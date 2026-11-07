@@ -1,0 +1,49 @@
+name: harness-smoke
+
+# Daily regression for wrapping, redaction, supply-chain gates, and prompt variants.
+# This is the offline half of model-drift detection (no provider keys).
+# Pin model ids in Settings; use Compare models to A/B harness changes against a fixed model.
+
+on:
+  schedule:
+    - cron: "15 6 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "packages/shared/src/untrusted.ts"
+      - "packages/shared/src/security.ts"
+      - "packages/shared/src/supplyChain.ts"
+      - "packages/shared/src/journal.ts"
+      - "packages/shared/src/selfCorrect.ts"
+      - "packages/shared/src/models/lifecycle.ts"
+      - "packages/shared/src/models/autonomy.ts"
+      - "packages/shared/src/compact.ts"
+      - "packages/shared/src/codingEval.ts"
+      - "packages/shared/src/generationEval.ts"
+      - "packages/shared/src/models/designQuality.ts"
+      - "packages/shared/src/models/gameCanvas.ts"
+      - "packages/shared/src/models/assetCanvas.ts"
+      - "packages/shared/src/trace.ts"
+      - "packages/providers/src/prompt.ts"
+      - "apps/server/src/session/sessions.ts"
+      - "apps/server/src/session/agentTurn.ts"
+      - "apps/server/src/evals/coding.eval.test.ts"
+      - "apps/server/src/evals/generation.eval.test.ts"
+      - "apps/server/fixtures/coding-eval/**"
+      - ".github/workflows/harness-smoke.yml"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - run: npm test --workspace=@locus/shared
+      - run: npm test --workspace=@locus/providers
+      - run: npm test --workspace=@locus/server -- src/evals/coding.eval.test.ts src/evals/harness.eval.test.ts src/evals/generation.eval.test.ts

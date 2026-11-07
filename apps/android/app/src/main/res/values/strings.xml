@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Locus</string>
+    <string name="host_hint">Computer address</string>
+    <string name="port_hint">Port</string>
+    <string name="token_hint">Pairing token</string>
+    <string name="fingerprint_hint">TLS fingerprint</string>
+    <string name="connect">Connect</string>
+    <string name="cancel">Cancel</string>
+    <string name="confirm_pair_title">Confirm pairing</string>
+    <string name="confirm_pair_message">Connect to %1$s:%2$s?\nFingerprint: %3$s\nOnly continue if this is your Locus desktop.</string>
+    <string name="fingerprint_required">TLS fingerprint is required. Scan the QR from Settings → Phone, or paste the fingerprint shown there.</string>
+    <string name="pair_copy">Settings → Phone on the desktop. Same Wi-Fi or Tailscale. HTTPS only — never expose port 7420 to the internet.</string>
+</resources>

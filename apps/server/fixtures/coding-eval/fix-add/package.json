@@ -1,0 +1,8 @@
+{
+  "name": "locus-coding-eval-fix-add",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test src/add.test.js"
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "name": "@locus/desktop",
+  "version": "0.16.1",
+  "private": true,
+  "author": "Locus contributors",
+  "license": "MIT",
+  "description": "Locus — local AI coding agents in real guest VMs",
+  "desktopName": "locus",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && node ./scripts/bundle-server.mjs",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "electron": "electron .",
+    "dist": "npm run build && electron-builder --publish never"
+  },
+  "dependencies": {
+    "@locus/shared": "*",
+    "@novnc/novnc": "^1.7.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "uqr": "^0.1.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.1.4",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "45.2.2",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.1.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  },
+  "build": {
+    "appId": "dev.locus.desktop",
+    "productName": "Locus",
+    "executableName": "locus",
+    "electronVersion": "45.2.2",
+    "copyright": "Copyright (c) 2026 Locus contributors",
+    "directories": {
+      "output": "dist-electron",
+      "buildResources": "buildResources"
+    },
+    "icon": "buildResources/icon.png",
+    "files": [
+      "electron/**/*.cjs",
+      "package.json",
+      "buildResources/icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "dist",
+        "to": "ui"
+      },
+      {
+        "from": "build/server",
+        "to": "server"
+      },
+      {
+        "from": "build/server-typescript-ls",
+        "to": "server/node_modules/typescript-ls"
+      },
+      {
+        "from": "../../images",
+        "to": "images"
+      },
+      {
+        "from": "../../apps/chrome-extension",
+        "to": "chrome-extension"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development",
+      "maintainer": "Locus",
+      "executableName": "locus"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

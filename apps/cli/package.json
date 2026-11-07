@@ -1,0 +1,27 @@
+{
+  "name": "@locus/cli",
+  "version": "0.16.1",
+  "private": true,
+  "description": "Locus CLI — control plane client for agents, Slack, Codebase, Docker, and automations",
+  "type": "module",
+  "bin": {
+    "locus": "./bin/locus.mjs"
+  },
+  "scripts": {
+    "start": "node ./bin/locus.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@locus/shared": "*",
+    "tsx": "^4.23.15",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/ws": "^8.18.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "locus",
+  "version": "0.16.1",
+  "private": true,
+  "description": "Local AI coding agents that run in Ubuntu, Debian, Omarchy, and Windows VMs or Linux Docker containers on your machine",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Modsofthenation/Locus.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Modsofthenation/Locus/issues"
+  },
+  "homepage": "https://github.com/Modsofthenation/Locus#readme",
+  "keywords": [
+    "ai-agent",
+    "qemu",
+    "docker",
+    "local-llm",
+    "electron",
+    "computer-use"
+  ],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,desktop -c cyan,magenta \"npm run dev:server\" \"npm run dev:desktop\"",
+    "dev:server": "npm run dev --workspace=@locus/server",
+    "dev:desktop": "npm run dev --workspace=@locus/desktop",
+    "locus": "npm run start --workspace=@locus/cli --",
+    "dev:worker": "npm run dev --workspace=@locus/worker",
+    "dev:app": "concurrently -n server,desktop,electron -c cyan,magenta,green \"npm run dev:server\" \"npm run dev:desktop\" \"wait-on http://127.0.0.1:5173 http-get://127.0.0.1:7420/api/health && npm run electron --workspace=@locus/desktop -- --dev\"",
+    "app": "npm run build --workspace=@locus/desktop && npm run electron --workspace=@locus/desktop",
+    "dist": "npm run dist --workspace=@locus/desktop",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "eslint .",
+    "test": "npm run test --workspaces --if-present && node --test scripts/*.test.mjs",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "images": "docker build -t locus/agent:0.1 images/agent",
+    "format:check": "prettier --check \"**/*.{ts,tsx,mjs,cjs,json,css}\"",
+    "format:fix": "prettier --write \"**/*.{ts,tsx,mjs,cjs,json,css}\""
+  },
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "concurrently": "^10.0.6",
+    "eslint": "10.12.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
+    "prettier": "3.9.9",
+    "typescript-eslint": "8.71.2",
+    "wait-on": "^9.5.1"
+  },
+  "overrides": {
+    "zod": "4.6.7",
+    "js-yaml": "4.3.2",
+    "@xmldom/xmldom": "0.8.15",
+    "fast-uri": "3.1.9",
+    "node-gyp": {
+      "undici": "6.29.1"
+    },
+    "@electron/get": {
+      "undici": "7.30.1"
+    },
+    "minimatch": "11.0.5"
+  }
+}

@@ -1,0 +1,70 @@
+name: Package macOS
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to package. Empty uses the triggering commit.
+        type: string
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: package-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    # v0.4.1 is a Windows-only hotfix; skip macOS packaging for that tag.
+    if: github.ref != 'refs/tags/v0.4.1'
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Package
+        env:
+          CSC_LINK_RAW: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD_RAW: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          # GitHub interpolates missing secrets as "", and electron-builder
+          # treats empty CSC_LINK as a certificate path (the desktop dir).
+          if [ -n "$CSC_LINK_RAW" ]; then
+            export CSC_LINK="$CSC_LINK_RAW"
+            export CSC_KEY_PASSWORD="$CSC_KEY_PASSWORD_RAW"
+            export CSC_IDENTITY_AUTO_DISCOVERY=true
+          else
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
+          npm run dist --workspace=@locus/desktop
+      - name: Checksums
+        run: node scripts/release-checksums.mjs apps/desktop/dist-electron SHA256SUMS-macos
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: locus-macos-dmg
+          path: |
+            apps/desktop/dist-electron/*.dmg
+            apps/desktop/dist-electron/SHA256SUMS-macos
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: |
+            apps/desktop/dist-electron/*.dmg
+            apps/desktop/dist-electron/SHA256SUMS-macos
+          generate_release_notes: false

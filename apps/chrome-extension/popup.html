@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Locus</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font:
+          13px/1.4 ui-sans-serif,
+          system-ui,
+          sans-serif;
+      }
+      body {
+        margin: 0;
+        width: 280px;
+        padding: 14px;
+        background: #16110c;
+        color: #f4eadc;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 15px;
+      }
+      label {
+        display: block;
+        margin: 10px 0 4px;
+        color: #cbb89a;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        border: 1px solid #3a3126;
+        border-radius: 6px;
+        background: #1f1812;
+        color: inherit;
+      }
+      button {
+        margin-top: 12px;
+        width: 100%;
+        padding: 8px;
+        border: 0;
+        border-radius: 6px;
+        background: #f5b942;
+        color: #1a1208;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      p {
+        margin: 8px 0 0;
+        color: #cbb89a;
+      }
+      .ok {
+        color: #9adf7a;
+      }
+      .err {
+        color: #f0a3a3;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Locus Chrome</h1>
+    <p>Pair with the Locus app so host agents can use these tabs.</p>
+    <label for="port">Control plane port</label>
+    <input id="port" type="number" min="1" max="65535" value="7420" />
+    <label for="token">Pairing token</label>
+    <input id="token" type="password" autocomplete="off" placeholder="cx_…" />
+    <button id="save" type="button">Connect</button>
+    <p id="status">Disconnected</p>
+    <script src="popup.js"></script>
+  </body>
+</html>

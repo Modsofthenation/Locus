@@ -1,0 +1,65 @@
+name: Package Linux
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to package. Empty uses the triggering commit.
+        type: string
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: package-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    # v0.4.1 is a Windows-only hotfix; skip Linux packaging for that tag.
+    if: github.ref != 'refs/tags/v0.4.1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run dist --workspace=@locus/desktop
+      - name: Checksums
+        run: node scripts/release-checksums.mjs apps/desktop/dist-electron SHA256SUMS-linux
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: locus-linux-appimage
+          path: |
+            apps/desktop/dist-electron/*.AppImage
+            apps/desktop/dist-electron/SHA256SUMS-linux
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: |
+            apps/desktop/dist-electron/*.AppImage
+            apps/desktop/dist-electron/SHA256SUMS-linux
+          generate_release_notes: true
+          # Only this job generates notes. macOS/Windows attach files with
+          # generate_release_notes: false so the changelog is not concatenated.
+      - name: Keep only the last 3 published releases
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          KEEP_RELEASES: "3"
+        run: node scripts/prune-github-releases.mjs

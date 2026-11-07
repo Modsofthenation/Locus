@@ -1,0 +1,5 @@
+{
+  "id": "fix-add",
+  "prompt": "The tests in src/add.test.js fail. Make add(2, 3) return 5. Do not change the tests.",
+  "expectSource": "a + b"
+}

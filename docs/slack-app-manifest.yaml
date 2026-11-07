@@ -1,0 +1,48 @@
+display_information:
+  name: Locus
+  description: Local agents that act as you in Slack. Locus stays on your laptop.
+  background_color: "#161410"
+features:
+  bot_user:
+    display_name: Locus
+    always_online: false
+  slash_commands:
+    - command: /locus
+      description: Ask Locus to work from this thread, or stop a running bound run
+      should_escape: false
+  shortcuts:
+    - name: Run with Locus
+      type: message
+      callback_id: locus_run
+      description: Start a local Locus agent on this message
+oauth_config:
+  redirect_urls:
+    - http://127.0.0.1:7420/api/oauth/callback
+  scopes:
+    bot:
+      - commands
+      - chat:write
+      - chat:write.public
+      - files:write
+    user:
+      - channels:history
+      - channels:read
+      - groups:history
+      - groups:read
+      - im:history
+      - im:read
+      - mpim:history
+      - mpim:read
+      - chat:write
+      - users:read
+      - files:read
+      - files:write
+      - emoji:read
+      - reactions:write
+      - search:read
+settings:
+  socket_mode_enabled: true
+  interactivity:
+    is_enabled: true
+  org_deploy_enabled: false
+  token_rotation_enabled: false

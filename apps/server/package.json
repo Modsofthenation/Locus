@@ -1,0 +1,38 @@
+{
+  "name": "@locus/server",
+  "version": "0.16.1",
+  "private": true,
+  "description": "Locus control plane — loopback Hono API, WebSocket hub, and session services",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.5",
+    "@locus/alb": "*",
+    "@locus/compute": "*",
+    "@locus/guest-agent": "*",
+    "@locus/hypervisor": "*",
+    "@locus/providers": "*",
+    "@locus/shared": "*",
+    "@locus/worker": "*",
+    "hono": "^4.13.13",
+    "typescript-ls": "npm:typescript@^5.9.3",
+    "vscode-css-languageservice": "^6.3.10",
+    "vscode-html-languageservice": "^5.6.2",
+    "vscode-json-languageservice": "^5.7.2",
+    "vscode-languageserver-textdocument": "^1.0.16",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

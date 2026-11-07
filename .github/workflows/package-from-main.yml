@@ -1,0 +1,32 @@
+name: Package from main
+
+# Actions → Package from main → Run workflow
+# Builds Linux, macOS, and Windows installers from current main.
+# Uploads artifacts only. Push a v* tag to publish a GitHub Release.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: package-from-main
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    uses: ./.github/workflows/dist-linux.yml
+    with:
+      ref: main
+    secrets: inherit
+  macos:
+    uses: ./.github/workflows/dist-macos.yml
+    with:
+      ref: main
+    secrets: inherit
+  windows:
+    uses: ./.github/workflows/dist-windows.yml
+    with:
+      ref: main
+    secrets: inherit

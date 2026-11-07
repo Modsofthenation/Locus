@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+dist-electron/
+coverage/
+package-lock.json
+*.md
+docs/screenshots/
+packages/alb/

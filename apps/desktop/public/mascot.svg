@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 76 76" role="img" aria-label="Locus mascot">
+  <title>Locus mascot</title>
+  <rect width="76" height="76" fill="#000"/>
+  <g fill="#e7b07a">
+    <path d="M17 24V14.5A3.5 3.5 0 0 1 20.5 11H30v5.5H22.5V24H17Z"/>
+    <path d="M59 24V14.5A3.5 3.5 0 0 0 55.5 11H46v5.5h7.5V24H59Z"/>
+    <path d="M17 40v9.5A3.5 3.5 0 0 0 20.5 53H30v-5.5H22.5V40H17Z"/>
+    <path d="M59 40v9.5A3.5 3.5 0 0 1 55.5 53H46v-5.5h7.5V40H59Z"/>
+  </g>
+  <g fill="#f3f1ec">
+    <circle cx="32.5" cy="30.5" r="5.2"/>
+    <circle cx="43.5" cy="30.5" r="5.2"/>
+  </g>
+  <g fill="#000">
+    <circle cx="32.5" cy="30.5" r="2.4"/>
+    <circle cx="43.5" cy="30.5" r="2.4"/>
+  </g>
+  <rect fill="#b29d8e" x="34.2" y="38.2" width="7.6" height="2.3" rx="1.15"/>
+  <rect fill="#b29d8e" x="31.2" y="54.5" width="3.4" height="9.5" rx="1.7"/>
+  <rect fill="#b29d8e" x="41.4" y="54.5" width="3.4" height="9.5" rx="1.7"/>
+</svg>
