@@ -6,6 +6,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { assessSetup, type AgentSession, type LinkedRepo } from "@locus/shared";
 import { Sidebar } from "./Sidebar";
+import { NoticeBanner } from "./NoticeBanner";
+import { dismissNotice } from "@/lib/notice";
 import { LAST_SLACK_SIDEBAR_GROUPS_KEY } from "@/components/slack/Slack";
 import { api } from "@/lib/api";
 import { setSettingsDirty } from "@/lib/settingsLeave";
@@ -130,6 +132,7 @@ describe("Sidebar", () => {
     window.localStorage.removeItem(SWARM_ROSTER_PREFS_KEY);
     vi.restoreAllMocks();
     setSettingsDirty(false);
+    dismissNotice();
   });
 
   function render(state: UiState) {
@@ -155,38 +158,13 @@ describe("Sidebar", () => {
     const labels = [...host.querySelectorAll(".side-rail-nav > button")].map((el) =>
       el.getAttribute("aria-label"),
     );
-    expect(labels).toEqual([
-      "Agents",
-      "Design",
-      "Games",
-      "Assets",
-      "IDE",
-      "Automations",
-      "Board",
-      "Projects",
-      "Codebase",
-      "Brain",
-      "Slack",
-      "Grafana",
-      "Docker",
-    ]);
-    expect(host.querySelector(".rail-more")).toBeNull();
+    expect(labels).toEqual(["Agents", "Design", "IDE", "Codebase", "Automations"]);
+    expect(host.querySelector(".rail-more")).toBeTruthy();
+    expect(host.querySelector(".rail-more summary")?.getAttribute("aria-label")).toBe("More");
     expect(host.querySelector(".side-rail-nav .rail-sep")?.getAttribute("role")).toBe("separator");
     expect(host.querySelector(".brand p")?.textContent).toBe("Agents");
     expect(host.querySelector(".brand-mark [data-testid='locus-mascot']")).toBeNull();
-    expect(host.querySelector("[data-testid='product-mode-toggle']")).toBeTruthy();
-    expect(
-      host
-        .querySelector(".brand-actions [data-testid='product-mode-developer']")
-        ?.getAttribute("aria-checked"),
-    ).toBe("true");
-    expect(
-      host.querySelector(".brand-actions [data-testid='product-mode-swarm']")?.textContent,
-    ).toBe("Swarm");
-    expect(css).toMatch(
-      /\.brand-actions \.product-mode-toggle > button \{[\s\S]*?overflow:\s*visible/,
-    );
-    expect(css).toMatch(/\.brand-actions \.product-mode-toggle \{[\s\S]*?max-width:\s*none/);
+    expect(host.querySelector(".brand-actions [data-testid='product-mode-toggle']")).toBeNull();
     expect(
       host.querySelector(".side-rail-nav button[aria-current='page']")?.getAttribute("aria-label"),
     ).toBe("Agents");
@@ -199,16 +177,22 @@ describe("Sidebar", () => {
     expect(host.querySelector(".search-wrap kbd")).toBeNull();
     expect(
       [...host.querySelectorAll(".side-rail-nav .rail-label")].map((el) => el.textContent),
-    ).toEqual([
-      "Agents",
-      "Design",
+    ).toEqual(["Agents", "Design", "IDE", "Codebase", "Automations", "More"]);
+  });
+
+  it("lists Games, Assets, Board, and Docker in the More menu", () => {
+    render({ ...initialState, sessions: [session] });
+    act(() => {
+      (host.querySelector(".rail-more summary") as HTMLElement | null)?.click();
+    });
+    const moreItems = [...host.querySelectorAll(".rail-more [role='menuitem']")].map(
+      (el) => el.textContent,
+    );
+    expect(moreItems).toEqual([
       "Games",
       "Assets",
-      "IDE",
-      "Automations",
       "Board",
       "Projects",
-      "Codebase",
       "Brain",
       "Slack",
       "Grafana",
@@ -219,7 +203,7 @@ describe("Sidebar", () => {
   it("fits full rail labels and wraps the mode toggle below the brand when narrow", () => {
     expect(css).toMatch(/--rail-w: 72px/);
     expect(css).toMatch(
-      /\.side-rail-nav > button \{[\s\S]*?width: calc\(var\(--rail-w, 64px\) - 8px\)/,
+      /\.side-rail-nav > button,[\s\S]*?width: calc\(var\(--rail-w, 64px\) - 8px\)/,
     );
     expect(css).toMatch(/\.side-main \{[\s\S]*?container: side-main \/ inline-size/);
     expect(css).toMatch(
@@ -228,7 +212,7 @@ describe("Sidebar", () => {
   });
 
   it("separates Automations from the rest of the icon rail", () => {
-    expect(css).toMatch(/\.side-rail-nav > button \{/);
+    expect(css).toMatch(/\.side-rail-nav > button,/);
     expect(css).toMatch(/\.side-rail-nav \.rail-sep \{[\s\S]*?height:\s*1px/);
     expect(css).toMatch(/\.side-rail-nav \.rail-sep \{[\s\S]*?background:\s*var\(--line-strong\)/);
     expect(css).toMatch(/\.side-rail-nav \{[\s\S]*?overflow-y:\s*auto/);
@@ -411,12 +395,12 @@ describe("Sidebar", () => {
     expect(host.querySelector(".brand p")?.textContent).toBe("Teammates");
   });
 
-  it("sends Swarm back to teammates from developer sections", () => {
+  it("shows Teammates, Teams, and More on the Swarm icon rail", () => {
     function Harness() {
       const [state, dispatch] = useReducer(reducer, {
         ...initialState,
         config: { productMode: "swarm" } as NonNullable<UiState["config"]>,
-        section: "design",
+        section: "agents",
       });
       return (
         <Store.Provider value={{ state, dispatch }}>
@@ -431,11 +415,10 @@ describe("Sidebar", () => {
       root.render(<Harness />);
     });
     expect(host.querySelector(".brand p")?.textContent).toBe("Teammates");
-    expect(host.querySelector("[data-testid='swarm-routines']")).toBeNull();
-    expect(host.querySelector("[data-testid='swarm-brain']")).toBeNull();
-    expect(
-      [...host.querySelectorAll(".swarm-shell-nav button")].map((el) => el.textContent),
-    ).toEqual(["Teammates", "Teams"]);
+    expect(host.querySelector("[data-testid='swarm-teammates']")).toBeTruthy();
+    expect(host.querySelector("[data-testid='swarm-teams']")).toBeTruthy();
+    expect(host.querySelector(".rail-more")).toBeTruthy();
+    expect(host.querySelector(".swarm-shell-nav")).toBeNull();
     const teams = host.querySelector("[data-testid='swarm-teams']") as HTMLButtonElement;
     act(() => {
       teams.click();
@@ -800,10 +783,15 @@ describe("Sidebar", () => {
     expect(host.querySelector(".icon-badge.danger")?.textContent).toBe("1");
     expect(host.querySelector(".session-group-label.warn")?.textContent).toBe("Needs you");
     expect(host.textContent).toContain("Name the owner");
-    expect(host.querySelector(".side-rail-nav button[aria-label='Board, unread']")).toBeTruthy();
+    expect(host.querySelector(".rail-more .unread-dot")).toBeTruthy();
+    act(() => {
+      (host.querySelector(".rail-more summary") as HTMLElement | null)?.click();
+    });
     expect(
-      host.querySelector(".side-rail-nav button[aria-label='Board, unread'] .unread-dot"),
-    ).toBeTruthy();
+      [...host.querySelectorAll(".rail-more [role='menuitem']")].some((el) =>
+        el.textContent?.includes("Board · unread"),
+      ),
+    ).toBe(true);
   });
 
   it("stretches New board in the same side-actions row as New design", () => {
@@ -878,11 +866,18 @@ describe("Sidebar", () => {
     });
     expect(search().value).toBe("no-such-agent");
     expect(host.querySelector(".empty-list")?.textContent).toMatch(/No matching agents/);
-    const slackItem = () =>
-      host.querySelector(".side-rail-nav button[aria-label='Slack']") as HTMLButtonElement;
-    act(() => {
-      slackItem().click();
-    });
+    const openSlack = () => {
+      act(() => {
+        (host.querySelector(".rail-more summary") as HTMLElement | null)?.click();
+      });
+      const item = [...host.querySelectorAll(".rail-more [role='menuitem']")].find((el) =>
+        (el.textContent ?? "").startsWith("Slack"),
+      );
+      act(() => {
+        item?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+    };
+    openSlack();
     expect(search().value).toBe("");
     expect(host.querySelector(".session-group .session-item .title-text")?.textContent).toBe("eng");
     expect(host.textContent).toContain("bob");
@@ -896,9 +891,7 @@ describe("Sidebar", () => {
     });
     expect(search().value).toBe("no-such-agent");
     expect(host.querySelector(".empty-list")?.textContent).toMatch(/No matching agents/);
-    act(() => {
-      slackItem().click();
-    });
+    openSlack();
     expect(search().value).toBe("zzz");
     expect(host.querySelector(".empty-list")?.textContent).toMatch(/No matching channels/);
   });
@@ -1288,9 +1281,8 @@ describe("Sidebar", () => {
     prompt.mockRestore();
   });
 
-  it("deletes an agent from the session row menu after confirm", async () => {
-    vi.mocked(api.deleteSession).mockResolvedValue({ ok: true });
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("archives a live agent from Delete and offers undo", async () => {
+    vi.mocked(api.patchSession).mockResolvedValue({ ...session, archived: true });
     const dispatch = vi.fn();
     host = document.createElement("div");
     document.body.appendChild(host);
@@ -1304,6 +1296,7 @@ describe("Sidebar", () => {
           }}
         >
           <Sidebar />
+          <NoticeBanner />
         </Store.Provider>,
       );
     });
@@ -1321,17 +1314,73 @@ describe("Sidebar", () => {
     await act(async () => {
       del!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await Promise.resolve();
+      await Promise.resolve();
     });
-    expect(confirm).toHaveBeenCalledWith("Delete Build the agent? This cannot be undone.");
+    expect(api.patchSession).toHaveBeenCalledWith("s1", { archived: true });
+    expect(api.deleteSession).not.toHaveBeenCalled();
+    expect(host.querySelector("[data-testid='app-notice-item']")?.textContent).toContain(
+      "Deleted Build the agent",
+    );
+  });
+
+  it("hard-deletes an archived agent after confirm", async () => {
+    vi.mocked(api.deleteSession).mockResolvedValue({ ok: true });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const dispatch = vi.fn();
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root.render(
+        <Store.Provider
+          value={{
+            state: {
+              ...initialState,
+              selectedId: "s1",
+              sessions: [{ ...session, archived: true }],
+            },
+            dispatch,
+          }}
+        >
+          <Sidebar />
+        </Store.Provider>,
+      );
+    });
+    act(() => {
+      const box = host.querySelector(".archive-toggle input") as HTMLInputElement;
+      if (box && !box.checked) box.click();
+    });
+    const toggle = host.querySelector(
+      '.session-item.has-menu [aria-haspopup="menu"]',
+    ) as HTMLElement;
+    act(() => {
+      toggle.click();
+    });
+    const del = [...host.querySelectorAll("[role='menuitem']")].find(
+      (el) => el.textContent === "Delete",
+    );
+    await act(async () => {
+      del!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(confirm).toHaveBeenCalledWith("This cannot be undone.");
     expect(api.deleteSession).toHaveBeenCalledWith("s1");
     expect(dispatch).toHaveBeenCalledWith({ type: "deleted", id: "s1" });
     confirm.mockRestore();
   });
 
-  it("does not delete when the session row confirm is cancelled", async () => {
+  it("does not delete an archived agent when confirm is cancelled", async () => {
     vi.mocked(api.deleteSession).mockClear();
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    render({ ...initialState, selectedId: "s1", sessions: [session] });
+    render({
+      ...initialState,
+      selectedId: "s1",
+      sessions: [{ ...session, archived: true }],
+    });
+    act(() => {
+      const box = host.querySelector(".archive-toggle input") as HTMLInputElement;
+      if (box && !box.checked) box.click();
+    });
     const toggle = host.querySelector(
       '.session-item.has-menu [aria-haspopup="menu"]',
     ) as HTMLElement;
@@ -1393,7 +1442,7 @@ describe("Sidebar", () => {
       del!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await Promise.resolve();
     });
-    expect(confirm).toHaveBeenCalledWith("Delete Retro? This cannot be undone.");
+    expect(confirm).toHaveBeenCalledWith("This cannot be undone.");
     expect(api.deleteBoard).toHaveBeenCalledWith("b1");
     expect(dispatch).toHaveBeenCalledWith({ type: "boardDeleted", id: "b1" });
     confirm.mockRestore();
@@ -1468,7 +1517,6 @@ describe("Sidebar", () => {
   });
 
   it("archives idle chats and empty drafts from the session list menu", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     const dispatch = vi.fn();
     const now = Date.now();
     const old = new Date(now - 8 * 24 * 60 * 60 * 1000).toISOString();
@@ -1526,6 +1574,7 @@ describe("Sidebar", () => {
           }}
         >
           <Sidebar />
+          <NoticeBanner />
         </Store.Provider>,
       );
     });
@@ -1544,8 +1593,12 @@ describe("Sidebar", () => {
     await act(async () => {
       idleItem.click();
       await Promise.resolve();
+      await Promise.resolve();
     });
-    expect(window.confirm).toHaveBeenCalledWith("Archive 1 idle chat older than 7 days?");
+    expect(host.querySelector("[data-testid='app-notice-item']")?.textContent).toContain(
+      "Archived 1 idle chat",
+    );
+    expect(host.querySelector(".app-notice-action")?.textContent).toBe("Undo");
     expect(api.patchSession).toHaveBeenCalledWith("idle-old", { archived: true });
     expect(api.patchSession).not.toHaveBeenCalledWith("idle-pin", { archived: true });
     expect(api.patchSession).not.toHaveBeenCalledWith("idle-new", { archived: true });
@@ -1563,8 +1616,12 @@ describe("Sidebar", () => {
     await act(async () => {
       draftsAgain.click();
       await Promise.resolve();
+      await Promise.resolve();
     });
-    expect(window.confirm).toHaveBeenCalledWith("Archive 1 empty draft that never sent a prompt?");
+    const noticeText = [...host.querySelectorAll("[data-testid='app-notice-item']")].map(
+      (el) => el.textContent,
+    );
+    expect(noticeText.some((text) => text?.includes("Archived 1 empty draft"))).toBe(true);
     expect(api.patchSession).toHaveBeenCalledWith("draft-empty", { archived: true });
     expect(api.patchSession).not.toHaveBeenCalledWith("draft-used", { archived: true });
   });
@@ -1591,16 +1648,16 @@ describe("Sidebar", () => {
     expect(
       host.querySelector(".side-rail button[aria-label='Design'] .rail-icon svg"),
     ).toBeTruthy();
-    expect(host.querySelector(".side-rail button[aria-label='Games'] .rail-icon svg")).toBeTruthy();
+    expect(host.querySelector(".side-rail button[aria-label='Games']")).toBeNull();
     expect(host.querySelector(".side-rail button[aria-label='IDE'] .rail-icon svg")).toBeTruthy();
     expect(host.querySelector(".side-rail button[aria-label='Automations, unread']")).toBeTruthy();
     expect(
       host.querySelector(".side-rail button[aria-label='Automations, unread'] .unread-dot"),
     ).toBeTruthy();
-    expect(host.querySelector(".rail-more")).toBeNull();
+    expect(host.querySelector(".rail-more")).toBeTruthy();
     expect(host.querySelector(".side-rail-nav .rail-sep")).toBeTruthy();
-    expect(host.querySelector(".side-rail button[aria-label='Board']")).toBeTruthy();
-    expect(host.querySelector(".side-rail button[aria-label='Docker']")).toBeTruthy();
+    expect(host.querySelector(".side-rail button[aria-label='Board']")).toBeNull();
+    expect(host.querySelector(".side-rail button[aria-label='Docker']")).toBeNull();
     expect(host.querySelector(".side-rail .unread-dot")).toBeTruthy();
     expect(host.querySelector(".setup-btn")?.getAttribute("aria-label")).toBe("Setup");
     expect(host.querySelector(".setup-btn .rail-icon svg")).toBeTruthy();
@@ -1705,7 +1762,7 @@ describe("Sidebar", () => {
       updatedAt: "2020-01-01T00:00:00.000Z",
     };
     render({ ...initialState, section: "codebase", selectedRepoId: "r3", repos: [repo] });
-    expect(host.querySelector(".repo-item .title-text")?.textContent).toBe("Locus");
+    expect(host.querySelector(".repo-item .title-text")?.textContent).toBe("local-agents");
     expect(host.querySelector(".repo-item .meta")?.textContent).toBe(
       "Modsofthenation/Locus · main",
     );
@@ -1853,10 +1910,7 @@ describe("Sidebar", () => {
     expect(activity?.textContent).toContain("Activity");
     expect(activity?.textContent).toContain("1");
     expect(activity?.querySelector(".unread-dot")).toBeTruthy();
-    expect(host.querySelector(".side-rail-nav button[aria-label='Slack, unread']")).toBeTruthy();
-    expect(
-      host.querySelector(".side-rail-nav button[aria-label='Slack, unread'] .unread-dot"),
-    ).toBeTruthy();
+    expect(host.querySelector(".rail-more .unread-dot")).toBeTruthy();
     expect(css).toMatch(/\.slack-activity-item \{/);
   });
 

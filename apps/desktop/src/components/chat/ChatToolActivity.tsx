@@ -28,7 +28,9 @@ import { api } from "@/lib/api";
 import { prUrlFromToolOutput } from "@/lib/markdown";
 import { screenshotSrc } from "./GuestTimeline";
 import { useDialogFocus } from "@/lib/useDialogFocus";
+import { showNotice } from "@/lib/notice";
 import { IconClose } from "@/components/layout/Icons";
+import { BusyButton, InlineError } from "@/components/layout/Skeleton";
 import { ToolPatch } from "./PatchCard";
 import { SubagentCard } from "./SubagentCard";
 
@@ -246,32 +248,34 @@ function ApprovalRow({ sessionId, callId }: { sessionId: string; callId: string 
 
   return (
     <div className="approval-row">
-      <button
-        type="button"
+      <BusyButton
         className="btn small primary"
         disabled={Boolean(working)}
+        busy={working === "approved"}
+        busyLabel="Approving…"
         onClick={() => void resolve("approved")}
       >
-        {working === "approved" ? "Approving…" : "Approve"}
-      </button>
-      <button
-        type="button"
+        Approve
+      </BusyButton>
+      <BusyButton
         className="btn small"
         disabled={Boolean(working)}
         title="Allow this tool for the rest of this session"
+        aria-label="Allow this tool for the rest of this session"
         onClick={() => void resolve("approved", true)}
       >
         Always allow
-      </button>
-      <button
-        type="button"
+      </BusyButton>
+      <BusyButton
         className="btn small"
         disabled={Boolean(working)}
+        busy={working === "denied"}
+        busyLabel="Denying…"
         onClick={() => void resolve("denied")}
       >
-        {working === "denied" ? "Denying…" : "Deny"}
-      </button>
-      {error ? <p className="error">{error}</p> : null}
+        Deny
+      </BusyButton>
+      {error ? <InlineError message={error} /> : null}
     </div>
   );
 }
@@ -417,7 +421,7 @@ function SlackPostDraft({ sessionId, call }: { sessionId: string; call: ToolCall
         decision === "approved" ? text : undefined,
       );
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Could not resolve draft");
+      showNotice(err instanceof Error ? err.message : "Could not resolve draft");
     } finally {
       setWorking(false);
     }
@@ -481,7 +485,7 @@ function BrainBriefDraft({ sessionId, call }: { sessionId: string; call: ToolCal
         decision === "approved" ? text : undefined,
       );
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Could not resolve briefing");
+      showNotice(err instanceof Error ? err.message : "Could not resolve briefing");
     } finally {
       setWorking(false);
     }

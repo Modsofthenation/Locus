@@ -19,12 +19,12 @@ Runtime (Docker / VM / Host) is **how** the guest is shaped. Placement is **wher
 Laptop Locus (127.0.0.1:7420) — keys, chat, runAgentLoop, approvals
         │  outbound HTTPS + Bearer token (cert fingerprint pinned)
         ▼
-locus-worker (0.0.0.0:7421) — DockerEngine + host folders + guest tools
+locus-worker (0.0.0.0:7421) — DockerEngine + QEMU + host folders + guest tools
         LAN box  or  cloud VM you created (kind: cloud)
         or Fargate task (kind: fargate) after RunTask + DescribeTasks
 ```
 
-Workers run **Docker or Host**. QEMU VMs stay on this machine. Restricted jail runs the CONNECT allowlist proxy on the worker (`host.docker.internal`). Design sessions use the same worker workspace GET/PUT and Preview HTTP as coding agents — the canvas is `/workspace/index.html` on that bind-mount. Docker golden-image seeds and the laptop **Host share** (`/mnt/host`) upload as tar.gz after create. Host-on-worker uses a folder on the worker (`host-workspaces/<session>` or an absolute path typed in New agent; root, `$HOME`, secret home dirs, and the worker data directory are refused). Cursor CLI on a worker runs `agent` on that host. Session MCP (playwright / `git_pr_*` / Grafana) and Codex `locus_git` are a loopback proxy on the worker, not the laptop `127.0.0.1:7420` URL.
+Workers run **Docker, Host, or QEMU VM**. Restricted jail runs the CONNECT allowlist proxy on the worker (`host.docker.internal`). Design sessions use the same worker workspace GET/PUT and Preview HTTP as coding agents — the canvas is `/workspace/index.html` on that bind-mount. Docker golden-image seeds and the laptop **Host share** (`/mnt/host`) upload as tar.gz after create. Host-on-worker uses a folder on the worker (`host-workspaces/<session>` or an absolute path typed in New agent; root, `$HOME`, secret home dirs, and the worker data directory are refused). Worker VMs resolve Ubuntu/Debian cloud images from `LOCUS_WORKER_HOME/media` (laptop ISO paths are ignored unless they exist on the worker). Cursor CLI on a worker Docker/Host guest runs `agent` on that host; on a Linux VM it SSHs into the guest and reverse-forwards the worker-loopback MCP. Session MCP (playwright / `git_pr_*` / Grafana) and Codex `locus_git` are a loopback proxy on the worker, not the laptop `127.0.0.1:7420` URL.
 
 LLM calls stay on the laptop for the native loop. The worker never stores provider keys. Cursor CLI on a worker receives the key on each `agent -p` spawn over pinned HTTPS (same channel as `GIT_TOKEN`); Codex CLI follows the same per-turn flow and maps the key to `OPENAI_API_KEY`. Forge tokens may be sent as guest `GIT_TOKEN` so clone/push works.
 
@@ -35,7 +35,7 @@ POST /api/sessions
   SessionService.create()
     cursorCloud? skip bootGuest
     else bootGuest()
-      placement worker → WorkerClient HTTPS → locus-worker Docker **or Host**
+      placement worker → WorkerClient HTTPS → locus-worker Docker, Host, **or QEMU**
         fargate: ComputeBackend.quote/provision (RunTask) then WorkerClient
         stop: destroy guest (default) unless LAN destroyOnStop=false
         fargate stop: destroy guest, then StopTask
@@ -57,7 +57,7 @@ POST /api/sessions
 
 1. On the other machine (LAN box or a VM you created): install Docker, `npm run dev:worker` (listens on `https://0.0.0.0:7421`, prints a token only when it first creates `~/.locus-worker/token`, prints a `locus-worker:add?url=…&fp=…` line per LAN address, prints the TLS fingerprint every start).
 2. On the laptop: paste that line in Settings → Workers (or `locus config workers add '<line>'`). Add tests the token, pins the cert, and lists the host. New agent **Where** shows live / unreachable. Locus does not scan the LAN. Mark **Cloud VM** when the host is metered (forces destroy-on-stop, default idle TTL 15 minutes, max concurrent 1, requires hourly USD and an image allowlist). Mark **Fargate** when ECS should RunTask an allowed size (region, task definition, size allowlist, image allowlist; no paste URL; hourly USD comes from the dated list-price quote). Save remaining fields (kind, allowlists) if you need them.
-3. New agent → **Where** → that worker. Runtime is Docker or Host (VM stays local).
+3. New agent → **Where** → that worker. Runtime is Docker, Host, or VM. For VMs, place the cloud image in `~/.locus-worker/media` (or `LOCUS_WORKER_HOME/media`) on the worker.
 
 Tokens live in the vault, not `config.json`. The control plane bind host stays loopback. Fargate talks to ECS with signed `fetch` (recorded JSON fixtures). There is no AWS/Azure/GCP SDK in `package.json`.
 
@@ -116,7 +116,8 @@ There is no “this worker belongs only to app X” setting. Isolation is a diff
 
 - HTTPS with a self-signed cert (fingerprint pin). Set `LOCUS_WORKER_TLS_CERT` / `LOCUS_WORKER_TLS_KEY` for your own cert.
 - Restricted jail: the allowlist CONNECT proxy listens on the worker (not the laptop). Bind is `0.0.0.0` on a random port so `host.docker.internal` from the guest can reach it; do not publish that port.
-- Docker golden-image seed and host share upload over worker HTTPS (`PUT /v1/guests/:id/workspace-seed` and `PUT /v1/guests/:id/host-share`). VM golden disks stay local.
+- Docker golden-image seed and host share upload over worker HTTPS (`PUT /v1/guests/:id/workspace-seed` and `PUT /v1/guests/:id/host-share`). VM golden disks stay on the worker; laptop qcow2 is not uploaded.
+- Worker QEMU display (VNC/SPICE) binds 127.0.0.1 on the worker. The laptop does not proxy live VNC in v1; screenshots, guest tools, and CLI-over-SSH still work.
 - Design sessions use worker Files + Preview (canvas is `/workspace/index.html`).
 - code-server / IDE tunnels stay on this machine. Preview is the guest HTTP port (or static `index.html`) proxied through the worker.
 - Worker Files reads the worker host bind-mount (`docker-workspaces/`), not a laptop copy.

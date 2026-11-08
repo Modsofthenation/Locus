@@ -90,6 +90,7 @@ describe("SessionSwitcher palette", () => {
     host.remove();
     vi.restoreAllMocks();
     setSettingsDirty(false);
+    localStorage.removeItem("locus.palette.recents");
   });
 
   it("opens with Ctrl+K and runs Start guest / Replay / Theme", async () => {
@@ -356,20 +357,20 @@ describe("SessionSwitcher palette", () => {
     expect(host.querySelector("[aria-label='Command palette']")).toBeNull();
     expect(host.querySelector("[aria-label='Keyboard shortcuts']")).toBeTruthy();
     expect(host.querySelector("[data-testid='palette-shortcuts']")?.textContent).toContain(
-      "Ctrl/Cmd+K",
+      "Ctrl+K",
     );
     expect(host.querySelector("[data-testid='palette-shortcuts']")?.textContent).toContain(
-      "Ctrl/Cmd+F",
+      "Ctrl+F",
     );
     expect(host.querySelector("[data-testid='palette-shortcuts']")?.textContent).toContain(
-      "Ctrl/Cmd+,",
+      "Ctrl+,",
     );
     expect(host.querySelector("[data-testid='palette-shortcuts']")?.textContent).toContain(
-      "Ctrl/Cmd+1–9",
+      "Ctrl+1–9",
     );
     expect(host.querySelector("[data-testid='palette-shortcuts']")?.textContent).toContain("F12");
     expect(host.querySelector("[data-testid='palette-shortcuts']")?.textContent).toContain(
-      "Ctrl/Cmd+W",
+      "Ctrl+W",
     );
 
     act(() => {
@@ -386,9 +387,7 @@ describe("SessionSwitcher palette", () => {
       setter?.call(search, "?");
       search.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    expect(host.querySelector("[data-testid='palette-shortcuts']")?.textContent).toMatch(
-      /Ctrl\/Cmd\+N/,
-    );
+    expect(host.querySelector("[data-testid='palette-shortcuts']")?.textContent).toMatch(/Ctrl\+N/);
     expect(host.textContent).not.toContain("Settings · MCP");
   });
 

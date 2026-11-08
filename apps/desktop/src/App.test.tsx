@@ -47,7 +47,7 @@ vi.mock("@/lib/api", () => ({
       connected: false,
       tabs: [],
     })),
-    checkUpdates: vi.fn(async () => ({ status: "unavailable", current: "0.16.1" })),
+    checkUpdates: vi.fn(async () => ({ status: "unavailable", current: "0.17.0" })),
     workersStatus: vi.fn(async () => []),
     tailscale: vi.fn(async () => ({
       installed: false,
@@ -172,7 +172,7 @@ describe("App boot screen", () => {
     expect(host.textContent).not.toContain("What should this agent do?");
     expect(document.documentElement.dataset.theme).toBe("nord");
     await vi.waitFor(() => {
-      expect(host.textContent).toMatch(/EXPLORER/);
+      expect(host.querySelector(".vm-rail-label")?.textContent).toBe("Files");
     });
   });
 
@@ -327,8 +327,13 @@ describe("App mobile shell", () => {
     });
     expect(host.querySelector(".skip-links")?.textContent).toContain("Skip to chat");
     await act(async () => {
-      const docker = host.querySelector(
-        ".side-rail-nav button[aria-label='Docker']",
+      host
+        .querySelector(".rail-more summary")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      const docker = [...host.querySelectorAll(".rail-more [role='menuitem']")].find((el) =>
+        el.textContent?.includes("Docker"),
       ) as HTMLButtonElement;
       docker.click();
     });

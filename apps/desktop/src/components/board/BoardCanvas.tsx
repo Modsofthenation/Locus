@@ -95,6 +95,10 @@ import {
   MenuSep,
   placePointerMenu,
 } from "@/components/layout/OverflowMenu";
+import { Select } from "@/components/layout/Select";
+import { Tooltip } from "@/components/layout/Tooltip";
+import { shortcutHint } from "@/lib/shortcuts";
+import { showNotice } from "@/lib/notice";
 import { BoardShapeFace, BoardShapePicker } from "./BoardShapePicker";
 import { BoardTableObject } from "./BoardTableObject";
 import { BoardTimelineObject } from "./BoardTimelineObject";
@@ -614,7 +618,7 @@ export function BoardCanvas(props: {
         x += BOARD_GRID;
         y += BOARD_GRID;
       } catch (err) {
-        window.alert(err instanceof Error ? err.message : "Could not add image");
+        showNotice(err instanceof Error ? err.message : "Could not add image");
       }
     }
     if (!ids.length) return false;
@@ -1308,33 +1312,33 @@ export function BoardCanvas(props: {
           </button>
         ) : null}
         <span className="board-toolbar-gap" />
-        <button
-          type="button"
-          title="Undo (Ctrl/Cmd+Z)"
-          disabled={!canUndo}
-          onClick={() => stepHistory(-1)}
-        >
-          Undo
-        </button>
-        <button
-          type="button"
-          title="Redo (Ctrl/Cmd+Shift+Z)"
-          disabled={!canRedo}
-          onClick={() => stepHistory(1)}
-        >
-          Redo
-        </button>
+        <Tooltip label={shortcutHint("undo")}>
+          <button type="button" disabled={!canUndo} onClick={() => stepHistory(-1)}>
+            Undo
+          </button>
+        </Tooltip>
+        <Tooltip label={shortcutHint("redo")}>
+          <button type="button" disabled={!canRedo} onClick={() => stepHistory(1)}>
+            Redo
+          </button>
+        </Tooltip>
         <div className="board-zoom">
-          <button type="button" title="Zoom out" onClick={() => zoomTo(cam.z * 0.92)}>
-            −
-          </button>
+          <Tooltip label="Zoom out">
+            <button type="button" aria-label="Zoom out" onClick={() => zoomTo(cam.z * 0.92)}>
+              −
+            </button>
+          </Tooltip>
           <span>{Math.round(cam.z * 100)}%</span>
-          <button type="button" title="Zoom in" onClick={() => zoomTo(cam.z * 1.08)}>
-            +
-          </button>
-          <button type="button" title="Zoom to fit (Ctrl/Cmd+0)" onClick={() => fitTo()}>
-            Fit
-          </button>
+          <Tooltip label="Zoom in">
+            <button type="button" aria-label="Zoom in" onClick={() => zoomTo(cam.z * 1.08)}>
+              +
+            </button>
+          </Tooltip>
+          <Tooltip label={`Zoom to fit (${shortcutHint("board-fit")})`}>
+            <button type="button" aria-label="Zoom to fit" onClick={() => fitTo()}>
+              Fit
+            </button>
+          </Tooltip>
         </div>
       </div>
       <div
@@ -2332,17 +2336,13 @@ function CardPicker(props: { onClose: () => void; onPick: (cite: BoardCite) => v
         ))}
       </div>
       {kind === "pull" && state.repos.length ? (
-        <select
-          aria-label="Repository"
+        <Select
+          compact
+          ariaLabel="Repository"
           value={repoId}
-          onChange={(event) => setRepoId(event.target.value)}
-        >
-          {state.repos.map((row) => (
-            <option key={row.id} value={row.id}>
-              {row.name}
-            </option>
-          ))}
-        </select>
+          options={state.repos.map((row) => ({ value: row.id, label: row.name }))}
+          onChange={setRepoId}
+        />
       ) : null}
       <ul className="board-card-list">
         {options.map((row) => (

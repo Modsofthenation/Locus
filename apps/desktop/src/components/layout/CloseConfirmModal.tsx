@@ -1,6 +1,5 @@
-import { useRef } from "react";
 import { closeConfirmCopy, type CloseGuardSession } from "@/lib/closeGuard";
-import { useDialogFocus } from "@/lib/useDialogFocus";
+import { Modal } from "./Modal";
 
 export function CloseConfirmModal({
   agents,
@@ -12,30 +11,24 @@ export function CloseConfirmModal({
   onConfirm: () => void;
 }) {
   const copy = closeConfirmCopy(agents);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogFocus(true, onCancel, dialogRef);
 
   return (
-    <div className="modal-backdrop" onClick={onCancel} data-testid="close-confirm-modal">
-      <div
-        className="modal close-confirm"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="close-confirm-title"
-        ref={dialogRef}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <h2 id="close-confirm-title">{copy.title}</h2>
-        <p className="modal-lead">{copy.body}</p>
-        <div className="modal-actions">
-          <button type="button" className="btn ghost" onClick={onCancel}>
-            Cancel
-          </button>
-          <button type="button" className="btn danger" onClick={onConfirm}>
-            Close
-          </button>
-        </div>
+    <Modal
+      titleId="close-confirm-title"
+      className="close-confirm"
+      testId="close-confirm-modal"
+      onClose={onCancel}
+    >
+      <h2 id="close-confirm-title">{copy.title}</h2>
+      <p className="modal-lead">{copy.body}</p>
+      <div className="modal-actions">
+        <button type="button" className="btn ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className="btn danger" onClick={onConfirm}>
+          Close
+        </button>
       </div>
-    </div>
+    </Modal>
   );
 }

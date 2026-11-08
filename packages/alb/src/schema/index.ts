@@ -136,6 +136,8 @@ export const ExecutionLimitsSchema = z.object({
   requireGateBeforeSideEffects: z.boolean().default(true),
 });
 export type ExecutionLimits = z.infer<typeof ExecutionLimitsSchema>;
+/** Nested field defaults applied. Prefer this over `.prefault({})`, which is missing on some Zod builds. */
+export const DEFAULT_EXECUTION_LIMITS: ExecutionLimits = ExecutionLimitsSchema.parse({});
 
 export const ModelConfigSchema = z.object({
   provider: z.string().default('openai'),
@@ -258,7 +260,7 @@ export const WorkflowSchema = z.object({
   nodes: z.array(WorkflowNodeSchema).default([]),
   edges: z.array(WorkflowEdgeSchema).default([]),
   variables: z.array(WorkflowVariableSchema).default([]),
-  limits: ExecutionLimitsSchema.prefault({}),
+  limits: ExecutionLimitsSchema.default(DEFAULT_EXECUTION_LIMITS),
   tags: z.array(z.string()).default([]),
   createdAt: z.string(),
   updatedAt: z.string(),

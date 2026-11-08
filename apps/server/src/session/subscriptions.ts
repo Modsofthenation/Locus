@@ -21,6 +21,8 @@ import type { JsonStore } from "../core/store.js";
 import { ForgeClient } from "../git/forge.js";
 import { withFreshForgeToken } from "../git/forgeOauth.js";
 import type { RepoService } from "../git/repos.js";
+import { IntegrationsClient } from "../integrations/integrations.js";
+import { listGrafanaAlerts } from "../integrations/grafanaLive.js";
 
 function slackTsGreater(a: string, b: string): boolean {
   return Number(a) > Number(b);
@@ -34,6 +36,7 @@ export class SubscriptionService {
   private ticking = false;
   private timer?: ReturnType<typeof setInterval>;
   private readonly forge: ForgeClient;
+  private readonly integrations: IntegrationsClient;
 
   constructor(
     private readonly store: JsonStore,
@@ -52,6 +55,7 @@ export class SubscriptionService {
     } = {},
   ) {
     this.forge = new ForgeClient(opts.fetch ?? fetch);
+    this.integrations = new IntegrationsClient(opts.fetch ?? fetch);
   }
 
   private now(): Date {
@@ -100,6 +104,14 @@ export class SubscriptionService {
         snapshot = await this.pullSnapshot(session, sub);
       } else if (sub.kind === "checks") {
         snapshot = await this.checksSnapshot(session, sub);
+      } else if (
+        sub.kind === "linear_issue" ||
+        sub.kind === "jira_issue" ||
+        sub.kind === "sentry_issue" ||
+        sub.kind === "incident" ||
+        sub.kind === "grafana_alert"
+      ) {
+        snapshot = await this.integrationSnapshot(session, sub);
       }
       const result = advanceSubscription(sub, now, snapshot);
       if (result.fire) {
@@ -275,6 +287,74 @@ export class SubscriptionService {
           sub.title,
           failures.map((row) => `${row.name}: ${row.status}`).join("\n"),
         ),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private async integrationSnapshot(
+    _session: AgentSession,
+    sub: SessionSubscription,
+  ): Promise<SubscriptionSnapshot | null> {
+    try {
+      const config = await this.store.loadConfig();
+      const rows = config.integrations;
+      if (sub.kind === "grafana_alert") {
+        const account = this.integrations.account(rows, "grafana");
+        if (!account) return null;
+        const alerts = await listGrafanaAlerts(account, this.opts.fetch ?? fetch);
+        const wanted = (sub.alertFingerprint || sub.issueId || "").trim().toLowerCase();
+        const match = wanted
+          ? alerts.find(
+              (row) =>
+                row.fingerprint.toLowerCase() === wanted || row.name.toLowerCase() === wanted,
+            )
+          : alerts[0];
+        const cursor = alerts
+          .map((row) => `${row.fingerprint}:${row.state}:${row.startsAt ?? ""}`)
+          .sort()
+          .join("|");
+        if (!sub.cursor) return { cursor, summary: "" };
+        if (cursor === sub.cursor) return { cursor, summary: "" };
+        const body = match
+          ? `${match.name} (${match.state}) ${match.summary ?? ""}`.trim()
+          : alerts.map((row) => `${row.name}:${row.state}`).join("\n") || "No firing alerts";
+        return {
+          cursor,
+          summary: wrapSubscriptionEvent("issue-text", sub.title, body),
+        };
+      }
+      const tool =
+        sub.kind === "linear_issue"
+          ? "linear_get"
+          : sub.kind === "jira_issue"
+            ? "jira_get"
+            : sub.kind === "sentry_issue"
+              ? "sentry_get"
+              : "incidentio_get";
+      const issueId = sub.issueId?.trim();
+      if (!issueId) return null;
+      const argKey =
+        sub.kind === "incident"
+          ? "incident"
+          : sub.kind === "sentry_issue"
+            ? "issue"
+            : sub.kind === "jira_issue"
+              ? "issue"
+              : "id";
+      const got = await this.integrations.call(
+        tool,
+        { [argKey]: issueId, issue: issueId, id: issueId },
+        rows,
+      );
+      if (!got.ok) return null;
+      const cursor = got.output.slice(0, 2000);
+      if (!sub.cursor) return { cursor, summary: "" };
+      if (cursor === sub.cursor) return { cursor, summary: "" };
+      return {
+        cursor,
+        summary: wrapSubscriptionEvent("issue-text", sub.title, got.output.slice(0, 1500)),
       };
     } catch {
       return null;

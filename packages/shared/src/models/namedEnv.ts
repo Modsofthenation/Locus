@@ -126,7 +126,7 @@ export function namedEnvironmentError(
     return "Docker environments need an image such as locus/agent";
   }
   if (!placementAllowsRuntime(parseAgentPlacement(env.placement), env.runtime)) {
-    return "Worker placement is Docker or Host";
+    return "This runtime cannot run on a worker";
   }
   if (env.placement === "worker") {
     if (!env.backendId) return "Pick a worker for this environment";

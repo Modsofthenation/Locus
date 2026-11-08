@@ -17,6 +17,7 @@ import { CANVAS_READY_FALLBACK_MS, DesignCanvas, isCanvasHostHidden } from "./De
 import { canvasFrameDoc } from "@/lib/canvasFrame";
 import { api } from "@/lib/api";
 import { Store, initialState, type Action, type UiState } from "@/state/store";
+import { selectOptionLabels, selectValue, setSelectValue } from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -118,7 +119,7 @@ describe("canvas host visibility", () => {
     expect(css).toMatch(/\.design-toolbar-group \{[\s\S]*?display:\s*inline-flex/);
     expect(css).toMatch(/\.design-toolbar-overflow-modes \{[\s\S]*?display:\s*none/);
     expect(css).toMatch(
-      /@container design-pane \(max-width: 920px\) \{[\s\S]*?\.vm-status-copy \{[\s\S]*?display:\s*none/,
+      /@container design-pane \(max-width: 900px\) \{[\s\S]*?\.vm-status-copy \{[\s\S]*?display:\s*none/,
     );
     expect(css).toMatch(
       /@container design-pane \(max-width: 760px\) \{[\s\S]*?\.design-toolbar-mode \{[\s\S]*?display:\s*none/,
@@ -129,7 +130,7 @@ describe("canvas host visibility", () => {
     expect(css).toMatch(/\.design-pane \.vm-toolbar \{[\s\S]*?flex-wrap:\s*wrap/);
     expect(css).toMatch(/\.design-pane \.vm-toolbar-actions \{[\s\S]*?flex-wrap:\s*wrap/);
     expect(css).toMatch(
-      /@container design-pane \(max-width: 520px\) \{[\s\S]*?\.design-system-picker \{[\s\S]*?display:\s*none/,
+      /@container design-pane \(max-width: 560px\) \{[\s\S]*?\.design-system-picker \{[\s\S]*?display:\s*none/,
     );
   });
 });
@@ -172,7 +173,7 @@ describe("DesignCanvas", () => {
     document.body.appendChild(host);
     root = createRoot(host);
     const node: ReactNode = (
-      <Store.Provider value={{ state, dispatch }}>
+      <Store.Provider value={{ state: { ...state, vmCollapsed: false }, dispatch }}>
         <DesignCanvas />
       </Store.Provider>
     );
@@ -410,10 +411,10 @@ describe("DesignCanvas", () => {
     expect([...host.querySelectorAll("button")].some((btn) => btn.textContent === "Desktop")).toBe(
       false,
     );
-    const picker = host.querySelector('[aria-label="Phone model"]') as HTMLSelectElement | null;
+    const picker = host.querySelector('[aria-label="Phone model"]');
     expect(picker).toBeTruthy();
-    expect(picker!.value).toBe("iphone-15");
-    expect([...picker!.options].map((option) => option.textContent)).toEqual([
+    expect(selectValue(host, "Phone model")).toBe("iphone-15");
+    expect(selectOptionLabels(host, "Phone model")).toEqual([
       "iPhone SE",
       "iPhone 15",
       "iPhone 16 Pro Max",
@@ -426,8 +427,7 @@ describe("DesignCanvas", () => {
     expect((host.querySelector(".design-frame") as HTMLElement).style.height).toBe("844px");
     expect(host.querySelector(".design-frame-caption")?.textContent).toBe("iPhone 15 · 390 × 844");
     act(() => {
-      picker!.value = "pixel-8";
-      picker!.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Phone model", "pixel-8");
     });
     expect(host.querySelector(".design-frame")?.getAttribute("data-phone")).toBe("pixel-8");
     expect((host.querySelector(".design-frame") as HTMLElement).style.width).toBe("412px");
@@ -525,6 +525,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: other.id,
               sessions: [session, other],
@@ -577,6 +578,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: other.id,
               sessions: [session, other],
@@ -638,6 +640,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: other.id,
               sessions: [session, other],
@@ -709,9 +712,9 @@ describe("DesignCanvas", () => {
     act(() => {
       (host.querySelector(".palette-swatch-row") as HTMLButtonElement).click();
     });
-    const paperBtn = [...host.querySelectorAll("button")].find((btn) =>
+    const paperBtn = [...host.querySelectorAll(".palette-pop button")].find((btn) =>
       btn.textContent?.includes("Paper"),
-    );
+    ) as HTMLButtonElement | undefined;
     act(() => {
       paperBtn!.click();
     });
@@ -754,6 +757,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: other.id,
               sessions: [session, other],
@@ -987,12 +991,12 @@ describe("DesignCanvas", () => {
     act(() => {
       (host.querySelector(".palette-swatch-row") as HTMLButtonElement).click();
     });
-    const paperBtn = [...host.querySelectorAll("button")].find((btn) =>
+    const paperBtn = [...host.querySelectorAll(".palette-pop button")].find((btn) =>
       btn.textContent?.includes("Paper"),
-    );
-    const oceanBtn = [...host.querySelectorAll("button")].find((btn) =>
+    ) as HTMLButtonElement | undefined;
+    const oceanBtn = [...host.querySelectorAll(".palette-pop button")].find((btn) =>
       btn.textContent?.includes("Ocean"),
-    );
+    ) as HTMLButtonElement | undefined;
     act(() => {
       paperBtn!.click();
       oceanBtn!.click();
@@ -1045,9 +1049,9 @@ describe("DesignCanvas", () => {
     act(() => {
       (host.querySelector(".palette-swatch-row") as HTMLButtonElement).click();
     });
-    const paperBtn = [...host.querySelectorAll("button")].find((btn) =>
+    const paperBtn = [...host.querySelectorAll(".palette-pop button")].find((btn) =>
       btn.textContent?.includes("Paper"),
-    );
+    ) as HTMLButtonElement | undefined;
     act(() => {
       paperBtn!.click();
     });
@@ -1064,6 +1068,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: other.id,
               sessions: [session, other],
@@ -1116,9 +1121,9 @@ describe("DesignCanvas", () => {
     act(() => {
       (host.querySelector(".palette-swatch-row") as HTMLButtonElement).click();
     });
-    const paperBtn = [...host.querySelectorAll("button")].find((btn) =>
+    const paperBtn = [...host.querySelectorAll(".palette-pop button")].find((btn) =>
       btn.textContent?.includes("Paper"),
-    );
+    ) as HTMLButtonElement | undefined;
     act(() => {
       paperBtn!.click();
     });
@@ -1172,9 +1177,9 @@ describe("DesignCanvas", () => {
       (host.querySelector(".palette-swatch-row") as HTMLButtonElement).click();
     });
     expect(host.textContent).toContain("Acme brand");
-    const acmeBtn = [...host.querySelectorAll("button")].find((btn) =>
+    const acmeBtn = [...host.querySelectorAll(".palette-pop button")].find((btn) =>
       btn.textContent?.includes("Acme brand"),
-    );
+    ) as HTMLButtonElement | undefined;
     act(() => {
       acmeBtn!.click();
     });
@@ -1416,10 +1421,8 @@ describe("DesignCanvas", () => {
     });
     await flushPaint();
     expect(swapOverlay()).toBeNull();
-    const picker = host.querySelector("#canvas-variant") as HTMLSelectElement;
     await act(async () => {
-      picker.value = "vprice";
-      picker.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Design variant", "vprice");
     });
     expect(api.activateDesignVariant).toHaveBeenCalledWith("d1", "vprice");
     expect(swapOverlay()?.textContent).toMatch(/Loading canvas/);
@@ -1428,7 +1431,7 @@ describe("DesignCanvas", () => {
     expect(canvasFrameDoc(host.querySelector("iframe.is-front") as HTMLIFrameElement)).toContain(
       "Hero",
     );
-    expect(picker.disabled).toBe(true);
+    expect(host.querySelector("#canvas-variant")?.getAttribute("aria-disabled")).toBe("true");
 
     vi.mocked(api.canvas).mockResolvedValue({
       html: nextHtml,
@@ -1524,10 +1527,8 @@ describe("DesignCanvas", () => {
     await flushPaint();
     expect(swapOverlay()).toBeNull();
 
-    const picker = host.querySelector("#canvas-variant") as HTMLSelectElement;
     await act(async () => {
-      picker.value = "vprice";
-      picker.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Design variant", "vprice");
     });
     expect(swapOverlay()?.textContent).toMatch(/Loading canvas/);
 
@@ -1601,6 +1602,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: other.id,
               sessions: [session, other],
@@ -1662,6 +1664,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: other.id,
               sessions: [session, other],
@@ -1733,6 +1736,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: other.id,
               sessions: [session, other],
@@ -1799,6 +1803,7 @@ describe("DesignCanvas", () => {
             value={{
               state: {
                 ...initialState,
+                vmCollapsed: false,
                 section: "design",
                 selectedId: other.id,
                 sessions: [session, other],
@@ -1863,6 +1868,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: other.id,
               sessions: [session, other],
@@ -1921,10 +1927,8 @@ describe("DesignCanvas", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    const picker = host.querySelector("#canvas-variant") as HTMLSelectElement;
     await act(async () => {
-      picker.value = "vprice";
-      picker.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Design variant", "vprice");
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -2086,6 +2090,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: session.id,
               sessions: [{ ...session, status: "running" }],
@@ -2144,6 +2149,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: session.id,
               sessions: [session],
@@ -2268,6 +2274,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: session.id,
               sessions: [{ ...session, status: "running" }],
@@ -2329,6 +2336,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: session.id,
               sessions: [{ ...session, status: "running" }],
@@ -2351,6 +2359,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: session.id,
               sessions: [{ ...session, status: "running" }],
@@ -2415,6 +2424,7 @@ describe("DesignCanvas", () => {
           value={{
             state: {
               ...initialState,
+              vmCollapsed: false,
               section: "design",
               selectedId: session.id,
               sessions: [{ ...session, status: "running" }],
@@ -2607,11 +2617,9 @@ describe("DesignCanvas", () => {
     expect(api.exportGameZip).toHaveBeenCalledWith("g1");
     createObjectURL.mockRestore();
     revokeObjectURL.mockRestore();
-    const viewport = host.querySelector("[aria-label='Viewport']") as HTMLSelectElement;
-    expect(viewport).toBeTruthy();
+    expect(host.querySelector("[aria-label='Viewport']")).toBeTruthy();
     act(() => {
-      viewport.value = "landscape";
-      viewport.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Viewport", "landscape");
     });
     expect(host.querySelector(".design-frame")?.getAttribute("data-viewport")).toBe("landscape");
     expect((host.querySelector(".design-frame") as HTMLElement).style.height).toBe("390px");
@@ -2707,10 +2715,10 @@ describe("DesignCanvas", () => {
       await Promise.resolve();
     });
     expect(api.generateGameAsset).toHaveBeenCalledWith("g1", "sprite");
-    const scaffold = host.querySelector("#canvas-scaffold") as HTMLSelectElement;
-    expect(scaffold.value).toBe("canvas-vite");
-    expect(scaffold.textContent).toContain("Three.js + Vite");
-    expect(scaffold.textContent).toContain("Phaser + Vite");
+    expect(selectValue(host, "Promote scaffold")).toBe("canvas-vite");
+    expect(selectOptionLabels(host, "Promote scaffold")).toEqual(
+      expect.arrayContaining(["Three.js + Vite", "Phaser + Vite"]),
+    );
     await act(async () => {
       const promote = [...host.querySelectorAll("button")].find(
         (btn) => btn.textContent === "Grow this into a project",
@@ -3089,11 +3097,10 @@ describe("DesignCanvas", () => {
     expect(api.exportGameZip).toHaveBeenCalledWith("as1");
     createObjectURL.mockRestore();
     revokeObjectURL.mockRestore();
-    const scaffold = host.querySelector("#canvas-scaffold") as HTMLSelectElement;
-    expect(scaffold.value).toBe("three-vite");
-    expect(scaffold.textContent).toContain("Three.js + Vite");
-    expect(scaffold.textContent).toContain("Canvas + Vite");
-    expect(scaffold.textContent).not.toContain("Phaser + Vite");
+    expect(selectValue(host, "Promote scaffold")).toBe("three-vite");
+    const scaffoldLabels = selectOptionLabels(host, "Promote scaffold");
+    expect(scaffoldLabels).toEqual(expect.arrayContaining(["Three.js + Vite", "Canvas + Vite"]));
+    expect(scaffoldLabels).not.toContain("Phaser + Vite");
     await act(async () => {
       const promote = [...host.querySelectorAll("button")].find(
         (btn) => btn.textContent === "Promote",

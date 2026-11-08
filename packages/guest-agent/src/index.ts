@@ -53,6 +53,14 @@ export {
   isSshTransportError,
 } from "./ssh.js";
 export type { SshTarget, SshExec } from "./ssh.js";
+export {
+  spawnCliOverSsh,
+  sshRemoteCommand,
+  sshCliEnv,
+  sshTargetFromInstance,
+  posixShellQuote,
+} from "./sshCli.js";
+export type { SshCliForward, SshCliHandle } from "./sshCli.js";
 export { authenticatedCloneUrl, gitAuthHeader } from "./git.js";
 export { ensureHostKey } from "./keys.js";
 export type { HostSshKey } from "./keys.js";

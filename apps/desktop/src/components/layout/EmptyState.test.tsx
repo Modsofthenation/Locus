@@ -19,6 +19,7 @@ import { Sidebar } from "./Sidebar";
 import { FINISH_SETUP_DISMISSED_KEY } from "@/components/settings/FinishSetupChecklist";
 import { api } from "@/lib/api";
 import { Store, initialState, reducer, type Action, type UiState } from "@/state/store";
+import { selectValue, setSelectValue } from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -560,8 +561,10 @@ describe("EmptyState recipes", () => {
     render();
     const attach = host.querySelector("button.composer-add") as HTMLButtonElement;
     expect(attach).not.toBeNull();
-    expect(attach.title).toMatch(/Copied into \/workspace\/\.locus-attachments/);
-    expect(attach.title).not.toMatch(/Vision is off/);
+    expect(attach.getAttribute("aria-label")).toMatch(
+      /Copied into \/workspace\/\.locus-attachments/,
+    );
+    expect(attach.getAttribute("aria-label")).not.toMatch(/Vision is off/);
     expect(host.querySelector(".composer-attach")).toBeNull();
     const dockerTab = [...host.querySelectorAll("button")].find(
       (btn) => btn.textContent === "Docker",
@@ -569,16 +572,16 @@ describe("EmptyState recipes", () => {
     act(() => {
       dockerTab!.click();
     });
-    expect((host.querySelector("button.composer-add") as HTMLButtonElement).title).toMatch(
-      /Vision is off/,
-    );
+    expect(
+      (host.querySelector("button.composer-add") as HTMLButtonElement).getAttribute("aria-label"),
+    ).toMatch(/Vision is off/);
     const vmTab = [...host.querySelectorAll("button")].find((btn) => btn.textContent === "VM");
     act(() => {
       vmTab!.click();
     });
-    expect((host.querySelector("button.composer-add") as HTMLButtonElement).title).not.toMatch(
-      /Vision is off/,
-    );
+    expect(
+      (host.querySelector("button.composer-add") as HTMLButtonElement).getAttribute("aria-label"),
+    ).not.toMatch(/Vision is off/);
     act(() => {
       dockerTab!.click();
     });
@@ -639,7 +642,9 @@ describe("EmptyState recipes", () => {
     });
     const attach = host.querySelector("button.composer-add") as HTMLButtonElement;
     expect(attach).not.toBeNull();
-    expect(attach.title).toMatch(/Copied into \/workspace\/\.locus-attachments/);
+    expect(attach.getAttribute("aria-label")).toMatch(
+      /Copied into \/workspace\/\.locus-attachments/,
+    );
     const input = host.querySelector("input[type='file']") as HTMLInputElement;
     const file = new File(["hello"], "brief.txt", { type: "text/plain" });
     await act(async () => {
@@ -1816,16 +1821,12 @@ describe("EmptyState named environment", () => {
         </Store.Provider>,
       );
     });
-    const picker = host.querySelector('[aria-label="Named environment"]') as HTMLSelectElement;
-    expect(picker).toBeTruthy();
+    expect(host.querySelector('[aria-label="Named environment"]')).toBeTruthy();
     expect(host.textContent).toContain("Save as environment");
     act(() => {
-      picker.value = "env-1";
-      picker.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Named environment", "env-1");
     });
-    expect((host.querySelector('[aria-label="Jail"]') as HTMLSelectElement).value).toBe(
-      "restricted",
-    );
+    expect(selectValue(host, "Jail")).toBe("restricted");
     expect((host.querySelector('[aria-label="Spend cap (USD)"]') as HTMLInputElement).value).toBe(
       "20",
     );
@@ -1881,10 +1882,8 @@ describe("EmptyState named environment", () => {
         </Store.Provider>,
       );
     });
-    const picker = host.querySelector('[aria-label="Named environment"]') as HTMLSelectElement;
     act(() => {
-      picker.value = "env-1";
-      picker.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Named environment", "env-1");
     });
     act(() => {
       [...host.querySelectorAll("button")]

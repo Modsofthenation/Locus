@@ -1,5 +1,5 @@
 import type { ExtraToolDef } from "./mcp.js";
-import { normalizeRepoUrl, type ForgeKind } from "./git.js";
+import { isForgeKind, normalizeRepoUrl, type ForgeKind } from "./git.js";
 import { computeNextRunAt, parseCronExpr } from "./automation.js";
 import { wrapUntrusted } from "../untrusted.js";
 
@@ -12,6 +12,11 @@ export const SESSION_SUBSCRIPTION_KINDS = [
   "pull_request",
   "checks",
   "timer",
+  "linear_issue",
+  "jira_issue",
+  "sentry_issue",
+  "grafana_alert",
+  "incident",
 ] as const;
 export type SessionSubscriptionKind = (typeof SESSION_SUBSCRIPTION_KINDS)[number];
 
@@ -39,16 +44,12 @@ export interface SessionSubscription {
   delaySeconds?: number;
   cron?: string;
   once?: boolean;
+  issueId?: string;
+  alertFingerprint?: string;
 }
 
 export function isSessionSubscriptionKind(value: unknown): value is SessionSubscriptionKind {
-  return (
-    value === "slack_channel" ||
-    value === "slack_thread" ||
-    value === "pull_request" ||
-    value === "checks" ||
-    value === "timer"
-  );
+  return (SESSION_SUBSCRIPTION_KINDS as readonly string[]).includes(value as string);
 }
 
 export function isSubscribeToolName(name: string): boolean {
@@ -60,6 +61,11 @@ export function subscriptionKindLabel(kind: SessionSubscriptionKind): string {
   if (kind === "slack_thread") return "Slack thread";
   if (kind === "pull_request") return "Pull request";
   if (kind === "checks") return "CI checks";
+  if (kind === "linear_issue") return "Linear";
+  if (kind === "jira_issue") return "Jira";
+  if (kind === "sentry_issue") return "Sentry";
+  if (kind === "grafana_alert") return "Grafana alert";
+  if (kind === "incident") return "incident.io";
   return "Timer";
 }
 
@@ -139,6 +145,41 @@ export function parseForgePullUrl(url: string):
       title: `${bitbucket[1]}/${repo}#${number}`,
     };
   }
+  const azure = trimmed.match(
+    /^https?:\/\/dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/]+)\/pullrequest\/(\d+)/i,
+  );
+  if (azure?.[1] && azure[2] && azure[3] && azure[4]) {
+    const number = Number(azure[4]);
+    if (!Number.isInteger(number) || number <= 0) return undefined;
+    const repo = azure[3].replace(/\.git$/i, "");
+    return {
+      forge: "azuredevops",
+      pullUrl: `https://dev.azure.com/${azure[1]}/${azure[2]}/_git/${repo}/pullrequest/${number}`,
+      repoUrl: `https://dev.azure.com/${azure[1]}/${azure[2]}/_git/${repo}`,
+      pullNumber: number,
+      title: `${azure[1]}/${azure[2]}/${repo}#${number}`,
+    };
+  }
+  const gitea = trimmed.match(
+    /^https?:\/\/([^/]+)\/([^/]+)\/([^/]+?)(?:\.git)?\/pulls\/(\d+)(?:\/.*)?$/i,
+  );
+  if (gitea?.[1] && gitea[2] && gitea[3] && gitea[4]) {
+    const host = gitea[1].toLowerCase();
+    if (host === "github.com" || host === "gitlab.com" || host === "bitbucket.org") {
+      return undefined;
+    }
+    const number = Number(gitea[4]);
+    if (!Number.isInteger(number) || number <= 0) return undefined;
+    const repo = gitea[3].replace(/\.git$/i, "");
+    const forge = host.includes("forgejo") || host === "codeberg.org" ? "forgejo" : "gitea";
+    return {
+      forge,
+      pullUrl: `https://${gitea[1]}/${gitea[2]}/${repo}/pulls/${number}`,
+      repoUrl: `https://${gitea[1]}/${gitea[2]}/${repo}.git`,
+      pullNumber: number,
+      title: `${gitea[2]}/${repo}#${number}`,
+    };
+  }
   return undefined;
 }
 
@@ -165,10 +206,7 @@ export function parseSessionSubscription(raw: unknown): SessionSubscription | un
     threadTs: str(value.threadTs),
     channelName: str(value.channelName),
     topLevelOnly: value.topLevelOnly === true ? true : undefined,
-    forge:
-      value.forge === "github" || value.forge === "gitlab" || value.forge === "bitbucket"
-        ? value.forge
-        : undefined,
+    forge: isForgeKind(value.forge) ? value.forge : undefined,
     repoUrl: str(value.repoUrl),
     pullNumber:
       pullNumber != null && Number.isInteger(pullNumber) && pullNumber > 0 ? pullNumber : undefined,
@@ -177,6 +215,8 @@ export function parseSessionSubscription(raw: unknown): SessionSubscription | un
     delaySeconds: delaySeconds != null && delaySeconds > 0 ? Math.round(delaySeconds) : undefined,
     cron: str(value.cron),
     once: value.once === true ? true : value.once === false ? false : undefined,
+    issueId: str(value.issueId),
+    alertFingerprint: str(value.alertFingerprint),
   };
   return row;
 }
@@ -206,6 +246,8 @@ export function subscriptionDedupeKey(
     | "pullNumber"
     | "pullUrl"
     | "name"
+    | "issueId"
+    | "alertFingerprint"
   >,
 ): string | undefined {
   if (sub.kind === "slack_channel") {
@@ -226,6 +268,19 @@ export function subscriptionDedupeKey(
     if (!repo || !number) return undefined;
     return `${sub.kind === "checks" ? "checks" : "pull"}:${repo}:${number}`;
   }
+  if (
+    sub.kind === "linear_issue" ||
+    sub.kind === "jira_issue" ||
+    sub.kind === "sentry_issue" ||
+    sub.kind === "incident"
+  ) {
+    const id = sub.issueId?.trim().toLowerCase();
+    return id ? `${sub.kind}:${id}` : undefined;
+  }
+  if (sub.kind === "grafana_alert") {
+    const id = (sub.alertFingerprint || sub.issueId)?.trim().toLowerCase();
+    return id ? `grafana_alert:${id}` : undefined;
+  }
   const name = sub.name?.trim().toLowerCase();
   return name ? `timer:${name}` : undefined;
 }
@@ -244,6 +299,8 @@ export function formatSubscriptionTitle(
     | "name"
     | "cron"
     | "delaySeconds"
+    | "issueId"
+    | "alertFingerprint"
   >,
 ): string {
   if (sub.title.trim()) return sub.title;
@@ -265,6 +322,17 @@ export function formatSubscriptionTitle(
       return sub.kind === "checks" ? `${title} checks` : title;
     }
     return sub.kind === "checks" ? "CI checks" : "Pull request";
+  }
+  if (
+    sub.kind === "linear_issue" ||
+    sub.kind === "jira_issue" ||
+    sub.kind === "sentry_issue" ||
+    sub.kind === "incident"
+  ) {
+    return sub.issueId || subscriptionKindLabel(sub.kind);
+  }
+  if (sub.kind === "grafana_alert") {
+    return sub.alertFingerprint || sub.issueId || "Grafana alert";
   }
   if (sub.name) return sub.name;
   if (sub.cron) return `Cron ${sub.cron}`;
@@ -347,7 +415,7 @@ export function formatSubscriptionWakePrompt(sub: SessionSubscription, detail: s
 }
 
 export function wrapSubscriptionEvent(
-  kind: "slack-message" | "pr-text",
+  kind: "slack-message" | "pr-text" | "issue-text",
   source: string,
   text: string,
 ): string {
@@ -367,7 +435,8 @@ function buildFromArgs(
   const kindRaw = str(args.kind);
   if (!kindRaw || !isSessionSubscriptionKind(kindRaw)) {
     return {
-      error: "kind must be slack_channel, slack_thread, pull_request, checks, or timer",
+      error:
+        "kind must be slack_channel, slack_thread, pull_request, checks, timer, linear_issue, jira_issue, sentry_issue, grafana_alert, or incident",
     };
   }
   const now = opts.now ?? new Date();
@@ -431,6 +500,34 @@ function buildFromArgs(
         ? `${opts.sessionPull?.title ?? `PR #${pullNumber}`} checks`
         : opts.sessionPull?.title) ||
       `PR #${pullNumber}`;
+    return { sub: draft };
+  }
+  if (
+    kindRaw === "linear_issue" ||
+    kindRaw === "jira_issue" ||
+    kindRaw === "sentry_issue" ||
+    kindRaw === "incident" ||
+    kindRaw === "grafana_alert"
+  ) {
+    const issueId = str(args.issueId) || str(args.issue) || str(args.id);
+    const alertFingerprint = str(args.alertFingerprint) || str(args.fingerprint);
+    if (kindRaw === "grafana_alert") {
+      if (!alertFingerprint && !issueId) {
+        return { error: "alertFingerprint or issueId is required for a Grafana alert" };
+      }
+    } else if (!issueId) {
+      return { error: "issueId is required (Linear/Jira/Sentry/incident.io id or key)" };
+    }
+    const draft: SessionSubscription = {
+      id,
+      kind: kindRaw,
+      title: "",
+      createdAt,
+      prompt,
+      issueId: issueId,
+      alertFingerprint: kindRaw === "grafana_alert" ? alertFingerprint || issueId : undefined,
+    };
+    draft.title = str(args.title) || formatSubscriptionTitle(draft);
     return { sub: draft };
   }
   const name = str(args.name);
@@ -643,7 +740,7 @@ export function checksFixRepoId(
 export const SUBSCRIBE_TOOL: ExtraToolDef = {
   name: SUBSCRIBE_TOOL_NAME,
   description:
-    "Subscribe this chat to a Slack channel or thread, a GitHub/GitLab/Bitbucket pull request, that PR's CI checks, or a timer, then stop and wait. The event arrives later as a follow-up. List before adding; identical coordinates reuse the live subscription. Do not busy-wait. Do not post a listening notice to Slack. Channel IDs look like C0123ABCDEF, not names. Timers dedupe by name — unsubscribe first to change a live timer. checks fires when a new check fails.",
+    "Subscribe this chat to a Slack channel or thread, a GitHub/GitLab/Bitbucket/Gitea/Forgejo/Azure DevOps pull request, that PR's CI checks, a Linear/Jira/Sentry/incident.io issue, a Grafana firing alert, or a timer, then stop and wait. The event arrives later as a follow-up. List before adding; identical coordinates reuse the live subscription. Do not busy-wait. Do not post a listening notice to Slack. Channel IDs look like C0123ABCDEF, not names. Timers dedupe by name — unsubscribe first to change a live timer. checks fires when a new check fails.",
   parameters: {
     type: "object",
     properties: {
@@ -654,8 +751,20 @@ export const SUBSCRIBE_TOOL: ExtraToolDef = {
       },
       kind: {
         type: "string",
-        description: "slack_channel, slack_thread, pull_request, checks, or timer",
-        enum: ["slack_channel", "slack_thread", "pull_request", "checks", "timer"],
+        description:
+          "slack_channel, slack_thread, pull_request, checks, timer, linear_issue, jira_issue, sentry_issue, grafana_alert, or incident",
+        enum: [
+          "slack_channel",
+          "slack_thread",
+          "pull_request",
+          "checks",
+          "timer",
+          "linear_issue",
+          "jira_issue",
+          "sentry_issue",
+          "grafana_alert",
+          "incident",
+        ],
       },
       channelId: {
         type: "string",
@@ -673,14 +782,22 @@ export const SUBSCRIBE_TOOL: ExtraToolDef = {
       pullUrl: {
         type: "string",
         description:
-          "GitHub / GitLab / Bitbucket pull or merge-request URL. Required coordinates for pull_request and checks.",
+          "GitHub / GitLab / Bitbucket / Gitea / Forgejo / Azure DevOps pull or merge-request URL. Required coordinates for pull_request and checks.",
       },
       repoUrl: { type: "string", description: "Repo clone URL when pullUrl is omitted." },
       pullNumber: { type: "number", description: "Pull / merge request number." },
       forge: {
         type: "string",
-        description: "github, gitlab, or bitbucket",
-        enum: ["github", "gitlab", "bitbucket"],
+        description: "github, gitlab, bitbucket, gitea, forgejo, or azuredevops",
+        enum: ["github", "gitlab", "bitbucket", "gitea", "forgejo", "azuredevops"],
+      },
+      issueId: {
+        type: "string",
+        description: "Linear/Jira/Sentry/incident.io issue id or key (ENG-12, WEB-1, INC-123).",
+      },
+      alertFingerprint: {
+        type: "string",
+        description: "Grafana alert fingerprint, or a name to match firing alerts.",
       },
       name: { type: "string", description: "Timer name used for dedupe." },
       delaySeconds: {

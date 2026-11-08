@@ -598,7 +598,9 @@ describe("ChatPane", () => {
     expect(host.textContent).toMatch(/Queue paused after Stop/);
     expect(host.textContent).toMatch(/1 queued/);
 
-    const remove = queued!.querySelector("button[title='Remove from queue']") as HTMLButtonElement;
+    const remove = queued!.querySelector(
+      "button[aria-label='Remove from queue']",
+    ) as HTMLButtonElement;
     await act(async () => {
       remove.click();
       await Promise.resolve();
@@ -795,9 +797,9 @@ describe("ChatPane", () => {
     });
 
     const queued = host.querySelector("[aria-label='Queued prompts']");
-    const sendNow = queued!.querySelector("button[aria-label='Send now']") as HTMLButtonElement;
+    const sendNow = queued!.querySelector("button[aria-label^='Send now']") as HTMLButtonElement;
     expect(sendNow).toBeTruthy();
-    expect(sendNow.title).toMatch(/interrupt this turn/i);
+    expect(sendNow.getAttribute("aria-label")).toMatch(/interrupt this turn/i);
     await act(async () => {
       sendNow.click();
       await Promise.resolve();
@@ -819,7 +821,7 @@ describe("ChatPane", () => {
       vms: [vm],
     });
 
-    const sendNow = host.querySelector("button[aria-label='Send now']") as HTMLButtonElement;
+    const sendNow = host.querySelector("button[aria-label^='Send now']") as HTMLButtonElement;
     await act(async () => {
       sendNow.click();
       await Promise.resolve();
@@ -2772,11 +2774,16 @@ describe("ChatPane", () => {
       sessions: [session],
       vms: [{ ...vm, status: "ready" }],
     });
-    const select = host.querySelector("[aria-label='Default subagent']") as HTMLSelectElement;
-    expect(select?.value).toBe("explore");
+    const picker = host.querySelector("[aria-label='Default subagent']") as HTMLElement;
+    expect(host.querySelector(".ui-select-value")?.textContent).toMatch(/Explore/i);
     await act(async () => {
-      select.value = "review";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      picker.click();
+    });
+    const review = [...host.querySelectorAll("[role='menuitem']")].find((el) =>
+      el.textContent?.includes("Review"),
+    );
+    await act(async () => {
+      review?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await Promise.resolve();
     });
     expect(api.patchSession).toHaveBeenCalledWith("s1", { defaultSubagent: "review" });
@@ -2821,11 +2828,11 @@ describe("ChatPane", () => {
       sessions: [{ ...session, runtime: "host", status: "idle", vmId: undefined }],
       vms: [],
     });
-    expect(host.textContent).toContain("no VM or container");
+    expect(host.textContent).toContain("This chat can read and edit files on this machine");
     expect(host.querySelector(".vision-toggle")).toBeNull();
     expect(host.querySelector(".composer-add")).toBeTruthy();
     expect(host.querySelector(".websearch-toggle")).toBeNull();
-    expect(host.textContent).toContain("Host agent · /workspace on this machine");
+    expect(host.querySelector(".chat-runtime-badge")?.textContent).toBe("This machine");
   });
 
   it("lays out the composer with model and Send on the footer", () => {
@@ -2858,9 +2865,9 @@ describe("ChatPane", () => {
       },
     });
     expect(host.querySelector(".composer-bar .model-picker")).toBeTruthy();
-    expect(host.querySelector(".model-picker-provider.on")).toBeTruthy();
+    expect(host.querySelector(".model-picker-combined.on")).toBeTruthy();
     expect(host.querySelector(".model-cost-chip")).toBeNull();
-    expect(host.querySelector("[aria-label='Context usage']")?.textContent).toMatch(/0% context/);
+    expect(host.querySelector("[aria-label='Context usage']")).toBeNull();
     expect(host.querySelector(".composer-meta")?.textContent).toMatch(/7,484 in · 400 out · \$0/);
     expect(host.querySelector(".composer-add")).toBeTruthy();
     expect(host.querySelector("[data-testid='composer-commands']")).toBeTruthy();
@@ -2931,10 +2938,10 @@ describe("ChatPane", () => {
     expect(css).toMatch(/\.composer-bar \{[\s\S]*?flex-wrap:\s*wrap/);
     expect(css).toMatch(/\.composer-actions \{[\s\S]*?flex:\s*1 1 12\.5rem/);
     expect(css).toMatch(
-      /@container composer \(max-width: 520px\) \{[\s\S]*?\.composer-actions,[\s\S]*?flex:\s*1 1 100%/,
+      /@container composer \(max-width: 560px\) \{[\s\S]*?\.composer-actions,[\s\S]*?flex:\s*1 1 100%/,
     );
     expect(css).toMatch(
-      /@container composer \(max-width: 520px\) \{[\s\S]*?\.composer-send-label \{[\s\S]*?display:\s*none/,
+      /@container composer \(max-width: 560px\) \{[\s\S]*?\.composer-send-label \{[\s\S]*?display:\s*none/,
     );
     expect(css).toMatch(
       /\.model-picker\.compact \.model-picker-provider \{[\s\S]*?overflow:\s*hidden/,
@@ -2954,7 +2961,7 @@ describe("ChatPane", () => {
       "utf8",
     );
     expect(css).toMatch(/:root,[\s\S]*?--chat-thread-pad: 16px 20px 8px;/);
-    expect(css).toMatch(/:root,[\s\S]*?--chat-font: 13px;/);
+    expect(css).toMatch(/:root,[\s\S]*?--chat-font: 14px;/);
     expect(css).toMatch(/\.thread \{[\s\S]*?padding: var\(--chat-thread-pad\)/);
     expect(css).toMatch(/\.thread \{[\s\S]*?scrollbar-width:\s*none/);
     expect(css).toMatch(/\.thread-scroll-thumb \{[\s\S]*?repeating-linear-gradient/);

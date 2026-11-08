@@ -1433,12 +1433,16 @@ export class SessionService {
       os: input.os,
       templateId: input.templateId,
       kind,
+      runtime: "vm",
+      placement: placement === "worker" ? "worker" : undefined,
+      backendId: placement === "worker" ? backendId : undefined,
       allowedTools: input.allowedTools,
       vision: input.vision ?? "latest",
       status: cursorCloud ? "idle" : input.startVm ? "provisioning" : "draft",
       network: input.network ?? defaultNetworkJail(input.imageId),
       imageId: input.imageId,
       hardware,
+      guestEnv: input.guestEnv,
       projectId: input.projectId,
       surface,
       reasoningEffort: input.reasoningEffort,
@@ -1612,6 +1616,7 @@ export class SessionService {
       throw new Error("Host agents do not have a VM or container.");
     }
     if (sessionRuntime(session) === "docker") return this.startDocker(sessionId);
+    if (this.isWorkerSession(session)) return this.startWorkerVm(sessionId);
     return this.startQemuVm(sessionId);
   }
 
@@ -1856,6 +1861,77 @@ export class SessionService {
       quotedUsdPerHour: quote.usdPerHour,
       instanceSize: size,
     });
+  }
+
+  private async startWorkerVm(sessionId: string): Promise<VmInstance> {
+    let vm = await this.ensureWorkerVm(sessionId);
+    const session = await this.require(sessionId);
+    const client = await this.requireWorker(session);
+    this.attachWorkerGuest(session, client, vm);
+    if (isGuestReady(vm.status)) {
+      await this.installGuestGitAuth(vm);
+      return vm;
+    }
+    vm = await client.start(vm.id);
+    this.attachWorkerGuest(session, client, vm);
+    await this.keepGuestOrDestroy(sessionId, vm.id, client);
+    await this.installGuestGitAuth(vm);
+    await this.patch(sessionId, { vmId: vm.id, status: "provisioning", error: undefined });
+    await this.persistVm(vm);
+    this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
+    await this.onVmStatus(vm.id, vm.status, vm.error);
+    return vm;
+  }
+
+  private async ensureWorkerVm(sessionId: string): Promise<VmInstance> {
+    let session = await this.require(sessionId);
+    const config = await this.store.loadConfig();
+    const backend = (config.workers ?? []).find((row) => row.id === session.backendId);
+    if (!backend) throw new Error("Worker was removed from Settings → Workers");
+    const template = config.templates.find((row) => row.id === session.templateId);
+    if (!template) throw new Error("Template missing");
+    if (workerKind(backend) === "fargate") {
+      session = await this.ensureFargateHandle(session, backend);
+    }
+    const client = await this.requireWorker(session);
+    let vm = session.vmId ? client.get(session.vmId) : undefined;
+    if (!vm && session.vmId) vm = await client.refresh(session.vmId);
+    if (!vm) {
+      const cap = workerMaxConcurrent(backend);
+      if (cap != null) {
+        const live = (await client.listGuests()).filter(
+          (guest) => guest.status !== "stopped" && guest.status !== "error",
+        ).length;
+        if (live >= cap) {
+          throw new Error(
+            `Worker ${backend.name} already has ${cap} live guest${cap === 1 ? "" : "s"} (maxConcurrent)`,
+          );
+        }
+      }
+      const hardware = session.hardware ?? template.hardware;
+      vm = await client.create({
+        sessionId,
+        name: session.title,
+        image: "vm",
+        os: session.os,
+        templateId: session.templateId,
+        runtime: "vm",
+        template: { ...template, hardware },
+        network: session.network ?? defaultNetworkJail(session.imageId),
+      });
+    }
+    this.attachWorkerGuest(session, client, vm);
+    await this.patch(sessionId, {
+      vmId: vm.id,
+      status: isGuestReady(vm.status) ? "idle" : "provisioning",
+      error: undefined,
+      ...(session.computeStartedAt ? {} : { computeStartedAt: now() }),
+    });
+    await this.persistVm(vm);
+    this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
+    this.hub.broadcast({ type: "session.updated", session: await this.require(sessionId) });
+    await this.landStudioWorkspace(sessionId);
+    return client.get(vm.id) ?? vm;
   }
 
   private async startWorkerDocker(sessionId: string): Promise<VmInstance> {
@@ -4753,6 +4829,17 @@ export class SessionService {
       requireWorker: (session) => this.requireWorker(session),
       spawnOnWorker: (client, vmId, sessionId, req) =>
         this.workerCursorCliHandle(client, vmId, sessionId, req),
+      guestSsh: async (session) => {
+        if (!session.vmId) return undefined;
+        const vm = this.getMachine(session.vmId);
+        if (!vm?.ssh) return undefined;
+        return {
+          host: vm.ssh.host,
+          port: vm.ssh.port,
+          username: vm.ssh.username,
+          identityFile: vm.ssh.identityFile,
+        };
+      },
       primeGameTurn: (id, text) => this.primeGameTurn(id, text),
       snapshotStudioBaseline: (id) => this.snapshotStudioBaseline(id),
       primeAssetTurn: (id, text) => this.primeAssetTurn(id, text),

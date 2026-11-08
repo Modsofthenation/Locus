@@ -35,12 +35,14 @@ import { EmptyState } from "@/components/layout/EmptyState";
 import { SessionSwitcher } from "@/components/layout/SessionSwitcher";
 import { FeatureChecklist } from "@/components/layout/FeatureChecklist";
 import { NoticeBanner } from "@/components/layout/NoticeBanner";
+import { DialogHost } from "@/components/layout/DialogHost";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { WorkspaceBody } from "@/components/workspace/WorkspaceBody";
 import { WorkspaceStage } from "@/components/workspace/WorkspaceStage";
 import { SwarmComputerPanel } from "@/components/layout/SwarmComputerPanel";
 import { api, connectEvents, retryEvents } from "@/lib/api";
+import { matchModKey } from "@/lib/shortcuts";
 import { locusWindowTitle } from "@/lib/windowTitle";
 import { sleep } from "@/lib/net";
 import {
@@ -694,8 +696,7 @@ export function App() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const meta = e.metaKey || e.ctrlKey;
-      if (meta && e.key.toLowerCase() === "n") {
+      if (matchModKey(e, "n")) {
         e.preventDefault();
         if (state.section === "settings") return;
         if (state.section === "automations") dispatch({ type: "newAutomation", open: true });
@@ -723,7 +724,7 @@ export function App() {
           }
         } else dispatch({ type: "select", id: null });
       }
-      if (meta && e.key === ",") {
+      if (matchModKey(e, ",")) {
         e.preventDefault();
         dispatch({ type: "settings", open: true });
       }
@@ -820,6 +821,8 @@ export function App() {
   return (
     <Store.Provider value={{ state, dispatch }}>
       <CloseGuard />
+      <DialogHost />
+      <NoticeBanner />
       {booting ? <BootScreen onRetry={() => retryBootRef.current()} /> : null}
       {state.productModeTransition ? (
         <ProductModeTransition transition={state.productModeTransition} />
@@ -988,7 +991,6 @@ export function App() {
             {state.setupOpen ? <SetupWizard /> : null}
           </Suspense>
           <SessionSwitcher />
-          <NoticeBanner />
           <FeatureChecklist />
           <Suspense fallback={null}>
             <SlackAlertToasts

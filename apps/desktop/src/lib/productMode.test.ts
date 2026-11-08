@@ -43,13 +43,13 @@ describe("applyProductModeSideEffects", () => {
     ]);
   });
 
-  it("keeps teammates, teams, and settings in the Swarm shell", () => {
+  it("keeps teammates, teams, More surfaces, and settings in the Swarm shell", () => {
     expect(swarmShellKeepsSection("agents")).toBe(true);
     expect(swarmShellKeepsSection("project")).toBe(true);
     expect(swarmShellKeepsSection("settings")).toBe(true);
-    expect(swarmShellKeepsSection("automations")).toBe(false);
-    expect(swarmShellKeepsSection("brain")).toBe(false);
-    expect(swarmShellKeepsSection("design")).toBe(false);
+    expect(swarmShellKeepsSection("automations")).toBe(true);
+    expect(swarmShellKeepsSection("brain")).toBe(true);
+    expect(swarmShellKeepsSection("design")).toBe(true);
   });
 
   it("is a no-op when the mode did not change", () => {

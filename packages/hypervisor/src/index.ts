@@ -7,6 +7,8 @@ export {
   MockDockerEngine,
   DockerCliEngine,
   createDockerEngine,
+  resolveContainerEngine,
+  CONTAINER_ENGINE_CANDIDATES,
   dockerWorkspaceDir,
   hostWorkspaceDir,
   sessionHostWorkspace,
@@ -17,6 +19,14 @@ export { QemuHypervisor, qemuIsoError } from "./qemu.js";
 export { createHypervisor } from "./factory.js";
 export type { HypervisorBundle } from "./factory.js";
 export { detectCapabilities, resolveAccelerator, knownQemuDirs } from "./detect.js";
+export {
+  hostQemuArch,
+  qemuArchForOs,
+  qemuArchFromBinary,
+  qemuBinaryCandidates,
+  qemuMachineType,
+} from "./qemuArch.js";
+export type { QemuGuestArch } from "./qemuArch.js";
 export { buildJolietIso, writeDirectoryIso } from "./iso.js";
 export { describeHost, installQemu } from "./install.js";
 export type { HostSetupInfo, QemuInstallResult } from "./install.js";

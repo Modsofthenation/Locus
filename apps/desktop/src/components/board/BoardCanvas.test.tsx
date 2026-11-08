@@ -172,7 +172,7 @@ describe("BoardCanvas", () => {
     );
     const frameNav = host.querySelector(".board-frames");
     expect(frameNav?.textContent).toContain("Context");
-    expect(host.querySelector('button[title="Zoom to fit (Ctrl/Cmd+0)"]')).toBeTruthy();
+    expect(host.querySelector('button[aria-label="Zoom to fit"]')).toBeTruthy();
   });
 
   it("switches tools from keyboard and Escape returns to select", () => {

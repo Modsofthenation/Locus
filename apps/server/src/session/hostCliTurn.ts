@@ -4,6 +4,7 @@ import type { AgentSession, ChatMessage, LocusConfig, PatchSessionInput } from "
 import {
   composePersonaInstructions,
   formatCursorOpsRoutingCard,
+  foldCodingVerifyFlags,
   integrationsWithTokens,
   isAssetSession,
   isCanvasSession,
@@ -15,11 +16,12 @@ import {
   isDesignSession,
   isGameSession,
   isReviewSession,
+  isWindows,
   lastUserMessage,
+  LINUX_WORKSPACE,
   normalizeCodexCliModel,
   sessionRuntime,
   sessionWebSearch,
-  foldCodingVerifyFlags,
 } from "@locus/shared";
 import type { WorkerClient } from "@locus/worker";
 import {
@@ -43,10 +45,14 @@ import { codexMcpPrompt } from "../integrations/cliGitMcp.js";
 import {
   controlPlaneMcpSessionUrl,
   controlPlaneMcpUrl,
+  mergeClaudeMcpJson,
+  mergeKiroMcpJson,
+  mergeLocusMcpJson,
   writeLocusClaudeMcpConfig,
   writeLocusKiroMcpConfig,
   writeLocusCursorMcpConfig,
 } from "../integrations/cursorCliMcp.js";
+import { spawnCliOverSsh, type SshCliHandle, type SshTarget } from "@locus/guest-agent";
 import {
   formatLocusCursorRule,
   LOCUS_CURSOR_RULE_REL,
@@ -95,6 +101,12 @@ export type HostCliTurnPorts = {
     sessionId: string,
     req: CursorCliSpawnRequest,
   ) => CursorCliSpawnHandle;
+  guestSsh?: (session: AgentSession) => Promise<SshTarget | undefined>;
+  spawnOverSsh?: (
+    target: SshTarget,
+    req: CursorCliSpawnRequest,
+    extra?: { reverseForwards?: { listenPort: number; hostPort: number }[] },
+  ) => SshCliHandle;
   primeGameTurn: (sessionId: string, userText: string) => Promise<string>;
   snapshotStudioBaseline: (sessionId: string) => Promise<unknown>;
   primeAssetTurn: (sessionId: string, userText: string) => Promise<string>;
@@ -148,27 +160,30 @@ const LABELS: Record<
 > = {
   cursor: {
     missing: "Cursor CLI provider is not configured. Enable it in Settings → Providers.",
-    vm: "Cursor CLI needs a Docker or Host workspace on this machine. Use Cursor Cloud for a remote agent.",
+    vm: "Cursor CLI on a VM needs a running Linux guest with SSH. Windows VMs are not supported — use Docker or Host, or Cursor Cloud.",
     workspace: "Cursor CLI needs a workspace folder on this machine.",
-    worker: "Cursor CLI on a worker needs a running Docker guest. Start the container first.",
+    worker:
+      "Cursor CLI on a worker needs a running Docker, Host, or Linux VM guest. Start it first.",
   },
   claude: {
     missing: "Claude Code provider is not configured. Enable it in Settings → Providers.",
-    vm: "Claude Code needs a Docker or Host workspace on this machine. Switch the runtime, then retry.",
+    vm: "Claude Code on a VM needs a running Linux guest with SSH. Windows VMs are not supported — switch the runtime, then retry.",
     workspace: "Claude Code needs a workspace folder on this machine.",
-    worker: "Claude Code on a worker needs a running Docker guest. Start the container first.",
+    worker:
+      "Claude Code on a worker needs a running Docker, Host, or Linux VM guest. Start it first.",
   },
   kiro: {
     missing: "Kiro CLI provider is not configured. Enable it in Settings → Providers.",
-    vm: "Kiro CLI needs a Docker or Host workspace on this machine. Switch the runtime, then retry.",
+    vm: "Kiro CLI on a VM needs a running Linux guest with SSH. Windows VMs are not supported — switch the runtime, then retry.",
     workspace: "Kiro CLI needs a workspace folder on this machine.",
-    worker: "Kiro CLI on a worker needs a running Docker guest. Start the container first.",
+    worker: "Kiro CLI on a worker needs a running Docker, Host, or Linux VM guest. Start it first.",
   },
   codex: {
     missing: "Codex CLI provider is not configured. Enable it in Settings → Providers.",
-    vm: "Codex CLI needs a Docker or Host workspace on this machine. Switch the runtime, then retry.",
+    vm: "Codex CLI on a VM needs a running Linux guest with SSH. Windows VMs are not supported — switch the runtime, then retry.",
     workspace: "Codex CLI needs a workspace folder on this machine.",
-    worker: "Codex CLI on a worker needs a running Docker guest. Start the container first.",
+    worker:
+      "Codex CLI on a worker needs a running Docker, Host, or Linux VM guest. Start it first.",
   },
 };
 
@@ -205,7 +220,10 @@ export async function runHostCliTurn(
       session = await ports.patchMeta(input.sessionId, { model: canonicalModel });
     }
   }
-  if (sessionRuntime(session) === "vm") {
+  const worker = ports.isWorkerSession(session);
+  const localVm = sessionRuntime(session) === "vm" && !worker;
+  const ssh = localVm ? await ports.guestSsh?.(session) : undefined;
+  if (localVm && (!ssh || isWindows(session.os))) {
     await ports.appendMessage(input.sessionId, {
       id: randomUUID(),
       role: "system",
@@ -214,8 +232,11 @@ export async function runHostCliTurn(
     });
     return "";
   }
-  const worker = ports.isWorkerSession(session);
-  const workspace = worker ? "/workspace" : ports.workspaceRoot(session);
+  const workspace = worker
+    ? "/workspace"
+    : localVm
+      ? LINUX_WORKSPACE
+      : ports.workspaceRoot(session);
   if (!workspace) {
     await ports.appendMessage(input.sessionId, {
       id: randomUUID(),
@@ -239,27 +260,34 @@ export async function runHostCliTurn(
           playbook: session.playbook,
         }
       : undefined;
-  if (!worker) {
+  const mcpSessionUrl = controlPlaneMcpSessionUrl(session.id, config.advanced.bindPort);
+  if (localVm) {
+    await writeGuestCliMcp(ports, input.sessionId, kind, mcpSessionUrl);
+    if (kind === "cursor" && cursorRule) {
+      const body = formatLocusCursorRule(cursorRule);
+      if (body) await ports.writeWorkspace(input.sessionId, LOCUS_CURSOR_RULE_REL, body);
+    }
+  } else if (!worker) {
     await mkdir(workspace, { recursive: true });
     if (kind === "cursor" && cursorRule) {
       await writeLocusCursorMcpConfig({
         dataDir: ports.dataDir,
         workspace,
         url: controlPlaneMcpUrl(config.advanced.bindPort),
-        workspaceUrl: controlPlaneMcpSessionUrl(session.id, config.advanced.bindPort),
+        workspaceUrl: mcpSessionUrl,
       });
       await writeLocusCursorRule({ workspace, ...cursorRule });
     }
     if (kind === "claude") {
       await writeLocusClaudeMcpConfig({
         workspace,
-        url: controlPlaneMcpSessionUrl(session.id, config.advanced.bindPort),
+        url: mcpSessionUrl,
       });
     }
     if (kind === "kiro") {
       await writeLocusKiroMcpConfig({
         workspace,
-        url: controlPlaneMcpSessionUrl(session.id, config.advanced.bindPort),
+        url: mcpSessionUrl,
       });
     }
   } else if (cursorRule) {
@@ -270,14 +298,12 @@ export async function runHostCliTurn(
   }
   const readiness =
     worker || kind === "cursor" ? undefined : await workspaceReadinessNote(workspace);
-  let spawnFn =
-    kind === "cursor"
-      ? ports.cursorCliSpawner()
-      : kind === "claude"
-        ? ports.claudeCodeSpawner()
-        : kind === "kiro"
-          ? ports.kiroCliSpawner()
-          : ports.codexCliSpawner();
+  let spawnFn: ReturnType<
+    | HostCliTurnPorts["cursorCliSpawner"]
+    | HostCliTurnPorts["claudeCodeSpawner"]
+    | HostCliTurnPorts["kiroCliSpawner"]
+    | HostCliTurnPorts["codexCliSpawner"]
+  >;
   if (worker) {
     if (!session.vmId) {
       await ports.appendMessage(input.sessionId, {
@@ -291,6 +317,24 @@ export async function runHostCliTurn(
     const client = await ports.requireWorker(session);
     const vmId = session.vmId;
     spawnFn = (req) => ports.spawnOnWorker(client, vmId, session.id, req);
+  } else if (localVm && ssh) {
+    const mcpPort = Number(new URL(mcpSessionUrl).port) || config.advanced.bindPort || 7420;
+    const overSsh = ports.spawnOverSsh ?? spawnCliOverSsh;
+    spawnFn = (req) =>
+      overSsh(
+        ssh,
+        { ...req, cwd: LINUX_WORKSPACE },
+        { reverseForwards: [{ listenPort: mcpPort, hostPort: mcpPort }] },
+      );
+  } else {
+    spawnFn =
+      kind === "cursor"
+        ? ports.cursorCliSpawner()
+        : kind === "claude"
+          ? ports.claudeCodeSpawner()
+          : kind === "kiro"
+            ? ports.kiroCliSpawner()
+            : ports.codexCliSpawner();
   }
   const reviewing = isReviewSession(session);
   const mcpKind: CodexMcpKind = reviewing ? "review" : isCanvasSession(session) ? "canvas" : "git";
@@ -638,4 +682,28 @@ export async function runHostCliTurn(
     wroteCanvasThisTurn = cont.wroteCanvasThisTurn;
   }
   return lastReplyId;
+}
+
+async function writeGuestCliMcp(
+  ports: Pick<HostCliTurnPorts, "writeWorkspace">,
+  sessionId: string,
+  kind: HostCliKind,
+  url: string,
+): Promise<void> {
+  const body = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
+  if (kind === "cursor") {
+    await ports.writeWorkspace(sessionId, ".cursor/mcp.json", body(mergeLocusMcpJson({}, url)));
+    return;
+  }
+  if (kind === "claude") {
+    await ports.writeWorkspace(sessionId, ".mcp.json", body(mergeClaudeMcpJson({}, url)));
+    return;
+  }
+  if (kind === "kiro") {
+    await ports.writeWorkspace(
+      sessionId,
+      ".kiro/settings/mcp.json",
+      body(mergeKiroMcpJson({}, url)),
+    );
+  }
 }

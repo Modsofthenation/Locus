@@ -2340,21 +2340,25 @@ describe("docker agents", () => {
       startVm: true,
     });
     try {
+      await waitUntilDockerRunning(sessions, created.id);
       await sessions.sendChat(created.id, "Build a standup spinner");
-      const deadline = Date.now() + 4000;
+      const deadline = Date.now() + 8000;
       let html: string | null = null;
       let nudged = false;
       let idle = false;
+      let needsHuman: string | undefined;
       while (Date.now() < deadline) {
         const fresh = await sessions.get(created.id);
         idle = fresh?.status === "idle";
+        needsHuman = fresh?.needsHuman;
         nudged = Boolean(
           fresh?.messages.some(
             (m) => m.role === "system" && m.content === EMPTY_CANVAS_NUDGE && m.hidden,
           ),
         );
         html = (await sessions.design.readCanvas(created.id)).html;
-        if (idle && html?.includes("standup spinner")) break;
+        // Host fallback HTML lands in finishTurn; needsHuman is written after that.
+        if (idle && html?.includes("standup spinner") && needsHuman) break;
         await new Promise((r) => setTimeout(r, 20));
       }
       expect(calls).toBe(3);
@@ -2400,21 +2404,25 @@ describe("docker agents", () => {
       startVm: true,
     });
     try {
+      await waitUntilDockerRunning(sessions, created.id);
       await sessions.sendChat(created.id, "Build a standup spinner");
-      const deadline = Date.now() + 4000;
+      const deadline = Date.now() + 8000;
       let html: string | null = null;
       let nudged = false;
       let idle = false;
+      let needsHuman: string | undefined;
       while (Date.now() < deadline) {
         const fresh = await sessions.get(created.id);
         idle = fresh?.status === "idle";
+        needsHuman = fresh?.needsHuman;
         nudged = Boolean(
           fresh?.messages.some(
             (m) => m.role === "system" && m.content === EMPTY_CANVAS_NUDGE && m.hidden,
           ),
         );
         html = (await sessions.design.readCanvas(created.id)).html;
-        if (idle && html?.includes("standup spinner")) break;
+        // Host fallback HTML lands in finishTurn; needsHuman is written after that.
+        if (idle && html?.includes("standup spinner") && needsHuman) break;
         await new Promise((r) => setTimeout(r, 20));
       }
       expect(calls).toBe(5);
@@ -6675,7 +6683,7 @@ describe("golden images, media, and abort", () => {
         return new Response("Not Found", { status: 404 });
       }) as typeof fetch,
     });
-    const res = await app.request("/api/updates?current=0.16.1");
+    const res = await app.request("/api/updates?current=0.17.0");
     expect(res.status).toBe(200);
     const body = (await res.json()) as { status: string; message?: string };
     expect(body.status).toBe("unavailable");

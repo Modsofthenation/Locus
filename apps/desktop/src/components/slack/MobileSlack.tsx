@@ -28,6 +28,7 @@ import { LAST_SLACK_POST_AS_KEY, SlackBody, slackWorkspaceBooting } from "./Slac
 import { IconLock, IconMore, IconSend } from "@/components/layout/Icons";
 import { Mascot } from "@/components/layout/Mascot";
 import { MobileFitPane } from "@/components/layout/MobileFitPane";
+import { useDialogFocus } from "@/lib/useDialogFocus";
 import { observePinThreadToLatest } from "@/lib/threadScroll";
 
 function loadLastSlackPostAs(): SlackPostAs {
@@ -626,10 +627,18 @@ function MobileSlackReactPicker(props: {
   onPick: (name: string) => void;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const names = useMemo(() => listSlackReactionNames(props.emoji, query), [props.emoji, query]);
+  useDialogFocus(true, props.onClose, dialogRef);
   return (
-    <div className="mobile-slack-picker" role="dialog" aria-label="Choose a reaction">
+    <div
+      className="mobile-slack-picker"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Choose a reaction"
+      ref={dialogRef}
+    >
       <div className="mobile-slack-picker-head">
         <input
           value={query}

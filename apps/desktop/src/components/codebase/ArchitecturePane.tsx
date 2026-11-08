@@ -7,6 +7,7 @@ import {
 } from "@locus/shared";
 import { api } from "@/lib/api";
 import { useStore } from "@/state/store";
+import { Select } from "@/components/layout/Select";
 
 const SHOWN = 6;
 
@@ -129,24 +130,25 @@ export function ArchitecturePane({ repoId, repoName }: { repoId: string; repoNam
           improving={busy === "feature"}
           onImprove={() => void improve("feature")}
           control={
-            <select
-              aria-label="Feature"
+            <Select
+              compact
+              ariaLabel="Feature"
               value={feature}
               disabled={!featureOptions.length}
-              onChange={(event) => {
-                const next = event.target.value;
+              options={
+                featureOptions.length
+                  ? featureOptions.map((row) => ({
+                      value: row.path,
+                      label: `${row.path} (${row.fileCount})`,
+                    }))
+                  : [{ value: "", label: "No features yet" }]
+              }
+              onChange={(next) => {
                 setFeature(next);
                 const rows = (report?.files ?? []).filter((row) => row.feature === next);
                 if (!rows.some((row) => row.path === file)) setFile(pickFile(rows));
               }}
-            >
-              {featureOptions.length ? null : <option value="">No features yet</option>}
-              {featureOptions.map((row) => (
-                <option key={row.path} value={row.path}>
-                  {row.path} ({row.fileCount})
-                </option>
-              ))}
-            </select>
+            />
           }
         />
         <SectionCard
@@ -157,20 +159,21 @@ export function ArchitecturePane({ repoId, repoName }: { repoId: string; repoNam
           improving={busy === "code"}
           onImprove={() => void improve("code")}
           control={
-            <select
-              aria-label="Code"
+            <Select
+              compact
+              ariaLabel="Code"
               value={file}
               disabled={!fileOptions.length}
-              onChange={(event) => setFile(event.target.value)}
-            >
-              {fileOptions.length ? null : <option value="">No files yet</option>}
-              {fileOptions.map((row) => (
-                <option key={row.path} value={row.path}>
-                  {row.path}
-                  {row.flags.length ? ` · ${row.flags.length}` : ""}
-                </option>
-              ))}
-            </select>
+              options={
+                fileOptions.length
+                  ? fileOptions.map((row) => ({
+                      value: row.path,
+                      label: `${row.path}${row.flags.length ? ` · ${row.flags.length}` : ""}`,
+                    }))
+                  : [{ value: "", label: "No files yet" }]
+              }
+              onChange={setFile}
+            />
           }
         />
       </div>

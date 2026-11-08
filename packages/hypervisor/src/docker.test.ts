@@ -46,7 +46,7 @@ describe("MockDockerEngine", () => {
     expect(() => hostWorkspaceDir("/data", "ok")).not.toThrow();
   });
 
-  it("refuses to create a Docker container for host runtime", async () => {
+  it("refuses to create a Docker container for host or VM runtime", async () => {
     const engine = new MockDockerEngine(join(tmpdir(), "locus-docker-host"));
     await expect(
       engine.create({
@@ -56,6 +56,14 @@ describe("MockDockerEngine", () => {
         runtime: "host",
       }),
     ).rejects.toThrow(/Host agents do not have a VM or container/);
+    await expect(
+      engine.create({
+        sessionId: "s1",
+        name: "vm",
+        image: "vm",
+        runtime: "vm",
+      }),
+    ).rejects.toThrow(/QEMU hypervisor/);
     expect(engine.list()).toEqual([]);
     engine.shutdown();
   });
@@ -361,6 +369,43 @@ describe("DockerCliEngine", () => {
     };
     const engine = await createDockerEngine("/tmp/x", runner);
     expect(engine.kind).toBe("mock");
+  });
+
+  it("uses podman when docker is missing", async () => {
+    const asked: string[] = [];
+    const runner: CommandRunner = {
+      which: async (name) => {
+        asked.push(name);
+        return name === "podman" ? "/usr/bin/podman" : null;
+      },
+      exists: async () => false,
+      exec: async () => ({ stdout: "", stderr: "", code: 0 }),
+      spawn: () => {
+        throw new Error("unused");
+      },
+    };
+    const engine = await createDockerEngine("/tmp/x", runner);
+    expect(engine.kind).toBe("docker");
+    expect(asked).toEqual(["docker", "podman"]);
+    expect(await engine.available()).toBe(true);
+  });
+
+  it("honors LOCUS_CONTAINER_ENGINE before PATH fallback", async () => {
+    const asked: string[] = [];
+    const runner: CommandRunner = {
+      which: async (name) => {
+        asked.push(name);
+        return name === "nerdctl" ? "/usr/local/bin/nerdctl" : null;
+      },
+      exists: async () => false,
+      exec: async () => ({ stdout: "", stderr: "", code: 0 }),
+      spawn: () => {
+        throw new Error("unused");
+      },
+    };
+    const engine = await createDockerEngine("/tmp/x", runner, "nerdctl");
+    expect(engine.kind).toBe("docker");
+    expect(asked[0]).toBe("nerdctl");
   });
 
   it("builds a missing locus/agent tag and starts in-guest code-server", async () => {

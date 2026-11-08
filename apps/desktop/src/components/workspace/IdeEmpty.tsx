@@ -19,11 +19,18 @@ import { openSettings, useStore } from "@/state/store";
 import { HostFolderPicker } from "./HostFolderField";
 import { IconClone, IconFolder } from "@/components/layout/Icons";
 import { ImportAccounts } from "@/components/settings/ImportAccounts";
-import { Mascot } from "@/components/layout/Mascot";
+import { EmptyHero } from "@/components/layout/EmptyHero";
 import { FeatureHintRow } from "@/components/layout/FeatureHint";
 import { SECTION_FEATURE_HINTS } from "@/lib/discoverability";
 
-const FORGE_ORDER: ForgeKind[] = ["github", "gitlab", "bitbucket"];
+const FORGE_ORDER: ForgeKind[] = [
+  "github",
+  "gitlab",
+  "bitbucket",
+  "gitea",
+  "forgejo",
+  "azuredevops",
+];
 
 function groupRepos(repos: LinkedRepo[]): Array<{ forge: ForgeKind; repos: LinkedRepo[] }> {
   const buckets = new Map<ForgeKind, LinkedRepo[]>();
@@ -128,7 +135,7 @@ export function IdeEmpty() {
   async function cloneUrlSubmit() {
     const parsed = parseRepoUrl(cloneUrl);
     if (!parsed) {
-      setError("Enter a GitHub, GitLab, or Bitbucket URL");
+      setError("Enter a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps URL");
       return;
     }
     await createWorkspace({
@@ -175,14 +182,11 @@ export function IdeEmpty() {
   return (
     <div className="empty ide-start" data-testid="ide-start">
       <div className="empty-card">
-        <header className="ide-start-hero">
-          <Mascot pose="idle" size={76} followCursor title="Locus" />
-          <h2>IDE</h2>
-          <p>
-            Open a folder on this machine, or clone a repository from the GitHub, GitLab, and
-            Bitbucket accounts already connected in Settings.
-          </p>
-        </header>
+        <EmptyHero
+          followCursor
+          title="IDE"
+          lead="Open a folder on this machine, or clone a repository from the GitHub, GitLab, and Bitbucket accounts already connected in Settings."
+        />
         {SECTION_FEATURE_HINTS.ide ? <FeatureHintRow hint={SECTION_FEATURE_HINTS.ide} /> : null}
         <div className="ide-start-tiles" role="group" aria-label="Start a workspace">
           <button

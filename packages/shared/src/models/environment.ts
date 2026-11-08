@@ -8,6 +8,101 @@ export interface LocusEnvironment {
   env?: Record<string, string>;
 }
 
+/** Strip JSONC comments and trailing commas. Dev Container files are JSONC. */
+export function parseJsonc(text: string): unknown {
+  let inStr = false;
+  let quote = "";
+  let escape = false;
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (inStr) {
+      out += c;
+      if (escape) escape = false;
+      else if (c === "\\") escape = true;
+      else if (c === quote) inStr = false;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      inStr = true;
+      quote = c;
+      out += c;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "/") {
+      while (i + 1 < text.length && text[i + 1] !== "\n") i += 1;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      i += 2;
+      while (i + 1 < text.length && !(text[i] === "*" && text[i + 1] === "/")) i += 1;
+      i += 1;
+      continue;
+    }
+    out += c;
+  }
+  return JSON.parse(out.replace(/,\s*([}\]])/g, "$1"));
+}
+
+function commandField(raw: unknown): string | undefined {
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
+  if (!Array.isArray(raw)) return undefined;
+  const parts = raw.filter(
+    (item): item is string => typeof item === "string" && Boolean(item.trim()),
+  );
+  return parts.length ? parts.map((item) => item.trim()).join(" ") : undefined;
+}
+
+/** Map a Dev Container spec onto Locus install / start / ports / env / image. */
+export function parseDevcontainer(raw: unknown): LocusEnvironment | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Record<string, unknown>;
+  const image =
+    typeof value.image === "string" && value.image.trim() ? value.image.trim() : undefined;
+  const install =
+    [value.onCreateCommand, value.updateContentCommand, value.postCreateCommand]
+      .map(commandField)
+      .filter((item): item is string => Boolean(item))
+      .join(" && ") || undefined;
+  const start = commandField(value.postStartCommand) ?? commandField(value.postAttachCommand);
+  const ports = parseEnvironmentPorts(value.forwardPorts ?? value.ports);
+  const env: Record<string, string> = {};
+  for (const bag of [value.containerEnv, value.remoteEnv]) {
+    if (!bag || typeof bag !== "object" || Array.isArray(bag)) continue;
+    for (const [key, item] of Object.entries(bag as Record<string, unknown>)) {
+      if (typeof item === "string" && key.trim()) env[key.trim()] = item;
+    }
+  }
+  if (!ports?.length && !install && !start && !image && !Object.keys(env).length) return undefined;
+  return {
+    install,
+    ports: ports?.length ? ports : undefined,
+    start,
+    image,
+    env: Object.keys(env).length ? env : undefined,
+  };
+}
+
+function looksLikeDevcontainer(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const value = raw as Record<string, unknown>;
+  return (
+    value.onCreateCommand != null ||
+    value.updateContentCommand != null ||
+    value.postCreateCommand != null ||
+    value.postStartCommand != null ||
+    value.postAttachCommand != null ||
+    value.forwardPorts != null ||
+    value.containerEnv != null ||
+    value.remoteEnv != null
+  );
+}
+
+export function parseWorkspaceEnvironment(raw: unknown): LocusEnvironment | undefined {
+  if (looksLikeDevcontainer(raw)) return parseDevcontainer(raw) ?? parseLocusEnvironment(raw);
+  return parseLocusEnvironment(raw) ?? parseDevcontainer(raw);
+}
+
 export function parseLocusEnvironment(raw: unknown): LocusEnvironment | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const value = raw as Record<string, unknown>;

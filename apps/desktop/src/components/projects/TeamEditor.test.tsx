@@ -5,6 +5,7 @@ import type { AgentSession, LocusConfig, ProjectDocument } from "@locus/shared";
 import { TeamEditor } from "./TeamEditor";
 import { api } from "@/lib/api";
 import { Store, initialState, type Action } from "@/state/store";
+import { setSelectValue } from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -17,17 +18,11 @@ vi.mock("@/lib/api", () => ({
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-function setControl(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) {
+function setControl(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   const prototype =
-    el instanceof HTMLTextAreaElement
-      ? HTMLTextAreaElement.prototype
-      : el instanceof HTMLSelectElement
-        ? HTMLSelectElement.prototype
-        : HTMLInputElement.prototype;
+    el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(el, value);
-  el.dispatchEvent(
-    new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }),
-  );
+  el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 const config: LocusConfig = {
@@ -140,11 +135,10 @@ describe("TeamEditor", () => {
     vi.mocked(api.project).mockResolvedValue(enrolled);
     render();
     const name = host.querySelector('[aria-label="Teammate name"]') as HTMLInputElement;
-    const role = host.querySelector('[aria-label="Teammate role"]') as HTMLSelectElement;
     const brief = host.querySelector('[aria-label="Teammate brief"]') as HTMLTextAreaElement;
     act(() => {
       setControl(name, "Nova");
-      setControl(role, "Ops");
+      setSelectValue(host, "Teammate role", "Ops");
       setControl(brief, "Watch deploys");
     });
     const add = [...host.querySelectorAll("button")].find(
@@ -206,9 +200,8 @@ describe("TeamEditor", () => {
       session: enrolledSession,
     });
     render(project, [nova]);
-    const pick = host.querySelector('[aria-label="Existing teammate"]') as HTMLSelectElement;
     act(() => {
-      setControl(pick, "s-nova");
+      setSelectValue(host, "Existing teammate", "s-nova");
     });
     const add = [...host.querySelectorAll("button")].find(
       (btn) => btn.textContent === "Add to team",

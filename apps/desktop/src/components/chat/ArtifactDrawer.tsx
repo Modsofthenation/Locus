@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useDialogFocus } from "@/lib/useDialogFocus";
+import { Skeleton } from "@/components/layout/Skeleton";
 import { canShowTimeline, parseUnifiedDiff, type AgentSession } from "@locus/shared";
 import {
   artifactSummary,
@@ -106,7 +108,7 @@ export function TurnDiffChip({
             />
           ) : null}
           <pre className="artifact-diff" data-testid="checkpoint-diff">
-            {loading && !text ? "Loading…" : text}
+            {loading && !text ? <Skeleton lines={2} label="Loading diff" /> : text}
           </pre>
         </>
       ) : null}
@@ -118,8 +120,10 @@ export function ArtifactDrawer({ session }: { session: AgentSession }) {
   const { dispatch } = useStore();
   const [open, setOpen] = useState(false);
   const [diff, setDiff] = useState<{ id: string; text: string } | null>(null);
+  const drawerRef = useRef<HTMLElement>(null);
   const items = useMemo(() => sessionArtifacts(session.messages), [session.messages]);
   const gitTurns = turnDiffCheckpoints(session);
+  useDialogFocus(open, () => setOpen(false), drawerRef, { trap: false });
   if (!items.length && !gitTurns.length) return null;
 
   async function loadDiff(checkpointId: string) {
@@ -133,7 +137,11 @@ export function ArtifactDrawer({ session }: { session: AgentSession }) {
   }
 
   return (
-    <aside className={`artifact-drawer ${open ? "open" : ""}`}>
+    <aside
+      ref={drawerRef}
+      className={`artifact-drawer ${open ? "open" : ""}`}
+      aria-label="Thread artifacts"
+    >
       <button
         type="button"
         className="artifact-toggle"

@@ -1,8 +1,15 @@
-export const FORGE_KINDS = ["github", "gitlab", "bitbucket"] as const;
+export const FORGE_KINDS = [
+  "github",
+  "gitlab",
+  "bitbucket",
+  "gitea",
+  "forgejo",
+  "azuredevops",
+] as const;
 export type ForgeKind = (typeof FORGE_KINDS)[number];
 
 export function isForgeKind(value: unknown): value is ForgeKind {
-  return value === "github" || value === "gitlab" || value === "bitbucket";
+  return (FORGE_KINDS as readonly string[]).includes(value as string);
 }
 
 export type ForgeAuthMethod = "token" | "oauth";
@@ -40,6 +47,9 @@ export const DEFAULT_FORGE_SPECS: Array<
 ];
 
 export function defaultForgeApiUrl(kind: ForgeKind): string {
+  if (kind === "gitea") return "https://gitea.example.com/api/v1";
+  if (kind === "forgejo") return "https://codeberg.org/api/v1";
+  if (kind === "azuredevops") return "https://dev.azure.com";
   return (
     DEFAULT_FORGE_SPECS.find((row) => row.kind === kind)?.apiBaseUrl ?? "https://api.github.com"
   );
@@ -48,6 +58,9 @@ export function defaultForgeApiUrl(kind: ForgeKind): string {
 export function forgeLabel(kind: ForgeKind): string {
   if (kind === "gitlab") return "GitLab";
   if (kind === "bitbucket") return "Bitbucket";
+  if (kind === "gitea") return "Gitea";
+  if (kind === "forgejo") return "Forgejo";
+  if (kind === "azuredevops") return "Azure DevOps";
   return "GitHub";
 }
 
@@ -66,7 +79,11 @@ export function forgeWebOrigin(kind: ForgeKind, apiBaseUrl: string): string {
       ? "https://gitlab.com"
       : kind === "bitbucket"
         ? "https://bitbucket.org"
-        : "https://github.com";
+        : kind === "azuredevops"
+          ? "https://dev.azure.com"
+          : kind === "gitea" || kind === "forgejo"
+            ? "https://gitea.example.com"
+            : "https://github.com";
   try {
     const url = new URL(apiBaseUrl);
     const host = url.hostname.toLowerCase();
@@ -310,6 +327,9 @@ export interface ForgeOauthStatus {
 export function forgeShort(kind: ForgeKind): string {
   if (kind === "gitlab") return "GL";
   if (kind === "bitbucket") return "BB";
+  if (kind === "gitea") return "GT";
+  if (kind === "forgejo") return "FJ";
+  if (kind === "azuredevops") return "AZ";
   return "GH";
 }
 
@@ -354,6 +374,8 @@ export function parseRepoUrl(input: string): { forge: ForgeKind; url: string } |
     /^(?:https?:\/\/bitbucket\.org\/|git@bitbucket\.org:)([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i;
   const gitlab =
     /^(?:https?:\/\/gitlab\.com\/|git@gitlab\.com:)([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i;
+  const azure = /^https?:\/\/dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/?#]+)/i;
+  const azureVs = /^https?:\/\/([^.]+)\.visualstudio\.com\/([^/]+)\/_git\/([^/?#]+)/i;
 
   const gh = trimmed.match(github);
   if (gh) {
@@ -367,13 +389,33 @@ export function parseRepoUrl(input: string): { forge: ForgeKind; url: string } |
   if (gl) {
     return { forge: "gitlab", url: `https://gitlab.com/${gl[1]}/${gl[2]}.git` };
   }
+  const az = trimmed.match(azure);
+  if (az?.[1] && az[2] && az[3]) {
+    return {
+      forge: "azuredevops",
+      url: `https://dev.azure.com/${az[1]}/${az[2]}/_git/${az[3].replace(/\.git$/i, "")}`,
+    };
+  }
+  const vs = trimmed.match(azureVs);
+  if (vs?.[1] && vs[2] && vs[3]) {
+    return {
+      forge: "azuredevops",
+      url: `https://${vs[1]}.visualstudio.com/${vs[2]}/_git/${vs[3].replace(/\.git$/i, "")}`,
+    };
+  }
   if (trimmed.startsWith("https://") || trimmed.startsWith("git@")) {
     const host = trimmed.toLowerCase();
     const forge: ForgeKind = host.includes("bitbucket")
       ? "bitbucket"
       : host.includes("gitlab")
         ? "gitlab"
-        : "github";
+        : host.includes("dev.azure.com") || host.includes("visualstudio.com")
+          ? "azuredevops"
+          : host.includes("forgejo") || host.includes("codeberg.org")
+            ? "forgejo"
+            : host.includes("gitea")
+              ? "gitea"
+              : "github";
     return { forge, url: trimmed };
   }
   return null;
@@ -476,6 +518,18 @@ export function branchLockRefusal(
 }
 
 export function parseOwnerRepo(url: string): { owner: string; repo: string } | null {
+  const azure = url
+    .replace(/\.git$/i, "")
+    .match(/dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/]+)/i);
+  if (azure?.[1] && azure[2] && azure[3]) {
+    return { owner: `${azure[1]}/${azure[2]}`, repo: azure[3] };
+  }
+  const vs = url
+    .replace(/\.git$/i, "")
+    .match(/([^.]+)\.visualstudio\.com\/([^/]+)\/_git\/([^/]+)/i);
+  if (vs?.[1] && vs[2] && vs[3]) {
+    return { owner: `${vs[1]}/${vs[2]}`, repo: vs[3] };
+  }
   const match = url.replace(/\.git$/, "").match(/[:/]([^/]+)\/([^/]+)\/?$/);
   if (!match?.[1] || !match[2]) return null;
   return { owner: match[1], repo: match[2] };
@@ -579,6 +633,7 @@ export function remoteUrlForToken(url: string, token?: string): string {
 export function pullHeadRefspec(kind: ForgeKind, number: number): string {
   if (kind === "gitlab") return `refs/merge-requests/${number}/head`;
   if (kind === "bitbucket") return `refs/pull-requests/${number}/from`;
+  if (kind === "azuredevops") return `refs/pull/${number}/merge`;
   return `refs/pull/${number}/head`;
 }
 
@@ -655,6 +710,9 @@ export function gitHttpsAuthUser(hostOrUrl: string, token?: string, username?: s
   }
   if (host.includes("bitbucket")) return "x-token-auth";
   if (host.includes("gitlab")) return "oauth2";
+  if (host.includes("dev.azure.com") || host.includes("visualstudio.com")) {
+    return username?.trim() || "azdo";
+  }
   const raw = token?.trim();
   if (raw && !isGitHubAppAccessToken(raw)) {
     const named = username?.trim();

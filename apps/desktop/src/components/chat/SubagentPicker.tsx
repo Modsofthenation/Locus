@@ -4,6 +4,7 @@ import {
   subagentKindHint,
   type SubagentKind,
 } from "@locus/shared";
+import { Select } from "@/components/layout/Select";
 
 export function SubagentPicker(props: {
   value: SubagentKind;
@@ -12,21 +13,19 @@ export function SubagentPicker(props: {
   disabled?: boolean;
 }) {
   return (
-    <select
-      aria-label="Default subagent"
+    <Select
+      ariaLabel="Default subagent"
       className={props.compact ? "subagent-select" : undefined}
+      compact={props.compact}
       disabled={props.disabled}
+      prefer={props.compact ? "up" : undefined}
       value={props.value}
-      title="Default child agent for spawn_agent. Asking for another kind in chat overrides this turn."
-      onChange={(e) => props.onChange(e.target.value as SubagentKind)}
-    >
-      {SUBAGENT_KINDS.map((kind) => (
-        <option key={kind} value={kind}>
-          {props.compact
-            ? formatSubagentKind(kind)
-            : `${formatSubagentKind(kind)} — ${subagentKindHint(kind)}`}
-        </option>
-      ))}
-    </select>
+      options={SUBAGENT_KINDS.map((kind) => ({
+        value: kind,
+        label: formatSubagentKind(kind),
+        hint: props.compact ? undefined : subagentKindHint(kind),
+      }))}
+      onChange={(kind) => props.onChange(kind as SubagentKind)}
+    />
   );
 }

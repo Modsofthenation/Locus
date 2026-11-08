@@ -3,6 +3,7 @@ import type { AgentSession } from "@locus/shared";
 import { SETTINGS_NAV_GROUPS, settingsNavLabel } from "./settingsNav";
 import {
   PALETTE_SHORTCUTS,
+  applyPaletteRecents,
   editorOwnsCommandK,
   filterPaletteItems,
   isPaletteShortcutsQuery,
@@ -364,6 +365,22 @@ describe("paletteItems", () => {
     );
   });
 
+  it("indexes provider, MCP, skill, and worker names on settings rows", () => {
+    const items = paletteItems({
+      sessions: [],
+      config: {
+        providers: [{ id: "p1", name: "OpenAI", kind: "openai" }],
+        mcpServers: [{ id: "m1", name: "filesystem", command: "npx", url: "" }],
+        skills: [{ id: "s1", name: "review", title: "Code review" }],
+        workers: [{ id: "w1", name: "office-box", url: "http://127.0.0.1:7421" }],
+      } as never,
+    });
+    expect(filterPaletteItems(items, "OpenAI").map((i) => i.id)).toContain("settings:providers");
+    expect(filterPaletteItems(items, "filesystem").map((i) => i.id)).toContain("settings:mcp");
+    expect(filterPaletteItems(items, "review").map((i) => i.id)).toContain("settings:skills");
+    expect(filterPaletteItems(items, "office-box").map((i) => i.id)).toContain("settings:workers");
+  });
+
   it("lists automations and each job", () => {
     const items = paletteItems({
       sessions: [],
@@ -627,8 +644,15 @@ describe("paletteItems", () => {
       "Ctrl/Cmd+.",
       "Ctrl/Cmd+W",
       "Ctrl/Cmd+\\",
+      "Ctrl/Cmd+S",
       "Ctrl/Cmd+Shift+S",
+      "Ctrl/Cmd+Z",
+      "Ctrl/Cmd+Shift+Z",
+      "F2",
+      "Ctrl+Space",
+      "Alt+Shift+F",
       "Tab then Enter",
+      "R P D M",
       "V H N T R L F C",
       "Ctrl/Cmd+0",
       "Ctrl/Cmd+] [",
@@ -680,5 +704,20 @@ describe("paletteItems", () => {
     expect(swarm.some((i) => i.id === "feature:memory")).toBe(false);
     expect(swarm.some((i) => i.id === "section:project")).toBe(true);
     expect(paletteItemsForMode(items, "developer").some((i) => i.id === "section:ide")).toBe(true);
+  });
+
+  it("ranks title matches ahead of keyword hits", () => {
+    const items = paletteItems({ sessions: [] });
+    const ranked = filterPaletteItems(items, "mcp");
+    expect(ranked[0]?.id).toBe("settings:mcp");
+    expect(ranked.map((i) => i.id)).toContain("feature:mcp");
+  });
+
+  it("pins recents at the top of an empty query", () => {
+    const items = paletteItems({ sessions: [] });
+    const pinned = applyPaletteRecents(items, ["settings:git", "new-agent", "missing"]);
+    expect(pinned.slice(0, 2).map((i) => i.id)).toEqual(["settings:git", "new-agent"]);
+    expect(pinned[0]?.group).toBe("Recents");
+    expect(pinned.filter((i) => i.id === "new-agent")).toHaveLength(1);
   });
 });

@@ -33,8 +33,15 @@ export interface SetupStatus {
   qemuInstall: QemuInstallRecipe;
 }
 
-const LINUX_APT_PACKAGES = ["qemu-system-x86", "qemu-utils", "ovmf", "swtpm"];
-const LINUX_DNF_PACKAGES = ["qemu-kvm", "qemu-img", "edk2-ovmf", "swtpm"];
+const LINUX_APT_PACKAGES = [
+  "qemu-system-x86",
+  "qemu-system-arm",
+  "qemu-utils",
+  "ovmf",
+  "qemu-efi-aarch64",
+  "swtpm",
+];
+const LINUX_DNF_PACKAGES = ["qemu-kvm", "qemu-img", "edk2-ovmf", "edk2-aarch64", "swtpm"];
 const LINUX_PACMAN_PACKAGES = ["qemu-full", "swtpm", "edk2-ovmf"];
 const LINUX_ZYPPER_PACKAGES = ["qemu", "qemu-tools", "qemu-ovmf-x86_64", "swtpm"];
 const WIN_MANUAL_HINT =

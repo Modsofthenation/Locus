@@ -1,4 +1,5 @@
 import { clipNamedEnvName } from "@locus/shared";
+import { askPrompt } from "@/lib/dialog";
 
 /** Default label when capturing a guest or Docker workspace image. */
 export function defaultGoldenName(title?: string, kind: "golden" | "workspace" = "golden"): string {
@@ -14,15 +15,15 @@ export function defaultEnvironmentName(title?: string): string {
 }
 
 /** Prompt for a golden image name. Cancel returns null; blank keeps the fallback. */
-export function promptGoldenName(fallback: string): string | null {
-  const next = window.prompt("Name this golden image", fallback);
+export async function promptGoldenName(fallback: string): Promise<string | null> {
+  const next = await askPrompt({ title: "Name this golden image", value: fallback });
   if (next == null) return null;
   return next.trim() || fallback;
 }
 
 /** Prompt for a named environment. Cancel returns null; blank keeps the fallback. */
-export function promptEnvironmentName(fallback: string): string | null {
-  const next = window.prompt("Name this environment", fallback);
+export async function promptEnvironmentName(fallback: string): Promise<string | null> {
+  const next = await askPrompt({ title: "Name this environment", value: fallback });
   if (next == null) return null;
   return next.trim() || fallback;
 }

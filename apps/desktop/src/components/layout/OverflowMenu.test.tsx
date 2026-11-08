@@ -10,6 +10,8 @@ import {
   fixedContainingOrigin,
   placeMenuPop,
   placePointerMenu,
+  typeaheadMenuIndex,
+  wrapMenuIndex,
 } from "./OverflowMenu";
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../index.css"), "utf8");
@@ -214,6 +216,17 @@ describe("OverflowMenu CSS", () => {
   });
 });
 
+describe("menu keyboard helpers", () => {
+  it("wraps arrow movement and matches typeahead from the next item", () => {
+    expect(wrapMenuIndex(0, 3, 1)).toBe(1);
+    expect(wrapMenuIndex(2, 3, 1)).toBe(0);
+    expect(wrapMenuIndex(0, 3, -1)).toBe(2);
+    expect(typeaheadMenuIndex(["Guided", "Supervised", "Autonomous"], "s", 0)).toBe(1);
+    expect(typeaheadMenuIndex(["Guided", "Supervised", "Autonomous"], "a", 1)).toBe(2);
+    expect(typeaheadMenuIndex(["Guided", "Supervised", "Autonomous"], "g", 0)).toBe(0);
+  });
+});
+
 describe("OverflowMenu", () => {
   let host: HTMLDivElement;
   let root: Root;
@@ -302,6 +315,49 @@ describe("OverflowMenu", () => {
       (host.querySelector(".menu-item") as HTMLButtonElement).click();
     });
     expect(details().open).toBe(false);
+  });
+
+  it("moves through items with arrows, Home/End, and typeahead, then restores focus", () => {
+    render(
+      <OverflowMenu title="More">
+        <MenuItem>Alpha</MenuItem>
+        <MenuItem>Bravo</MenuItem>
+        <MenuItem>Charlie</MenuItem>
+      </OverflowMenu>,
+    );
+    const trigger = host.querySelector("summary") as HTMLElement;
+    act(() => {
+      trigger.focus();
+      trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect((host.querySelector("details.menu") as HTMLDetailsElement).open).toBe(true);
+    expect(document.activeElement?.textContent).toContain("Alpha");
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(document.activeElement?.textContent).toContain("Bravo");
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+    });
+    expect(document.activeElement?.textContent).toContain("Charlie");
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+    });
+    expect(document.activeElement?.textContent).toContain("Alpha");
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true }));
+    });
+    expect(document.activeElement?.textContent).toContain("Charlie");
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect((host.querySelector("details.menu") as HTMLDetailsElement).open).toBe(false);
+    expect(document.activeElement).toBe(trigger);
   });
 
   it("does not widen the placed pop when the chat pane scrolls", () => {

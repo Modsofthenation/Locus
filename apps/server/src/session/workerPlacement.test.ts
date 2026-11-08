@@ -45,8 +45,10 @@ async function setupWorkerPlane(opts?: {
   ];
   await store.saveConfig(config);
   const workerEngine = new MockDockerEngine(workerDir);
+  const workerHypervisor = new MockHypervisor(workerDir);
   const workerApp = createWorkerApp({
     engine: workerEngine,
+    hypervisor: workerHypervisor,
     token: "secret",
     name: "studio",
     dataDir: workerDir,
@@ -70,6 +72,7 @@ async function setupWorkerPlane(opts?: {
     sessions,
     app,
     workerEngine,
+    workerHypervisor,
     localDocker,
     compute: opts?.compute,
     config: await store.loadConfig(),
@@ -649,13 +652,39 @@ console.log(JSON.stringify({ type: "result", subtype: "success", result: "from-w
         backendId: "missing",
       }),
     ).rejects.toThrow(/Settings → Workers/);
-    await expect(
-      sessions.create({
-        ...base,
-        runtime: "vm",
-        backendId: "w1",
-      }),
-    ).rejects.toThrow(/Docker or Host/);
+    const vm = await sessions.create({
+      ...base,
+      runtime: "vm",
+      backendId: "w1",
+    });
+    expect(vm.runtime).toBe("vm");
+    expect(vm.placement).toBe("worker");
+  });
+
+  it("boots a QEMU guest on the worker", async () => {
+    const { sessions, workerEngine, workerHypervisor, localDocker, config } =
+      await setupWorkerPlane();
+    const created = await sessions.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      runtime: "vm",
+      providerId: config.providers[0]!.id,
+      model: config.providers[0]!.defaultModel,
+      startVm: true,
+      placement: "worker",
+      backendId: "w1",
+    });
+    expect(created.placement).toBe("worker");
+    expect(created.runtime).toBe("vm");
+    expect(created.vmId).toBeTruthy();
+    expect(localDocker.list()).toHaveLength(0);
+    expect(workerEngine.list()).toHaveLength(0);
+    expect(workerHypervisor.get(created.vmId!)?.runtime).toBe("vm");
+    const write = await sessions.executeTool(created.id, {
+      name: "file_write",
+      args: { path: "/home/locus/workspace/hello.txt", content: "from worker vm" },
+    });
+    expect(write.ok).toBe(true);
   });
 
   it("starts a restricted-jail CONNECT proxy on the worker", async () => {

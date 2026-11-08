@@ -1,6 +1,7 @@
 import { forgeLabel, type LinkedRepo } from "@locus/shared";
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { IconClose } from "@/components/layout/Icons";
+import { Select } from "@/components/layout/Select";
 import { api } from "@/lib/api";
 
 function repoShortName(name: string): string {
@@ -132,19 +133,18 @@ export function ComposerRepoPicker(props: {
   if (!props.multiple) {
     return (
       <div className="composer-repo-picker">
-        <select
-          aria-label="Repository"
-          title={repoTitle}
+        <Select
+          ariaLabel="Repository"
           value={selected[0] ?? ""}
-          onChange={(e) => setIds(e.target.value ? [e.target.value] : [])}
-        >
-          <option value="">{emptyLabel}</option>
-          {props.repos.map((row) => (
-            <option key={row.id} value={row.id}>
-              {row.name} · {forgeLabel(row.checkout.forge)}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: "", label: emptyLabel },
+            ...props.repos.map((row) => ({
+              value: row.id,
+              label: `${row.name} · ${forgeLabel(row.checkout.forge)}`,
+            })),
+          ]}
+          onChange={(id) => setIds(id ? [id] : [])}
+        />
       </div>
     );
   }
@@ -774,10 +774,17 @@ export function RepoField(props: {
       {props.repos.length > 0 ? (
         <div className="field">
           <label>Linked repo</label>
-          <select
+          <Select
+            ariaLabel="Linked repo"
             value={props.repoId}
-            onChange={(e) => {
-              const id = e.target.value;
+            options={[
+              { value: "", label: "Paste a URL" },
+              ...props.repos.map((row) => ({
+                value: row.id,
+                label: `${row.name} · ${forgeLabel(row.checkout.forge)}`,
+              })),
+            ]}
+            onChange={(id) => {
               props.onRepoId(id);
               const linked = props.repos.find((row) => row.id === id);
               if (linked) {
@@ -787,14 +794,7 @@ export function RepoField(props: {
               if (id) props.onExtraRepoIds?.(extra.filter((row) => row !== id));
               else props.onExtraRepoIds?.([]);
             }}
-          >
-            <option value="">Paste a URL</option>
-            {props.repos.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.name} · {forgeLabel(row.checkout.forge)}
-              </option>
-            ))}
-          </select>
+          />
         </div>
       ) : null}
       <div className="field">

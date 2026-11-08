@@ -7,6 +7,7 @@ import {
   type RefObject,
 } from "react";
 import type { BrainEdge, BrainNode } from "@locus/shared";
+import { Select } from "@/components/layout/Select";
 import {
   BRAIN_GRAPH_FAMILIES,
   BRAIN_GRAPH_LAYOUTS,
@@ -255,21 +256,20 @@ export function BrainGraph(props: {
         </div>
         <label className="brain-graph-layout">
           Layout
-          <select
-            data-testid="brain-graph-layout"
-            aria-label="Graph layout algorithm"
+          <Select
+            compact
+            testId="brain-graph-layout"
+            ariaLabel="Graph layout algorithm"
             value={props.layout}
-            onChange={(event) => {
-              const next = BRAIN_GRAPH_LAYOUTS.find((row) => row.id === event.target.value)?.id;
+            options={BRAIN_GRAPH_LAYOUTS.map((row) => ({
+              value: row.id,
+              label: row.label,
+            }))}
+            onChange={(value) => {
+              const next = BRAIN_GRAPH_LAYOUTS.find((row) => row.id === value)?.id;
               if (next) props.onLayout(next);
             }}
-          >
-            {BRAIN_GRAPH_LAYOUTS.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.label}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <button
           type="button"
@@ -418,14 +418,20 @@ export function BrainGraph(props: {
           </g>
         </svg>
         <div className="brain-graph-zoom" aria-label="Graph zoom">
-          <button type="button" title="Zoom out" onClick={() => zoomAt(0.92)}>
+          <button type="button" title="Zoom out" aria-label="Zoom out" onClick={() => zoomAt(0.92)}>
             −
           </button>
           <span>{Math.round(camera.z * 100)}%</span>
-          <button type="button" title="Zoom in" onClick={() => zoomAt(1.08)}>
+          <button type="button" title="Zoom in" aria-label="Zoom in" onClick={() => zoomAt(1.08)}>
             +
           </button>
-          <button type="button" title="Fit view" data-testid="brain-graph-fit" onClick={fitView}>
+          <button
+            type="button"
+            title="Fit view"
+            aria-label="Fit view"
+            data-testid="brain-graph-fit"
+            onClick={fitView}
+          >
             Fit
           </button>
         </div>

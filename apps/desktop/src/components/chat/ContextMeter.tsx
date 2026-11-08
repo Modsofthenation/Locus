@@ -157,6 +157,8 @@ export function ContextMeter(props: {
   const width =
     place?.width ??
     contextPopWidth(typeof window === "undefined" ? CONTEXT_POP_WIDTH : window.innerWidth);
+  if (percent === "0%") return null;
+
   const popStyle: CSSProperties = {
     position: "fixed",
     width,

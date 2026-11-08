@@ -80,11 +80,13 @@ import {
 } from "@locus/shared";
 import { loadLastAgent, pickProvider, saveLastAgent } from "@/lib/lastAgent";
 import { api } from "@/lib/api";
+import { showNotice } from "@/lib/notice";
 import { createPortal } from "react-dom";
 import { formatMarkdown } from "@/lib/markdown";
 import { isStuckToBottom } from "@/lib/threadScroll";
 import {
   listWindowFromSizes,
+  listWindowRange,
   shouldUpdateListWindow,
   sameListWindow,
   type ListWindow,
@@ -98,7 +100,9 @@ import {
   IconPin,
   IconStar,
 } from "@/components/layout/Icons";
-import { Mascot } from "@/components/layout/Mascot";
+import { EmptyHero, EmptyHint } from "@/components/layout/EmptyHero";
+import { ErrorBanner, InlineError, Skeleton } from "@/components/layout/Skeleton";
+import { useDialogFocus } from "@/lib/useDialogFocus";
 import { ModelPicker } from "@/components/settings/ModelPicker";
 import { SearchField } from "@/components/layout/SearchField";
 
@@ -348,7 +352,7 @@ function SlackDraftSend({
       );
       dispatch({ type: "session", session: updated });
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Could not resolve draft");
+      showNotice(err instanceof Error ? err.message : "Could not resolve draft");
     } finally {
       setWorking(false);
     }
@@ -473,7 +477,7 @@ export function SlackListenButton(props: {
       dispatch({ type: "session", session: updated });
       setPicker(false);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Could not subscribe");
+      showNotice(err instanceof Error ? err.message : "Could not subscribe");
     } finally {
       setWorking(false);
     }
@@ -491,7 +495,7 @@ export function SlackListenButton(props: {
       const updated = await api.patchSession(session.id, { subscriptions: result.subscriptions });
       dispatch({ type: "session", session: updated });
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Could not unsubscribe");
+      showNotice(err instanceof Error ? err.message : "Could not unsubscribe");
     } finally {
       setWorking(false);
     }
@@ -504,7 +508,7 @@ export function SlackListenButton(props: {
       return;
     }
     if (!candidates.length) {
-      window.alert("Start an agent first, then pin this conversation onto it.");
+      showNotice("Start an agent first, then pin this conversation onto it.");
       return;
     }
     if (preferred) {
@@ -1190,6 +1194,10 @@ export function SlackPane() {
     () => state.slackMessages.filter((row) => isSlackChannelMessage(row)),
     [state.slackMessages],
   );
+  const threadRows = useMemo(
+    () => (replies.length ? replies : topLevel.filter((row) => row.ts === state.slackThreadTs)),
+    [replies, topLevel, state.slackThreadTs],
+  );
   const channelScroll = usePinnedScroller(
     state.selectedSlackChannelId,
     `${topLevel.length}:${historyLoading}`,
@@ -1243,6 +1251,31 @@ export function SlackPane() {
     });
   }
   const threadScroll = usePinnedScroller(state.slackThreadTs, `${replies.length}:${repliesReady}`);
+  const [threadWin, setThreadWin] = useState<ListWindow>(() =>
+    listWindowRange({
+      scrollTop: 0,
+      clientHeight: 0,
+      rowCount: 0,
+      rowPx: SLACK_ROW_PX,
+      stickToEnd: true,
+    }),
+  );
+
+  function syncThreadWindow(el: HTMLDivElement | null, stickToEnd?: boolean) {
+    if (!el) return;
+    const next = listWindowRange({
+      scrollTop: el.scrollTop,
+      clientHeight: el.clientHeight,
+      rowCount: threadRows.length,
+      rowPx: SLACK_ROW_PX,
+      stickToEnd: stickToEnd ?? (threadScroll.stick.current || el.clientHeight <= 0),
+    });
+    setThreadWin((current) => {
+      if (sameListWindow(current, next)) return current;
+      if (current.start === next.start && current.end === next.end) return next;
+      return shouldUpdateListWindow(current, next) ? next : current;
+    });
+  }
 
   useLayoutEffect(() => {
     slackHeightsRef.current.clear();
@@ -1265,6 +1298,11 @@ export function SlackPane() {
     if (measureSlackRows(el)) setSlackSizeTick((n) => n + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topLevel, slackSizes, state.selectedSlackChannelId]);
+
+  useLayoutEffect(() => {
+    syncThreadWindow(threadScroll.ref.current, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.slackThreadTs, threadRows.length, repliesReady]);
 
   useEffect(() => {
     saveSlackThreadWidth(threadWidth);
@@ -1846,7 +1884,7 @@ export function SlackPane() {
     return (
       <div className="slack-pane" data-testid="slack-booting">
         {error ? (
-          <p className="error">{error}</p>
+          <ErrorBanner message={error} />
         ) : (
           <p className="hint slack-loading">Loading workspace…</p>
         )}
@@ -1872,17 +1910,15 @@ export function SlackPane() {
   if (!connected) {
     return (
       <div className="slack-pane">
-        {error ? <p className="error">{error}</p> : null}
+        {error ? <ErrorBanner message={error} /> : null}
         <div className="empty">
           <div className="empty-card codebase-empty slack-empty">
-            <div className="empty-hero">
-              <Mascot pose="rest" size={76} />
-              <h2>Sign in as yourself</h2>
-            </div>
-            <p>
-              Tokens live in Settings → Integrations. Locus is the local client. Sign in as yourself
-              to read Slack; send as you by default, or as the Locus bot. Slack.com is still Slack.
-            </p>
+            <EmptyHero
+              pose="rest"
+              size={76}
+              title="Sign in as yourself"
+              lead="Tokens live in Settings → Integrations. Locus is the local client. Sign in as yourself to read Slack; send as you by default, or as the Locus bot. Slack.com is still Slack."
+            />
             <div className="row-actions">
               <button
                 className="btn primary"
@@ -1901,18 +1937,16 @@ export function SlackPane() {
     const mentionNames = slackActivityMentionNames(state.slackStatus);
     return (
       <div className="slack-pane">
-        {error ? <p className="error">{error}</p> : null}
+        {error ? <ErrorBanner message={error} /> : null}
         {state.slackActivity.length === 0 ? (
           <div className="empty">
             <div className="empty-card codebase-empty slack-empty">
-              <div className="empty-hero">
-                <Mascot pose="rest" size={76} />
-                <h2>All caught up</h2>
-              </div>
-              <p>
-                Mentions, thread replies, and unread DMs land here. Desktop notifications fire when
-                new ones arrive.
-              </p>
+              <EmptyHero
+                pose="rest"
+                size={76}
+                title="All caught up"
+                lead="Mentions, thread replies, and unread DMs land here. Desktop notifications fire when new ones arrive."
+              />
             </div>
           </div>
         ) : (
@@ -1945,18 +1979,16 @@ export function SlackPane() {
   if (!channel) {
     return (
       <div className="slack-pane">
-        {error ? <p className="error">{error}</p> : null}
+        {error ? <ErrorBanner message={error} /> : null}
         {state.slackConversations.length === 0 ? (
           <div className="empty">
             <div className="empty-card codebase-empty slack-empty">
-              <div className="empty-hero">
-                <Mascot pose="rest" size={76} />
-                <h2>Pick a channel</h2>
-              </div>
-              <p>
-                Unreads, starred, channels, and DMs land in the sidebar. Locus reads as you. Sends
-                default to you; switch the composer to post as the Locus bot.
-              </p>
+              <EmptyHero
+                pose="rest"
+                size={76}
+                title="Pick a channel"
+                lead="Unreads, starred, channels, and DMs land in the sidebar. Locus reads as you. Sends default to you; switch the composer to post as the Locus bot."
+              />
             </div>
           </div>
         ) : (
@@ -2068,7 +2100,7 @@ export function SlackPane() {
           ) : null}
         </div>
       </div>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <ErrorBanner message={error} /> : null}
       {askOpen && !askThread ? (
         <AskLocusForm
           placement="channel"
@@ -2115,7 +2147,7 @@ export function SlackPane() {
                   <SlackHistorySkeleton />
                 ) : topLevel.length === 0 ? (
                   <div className="slack-empty-thread">
-                    <p>No messages yet. Say something as you.</p>
+                    <EmptyHint title="No messages yet." lead="Say something as you." />
                   </div>
                 ) : (
                   <>
@@ -2330,42 +2362,50 @@ export function SlackPane() {
               <div
                 className="slack-timeline slack-thread-list"
                 ref={threadScroll.ref}
-                onScroll={threadScroll.onScroll}
+                onScroll={(event) => {
+                  const node = event.currentTarget;
+                  syncThreadWindow(node, isStuckToBottom(node) || node.clientHeight <= 0);
+                  threadScroll.onScroll();
+                }}
               >
                 <div className="slack-timeline-inner" ref={threadScroll.innerRef}>
                   {!repliesReady ? (
                     <SlackHistorySkeleton />
                   ) : (
-                    (replies.length
-                      ? replies
-                      : topLevel.filter((row) => row.ts === state.slackThreadTs)
-                    ).map((row, index, rows) => (
-                      <SlackMessageRow
-                        key={row.ts}
-                        message={row}
-                        compact={grouped(rows[index - 1], row)}
-                        you={Boolean(youId && row.userId === youId)}
-                        youAvatar={youAvatar}
-                        agent={Boolean(lastPostTs && row.ts === lastPostTs)}
-                        hover={hoverTs === row.ts}
-                        emoji={emoji}
-                        busy={busy}
-                        editing={editingTs === row.ts}
-                        editDraft={editingTs === row.ts ? editDraft : undefined}
-                        onEditDraft={setEditDraft}
-                        onHover={setHoverTs}
-                        onReact={(name) => void reactOn(row, name)}
-                        onAsk={() => openAsk(state.slackThreadTs ?? row.ts)}
-                        onStartEdit={() => {
-                          setEditingTs(row.ts);
-                          setEditDraft(row.text);
-                        }}
-                        onSaveEdit={() => void saveEdit()}
-                        onCancelEdit={() => setEditingTs(null)}
-                        onDelete={() => void deleteOn(row)}
-                        onCopyLink={() => copyLink(row)}
-                      />
-                    ))
+                    <>
+                      <div className="list-window-spacer" style={{ height: threadWin.padTop }} />
+                      {threadRows.slice(threadWin.start, threadWin.end).map((row, paintedIndex) => {
+                        const index = threadWin.start + paintedIndex;
+                        return (
+                          <SlackMessageRow
+                            key={row.ts}
+                            message={row}
+                            compact={grouped(threadRows[index - 1], row)}
+                            you={Boolean(youId && row.userId === youId)}
+                            youAvatar={youAvatar}
+                            agent={Boolean(lastPostTs && row.ts === lastPostTs)}
+                            hover={hoverTs === row.ts}
+                            emoji={emoji}
+                            busy={busy}
+                            editing={editingTs === row.ts}
+                            editDraft={editingTs === row.ts ? editDraft : undefined}
+                            onEditDraft={setEditDraft}
+                            onHover={setHoverTs}
+                            onReact={(name) => void reactOn(row, name)}
+                            onAsk={() => openAsk(state.slackThreadTs ?? row.ts)}
+                            onStartEdit={() => {
+                              setEditingTs(row.ts);
+                              setEditDraft(row.text);
+                            }}
+                            onSaveEdit={() => void saveEdit()}
+                            onCancelEdit={() => setEditingTs(null)}
+                            onDelete={() => void deleteOn(row)}
+                            onCopyLink={() => copyLink(row)}
+                          />
+                        );
+                      })}
+                      <div className="list-window-spacer" style={{ height: threadWin.padBottom }} />
+                    </>
                   )}
                 </div>
               </div>
@@ -2618,11 +2658,13 @@ function AskLocusForm(props: {
 }
 
 function SlackGifPicker(props: { onPick: (gif: SlackGifHit) => void; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SlackGifHit[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  useDialogFocus(true, props.onClose, dialogRef);
 
   useEffect(() => {
     let cancelled = false;
@@ -2653,7 +2695,7 @@ function SlackGifPicker(props: { onPick: (gif: SlackGifHit) => void; onClose: ()
   }, [query]);
 
   return (
-    <div className="slack-gif-picker" role="dialog" aria-label="GIF search">
+    <div className="slack-gif-picker" role="dialog" aria-label="GIF search" ref={dialogRef}>
       <div className="slack-gif-head">
         <input
           value={query}
@@ -2665,7 +2707,7 @@ function SlackGifPicker(props: { onPick: (gif: SlackGifHit) => void; onClose: ()
           Close
         </button>
       </div>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineError message={error} /> : null}
       {!error && notice ? <p className="hint slack-gif-notice">{notice}</p> : null}
       <div className="slack-gif-grid" aria-busy={busy}>
         {hits.map((gif) => (
@@ -2680,7 +2722,7 @@ function SlackGifPicker(props: { onPick: (gif: SlackGifHit) => void; onClose: ()
           </button>
         ))}
         {busy && hits.length === 0 ? <p className="hint">Loading GIFs…</p> : null}
-        {!busy && hits.length === 0 ? <p className="hint">No GIFs for that search.</p> : null}
+        {!busy && hits.length === 0 ? <EmptyHint title="No GIFs for that search." /> : null}
       </div>
     </div>
   );
@@ -2759,32 +2801,16 @@ export function SlackAlertToasts({
 
 function SlackHistorySkeleton() {
   return (
-    <div className="slack-history-skeleton" data-testid="slack-history-skeleton" aria-busy="true">
-      {Array.from({ length: 6 }, (_, i) => (
-        <div className="slack-skel-row" key={i}>
-          <span className="skeleton slack-skel-avatar" />
-          <div className="slack-skel-body">
-            <span className="skeleton line" />
-            <span className="skeleton line wide" />
-          </div>
-        </div>
-      ))}
+    <div className="slack-history-skeleton" data-testid="slack-history-skeleton">
+      <Skeleton lines={6} label="Loading messages" />
     </div>
   );
 }
 
 export function SlackChannelListSkeleton() {
   return (
-    <div className="slack-list-skeleton" data-testid="slack-channel-list-skeleton" aria-busy="true">
-      {Array.from({ length: 8 }, (_, i) => (
-        <div className="slack-list-skel-row" key={i}>
-          <span className="skeleton slack-list-skel-mark" />
-          <div className="slack-list-skel-body">
-            <span className="skeleton line" />
-            <span className="skeleton line wide" />
-          </div>
-        </div>
-      ))}
+    <div className="slack-list-skeleton" data-testid="slack-channel-list-skeleton">
+      <Skeleton lines={8} label="Loading channels" />
     </div>
   );
 }
@@ -3045,10 +3071,17 @@ function SlackReactionPicker(props: {
   onPick: (name: string) => void;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const names = useMemo(() => listSlackReactionNames(props.emoji, query), [props.emoji, query]);
+  useDialogFocus(true, props.onClose, dialogRef);
   return (
-    <div className="slack-react-picker" role="dialog" aria-label="Choose a reaction">
+    <div
+      className="slack-react-picker"
+      role="dialog"
+      aria-label="Choose a reaction"
+      ref={dialogRef}
+    >
       <div className="slack-react-head">
         <input
           value={query}
@@ -3073,7 +3106,7 @@ function SlackReactionPicker(props: {
             <SlackReactionGlyph name={name} emoji={props.emoji} />
           </button>
         ))}
-        {names.length === 0 ? <p className="hint">No emoji for that search.</p> : null}
+        {names.length === 0 ? <EmptyHint title="No emoji for that search." /> : null}
       </div>
     </div>
   );

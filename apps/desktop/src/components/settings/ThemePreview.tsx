@@ -1,5 +1,5 @@
 import { resolveTheme, themeOption } from "@locus/shared";
-import { Mascot } from "@/components/layout/Mascot";
+import { EmptyHero } from "@/components/layout/EmptyHero";
 
 export function ThemePreview({
   theme,
@@ -34,12 +34,12 @@ export function ThemePreview({
         </div>
         <div className="empty agent-start theme-preview-stage">
           <div className="empty-card">
-            <Mascot pose="rest" size={44} />
-            <h2>What should we talk about?</h2>
-            <p>
-              A coding agent on this machine. Pick a folder, or leave it empty for a private
-              workspace.
-            </p>
+            <EmptyHero
+              pose="rest"
+              size={44}
+              title="What should we talk about?"
+              lead="A coding agent on this machine. Pick a folder, or leave it empty for a private workspace."
+            />
             <div className="runtime-toggle">
               <span>Docker</span>
               <span>VM</span>

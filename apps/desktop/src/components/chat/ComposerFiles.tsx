@@ -23,6 +23,7 @@ import {
   pointInRects,
 } from "@/lib/composerPaste";
 import { IconClose, IconPlus } from "@/components/layout/Icons";
+import { Tooltip } from "@/components/layout/Tooltip";
 import { placeMenuPop } from "@/components/layout/OverflowMenu";
 
 export const COMPOSER_FILE_CAP = 4;
@@ -63,14 +64,15 @@ export function ComposerAddButton(props: {
           props.onPick(picked);
         }}
       />
-      <button
-        type="button"
-        className="btn small ghost composer-add"
-        title={props.title}
-        onClick={() => input.current?.click()}
-      >
-        <IconPlus />
-      </button>
+      <Tooltip label={props.title}>
+        <button
+          type="button"
+          className="btn small ghost composer-add"
+          onClick={() => input.current?.click()}
+        >
+          <IconPlus />
+        </button>
+      </Tooltip>
     </>
   );
 }

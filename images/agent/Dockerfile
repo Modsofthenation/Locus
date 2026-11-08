@@ -35,13 +35,20 @@ RUN apt-get update \
     && ln -sf /usr/bin/chromium /usr/local/bin/chromium-browser \
     && ln -sf /usr/bin/chromium /usr/local/bin/google-chrome
 
+COPY vendor/ /tmp/vendor/
 RUN ARCH="$(case "${TARGETARCH:-amd64}" in arm64) echo arm64 ;; *) echo amd64 ;; esac)" \
-    && curl -fsSL "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server-${CODE_SERVER_VERSION}-linux-${ARCH}.tar.gz" \
-      | tar -xz -C /opt \
+    && if [ -f /tmp/vendor/code-server.tar.gz ]; then \
+         tar -xz -C /opt -f /tmp/vendor/code-server.tar.gz; \
+       else \
+         curl --retry 8 --retry-all-errors --retry-delay 10 --fail -fsSL \
+           "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server-${CODE_SERVER_VERSION}-linux-${ARCH}.tar.gz" \
+           | tar -xz -C /opt; \
+       fi \
     && ln -s "/opt/code-server-${CODE_SERVER_VERSION}-linux-${ARCH}/bin/code-server" /usr/local/bin/code-server \
     && printf '%s\n' '#!/bin/sh' 'exec code-server --auth none --bind-addr 127.0.0.1:3999 --user-data-dir /tmp/locus-code /workspace "$@"' \
       > /usr/local/bin/locus-code-server \
-    && chmod +x /usr/local/bin/locus-code-server
+    && chmod +x /usr/local/bin/locus-code-server \
+    && rm -rf /tmp/vendor
 
 COPY git-credential-locus /usr/local/bin/git-credential-locus
 RUN chmod +x /usr/local/bin/git-credential-locus \

@@ -5,6 +5,7 @@ import type { AgentSession, LocusConfig, ProjectDocument } from "@locus/shared";
 import { ProjectFleet } from "./ProjectPane";
 import { api } from "@/lib/api";
 import { Store, initialState, type Action, type UiState } from "@/state/store";
+import { setSelectValue } from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -237,12 +238,9 @@ describe("ProjectFleet hub roster", () => {
     act(() => {
       more.open = true;
     });
-    const select = host.querySelector('select[aria-label="Board"]') as HTMLSelectElement;
-    expect(select).toBeTruthy();
+    expect(host.querySelector('[aria-label="Board"]')).toBeTruthy();
     act(() => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
-      setter.call(select, "board-1");
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Board", "board-1");
     });
     await act(async () => {
       const pin = [...host.querySelectorAll("button")].find((btn) => btn.textContent === "Pin");

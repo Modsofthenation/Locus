@@ -1,6 +1,6 @@
 # Codebase
 
-Codebase is a local catalog of git remotes. Locus does not host repositories. GitHub, GitLab, or Bitbucket stays the remote; agents still run on this machine.
+Codebase is a local catalog of git remotes. Locus does not host repositories. GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps stays the remote; agents still run on this machine.
 
 Put forge tokens in Settings → Git, or **Sign in with GitHub / GitLab / Bitbucket** so SSO-protected orgs work. You can keep several GitHub, GitLab, and Bitbucket accounts at once. Tokens stay in `~/.locus/secrets.enc`, not in chat. A signed-in session or a pasted token is enough to clone a repo, fetch a branch or pull request, and push over HTTPS — you do not need an SSH key path. GitHub uses device flow; GitLab and Bitbucket open a browser and return to `http://127.0.0.1:<port>/api/oauth/callback`. Each Sign in row needs an OAuth client ID (GitLab and Bitbucket also need the application secret), or set `LOCUS_GITHUB_OAUTH_CLIENT_ID` / `LOCUS_GITLAB_OAUTH_CLIENT_ID` / `LOCUS_BITBUCKET_OAUTH_CLIENT_ID`.
 
@@ -8,7 +8,7 @@ Put forge tokens in Settings → Git, or **Sign in with GitHub / GitLab / Bitbuc
 
 Open **Codebase** on the left icon rail.
 
-- **Link repo** — paste a GitHub, GitLab, or Bitbucket URL. If more than one token of that forge is configured, pick the account.
+- **Link repo** — paste a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps URL. If more than one token of that forge is configured, pick the account.
 - **Import from Git** — lists remotes those tokens can see. Search or filter, check the ones you want, then **Link selected**. Already-linked remotes stay marked and skipped.
 
 The empty state says this explicitly: tokens stay in Settings → Git; Locus stays the local catalog.

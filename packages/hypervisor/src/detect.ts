@@ -2,15 +2,26 @@ import { createConnection } from "node:net";
 import { join } from "node:path";
 import type { Accelerator, AdvancedSettings } from "@locus/shared";
 import type { CommandRunner } from "./runner.js";
+import {
+  hostQemuArch,
+  qemuArchFromBinary,
+  qemuBinaryCandidates,
+  type QemuGuestArch,
+} from "./qemuArch.js";
 
 export interface HostCapabilities {
   qemuBinary: string | null;
   qemuImgBinary: string | null;
+  qemuX86Binary?: string | null;
+  qemuAarch64Binary?: string | null;
+  guestArch?: QemuGuestArch;
   swtpmBinary: string | null;
   xorrisoBinary: string | null;
   accelerator: Accelerator;
   ovmfCodePath: string | null;
   ovmfVarsPath: string | null;
+  ovmfAarch64CodePath?: string | null;
+  ovmfAarch64VarsPath?: string | null;
   hasKvm: boolean;
   kvmUsable: boolean;
   hasVirtfs: boolean;
@@ -26,6 +37,22 @@ const OVMF_CODE_CANDIDATES = [
   "/usr/share/qemu/OVMF_CODE.fd",
   "/opt/homebrew/share/qemu/edk2-x86_64-code.fd",
   "/usr/local/share/qemu/edk2-x86_64-code.fd",
+];
+
+const AAVMF_CODE_CANDIDATES = [
+  "/usr/share/AAVMF/AAVMF_CODE.fd",
+  "/usr/share/qemu-efi-aarch64/QEMU_EFI.fd",
+  "/usr/share/edk2/aarch64/QEMU_EFI.fd",
+  "/opt/homebrew/share/qemu/edk2-aarch64-code.fd",
+  "/usr/local/share/qemu/edk2-aarch64-code.fd",
+];
+
+const AAVMF_VARS_CANDIDATES = [
+  "/usr/share/AAVMF/AAVMF_VARS.fd",
+  "/usr/share/qemu-efi-aarch64/QEMU_VARS.fd",
+  "/usr/share/edk2/aarch64/QEMU_VARS.fd",
+  "/opt/homebrew/share/qemu/edk2-arm-vars.fd",
+  "/usr/local/share/qemu/edk2-arm-vars.fd",
 ];
 
 const OVMF_VARS_CANDIDATES = [
@@ -149,11 +176,27 @@ export async function detectCapabilities(
 ): Promise<HostCapabilities> {
   const platform = opts.platform ?? process.platform;
   const dirs = knownQemuDirs(platform);
-  const qemuNames =
-    platform === "win32"
-      ? [opts.qemuBinary, `${opts.qemuBinary}.exe`, "qemu-system-x86_64.exe"]
-      : [opts.qemuBinary];
+  const qemuNames = qemuBinaryCandidates(opts.qemuBinary, {
+    platform,
+    hostArch: process.arch,
+  });
   const qemuBinary = await resolveBinary(runner, qemuNames, dirs, platform);
+  const qemuX86Binary = await resolveBinary(
+    runner,
+    platform === "win32"
+      ? ["qemu-system-x86_64", "qemu-system-x86_64.exe"]
+      : ["qemu-system-x86_64"],
+    dirs,
+    platform,
+  );
+  const qemuAarch64Binary = await resolveBinary(
+    runner,
+    platform === "win32"
+      ? ["qemu-system-aarch64", "qemu-system-aarch64.exe"]
+      : ["qemu-system-aarch64"],
+    dirs,
+    platform,
+  );
   const qemuImgBinary = await resolveBinary(
     runner,
     platform === "win32" ? ["qemu-img", "qemu-img.exe"] : ["qemu-img"],
@@ -181,21 +224,35 @@ export async function detectCapabilities(
   const accelerator: Accelerator = optsPreferred(hasKvm && kvmUsable, platform);
   const firmware = firmwareCandidates(platform);
 
+  const guestArch = qemuArchFromBinary(qemuBinary) ?? hostQemuArch();
   const ovmfCodePath =
     (opts.ovmfCodePath && (await runner.exists(opts.ovmfCodePath)) ? opts.ovmfCodePath : null) ??
-    (await firstExisting(firmware.code, runner));
+    (await firstExisting(
+      guestArch === "aarch64" ? [...AAVMF_CODE_CANDIDATES, ...firmware.code] : firmware.code,
+      runner,
+    ));
   const ovmfVarsPath =
     (opts.ovmfVarsPath && (await runner.exists(opts.ovmfVarsPath)) ? opts.ovmfVarsPath : null) ??
-    (await firstExisting(firmware.vars, runner));
+    (await firstExisting(
+      guestArch === "aarch64" ? [...AAVMF_VARS_CANDIDATES, ...firmware.vars] : firmware.vars,
+      runner,
+    ));
+  const ovmfAarch64CodePath = await firstExisting(AAVMF_CODE_CANDIDATES, runner);
+  const ovmfAarch64VarsPath = await firstExisting(AAVMF_VARS_CANDIDATES, runner);
 
   return {
     qemuBinary,
     qemuImgBinary,
+    qemuX86Binary,
+    qemuAarch64Binary,
+    guestArch,
     swtpmBinary,
     xorrisoBinary,
     accelerator,
     ovmfCodePath,
     ovmfVarsPath,
+    ovmfAarch64CodePath,
+    ovmfAarch64VarsPath,
     hasKvm,
     kvmUsable: Boolean(kvmUsable),
     hasVirtfs,
@@ -256,7 +313,7 @@ async function probeKvm(runner: CommandRunner, qemuBinary: string): Promise<bool
       "-name",
       "locus-kvm-probe",
       "-machine",
-      "q35",
+      qemuArchFromBinary(qemuBinary) === "aarch64" ? "virt" : "q35",
       "-accel",
       "kvm",
       "-cpu",

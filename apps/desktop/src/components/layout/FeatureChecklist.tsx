@@ -51,9 +51,9 @@ export function FeatureChecklist() {
   const remaining = open.length - 1;
 
   return (
-    <aside className="try-next-corner" data-testid="feature-checklist" aria-label="Try next">
+    <aside className="try-next-corner" data-testid="feature-checklist" aria-label="Tip">
       <div className="try-next-corner-head">
-        <p className="try-next-corner-kicker">Try next</p>
+        <p className="try-next-corner-kicker">Tip</p>
         <button
           type="button"
           className="btn icon ghost"

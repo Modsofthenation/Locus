@@ -19,6 +19,10 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       - run: sudo apt-get update && sudo apt-get install -y ripgrep
       - run: npm test
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/desktop
+      - run: npm run test:visual
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
@@ -28,6 +32,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.22"
+      - name: Prefetch code-server
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p images/agent/vendor
+          node scripts/prefetch-github-release-asset.mjs --owner coder --repo code-server --tag v4.96.4 --file code-server-4.96.4-linux-amd64.tar.gz --out images/agent/vendor/code-server.tar.gz
       - run: docker build -t locus/agent:0.1 images/agent
 
   android:

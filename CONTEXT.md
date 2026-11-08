@@ -24,7 +24,7 @@ The `/workspace` tree the operator Files pane and the agent file tools share. Ho
 
 ## Forge
 
-GitHub, GitLab, or Bitbucket as the remote for clone, push, pull requests, and issues. Locus stays the local catalog. `ForgeClient` selects one forge adapter per account.
+GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps as the remote for clone, push, pull requests, and issues. Locus stays the local catalog. `ForgeClient` selects one forge adapter per account. Gitea/Forgejo/Azure DevOps are PAT-only and are not auto-added as empty Settings cards.
 
 ## Design
 

@@ -69,7 +69,7 @@ export function DockerExplorer({
 
   async function runAction(row: DockerContainer, action: "start" | "stop" | "restart") {
     if (busyId) return;
-    if (action !== "start" && !confirmDockerContainerAction(action, row)) return;
+    if (action !== "start" && !(await confirmDockerContainerAction(action, row))) return;
     setBusyId(row.id);
     setError(null);
     try {

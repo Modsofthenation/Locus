@@ -1,9 +1,10 @@
 import { isGameSession, type GameStyle } from "@locus/shared";
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/state/store";
-import { useDialogFocus } from "@/lib/useDialogFocus";
+import { Modal } from "@/components/layout/Modal";
 import { IconClose, IconPlus } from "@/components/layout/Icons";
+import { Select } from "@/components/layout/Select";
 
 interface EditorState {
   id: string;
@@ -45,8 +46,6 @@ export function GameStylesModal() {
   const [origin, setOrigin] = useState<EditorState>(emptyDraft());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const openedAt = useRef(0);
-  const dialogRef = useRef<HTMLDivElement>(null);
   const session = state.sessions.find((s) => s.id === state.selectedId);
   const defaultId = state.config?.defaultGameStyleId;
   const dirty = JSON.stringify(draft) !== JSON.stringify(origin);
@@ -62,11 +61,8 @@ export function GameStylesModal() {
     dispatch({ type: "gameStyles", open: false });
   }, [dispatch]);
 
-  useDialogFocus(state.gameStylesOpen, close, dialogRef);
-
   useEffect(() => {
     if (!state.gameStylesOpen) return;
-    openedAt.current = Date.now();
     setError(null);
     const boundId = isGameSession(session ?? {}) ? session?.gameStyleId : undefined;
     const bound = boundId ? state.gameStyles.find((row) => row.id === boundId) : undefined;
@@ -78,12 +74,6 @@ export function GameStylesModal() {
     if (first) load(toEditor(first));
     else load(emptyDraft());
   }, [state.gameStylesOpen]);
-
-  function onBackdrop(event: MouseEvent<HTMLDivElement>) {
-    if (event.target !== event.currentTarget) return;
-    if (Date.now() - openedAt.current < 250) return;
-    close();
-  }
 
   async function refresh() {
     const catalog = await api.gameStyles();
@@ -183,133 +173,134 @@ export function GameStylesModal() {
   if (!state.gameStylesOpen) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onBackdrop}>
-      <div className="modal" role="dialog" aria-labelledby="game-styles-title" ref={dialogRef}>
-        <div className="modal-head">
-          <h2 id="game-styles-title">Game styles</h2>
-          <button type="button" className="btn icon ghost" aria-label="Close" onClick={close}>
-            <IconClose />
+    <Modal titleId="game-styles-title" closeGuardMs={250} onClose={close}>
+      <div className="modal-head">
+        <h2 id="game-styles-title">Game styles</h2>
+        <button type="button" className="btn icon ghost" aria-label="Close" onClick={close}>
+          <IconClose />
+        </button>
+      </div>
+      <div className="modal-body design-systems-body">
+        <aside className="design-systems-list">
+          <button type="button" className="btn small ghost" onClick={() => load(emptyDraft())}>
+            <IconPlus /> New
           </button>
-        </div>
-        <div className="modal-body design-systems-body">
-          <aside className="design-systems-list">
-            <button type="button" className="btn small ghost" onClick={() => load(emptyDraft())}>
-              <IconPlus /> New
-            </button>
-            {saved.map((row) => (
-              <button
-                key={row.id}
-                type="button"
-                className={`btn small ghost${row.id === draft.id ? " on" : ""}`}
-                onClick={() => load(toEditor(row))}
-              >
-                {row.name}
-                {row.id === defaultId ? " · default" : ""}
-              </button>
-            ))}
-          </aside>
-          <div className="design-systems-editor">
-            <label>
-              Name
-              <input
-                value={draft.name}
-                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-              />
-            </label>
-            <label>
-              Summary
-              <input
-                value={draft.summary}
-                onChange={(event) => setDraft({ ...draft, summary: event.target.value })}
-              />
-            </label>
-            <div className="design-system-picker-row">
-              <label>
-                Tile
-                <select
-                  aria-label="Tile size"
-                  value={draft.tilePx}
-                  onChange={(event) => setDraft({ ...draft, tilePx: event.target.value })}
-                >
-                  <option value="8">8px</option>
-                  <option value="16">16px</option>
-                  <option value="32">32px</option>
-                  <option value="48">48px</option>
-                </select>
-              </label>
-              <label>
-                HUD
-                <select
-                  aria-label="HUD"
-                  value={draft.hud}
-                  onChange={(event) => setDraft({ ...draft, hud: event.target.value })}
-                >
-                  <option value="normal">Normal</option>
-                  <option value="minimal">Minimal</option>
-                  <option value="arcade">Arcade</option>
-                </select>
-              </label>
-              <label>
-                Juice
-                <select
-                  aria-label="Juice"
-                  value={draft.juice}
-                  onChange={(event) => setDraft({ ...draft, juice: event.target.value })}
-                >
-                  <option value="floaty">Floaty</option>
-                  <option value="crunchy">Crunchy</option>
-                  <option value="heavy">Heavy</option>
-                </select>
-              </label>
-            </div>
-            <label>
-              Guidelines
-              <textarea
-                rows={6}
-                value={draft.guidelines}
-                onChange={(event) => setDraft({ ...draft, guidelines: event.target.value })}
-              />
-            </label>
-            {error ? <p className="scrim-note">{error}</p> : null}
-          </div>
-        </div>
-        <div className="modal-actions">
-          <button
-            type="button"
-            className="btn ghost"
-            disabled={busy || !draft.id}
-            onClick={() => void remove()}
-          >
-            Delete
-          </button>
-          <button
-            type="button"
-            className="btn ghost"
-            disabled={busy || !draft.id}
-            onClick={() => void makeDefault()}
-          >
-            Default
-          </button>
-          {session && isGameSession(session) ? (
+          {saved.map((row) => (
             <button
+              key={row.id}
               type="button"
-              className="btn ghost"
-              disabled={busy}
-              onClick={() => void saveFromGame()}
+              className={`btn small ghost${row.id === draft.id ? " on" : ""}`}
+              onClick={() => load(toEditor(row))}
             >
-              Save from this game
+              {row.name}
+              {row.id === defaultId ? " · default" : ""}
             </button>
-          ) : null}
-          <button
-            type="button"
-            className="btn primary"
-            disabled={busy || !dirty}
-            onClick={() => void save()}
-          >
-            {busy ? "Saving…" : draft.id ? "Save" : "Create"}
-          </button>
+          ))}
+        </aside>
+        <div className="design-systems-editor">
+          <label>
+            Name
+            <input
+              value={draft.name}
+              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+            />
+          </label>
+          <label>
+            Summary
+            <input
+              value={draft.summary}
+              onChange={(event) => setDraft({ ...draft, summary: event.target.value })}
+            />
+          </label>
+          <div className="design-system-picker-row">
+            <label>
+              Tile
+              <Select
+                ariaLabel="Tile size"
+                value={draft.tilePx}
+                options={[
+                  { value: "8", label: "8px" },
+                  { value: "16", label: "16px" },
+                  { value: "32", label: "32px" },
+                  { value: "48", label: "48px" },
+                ]}
+                onChange={(value) => setDraft({ ...draft, tilePx: value })}
+              />
+            </label>
+            <label>
+              HUD
+              <Select
+                ariaLabel="HUD"
+                value={draft.hud}
+                options={[
+                  { value: "normal", label: "Normal" },
+                  { value: "minimal", label: "Minimal" },
+                  { value: "arcade", label: "Arcade" },
+                ]}
+                onChange={(value) => setDraft({ ...draft, hud: value })}
+              />
+            </label>
+            <label>
+              Juice
+              <Select
+                ariaLabel="Juice"
+                value={draft.juice}
+                options={[
+                  { value: "floaty", label: "Floaty" },
+                  { value: "crunchy", label: "Crunchy" },
+                  { value: "heavy", label: "Heavy" },
+                ]}
+                onChange={(value) => setDraft({ ...draft, juice: value })}
+              />
+            </label>
+          </div>
+          <label>
+            Guidelines
+            <textarea
+              rows={6}
+              value={draft.guidelines}
+              onChange={(event) => setDraft({ ...draft, guidelines: event.target.value })}
+            />
+          </label>
+          {error ? <p className="scrim-note">{error}</p> : null}
         </div>
       </div>
-    </div>
+      <div className="modal-actions">
+        <button
+          type="button"
+          className="btn ghost"
+          disabled={busy || !draft.id}
+          onClick={() => void remove()}
+        >
+          Delete
+        </button>
+        <button
+          type="button"
+          className="btn ghost"
+          disabled={busy || !draft.id}
+          onClick={() => void makeDefault()}
+        >
+          Default
+        </button>
+        {session && isGameSession(session) ? (
+          <button
+            type="button"
+            className="btn ghost"
+            disabled={busy}
+            onClick={() => void saveFromGame()}
+          >
+            Save from this game
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="btn primary"
+          disabled={busy || !dirty}
+          onClick={() => void save()}
+        >
+          {busy ? "Saving…" : draft.id ? "Save" : "Create"}
+        </button>
+      </div>
+    </Modal>
   );
 }

@@ -9,6 +9,7 @@ import {
   type PullRequestRef,
 } from "@locus/shared";
 import { api } from "@/lib/api";
+import { askConfirm } from "@/lib/dialog";
 import { formatMarkdown } from "@/lib/markdown";
 import { matchesMobileQuery } from "@/lib/mobileShell";
 import { formatAgo } from "./Codebase";
@@ -222,7 +223,15 @@ export function MobilePullDetail(props: { repo: LinkedRepo; number: number; onBa
   async function mergePull() {
     if (!pull || busy) return;
     if (isDraftPull(pull) || pull.state === "merged" || pull.state === "closed") return;
-    if (!window.confirm("Merge this pull request on the forge?")) return;
+    if (
+      !(await askConfirm({
+        title: "Merge pull request?",
+        body: "Merge this pull request on the forge?",
+        confirmLabel: "Merge",
+        danger: true,
+      }))
+    )
+      return;
     setBusy(true);
     setError(null);
     try {

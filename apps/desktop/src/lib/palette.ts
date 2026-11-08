@@ -28,18 +28,20 @@ import {
   type ProjectSummary,
   type DockerContainer,
   type LinkedRepo,
+  type LocusConfig,
   type ProductMode,
   type SetupStatus,
   type SlackConversation,
   type VmInstance,
 } from "@locus/shared";
 import { featurePaletteItems } from "./discoverability";
+import { SHORTCUTS, shortcutHint } from "./shortcuts";
 import { needsYouCount, needsYouItems, needsYouSessions } from "./needsYou";
-import { SETTINGS_NAV_GROUPS, settingsNavLabel } from "./settingsNav";
+import { SETTINGS_NAV_GROUPS, settingsNavLabel, type SettingsTab } from "./settingsNav";
 import { switchableSessions } from "./sessionSwitch";
 
 export type PaletteGroup =
-  | "Try next"
+  | "Recents"
   | "Agents"
   | "Design"
   | "Games"
@@ -67,34 +69,10 @@ export interface PaletteItem {
   keywords: string;
 }
 
-export const PALETTE_SHORTCUTS: { keys: string; action: string }[] = [
-  {
-    keys: "Ctrl/Cmd+N",
-    action: "New agent, workspace, automation, design, game, asset, board, or project",
-  },
-  { keys: "Ctrl/Cmd+K", action: "Command palette" },
-  { keys: "Ctrl/Cmd+Shift+K", action: "Inline AI in the files editor" },
-  { keys: "Ctrl/Cmd+P", action: "Go to file" },
-  { keys: "Ctrl/Cmd+T", action: "Go to symbol" },
-  { keys: "Ctrl/Cmd+Shift+F", action: "Search in files" },
-  { keys: "Ctrl/Cmd+`", action: "Toggle workspace terminal" },
-  { keys: "Ctrl/Cmd+,", action: "Settings" },
-  { keys: "Ctrl/Cmd+F", action: "Find in chat or the open file" },
-  { keys: "Ctrl/Cmd+1–9", action: "Jump to agent" },
-  { keys: "F12", action: "Go to definition" },
-  { keys: "Alt+F12", action: "Go to type definition" },
-  { keys: "Ctrl/Cmd+.", action: "Quick Fix" },
-  { keys: "Ctrl/Cmd+W", action: "Close editor tab" },
-  { keys: "Ctrl/Cmd+\\", action: "Split editor" },
-  { keys: "Ctrl/Cmd+Shift+S", action: "Save all" },
-  { keys: "Tab then Enter", action: "Skip to chat or files" },
-  {
-    keys: "V H N T R L F C",
-    action: "Board select, pan, sticky, text, shape, connector, frame, comment",
-  },
-  { keys: "Ctrl/Cmd+0", action: "Zoom board to fit" },
-  { keys: "Ctrl/Cmd+] [", action: "Bring board objects forward or send backward" },
-];
+export const PALETTE_SHORTCUTS: { keys: string; action: string }[] = SHORTCUTS.map((row) => ({
+  keys: row.keys,
+  action: row.action,
+}));
 
 export function editorOwnsCommandK(el: EventTarget | null): boolean {
   if (!(el instanceof Element)) return false;
@@ -119,19 +97,20 @@ export function paletteItems(input: {
   brain?: BrainSummary | null;
   projects?: ProjectSummary[];
   setup?: SetupStatus | null;
+  config?: LocusConfig | null;
 }): PaletteItem[] {
   const items: PaletteItem[] = [];
   items.push({
     id: "new-agent",
     title: "New agent",
-    hint: "Ctrl/Cmd+N",
+    hint: shortcutHint("new"),
     group: "Agents",
     keywords: "new agent create session chat start",
   });
   items.push({
     id: "new-design",
     title: "New design",
-    hint: "Ctrl/Cmd+N on Design",
+    hint: shortcutHint("new", "on Design"),
     group: "Design",
     keywords: "new design create prototype mockup",
   });
@@ -145,7 +124,7 @@ export function paletteItems(input: {
   items.push({
     id: "new-game",
     title: "New game",
-    hint: "Ctrl/Cmd+N on Games",
+    hint: shortcutHint("new", "on Games"),
     group: "Games",
     keywords: "new game create arcade platformer puzzle playable",
   });
@@ -159,7 +138,7 @@ export function paletteItems(input: {
   items.push({
     id: "new-asset",
     title: "New asset",
-    hint: "Ctrl/Cmd+N on Assets",
+    hint: shortcutHint("new", "on Assets"),
     group: "Assets",
     keywords: "new asset create mesh rig sprite 3d 2d image",
   });
@@ -173,7 +152,7 @@ export function paletteItems(input: {
   items.push({
     id: "new-board",
     title: "New board",
-    hint: "Ctrl/Cmd+N on Board",
+    hint: shortcutHint("new", "on Board"),
     group: "Board",
     keywords: "new board create sticky architecture sprint retro rca research",
   });
@@ -197,7 +176,7 @@ export function paletteItems(input: {
   items.push({
     id: "new-project",
     title: "New project",
-    hint: "Ctrl/Cmd+N on Projects",
+    hint: shortcutHint("new", "on Projects"),
     group: "Project",
     keywords: "new project create feature migration gardening coordinator",
   });
@@ -221,7 +200,7 @@ export function paletteItems(input: {
   items.push({
     id: "new-workspace",
     title: "New workspace",
-    hint: "Ctrl/Cmd+N on IDE",
+    hint: shortcutHint("new", "on IDE"),
     group: "IDE",
     keywords: "new workspace open folder clone repo ide host",
   });
@@ -229,21 +208,21 @@ export function paletteItems(input: {
     items.push({
       id: "workspace-goto",
       title: "Go to file",
-      hint: "Ctrl/Cmd+P",
+      hint: shortcutHint("goto-file"),
       group: isIdeSession(input.session) ? "IDE" : "Guest",
       keywords: "go to file quick open symbol search index find workspace editor",
     });
     items.push({
       id: "workspace-goto-symbol",
       title: "Go to symbol",
-      hint: "Ctrl/Cmd+T",
+      hint: shortcutHint("goto-symbol"),
       group: isIdeSession(input.session) ? "IDE" : "Guest",
       keywords: "go to symbol typescript navigate workspace editor",
     });
     items.push({
       id: "workspace-search",
       title: "Search in files",
-      hint: "Ctrl/Cmd+Shift+F",
+      hint: shortcutHint("search-files"),
       group: isIdeSession(input.session) ? "IDE" : "Guest",
       keywords: "search in files grep find code workspace editor",
     });
@@ -264,7 +243,7 @@ export function paletteItems(input: {
     items.push({
       id: "workspace-split",
       title: "Split editor",
-      hint: "Ctrl/Cmd+\\",
+      hint: shortcutHint("split"),
       group: isIdeSession(input.session) ? "IDE" : "Guest",
       keywords: "split editor beside files columns pane group compare",
     });
@@ -280,7 +259,7 @@ export function paletteItems(input: {
     items.push({
       id: "workspace-terminal",
       title: "Toggle terminal",
-      hint: "Ctrl/Cmd+`",
+      hint: shortcutHint("terminal"),
       group: isIdeSession(input.session) ? "IDE" : "Agents",
       keywords: "terminal shell pty workspace bash cmd ide",
     });
@@ -366,7 +345,7 @@ export function paletteItems(input: {
   items.push({
     id: "new-automation",
     title: "New automation",
-    hint: "Ctrl/Cmd+N on Automations",
+    hint: shortcutHint("new", "on Automations"),
     group: "Automations",
     keywords: "new automation create schedule job",
   });
@@ -471,7 +450,7 @@ export function paletteItems(input: {
     items.push({
       id: "chat-find",
       title: "Find in chat",
-      hint: "Ctrl/Cmd+F",
+      hint: shortcutHint("find"),
       group: "Guest",
       keywords: "find search chat thread ctrl f command f",
     });
@@ -581,12 +560,14 @@ export function paletteItems(input: {
     for (const tab of group.items) {
       const label = settingsNavLabel(tab);
       const extra = tab === "notifications" ? " quiet hours alerts notify desktop" : "";
+      const names = settingsTabKeywords(tab, input.config);
       items.push({
         id: `settings:${tab}`,
         title: `Settings · ${label}`,
         hint: group.label,
         group: "Settings",
-        keywords: `settings ${label} ${tab} ${group.label} preferences page${extra}`,
+        keywords:
+          `settings ${label} ${tab} ${group.label} preferences page${extra} ${names}`.trim(),
       });
     }
   }
@@ -602,7 +583,7 @@ export function paletteItems(input: {
   items.push({
     id: "keyboard-shortcuts",
     title: "Keyboard shortcuts",
-    hint: "Ctrl/Cmd+N, K, F, comma, 1–9, F12",
+    hint: `${shortcutHint("new")}, K, F, comma, 1–9, F12`,
     group: "Help",
     keywords: "keyboard shortcuts cheat sheet keys help question ?",
   });
@@ -619,6 +600,25 @@ export function paletteItems(input: {
   return items;
 }
 
+function settingsTabKeywords(tab: SettingsTab, config?: LocusConfig | null): string {
+  if (!config) return "";
+  if (tab === "providers") {
+    return config.providers.map((row) => `${row.name} ${row.kind}`).join(" ");
+  }
+  if (tab === "mcp") {
+    return (config.mcpServers ?? [])
+      .map((row) => `${row.name} ${row.command} ${row.url ?? ""}`)
+      .join(" ");
+  }
+  if (tab === "skills") {
+    return (config.skills ?? []).map((row) => `${row.name} ${row.title ?? ""}`).join(" ");
+  }
+  if (tab === "workers") {
+    return (config.workers ?? []).map((row) => row.name).join(" ");
+  }
+  return "";
+}
+
 function textMatchesQuery(text: string, q: string): boolean {
   const lower = text.toLowerCase();
   let from = 0;
@@ -631,15 +631,44 @@ function textMatchesQuery(text: string, q: string): boolean {
   return false;
 }
 
+function paletteMatchScore(item: PaletteItem, q: string): number {
+  const titleHit = textMatchesQuery(item.title, q);
+  const hintHit = textMatchesQuery(item.hint, q);
+  const keyHit = textMatchesQuery(item.keywords, q);
+  if (!titleHit && !hintHit && !keyHit) return 0;
+  const title = item.title.toLowerCase();
+  if (title === q) return 100;
+  const words = title.split(/[^a-z0-9]+/).filter(Boolean);
+  if (words.some((word) => word === q)) return 96;
+  if (title.startsWith(q)) return 90;
+  if (words.some((word) => word.startsWith(q))) return 80;
+  if (titleHit) return 60;
+  if (keyHit) return 50;
+  return 40;
+}
+
 export function filterPaletteItems(items: PaletteItem[], query: string): PaletteItem[] {
   const q = query.trim().toLowerCase();
   if (!q) return items;
-  return items.filter(
-    (item) =>
-      textMatchesQuery(item.title, q) ||
-      textMatchesQuery(item.hint, q) ||
-      textMatchesQuery(item.keywords, q),
-  );
+  return items
+    .map((item, index) => ({ item, index, score: paletteMatchScore(item, q) }))
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((row) => row.item);
+}
+
+/** Pin recently run commands at the top when the query is empty. */
+export function applyPaletteRecents(items: PaletteItem[], recents: string[]): PaletteItem[] {
+  if (!recents.length) return items;
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const recentItems: PaletteItem[] = [];
+  for (const id of recents) {
+    const item = byId.get(id);
+    if (item) recentItems.push({ ...item, group: "Recents" });
+  }
+  if (!recentItems.length) return items;
+  const recentIds = new Set(recentItems.map((item) => item.id));
+  return [...recentItems, ...items.filter((item) => !recentIds.has(item.id))];
 }
 
 const SWARM_HIDDEN_GROUPS = new Set<PaletteGroup>([

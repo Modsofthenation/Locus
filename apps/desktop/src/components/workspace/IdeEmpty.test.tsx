@@ -132,7 +132,7 @@ describe("IdeEmpty", () => {
     render();
     expect(host.querySelector("[data-testid='ide-start']")).toBeTruthy();
     expect(host.querySelector("[data-testid='locus-mascot']")).toBeTruthy();
-    expect(host.querySelector(".ide-start-hero h2")?.textContent).toBe("IDE");
+    expect(host.querySelector(".empty-hero h2")?.textContent).toBe("IDE");
     expect(host.textContent).toContain("Open folder");
     expect(host.textContent).toContain("Clone repo");
     expect(host.querySelector("[data-testid='ide-clone-panel']")).toBeNull();

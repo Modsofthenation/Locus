@@ -17,8 +17,10 @@ import {
   type CodexReasoningEffort,
   type AiProvider,
 } from "@locus/shared";
+import { Fragment } from "react";
 import { modelsForProvider } from "@/lib/lastAgent";
 import { MenuItem, MenuLabel, MenuSep, OverflowMenu } from "@/components/layout/OverflowMenu";
+import { Select } from "@/components/layout/Select";
 
 export function ModelPicker(props: {
   providers: AiProvider[];
@@ -54,55 +56,48 @@ export function ModelPicker(props: {
     ? props.providers.filter((p) => p.enabled || p.id === props.providerId)
     : props.providers;
   const providerSelect = (
-    <select
-      aria-label="Provider"
+    <Select
+      ariaLabel="Provider"
       disabled={props.disabled}
       value={props.providerId}
-      onChange={(e) => {
-        const next = props.providers.find((p) => p.id === e.target.value);
+      options={[
+        listedProviders.some((p) => p.id === props.providerId)
+          ? null
+          : {
+              value: props.providerId,
+              label: props.providerId || "No provider",
+              disabled: true,
+            },
+        ...listedProviders.map((p) => ({
+          value: p.id,
+          label: p.enabled ? p.name : `${p.name} (off)`,
+        })),
+      ].filter((row): row is NonNullable<typeof row> => Boolean(row))}
+      onChange={(id) => {
+        const next = props.providers.find((p) => p.id === id);
         props.onChange({
-          providerId: e.target.value,
+          providerId: id,
           model: next?.defaultModel || next?.models[0] || "",
         });
       }}
-    >
-      {listedProviders.some((p) => p.id === props.providerId) ? null : (
-        <option value={props.providerId} disabled>
-          {props.providerId || "No provider"}
-        </option>
-      )}
-      {listedProviders.map((p) => (
-        <option key={p.id} value={p.id}>
-          {p.name}
-          {p.enabled ? "" : " (off)"}
-        </option>
-      ))}
-    </select>
+    />
   );
 
   const modelSelect = (
-    <select
-      aria-label="Model"
+    <Select
+      ariaLabel="Model"
       disabled={props.disabled}
       value={modelValue}
-      onChange={(e) =>
-        setModel(cursorIds ? retargetCursorModel(props.model, e.target.value) : e.target.value)
+      options={
+        models.length
+          ? models.map((m) => {
+              const rates = formatRatePair(resolveUsageRates(provider, m));
+              return { value: m, label: rates ? `${m} · ${rates}` : m };
+            })
+          : [{ value: "", label: "No model", disabled: true }]
       }
-    >
-      {models.length ? null : (
-        <option value="" disabled>
-          No model
-        </option>
-      )}
-      {models.map((m) => {
-        const rates = props.compact ? undefined : formatRatePair(resolveUsageRates(provider, m));
-        return (
-          <option key={m} value={m}>
-            {rates ? `${m} · ${rates}` : m}
-          </option>
-        );
-      })}
-    </select>
+      onChange={(value) => setModel(cursorIds ? retargetCursorModel(props.model, value) : value)}
+    />
   );
 
   const cursorControls =
@@ -127,13 +122,70 @@ export function ModelPicker(props: {
   const modelControls = cursorControls || codexControls;
 
   if (props.compact) {
+    const combinedLabel = !provider
+      ? "No provider"
+      : !modelValue
+        ? `${provider.name} · No model`
+        : `${provider.name} · ${modelValue}`;
     return (
       <div className="model-picker-wrap">
         <div className="model-picker compact">
-          <span className={`model-picker-provider ${provider?.enabled ? "on" : ""}`}>
-            {providerSelect}
-          </span>
-          {modelSelect}
+          <OverflowMenu
+            className={`model-picker-combined${provider?.enabled ? " on" : ""}`}
+            title="Model"
+            align="left"
+            prefer="up"
+            wide
+            disabled={props.disabled}
+            toggleClassName="btn small ghost model-picker-combined-toggle"
+            label={<span className="model-picker-combined-label">{combinedLabel}</span>}
+          >
+            {listedProviders.length ? (
+              listedProviders.map((row) => {
+                const listed = modelsForProvider(
+                  row,
+                  row.id === props.providerId ? selectedModel : row.defaultModel,
+                );
+                const ids = usesCursorModelIds(row) ? cursorModelPickerIds(listed) : listed;
+                return (
+                  <Fragment key={row.id}>
+                    <MenuLabel>
+                      {row.name}
+                      {row.enabled ? "" : " (off)"}
+                    </MenuLabel>
+                    {ids.length ? (
+                      ids.map((m) => (
+                        <MenuItem
+                          key={`${row.id}:${m}`}
+                          active={row.id === props.providerId && m === modelValue}
+                          disabled={props.disabled}
+                          onClick={() =>
+                            props.onChange({
+                              providerId: row.id,
+                              model: usesCursorModelIds(row)
+                                ? retargetCursorModel(
+                                    row.id === props.providerId
+                                      ? props.model
+                                      : row.defaultModel || m,
+                                    m,
+                                  )
+                                : m,
+                            })
+                          }
+                        >
+                          {m}
+                        </MenuItem>
+                      ))
+                    ) : (
+                      <MenuItem disabled>No model</MenuItem>
+                    )}
+                  </Fragment>
+                );
+              })
+            ) : (
+              <MenuItem disabled>No provider</MenuItem>
+            )}
+          </OverflowMenu>
           {modelControls ? (
             <OverflowMenu
               className="model-picker-more"
@@ -187,21 +239,21 @@ export function CodexReasoningPicker(props: {
   return (
     <div className="field">
       <label>Reasoning effort</label>
-      <select
-        aria-label="Reasoning effort"
+      <Select
+        ariaLabel="Reasoning effort"
         disabled={props.disabled}
         value={selected}
-        onChange={(e) =>
-          props.onChange((e.target.value || undefined) as CodexReasoningEffort | undefined)
+        options={[
+          { value: "", label: "Auto (Codex default)" },
+          ...levels.map((level) => ({
+            value: level,
+            label: level === "xhigh" ? "XHigh" : level[0]!.toUpperCase() + level.slice(1),
+          })),
+        ]}
+        onChange={(value) =>
+          props.onChange((value || undefined) as CodexReasoningEffort | undefined)
         }
-      >
-        <option value="">Auto (Codex default)</option>
-        {levels.map((level) => (
-          <option key={level} value={level}>
-            {level === "xhigh" ? "XHigh" : level[0]!.toUpperCase() + level.slice(1)}
-          </option>
-        ))}
-      </select>
+      />
       <p className="hint">Controls how much reasoning Codex uses for this model.</p>
     </div>
   );
@@ -314,33 +366,29 @@ export function CursorModelControls(props: {
   const fastControl = caps.supportsFast ? (
     <div className="field">
       <label>Fast</label>
-      <select
-        aria-label="Fast"
+      <Select
+        ariaLabel="Fast"
         disabled={props.disabled}
         value={parsed.fast ? "fast" : "off"}
-        onChange={(e) => emit({ fast: e.target.value === "fast" })}
-      >
-        <option value="off">Off</option>
-        <option value="fast">On</option>
-      </select>
+        options={[
+          { value: "off", label: "Off" },
+          { value: "fast", label: "On" },
+        ]}
+        onChange={(value) => emit({ fast: value === "fast" })}
+      />
     </div>
   ) : null;
 
   const thinkingControl = caps.thinkingLevels.length ? (
     <div className="field">
       <label>Thinking</label>
-      <select
-        aria-label="Thinking"
+      <Select
+        ariaLabel="Thinking"
         disabled={props.disabled}
         value={thinkingValue}
-        onChange={(e) => emit({ thinking: e.target.value as (typeof parsed)["thinking"] })}
-      >
-        {caps.thinkingLevels.map((row) => (
-          <option key={row.value} value={row.value}>
-            {row.label}
-          </option>
-        ))}
-      </select>
+        options={caps.thinkingLevels.map((row) => ({ value: row.value, label: row.label }))}
+        onChange={(value) => emit({ thinking: value as (typeof parsed)["thinking"] })}
+      />
     </div>
   ) : null;
 

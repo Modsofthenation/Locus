@@ -1,5 +1,6 @@
 import { builtinDesignSystems, resolveDesignSystem, type DesignSystem } from "@locus/shared";
 import { useStore } from "@/state/store";
+import { Select } from "@/components/layout/Select";
 
 export function DesignSystemPicker(props: {
   selectedId?: string;
@@ -17,33 +18,24 @@ export function DesignSystemPicker(props: {
     <div className={`design-system-picker${props.compact ? " compact" : ""}`}>
       {!props.compact ? <div className="field-label">Design system</div> : null}
       <div className="design-system-picker-row">
-        <select
-          aria-label="Design system"
-          title="Design system"
+        <Select
+          ariaLabel="Design system"
           value={value}
-          onChange={(event) => {
-            const id = event.target.value;
-            props.onChange(id ? resolveDesignSystem(id, stored) : undefined);
-          }}
-        >
-          <option value="">None</option>
-          {stored.length ? (
-            <optgroup label="My systems">
-              {stored.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.name}
-                </option>
-              ))}
-            </optgroup>
-          ) : null}
-          <optgroup label="Starters">
-            {builtins.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.name}
-              </option>
-            ))}
-          </optgroup>
-        </select>
+          options={[
+            { value: "", label: "None" },
+            ...stored.map((row) => ({
+              value: row.id,
+              label: row.name,
+              hint: "My systems",
+            })),
+            ...builtins.map((row) => ({
+              value: row.id,
+              label: row.name,
+              hint: "Starters",
+            })),
+          ]}
+          onChange={(id) => props.onChange(id ? resolveDesignSystem(id, stored) : undefined)}
+        />
         {props.manage !== false ? (
           <button
             type="button"

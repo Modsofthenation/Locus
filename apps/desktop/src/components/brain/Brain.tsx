@@ -13,7 +13,7 @@ import {
 } from "@locus/shared";
 import { api } from "@/lib/api";
 import { useStore } from "@/state/store";
-import { Mascot } from "@/components/layout/Mascot";
+import { EmptyHero } from "@/components/layout/EmptyHero";
 import { IconFolder } from "@/components/layout/Icons";
 import { FeatureHintRow } from "@/components/layout/FeatureHint";
 import { SECTION_FEATURE_HINTS } from "@/lib/discoverability";
@@ -170,12 +170,10 @@ export function BrainPane() {
         <div className={showEmptyHero ? "brain-start" : "brain-filled"}>
           {showEmptyHero ? (
             <div className="empty-card">
-              <Mascot pose="idle" />
-              <h2>Brain</h2>
-              <p>
-                Index a repo folder to learn services and APIs. Remember durable conclusions. Coding
-                agents orient on this automatically — grep still wins for the tree.
-              </p>
+              <EmptyHero
+                title="Brain"
+                lead="Index a repo folder to learn services and APIs. Remember durable conclusions. Coding agents orient on this automatically — grep still wins for the tree."
+              />
               <FeatureHintRow hint={SECTION_FEATURE_HINTS.brain!} />
             </div>
           ) : null}

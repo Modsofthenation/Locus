@@ -145,7 +145,7 @@ describe("claude code chat loop", () => {
     expect(captured[1]?.args).toEqual(expect.arrayContaining(["--resume", "cc-sess-1"]));
   });
 
-  it("rejects a VM runtime for Claude Code", async () => {
+  it("creates a VM runtime session for Claude Code", async () => {
     const dir = await mkdtemp(join(tmpdir(), "locus-claude-vm-"));
     cleanup.push(dir);
     const store = new JsonStore(dir);
@@ -155,15 +155,15 @@ describe("claude code chat loop", () => {
     claude.enabled = true;
     await store.saveConfig(config);
     const sessions = new SessionService(store, new MockHypervisor(dir), new Hub());
-    await expect(
-      sessions.create({
-        os: "ubuntu",
-        templateId: config.templates[0]!.id,
-        runtime: "vm",
-        providerId: claude.id,
-        model: "claude-sonnet-4-5",
-        startVm: false,
-      }),
-    ).rejects.toThrow(/Docker or Host/);
+    const created = await sessions.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      runtime: "vm",
+      providerId: claude.id,
+      model: "claude-sonnet-4-5",
+      startVm: false,
+    });
+    expect(created.runtime).toBe("vm");
+    expect(created.providerId).toBe(claude.id);
   });
 });

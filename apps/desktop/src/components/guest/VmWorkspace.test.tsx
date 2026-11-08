@@ -125,7 +125,7 @@ describe("VmWorkspace golden image toast", () => {
     document.body.appendChild(host);
     root = createRoot(host);
     const node: ReactNode = (
-      <Store.Provider value={{ state, dispatch }}>
+      <Store.Provider value={{ state: { ...state, vmCollapsed: false }, dispatch }}>
         <VmWorkspace />
       </Store.Provider>
     );

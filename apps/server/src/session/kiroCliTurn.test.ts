@@ -273,7 +273,7 @@ describe("kiro cli chat loop", () => {
     expect(content).not.toMatch(/kas\.server\.starting/);
   });
 
-  it("rejects a VM runtime for Kiro CLI", async () => {
+  it("creates a VM runtime session for Kiro CLI", async () => {
     const dir = await mkdtemp(join(tmpdir(), "locus-kiro-vm-"));
     cleanup.push(dir);
     const store = new JsonStore(dir);
@@ -283,15 +283,15 @@ describe("kiro cli chat loop", () => {
     kiro.enabled = true;
     await store.saveConfig(config);
     const sessions = new SessionService(store, new MockHypervisor(dir), new Hub());
-    await expect(
-      sessions.create({
-        os: "ubuntu",
-        templateId: config.templates[0]!.id,
-        runtime: "vm",
-        providerId: kiro.id,
-        model: "auto",
-        startVm: false,
-      }),
-    ).rejects.toThrow(/Docker or Host/);
+    const created = await sessions.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      runtime: "vm",
+      providerId: kiro.id,
+      model: "auto",
+      startVm: false,
+    });
+    expect(created.runtime).toBe("vm");
+    expect(created.providerId).toBe(kiro.id);
   });
 });

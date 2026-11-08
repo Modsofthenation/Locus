@@ -1339,16 +1339,16 @@ describe("cursor cli chat loop", () => {
     expect(fresh?.cursorCli?.sessionId).toBe("cli-docker");
     expect(fresh?.vmId).toBeTruthy();
 
-    await expect(
-      sessions.create({
-        os: "ubuntu",
-        templateId: config.templates[0]!.id,
-        runtime: "vm",
-        providerId: cursor.id,
-        model: "composer-2",
-        startVm: false,
-      }),
-    ).rejects.toThrow(/Docker or Host/);
+    const vmCli = await sessions.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      runtime: "vm",
+      providerId: cursor.id,
+      model: "composer-2",
+      startVm: false,
+    });
+    expect(vmCli.runtime).toBe("vm");
+    expect(vmCli.providerId).toBe(cursor.id);
     hypervisor.shutdown();
   });
 

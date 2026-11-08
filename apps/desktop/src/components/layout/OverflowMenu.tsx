@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { IconMore } from "./Icons";
+import { Tooltip } from "./Tooltip";
 
 const MENU_GAP = 6;
 const MENU_PAD = 8;
@@ -111,6 +112,39 @@ export function placePointerMenu(opts: {
   return { top: placed.top, left: placed.left };
 }
 
+const TYPEAHEAD_MS = 600;
+
+export function menuItemButtons(root: ParentNode | null): HTMLButtonElement[] {
+  if (!root) return [];
+  return [
+    ...root.querySelectorAll<HTMLButtonElement>('[role="menuitem"], [role="menuitemcheckbox"]'),
+  ].filter((el) => !el.disabled);
+}
+
+export function wrapMenuIndex(index: number, length: number, delta: number): number {
+  if (length <= 0) return 0;
+  return (index + delta + length) % length;
+}
+
+export function typeaheadMenuIndex(labels: string[], query: string, fromIndex: number): number {
+  const q = query.trim().toLowerCase();
+  if (!q || !labels.length) return -1;
+  const start = labels.length ? (fromIndex + 1 + labels.length) % labels.length : 0;
+  for (let i = 0; i < labels.length; i++) {
+    const idx = (start + i) % labels.length;
+    if (labels[idx]!.trim().toLowerCase().startsWith(q)) return idx;
+  }
+  return -1;
+}
+
+function isTypingTarget(node: EventTarget | null): boolean {
+  return (
+    node instanceof HTMLInputElement ||
+    node instanceof HTMLTextAreaElement ||
+    (node instanceof HTMLElement && node.isContentEditable)
+  );
+}
+
 export function OverflowMenu(props: {
   label?: ReactNode;
   title?: string;
@@ -119,16 +153,55 @@ export function OverflowMenu(props: {
   toggleClassName?: string;
   wide?: boolean;
   prefer?: "up" | "down";
+  disabled?: boolean;
   onOpen?: () => void;
+  /** Current value, mirrored on the trigger for tests and a11y. */
+  dataValue?: string;
+  id?: string;
+  testId?: string;
   children: ReactNode;
 }) {
   const root = useRef<HTMLDetailsElement>(null);
   const pop = useRef<HTMLDivElement>(null);
   const popSize = useRef<{ width: number; height: number } | null>(null);
+  const typeahead = useRef({ query: "", at: 0 });
+  const pendingFocus = useRef<"first" | "last" | "active">("active");
   const [open, setOpen] = useState(false);
   const [place, setPlace] = useState<{ up: boolean; top: number; left: number } | null>(null);
   const align = props.align === "left" ? "left" : props.align === "after" ? "after" : "right";
-  const close = useCallback(() => setOpen(false), []);
+
+  const focusTrigger = useCallback(() => {
+    const summary = root.current?.querySelector(":scope > summary");
+    if (summary instanceof HTMLElement) summary.focus();
+  }, []);
+
+  const close = useCallback(() => {
+    const active = document.activeElement;
+    const restore = Boolean(
+      root.current && active instanceof Node && root.current.contains(active),
+    );
+    setOpen(false);
+    if (restore) {
+      queueMicrotask(focusTrigger);
+    }
+  }, [focusTrigger]);
+
+  function items(): HTMLButtonElement[] {
+    return menuItemButtons(pop.current);
+  }
+
+  const focusItem = useCallback((index: number) => {
+    menuItemButtons(pop.current)[index]?.focus();
+  }, []);
+
+  function openMenu(focus: "first" | "last" | "active" = "active") {
+    if (props.disabled) return;
+    pendingFocus.current = focus;
+    if (!open) {
+      setOpen(true);
+      props.onOpen?.();
+    }
+  }
 
   useEffect(() => {
     const summary = root.current?.querySelector(":scope > summary");
@@ -140,6 +213,20 @@ export function OverflowMenu(props: {
     return () => summary.removeEventListener("click", suppressNativeToggle, true);
   }, []);
 
+  useLayoutEffect(() => {
+    if (!open) return;
+    const list = items();
+    if (!list.length) return;
+    const active = list.findIndex(
+      (el) => el.getAttribute("aria-current") === "true" || el.classList.contains("active"),
+    );
+    const want = pendingFocus.current;
+    const index =
+      want === "last" ? list.length - 1 : want === "first" ? 0 : active >= 0 ? active : 0;
+    pendingFocus.current = "active";
+    list[index]?.focus();
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     function onPointer(event: PointerEvent) {
@@ -148,9 +235,56 @@ export function OverflowMenu(props: {
       setOpen(false);
     }
     function onKey(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setOpen(false);
+      if (isTypingTarget(event.target)) return;
+      const list = items();
+      const current = list.findIndex((el) => el === document.activeElement);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        focusTrigger();
+        return;
+      }
+      if (event.key === "Tab") {
+        setOpen(false);
+        focusTrigger();
+        return;
+      }
+      if (!list.length) return;
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        focusItem(wrapMenuIndex(current < 0 ? -1 : current, list.length, 1));
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        focusItem(wrapMenuIndex(current < 0 ? 0 : current, list.length, -1));
+        return;
+      }
+      if (event.key === "Home") {
+        event.preventDefault();
+        focusItem(0);
+        return;
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        focusItem(list.length - 1);
+        return;
+      }
+      if (event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key === " ") return;
+      const now = Date.now();
+      if (now - typeahead.current.at > TYPEAHEAD_MS) typeahead.current.query = "";
+      typeahead.current.query += event.key;
+      typeahead.current.at = now;
+      const next = typeaheadMenuIndex(
+        list.map((el) => el.textContent ?? ""),
+        typeahead.current.query,
+        current,
+      );
+      if (next >= 0) {
+        event.preventDefault();
+        focusItem(next);
+      }
     }
     document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
@@ -158,7 +292,7 @@ export function OverflowMenu(props: {
       document.removeEventListener("pointerdown", onPointer);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, focusTrigger, focusItem]);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -204,26 +338,54 @@ export function OverflowMenu(props: {
     ? { top: place.top, left: place.left }
     : undefined;
 
-  return (
+  const menu = (
     <MenuCloser.Provider value={close}>
       <details
         ref={root}
         className={`menu ${align}${place?.up ? " up" : ""}${props.className ? ` ${props.className}` : ""}`}
         open={open}
+        data-value={props.dataValue}
+        data-testid={props.testId}
       >
         <summary
+          id={props.id}
           className={props.toggleClassName ?? "btn small ghost menu-toggle"}
           title={props.title ?? "More"}
           aria-label={props.title ?? "More"}
           aria-expanded={open}
           aria-haspopup="menu"
+          aria-disabled={props.disabled || undefined}
           onClick={(event) => {
             // Native <details> in a flex toolbar (and React's open prop) can toggle
             // twice on one click, so the menu appears to open and immediately close.
             event.preventDefault();
+            if (props.disabled) return;
             const next = !open;
+            pendingFocus.current = "active";
             setOpen(next);
             if (next) props.onOpen?.();
+          }}
+          onKeyDown={(event) => {
+            if (props.disabled) return;
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              openMenu("first");
+              return;
+            }
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              openMenu("last");
+              return;
+            }
+            if (event.key === "Home") {
+              event.preventDefault();
+              openMenu("first");
+              return;
+            }
+            if (event.key === "End") {
+              event.preventDefault();
+              openMenu("last");
+            }
           }}
         >
           {props.label ?? <IconMore />}
@@ -239,6 +401,7 @@ export function OverflowMenu(props: {
       </details>
     </MenuCloser.Provider>
   );
+  return <Tooltip label={props.title ?? "More"}>{menu}</Tooltip>;
 }
 
 export function MenuItem(props: {
@@ -251,12 +414,13 @@ export function MenuItem(props: {
   pressed?: boolean;
   testId?: string;
   title?: string;
+  value?: string;
   children: ReactNode;
 }) {
   const close = useContext(MenuCloser);
   const toggle = props.checked !== undefined;
   const on = Boolean(props.checked ?? props.active);
-  return (
+  const item = (
     <button
       type="button"
       role={toggle ? "menuitemcheckbox" : "menuitem"}
@@ -265,7 +429,9 @@ export function MenuItem(props: {
       aria-checked={toggle ? props.checked : undefined}
       aria-pressed={props.pressed}
       data-testid={props.testId}
+      data-value={props.value}
       title={props.title}
+      tabIndex={-1}
       disabled={props.disabled}
       onClick={() => {
         close?.();
@@ -279,6 +445,12 @@ export function MenuItem(props: {
       ) : null}
       {props.children}
     </button>
+  );
+  if (!props.title) return item;
+  return (
+    <Tooltip label={props.title} disabledReason={props.disabled ? props.title : undefined}>
+      {item}
+    </Tooltip>
   );
 }
 

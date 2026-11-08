@@ -49,6 +49,7 @@ import { useStore } from "@/state/store";
 import { DesignThumb } from "./DesignThumb";
 import { IconChevron, IconSend } from "@/components/layout/Icons";
 import { Mascot } from "@/components/layout/Mascot";
+import { Select } from "@/components/layout/Select";
 import { AssetBuildPicker } from "@/components/assets/AssetBuildPicker";
 import { useAssetBuild } from "@/components/assets/useAssetBuild";
 
@@ -381,35 +382,35 @@ export function MobileDesignCanvas(props: {
         )}
       </header>
       <div className="mobile-canvas-toolbar" data-testid="mobile-promote">
-        <select
+        <Select
           className="mobile-promote-scaffold"
-          aria-label="Promote scaffold"
+          compact
+          ariaLabel="Promote scaffold"
           value={scaffold}
           disabled={promoting}
-          onChange={(event) => setScaffold(event.target.value as PromoteScaffold)}
-        >
-          {game ? (
-            <>
-              <option value="canvas-vite">Canvas + Vite</option>
-              <option value="three-vite">Three.js + Vite</option>
-              <option value="phaser">Phaser + Vite</option>
-              <option value="static">Static HTML</option>
-            </>
-          ) : assets ? (
-            <>
-              <option value="three-vite">Three.js + Vite</option>
-              <option value="canvas-vite">Canvas + Vite</option>
-              <option value="static">Static HTML</option>
-            </>
-          ) : (
-            <>
-              <option value="vite-react">Vite + React</option>
-              <option value="next">Next.js</option>
-              <option value="astro">Astro</option>
-              <option value="static">Static HTML</option>
-            </>
-          )}
-        </select>
+          options={
+            game
+              ? [
+                  { value: "canvas-vite", label: "Canvas + Vite" },
+                  { value: "three-vite", label: "Three.js + Vite" },
+                  { value: "phaser", label: "Phaser + Vite" },
+                  { value: "static", label: "Static HTML" },
+                ]
+              : assets
+                ? [
+                    { value: "three-vite", label: "Three.js + Vite" },
+                    { value: "canvas-vite", label: "Canvas + Vite" },
+                    { value: "static", label: "Static HTML" },
+                  ]
+                : [
+                    { value: "vite-react", label: "Vite + React" },
+                    { value: "next", label: "Next.js" },
+                    { value: "astro", label: "Astro" },
+                    { value: "static", label: "Static HTML" },
+                  ]
+          }
+          onChange={(value) => setScaffold(value as PromoteScaffold)}
+        />
         <button
           type="button"
           className="btn small primary"
@@ -586,27 +587,26 @@ export function MobileDesignCanvas(props: {
             >
               +
             </button>
-            <select
+            <Select
               className="game-kit-select"
-              aria-label="Clip"
+              compact
+              ariaLabel="Clip"
               disabled={!html?.trim()}
               value={clip}
-              onChange={(event) => {
-                const next = event.target.value as (typeof ASSET_CORE_CLIPS)[number];
-                setClip(next);
+              options={ASSET_CORE_CLIPS.map((id) => ({
+                value: id,
+                label: formatAssetClipLabel(id),
+              }))}
+              onChange={(next) => {
+                const clipId = next as (typeof ASSET_CORE_CLIPS)[number];
+                setClip(clipId);
                 setAssetPaused(false);
                 frame.current?.contentWindow?.postMessage(
-                  { type: "locus-asset-play", clip: next },
+                  { type: "locus-asset-play", clip: clipId },
                   "*",
                 );
               }}
-            >
-              {ASSET_CORE_CLIPS.map((id) => (
-                <option key={id} value={id}>
-                  {formatAssetClipLabel(id)}
-                </option>
-              ))}
-            </select>
+            />
             <button
               type="button"
               className="btn small ghost"

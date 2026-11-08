@@ -89,6 +89,56 @@ describe("applySubscribe", () => {
     );
     expect(applySubscribe([], { kind: "timer", name: "x" }).output).toMatch(/delaySeconds or cron/);
     expect(applySubscribe([], { kind: "pull_request" }).output).toMatch(/pullUrl or pullNumber/);
+    expect(applySubscribe([], { kind: "linear_issue" }).output).toMatch(/issueId is required/);
+    expect(applySubscribe([], { kind: "grafana_alert" }).output).toMatch(
+      /alertFingerprint or issueId/,
+    );
+  });
+
+  it("subscribes to Linear and Grafana coordinates", () => {
+    const linear = applySubscribe(
+      [],
+      { kind: "linear_issue", issueId: "ENG-12" },
+      { id: "l1", createdAt: now.toISOString(), now },
+    );
+    expect(linear.subscriptions[0]).toMatchObject({
+      kind: "linear_issue",
+      issueId: "ENG-12",
+      title: "ENG-12",
+    });
+    const grafana = applySubscribe(
+      [],
+      { kind: "grafana_alert", alertFingerprint: "abc" },
+      { id: "g1", createdAt: now.toISOString(), now },
+    );
+    expect(grafana.subscriptions[0]).toMatchObject({
+      kind: "grafana_alert",
+      alertFingerprint: "abc",
+    });
+  });
+
+  it("parses Azure DevOps and Gitea pull URLs", () => {
+    const azure = applySubscribe(
+      [],
+      {
+        kind: "pull_request",
+        pullUrl: "https://dev.azure.com/org/proj/_git/app/pullrequest/9",
+      },
+      { id: "a1", createdAt: now.toISOString(), now },
+    );
+    expect(azure.subscriptions[0]).toMatchObject({
+      forge: "azuredevops",
+      pullNumber: 9,
+    });
+    const gitea = applySubscribe(
+      [],
+      { kind: "pull_request", pullUrl: "https://git.example.com/acme/app/pulls/3" },
+      { id: "g1", createdAt: now.toISOString(), now },
+    );
+    expect(gitea.subscriptions[0]).toMatchObject({
+      forge: "gitea",
+      pullNumber: 3,
+    });
   });
 
   it("fills a pull subscription from a URL or the bound session pull", () => {

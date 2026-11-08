@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GameEmpty } from "./GameEmpty";
 import { api } from "@/lib/api";
 import { Store, initialState } from "@/state/store";
+import { selectValue, setSelectValue } from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -96,10 +97,9 @@ describe("GameEmpty", () => {
     expect(
       host.querySelector('[aria-label="Agent runtime"] [aria-selected="true"]')?.textContent,
     ).toBe("Docker");
-    const kit = host.querySelector("[aria-label='Game kit']") as HTMLSelectElement;
+    expect(host.querySelector("[aria-label='Game kit']")).toBeTruthy();
     act(() => {
-      kit.value = "pixel-pack";
-      kit.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Game kit", "pixel-pack");
     });
     const arcade = [...host.querySelectorAll("button")].find((btn) =>
       btn.textContent?.includes("Arcade"),
@@ -155,9 +155,7 @@ describe("GameEmpty", () => {
       three!.click();
       seat!.click();
     });
-    expect((host.querySelector("[aria-label='Game kit']") as HTMLSelectElement).value).toBe(
-      "three-starter",
-    );
+    expect(selectValue(host, "Game kit")).toBe("three-starter");
     const remix = [...host.querySelectorAll("[aria-label='Remix a sentence'] button")].find(
       (btn) => btn.textContent === "Vegas match-3",
     ) as HTMLButtonElement | undefined;

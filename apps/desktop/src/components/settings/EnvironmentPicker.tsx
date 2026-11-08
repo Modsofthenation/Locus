@@ -13,6 +13,8 @@ import {
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/state/store";
+import { Select } from "@/components/layout/Select";
+import { InlineError } from "@/components/layout/Skeleton";
 
 export function EnvironmentPicker(props: {
   value: string;
@@ -78,32 +80,32 @@ export function EnvironmentPicker(props: {
   return (
     <div className="field env-picker">
       <label>Environment</label>
-      <select
-        aria-label="Named environment"
+      <Select
+        ariaLabel="Named environment"
         value={props.value}
-        onChange={(event) => {
-          const id = event.target.value;
+        options={[
+          {
+            value: "",
+            label: props.noneLabel ?? "None — pick runtime, recipe, and Where as usual",
+          },
+          ...items.map((env) => {
+            const worker = workers.find((row) => row.id === env.backendId);
+            const bits = [
+              env.name,
+              env.network ? formatNetworkJail(env.network) : "",
+              typeof env.maxUsd === "number" ? `$${env.maxUsd}` : "",
+              worker ? workerWhereLabel(worker) : "",
+            ].filter(Boolean);
+            return { value: env.id, label: bits.join(" · ") };
+          }),
+        ]}
+        onChange={(id) => {
           props.onChange(
             id,
             items.find((row) => row.id === id),
           );
         }}
-      >
-        <option value="">
-          {props.noneLabel ?? "None — pick runtime, recipe, and Where as usual"}
-        </option>
-        {items.map((env) => {
-          const worker = workers.find((row) => row.id === env.backendId);
-          return (
-            <option key={env.id} value={env.id}>
-              {env.name}
-              {env.network ? ` · ${formatNetworkJail(env.network)}` : ""}
-              {typeof env.maxUsd === "number" ? ` · $${env.maxUsd}` : ""}
-              {worker ? ` · ${workerWhereLabel(worker)}` : ""}
-            </option>
-          );
-        })}
-      </select>
+      />
       {props.value ? (
         <p className="hint">
           {(() => {
@@ -155,7 +157,7 @@ export function EnvironmentPicker(props: {
           Save as environment
         </button>
       )}
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineError message={error} /> : null}
     </div>
   );
 }

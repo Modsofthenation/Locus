@@ -1,6 +1,7 @@
 import type { Dispatch } from "react";
 import { parseProductMode, type LocusConfig, type ProductMode } from "@locus/shared";
-import type { Action } from "@/state/store";
+import type { Action, UiSection } from "@/state/store";
+import { moreRailSections, primaryRailSections } from "./railNav";
 
 export const PRODUCT_MODE_TRANSITION_MS = 360;
 
@@ -41,7 +42,7 @@ export function applyProductModeSideEffects(
     dispatch({ type: "select", id: null });
     // Messenger shell wants the computer column open by default.
     if (opts.vmCollapsed) dispatch({ type: "toggleVmPane" });
-    // Swarm has no icon rail — keep the teammate list visible.
+    // Keep the teammate list visible beside the icon rail.
     if (opts.sidebarCollapsed) dispatch({ type: "toggleSidebar" });
   }
 }
@@ -52,7 +53,12 @@ export function productModeFromConfig(
   return parseProductMode(config?.productMode);
 }
 
-/** Swarm messenger: Teammates, Teams, and Settings. */
+/** Swarm messenger: Teammates, Teams, More surfaces, and Settings. */
 export function swarmShellKeepsSection(section: string): boolean {
-  return section === "agents" || section === "project" || section === "settings";
+  if (section === "settings") return true;
+  const id = section as UiSection;
+  return (
+    (primaryRailSections("swarm") as readonly string[]).includes(id) ||
+    (moreRailSections("swarm") as readonly string[]).includes(id)
+  );
 }

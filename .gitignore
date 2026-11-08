@@ -1,4 +1,5 @@
 node_modules/
+images/agent/vendor/*.tar.gz
 dist/
 build/
 .turbo/
@@ -17,6 +18,9 @@ apps/server/dist/
 packages/*/dist/
 .idea/
 .vscode/
+playwright-report/
+blob-report/
+test-results/
 *.qcow2
 *.iso
 *.img

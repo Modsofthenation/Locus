@@ -22,7 +22,7 @@ export function sessionPlacement(session: { placement?: AgentPlacement }): Agent
 
 export function placementAllowsRuntime(placement: AgentPlacement, runtime: AgentRuntime): boolean {
   if (placement === "local") return true;
-  return runtime === "docker" || runtime === "host";
+  return runtime === "docker" || runtime === "host" || runtime === "vm";
 }
 
 export const DEFAULT_WORKER_PORT = 7421;

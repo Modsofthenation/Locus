@@ -13,6 +13,7 @@ import { swarmComputerStatus } from "@/lib/swarmPresence";
 import { useDeferredCollapse } from "@/lib/useDeferredCollapse";
 import { useStore } from "@/state/store";
 import { IconClock, IconClose, IconGear, IconPanelRight } from "@/components/layout/Icons";
+import { InlineError } from "@/components/layout/Skeleton";
 
 type ComputerMode = "status" | "preview" | "takeover";
 
@@ -200,7 +201,7 @@ export function SwarmComputerPanel(props: { screen: ReactNode }) {
             </button>
           )}
         </div>
-        {actionError ? <p className="error">{actionError}</p> : null}
+        {actionError ? <InlineError message={actionError} /> : null}
         {showScreen ? <div className="hub-computer-screen-body">{props.screen}</div> : null}
       </div>
 

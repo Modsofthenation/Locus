@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { useDialogFocus } from "@/lib/useDialogFocus";
+import { useState } from "react";
+import { Modal } from "@/components/layout/Modal";
 import type { AiProvider, LocusConfig } from "@locus/shared";
 import { DEFAULT_DOCKER_IMAGE, hasUsableKey, isLocalOpenAiBase } from "@locus/shared";
 import { api } from "@/lib/api";
@@ -7,6 +7,7 @@ import { loadLastAgent, pickProvider, saveLastAgent } from "@/lib/lastAgent";
 import { useStore } from "@/state/store";
 import { Mascot } from "@/components/layout/Mascot";
 import { PRODUCT_MODE_LABELS } from "@/lib/productMode";
+import { Select } from "@/components/layout/Select";
 import { QemuInstallStatus } from "./SettingsCards";
 
 export function SetupWizard() {
@@ -19,15 +20,6 @@ export function SetupWizard() {
   const [error, setError] = useState<string | null>(null);
   const [restartNote, setRestartNote] = useState<string | null>(null);
   const [productMode, setProductMode] = useState<"developer" | "swarm">("developer");
-
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogFocus(
-    Boolean(state.setupOpen && setup && config),
-    () => {
-      dispatch({ type: "setupOpen", open: false });
-    },
-    dialogRef,
-  );
 
   if (!state.setupOpen || !setup || !config) return null;
   const current = config;
@@ -146,77 +138,76 @@ export function SetupWizard() {
   const keyOptional = hasUsableKey("", provider?.baseUrl, provider?.kind);
 
   return (
-    <div className="modal-backdrop">
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="setup-wizard-title"
-        ref={dialogRef}
-        onClick={(e) => e.stopPropagation()}
-        style={{ width: 640 }}
-      >
-        <div className="setup-hero">
-          <Mascot pose="idle" size={48} />
-          <div>
-            <h2 id="setup-wizard-title">Set up Locus</h2>
-            <p className="scrim-note" style={{ marginTop: 0 }}>
-              Detected {hostLabel}. Add a provider key, then start chatting on this machine. Docker
-              and QEMU are optional if you want a container or a full guest desktop later.
-            </p>
-          </div>
+    <Modal
+      titleId="setup-wizard-title"
+      className="setup-wizard-modal"
+      closeOnBackdrop={false}
+      onClose={() => dispatch({ type: "setupOpen", open: false })}
+    >
+      <div className="setup-hero">
+        <Mascot pose="idle" size={48} />
+        <div>
+          <h2 id="setup-wizard-title">Set up Locus</h2>
+          <p className="scrim-note setup-hero-lead">
+            Detected {hostLabel}. Add a provider key, then start chatting on this machine. Docker
+            and QEMU are optional if you want a container or a full guest desktop later.
+          </p>
         </div>
+      </div>
+      <ol className="setup-list">
+        <li className={setup.hasProvider ? "ok" : "todo"}>
+          <strong>Provider</strong>
+          <span>
+            {setup.hasProvider
+              ? "An enabled provider can answer chat."
+              : "Paste an OpenCode Zen key for the free tier, or another provider key. Local servers such as Ollama, and CLI providers (Cursor CLI, Claude Code, Codex CLI, Kiro CLI), do not need a key."}
+          </span>
+          {!setup.hasProvider && (
+            <div className="setup-provider">
+              <Select
+                ariaLabel="Provider"
+                value={provider?.id ?? ""}
+                options={current.providers.map((p: AiProvider) => ({
+                  value: p.id,
+                  label: p.name,
+                }))}
+                onChange={(id) => {
+                  setProviderId(id);
+                  setApiKey("");
+                }}
+              />
+              <input
+                type="password"
+                placeholder={
+                  provider?.kind === "cursor-cli"
+                    ? "optional — uses agent login"
+                    : provider?.kind === "claude-code"
+                      ? "optional — uses claude login"
+                      : provider?.kind === "codex-cli"
+                        ? "optional — uses codex login"
+                        : provider?.kind === "kiro-cli"
+                          ? "optional — uses kiro-cli login"
+                          : isLocalOpenAiBase(provider?.baseUrl)
+                            ? "Optional for localhost"
+                            : "API key"
+                }
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+              />
+              <button
+                className="btn small primary"
+                disabled={busy !== null || (!apiKey.trim() && !keyOptional)}
+                onClick={() => void saveProvider()}
+              >
+                Save key
+              </button>
+            </div>
+          )}
+        </li>
+      </ol>
+      <details className="setup-later">
+        <summary>Set up Docker or a VM later</summary>
         <ol className="setup-list">
-          <li className={setup.hasProvider ? "ok" : "todo"}>
-            <strong>Provider</strong>
-            <span>
-              {setup.hasProvider
-                ? "An enabled provider can answer chat."
-                : "Paste an OpenCode Zen key for the free tier, or another provider key. Local servers such as Ollama, and CLI providers (Cursor CLI, Claude Code, Codex CLI, Kiro CLI), do not need a key."}
-            </span>
-            {!setup.hasProvider && (
-              <div className="setup-provider">
-                <select
-                  value={provider?.id ?? ""}
-                  onChange={(e) => {
-                    setProviderId(e.target.value);
-                    setApiKey("");
-                  }}
-                >
-                  {current.providers.map((p: AiProvider) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="password"
-                  placeholder={
-                    provider?.kind === "cursor-cli"
-                      ? "optional — uses agent login"
-                      : provider?.kind === "claude-code"
-                        ? "optional — uses claude login"
-                        : provider?.kind === "codex-cli"
-                          ? "optional — uses codex login"
-                          : provider?.kind === "kiro-cli"
-                            ? "optional — uses kiro-cli login"
-                            : isLocalOpenAiBase(provider?.baseUrl)
-                              ? "Optional for localhost"
-                              : "API key"
-                  }
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                />
-                <button
-                  className="btn small primary"
-                  disabled={busy !== null || (!apiKey.trim() && !keyOptional)}
-                  onClick={() => void saveProvider()}
-                >
-                  Save key
-                </button>
-              </div>
-            )}
-          </li>
           <li className={setup.dockerFound ? "ok" : "todo"}>
             <strong>Docker (recommended)</strong>
             <span>
@@ -279,65 +270,67 @@ export function SetupWizard() {
               </div>
             ) : null}
           </li>
-          <li className="ok">
-            <strong>How do you want to start?</strong>
-            <span>
-              {PRODUCT_MODE_LABELS.swarm} is teammate-first (avatars, Teams, Routines).{" "}
-              {PRODUCT_MODE_LABELS.developer} is the full control plane. You can switch anytime.
-            </span>
-            <div className="setup-provider" role="radiogroup" aria-label="Product mode">
-              <button
-                type="button"
-                className={`btn small${productMode === "swarm" ? " primary" : ""}`}
-                role="radio"
-                aria-checked={productMode === "swarm"}
-                data-testid="setup-mode-swarm"
-                onClick={() => setProductMode("swarm")}
-              >
-                {PRODUCT_MODE_LABELS.swarm}
-              </button>
-              <button
-                type="button"
-                className={`btn small${productMode === "developer" ? " primary" : ""}`}
-                role="radio"
-                aria-checked={productMode === "developer"}
-                data-testid="setup-mode-developer"
-                onClick={() => setProductMode("developer")}
-              >
-                {PRODUCT_MODE_LABELS.developer}
-              </button>
-            </div>
-          </li>
         </ol>
-        {restartNote && <p className="scrim-note">{restartNote}</p>}
-        {error && (
-          <p className="scrim-note" style={{ color: "var(--danger)" }}>
-            {error}
-          </p>
-        )}
-        <div className="modal-actions">
-          <button className="btn ghost" disabled={busy !== null} onClick={() => void finish(false)}>
-            Skip for now
+      </details>
+      <ol className="setup-list">
+        <li className="ok">
+          <strong>How do you want to start?</strong>
+          <span>
+            {PRODUCT_MODE_LABELS.swarm} is teammate-first (avatars, Teams, Routines).{" "}
+            {PRODUCT_MODE_LABELS.developer} is the full control plane. You can switch anytime.
+          </span>
+          <div className="setup-provider" role="radiogroup" aria-label="Product mode">
+            <button
+              type="button"
+              className={`btn small${productMode === "swarm" ? " primary" : ""}`}
+              role="radio"
+              aria-checked={productMode === "swarm"}
+              data-testid="setup-mode-swarm"
+              onClick={() => setProductMode("swarm")}
+            >
+              {PRODUCT_MODE_LABELS.swarm}
+            </button>
+            <button
+              type="button"
+              className={`btn small${productMode === "developer" ? " primary" : ""}`}
+              role="radio"
+              aria-checked={productMode === "developer"}
+              data-testid="setup-mode-developer"
+              onClick={() => setProductMode("developer")}
+            >
+              {PRODUCT_MODE_LABELS.developer}
+            </button>
+          </div>
+        </li>
+      </ol>
+      {restartNote && <p className="scrim-note">{restartNote}</p>}
+      {error && (
+        <p className="scrim-note" style={{ color: "var(--danger)" }}>
+          {error}
+        </p>
+      )}
+      <div className="modal-actions">
+        <button className="btn ghost" disabled={busy !== null} onClick={() => void finish(false)}>
+          Skip for now
+        </button>
+        {setup.dockerFound ? (
+          <button
+            className="btn primary"
+            disabled={busy !== null || !setup.ready}
+            onClick={() => void finish(true)}
+          >
+            Continue
           </button>
-          {setup.dockerFound ? (
-            <button
-              className="btn primary"
-              disabled={busy !== null || !setup.ready}
-              onClick={() => void finish(true)}
-            >
-              Continue
-            </button>
-          ) : (
-            <button
-              className="btn primary"
-              disabled={busy !== null || !setup.ready}
-              onClick={() => void finish(true, "host")}
-            >
-              Use Host instead
-            </button>
-          )}
-        </div>
+        ) : (
+          <button
+            className="btn primary"
+            disabled={busy !== null || !setup.ready}
+            onClick={() => void finish(true, "host")}
+          >
+            Use Host instead
+          </button>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }

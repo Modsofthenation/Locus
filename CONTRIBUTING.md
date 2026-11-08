@@ -28,7 +28,16 @@ npm run lint
 npm run format:check
 ```
 
-CI on `main` and pull requests runs those plus `npm run build --workspace=@locus/desktop`, a Docker image build, and `cd apps/android && ./gradlew assembleDebug`. When Docker is available, tests include a real container write/patch/commit eval. Installers are **Package Linux / macOS / Windows**; they also publish to a GitHub Release when you push a `v*` tag. **Actions → Package from main → Run workflow** builds all three platforms from current `main` and uploads artifacts without publishing a release. Only the Linux job sets `generate_release_notes: true` so the three parallel packagers do not concatenate the changelog.
+Visual regression (Chromium, Linux baselines in `apps/desktop/e2e`):
+
+```bash
+npx playwright install chromium
+npm run test:visual
+```
+
+After an intentional UI change, recapture screenshots with `npm run test:visual:update`. CI Linux is the source of truth. Harness-backed README shots (New agent, New automation) copy with `npm run capture:readme`. Playwright also runs axe on confirm, prompt, feedback, empty-hero, shortcuts, and chat, plus phone-sized shots of confirm / prompt / toast / feedback / shortcuts. Visual runs with `prefers-reduced-motion: reduce`.
+
+CI on `main` and pull requests runs those plus `npm run test:visual`, `npm run build --workspace=@locus/desktop`, a Docker image build, and `cd apps/android && ./gradlew assembleDebug`. When Docker is available, tests include a real container write/patch/commit eval. Installers are **Package Linux / macOS / Windows**; they also publish to a GitHub Release when you push a `v*` tag. **Actions → Package from main → Run workflow** builds all three platforms from current `main` and uploads artifacts without publishing a release. Only the Linux job sets `generate_release_notes: true` so the three parallel packagers do not concatenate the changelog.
 
 Please run those four checks before you open a PR. Target `main`.
 
@@ -39,8 +48,8 @@ First agent without Docker: Settings → Providers (Ollama needs no key) then Ne
 After merge to `main`:
 
 ```bash
-git tag v0.16.1
-git push origin v0.16.1
+git tag v0.17.0
+git push origin v0.17.0
 ```
 
 GitHub Releases are the distribution channel (`v*` tags). Pushing a `v*` tag publishes Linux, macOS, and Windows installers, then **Prune GitHub Releases** deletes older published releases so only the last three remain (git tags are kept). See [docs/public-release.md](docs/public-release.md) for listing settings this tree cannot change (visibility, vulnerability reporting, unsigned macOS/Windows). Keep the repository description as the README tagline and topics `ai-agents`, `qemu`, `docker`, `computer-use`, `electron`, `local-first`.

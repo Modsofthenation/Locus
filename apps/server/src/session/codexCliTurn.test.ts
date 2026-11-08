@@ -320,7 +320,7 @@ describe("codex CLI chat loop", () => {
     });
   });
 
-  it("rejects a VM runtime for Codex CLI", async () => {
+  it("creates a VM runtime session for Codex CLI", async () => {
     const dir = await mkdtemp(join(tmpdir(), "locus-codex-vm-"));
     cleanup.push(dir);
     const store = new JsonStore(dir);
@@ -330,16 +330,16 @@ describe("codex CLI chat loop", () => {
     codex.enabled = true;
     await store.saveConfig(config);
     const sessions = new SessionService(store, new MockHypervisor(dir), new Hub());
-    await expect(
-      sessions.create({
-        os: "ubuntu",
-        templateId: config.templates[0]!.id,
-        runtime: "vm",
-        providerId: codex.id,
-        model: "gpt-6-astra",
-        startVm: false,
-      }),
-    ).rejects.toThrow(/Docker or Host/);
+    const created = await sessions.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      runtime: "vm",
+      providerId: codex.id,
+      model: "gpt-6-astra",
+      startVm: false,
+    });
+    expect(created.runtime).toBe("vm");
+    expect(created.providerId).toBe(codex.id);
   });
 
   it("persists the canonical model when a legacy Codex session sends a turn", async () => {

@@ -6,6 +6,7 @@ import {
   type WorkspaceGitStash,
   type WorkspaceGitStatus,
 } from "@/lib/api";
+import { Select } from "@/components/layout/Select";
 
 export function WorkspaceGitPane({
   sessionId,
@@ -89,51 +90,45 @@ export function WorkspaceGitPane({
     <div className="workspace-git">
       <div className="workspace-git-branch-row">
         {dests.length > 1 ? (
-          <select
+          <Select
             className="workspace-git-select workspace-git-dest"
-            aria-label="Git repository"
+            compact
+            ariaLabel="Git repository"
             value={dest ?? dests[0]?.dest ?? ""}
-            onChange={(event) => {
-              const next = event.target.value;
+            options={dests.map((row) => ({
+              value: row.dest,
+              label: row.dest || row.name,
+            }))}
+            onChange={(next) => {
               if (!next || next === dest) return;
               onDestChange?.(next);
             }}
-          >
-            {dests.map((row) => (
-              <option key={row.dest} value={row.dest} title={row.url ?? row.name}>
-                {row.dest || row.name}
-              </option>
-            ))}
-          </select>
+          />
         ) : null}
         {branches.length ? (
-          <select
+          <Select
             className="workspace-git-select"
-            aria-label="Git branch"
+            compact
+            ariaLabel="Git branch"
             value={git.branch}
-            onChange={(event) => {
-              const branch = event.target.value;
+            options={[
+              ...(git.branch && !branches.includes(git.branch)
+                ? [{ value: git.branch, label: git.branch }]
+                : []),
+              ...branches.map((branch) => ({ value: branch, label: branch })),
+              ...remotes.map((branch) => ({
+                value: branch,
+                label: `origin/${branch}`,
+              })),
+            ]}
+            onChange={(branch) => {
               if (!branch || branch === git.branch) return;
               void api
                 .workspaceGitCheckout(sessionId, branch, false, ...destArg)
                 .then(onGit)
                 .catch((err) => catchGit(err, "Checkout failed"));
             }}
-          >
-            {git.branch && !branches.includes(git.branch) ? (
-              <option value={git.branch}>{git.branch}</option>
-            ) : null}
-            {branches.map((branch) => (
-              <option key={branch} value={branch}>
-                {branch}
-              </option>
-            ))}
-            {remotes.map((branch) => (
-              <option key={`remote-${branch}`} value={branch}>
-                origin/{branch}
-              </option>
-            ))}
-          </select>
+          />
         ) : git.branch ? (
           <p className="workspace-git-branch">{git.branch}</p>
         ) : null}
@@ -554,22 +549,27 @@ export function WorkspaceGitPane({
               <p className="hint">onto {onto || "upstream"}</p>
               {todos.map((todo, index) => (
                 <div key={todo.sha} className="workspace-git-rebase-row">
-                  <select
-                    aria-label={`Rebase action ${todo.sha.slice(0, 7)}`}
+                  <Select
+                    compact
+                    ariaLabel={`Rebase action ${todo.sha.slice(0, 7)}`}
                     value={todo.action}
-                    onChange={(event) => {
-                      const action = event.target.value as WorkspaceGitRebaseTodo["action"];
+                    options={[
+                      { value: "pick", label: "pick" },
+                      { value: "reword", label: "reword" },
+                      { value: "squash", label: "squash" },
+                      { value: "fixup", label: "fixup" },
+                      { value: "drop", label: "drop" },
+                    ]}
+                    onChange={(action) => {
                       setTodos((current) =>
-                        current.map((row, i) => (i === index ? { ...row, action } : row)),
+                        current.map((row, i) =>
+                          i === index
+                            ? { ...row, action: action as WorkspaceGitRebaseTodo["action"] }
+                            : row,
+                        ),
                       );
                     }}
-                  >
-                    <option value="pick">pick</option>
-                    <option value="reword">reword</option>
-                    <option value="squash">squash</option>
-                    <option value="fixup">fixup</option>
-                    <option value="drop">drop</option>
-                  </select>
+                  />
                   <span title={todo.sha}>{todo.message}</span>
                 </div>
               ))}

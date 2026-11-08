@@ -12,6 +12,7 @@ private advisory: https://github.com/Modsofthenation/Locus/security/advisories/n
 Local (CI also runs these, then builds `@locus/desktop`, `locus/agent:0.1`, and the Android debug APK):
 
 - [ ] `npm test`
+- [ ] `npm run test:visual` (or N/A if the desktop UI did not change)
 - [ ] `npm run typecheck`
 - [ ] `npm run lint`
 - [ ] `npm run format:check`

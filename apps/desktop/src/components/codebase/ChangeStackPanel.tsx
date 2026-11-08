@@ -15,6 +15,7 @@ import {
 } from "@locus/shared";
 import { PatchCard, type DiffLineRef } from "@/components/chat/PatchCard";
 import { SearchField } from "@/components/layout/SearchField";
+import { Select } from "@/components/layout/Select";
 import { MermaidDiagram } from "./MermaidDiagram";
 
 export function ChangeStackPanel(props: {
@@ -253,21 +254,20 @@ export function ChangeStackPanel(props: {
             {revisions.length ? (
               <label>
                 Snapshot
-                <select
-                  aria-label="Change stack snapshot"
-                  data-testid="pr-stack-revision"
+                <Select
+                  compact
+                  ariaLabel="Change stack snapshot"
+                  testId="pr-stack-revision"
                   value={viewingSha}
                   disabled={props.busy}
-                  onChange={(event) => props.onViewRevision?.(event.target.value)}
-                >
-                  {revisions.map((row) => (
-                    <option key={row.headSha} value={row.headSha}>
-                      {row.headSha.slice(0, 8)}
-                      {row.current ? " · current" : ""}
-                      {row.source === "heuristic+model" ? " · summaries" : ""}
-                    </option>
-                  ))}
-                </select>
+                  options={revisions.map((row) => ({
+                    value: row.headSha,
+                    label: `${row.headSha.slice(0, 8)}${row.current ? " · current" : ""}${
+                      row.source === "heuristic+model" ? " · summaries" : ""
+                    }`,
+                  }))}
+                  onChange={(value) => props.onViewRevision?.(value)}
+                />
               </label>
             ) : (
               <span className="hint">{stack.headSha.slice(0, 8)}</span>

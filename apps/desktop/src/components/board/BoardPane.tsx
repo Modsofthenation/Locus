@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { BoardCite, BoardDocument, BoardRunTarget } from "@locus/shared";
-import { useDialogFocus } from "@/lib/useDialogFocus";
+import { Modal } from "@/components/layout/Modal";
 import { api } from "@/lib/api";
 import { showNotice } from "@/lib/notice";
 import { useStore } from "@/state/store";
@@ -8,6 +8,7 @@ import { ChatPane } from "@/components/chat/ChatPane";
 import { IconChat, IconPanelRight } from "@/components/layout/Icons";
 import { WorkspaceBody } from "@/components/workspace/WorkspaceBody";
 import { useDeferredCollapse } from "@/lib/useDeferredCollapse";
+import { ErrorBanner, InlineError, Skeleton } from "@/components/layout/Skeleton";
 import { BoardCanvas } from "./BoardCanvas";
 import { BoardEmpty } from "./BoardEmpty";
 
@@ -91,14 +92,14 @@ export function BoardPane() {
   if (error) {
     return (
       <div className="empty">
-        <p className="error-text">{error}</p>
+        <ErrorBanner message={error} />
       </div>
     );
   }
   if (!cached) {
     return (
       <div className="empty">
-        <p>Loading board…</p>
+        <Skeleton lines={4} label="Loading board" />
       </div>
     );
   }
@@ -336,48 +337,36 @@ function BrainBriefDialog(props: {
   onClose: () => void;
   onApprove: () => void;
 }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogFocus(true, props.onClose, dialogRef);
   return (
-    <div className="modal-backdrop" onClick={props.onClose}>
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
+    <Modal label="Brain briefing" dialogTestId="brain-brief-dialog" onClose={props.onClose}>
+      <h2>Brain briefing for {props.draft.issue}</h2>
+      <p className="modal-lead">Edit, then Approve. Locus will not post until you do.</p>
+      {props.draft.busy && !props.draft.body ? (
+        <p className="hint">Drafting from the brain…</p>
+      ) : null}
+      <textarea
+        value={props.draft.body}
+        rows={12}
         aria-label="Brain briefing"
-        ref={dialogRef}
-        data-testid="brain-brief-dialog"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <h2>Brain briefing for {props.draft.issue}</h2>
-        <p className="modal-lead">Edit, then Approve. Locus will not post until you do.</p>
-        {props.draft.busy && !props.draft.body ? (
-          <p className="hint">Drafting from the brain…</p>
-        ) : null}
-        <textarea
-          value={props.draft.body}
-          rows={12}
-          aria-label="Brain briefing"
-          data-testid="brain-brief-text"
-          disabled={props.draft.busy && !props.draft.body}
-          onChange={(event) => props.onChange(event.target.value)}
-        />
-        {props.draft.error ? <p className="error">{props.draft.error}</p> : null}
-        <div className="row-actions">
-          <button type="button" className="btn" disabled={props.draft.busy} onClick={props.onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn primary"
-            data-testid="brain-brief-approve"
-            disabled={props.draft.busy || !props.draft.body.trim()}
-            onClick={props.onApprove}
-          >
-            Approve
-          </button>
-        </div>
+        data-testid="brain-brief-text"
+        disabled={props.draft.busy && !props.draft.body}
+        onChange={(event) => props.onChange(event.target.value)}
+      />
+      {props.draft.error ? <InlineError message={props.draft.error} /> : null}
+      <div className="row-actions">
+        <button type="button" className="btn" disabled={props.draft.busy} onClick={props.onClose}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn primary"
+          data-testid="brain-brief-approve"
+          disabled={props.draft.busy || !props.draft.body.trim()}
+          onClick={props.onApprove}
+        >
+          Approve
+        </button>
       </div>
-    </div>
+    </Modal>
   );
 }

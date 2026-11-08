@@ -1,5 +1,6 @@
 import { BOARD_SHAPE_GROUPS, boardShapePath, type BoardShapeKind } from "@locus/shared";
-import { type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
+import { useDialogFocus } from "@/lib/useDialogFocus";
 
 export function BoardShapeGlyph(props: { kind: BoardShapeKind; title?: string }) {
   return (
@@ -31,8 +32,16 @@ export function BoardShapePicker(props: {
   onPick: (kind: BoardShapeKind) => void;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(true, props.onClose, dialogRef);
   return (
-    <div className="board-shape-pop" role="dialog" aria-label="Shapes">
+    <div
+      className="board-shape-pop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Shapes"
+      ref={dialogRef}
+    >
       <div className="board-shape-pop-head">
         <p>Shapes</p>
         <button type="button" className="btn ghost small" onClick={props.onClose}>

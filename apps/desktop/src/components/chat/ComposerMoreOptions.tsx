@@ -1,5 +1,6 @@
 import type { NamedEnvironment, NetworkJail } from "@locus/shared";
 import { formatNetworkJail } from "@locus/shared";
+import { Select } from "@/components/layout/Select";
 
 export type ComposerMoreOptionsProps = {
   hostChat: boolean;
@@ -69,24 +70,21 @@ export function ComposerMoreOptions(props: ComposerMoreOptionsProps) {
         <div className="composer-more-cell">
           <span className="composer-more-label">Named environment</span>
           <div className="composer-more-field composer-more-env">
-            <select
-              aria-label="Named environment"
+            <Select
+              compact
+              ariaLabel="Named environment"
               value={props.namedEnvId}
-              onChange={(e) => {
-                const id = e.target.value;
+              options={[
+                { value: "", label: "Default" },
+                ...props.environments.map((env) => ({ value: env.id, label: env.name })),
+              ]}
+              onChange={(id) => {
                 props.onNamedEnvChange(
                   id,
                   props.environments.find((row) => row.id === id),
                 );
               }}
-            >
-              <option value="">Default</option>
-              {props.environments.map((env) => (
-                <option key={env.id} value={env.id}>
-                  {env.name}
-                </option>
-              ))}
-            </select>
+            />
             <span className="composer-more-env-label" aria-hidden>
               {envLabel}
             </span>

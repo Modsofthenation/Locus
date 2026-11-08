@@ -29,7 +29,9 @@ import { api } from "@/lib/api";
 import { loadLastAgent, pickProvider } from "@/lib/lastAgent";
 import { SECTION_FEATURE_HINTS } from "@/lib/discoverability";
 import { FeatureHintRow } from "@/components/layout/FeatureHint";
-import { Mascot } from "@/components/layout/Mascot";
+import { EmptyHero, EmptyHint } from "@/components/layout/EmptyHero";
+import { InlineError, Skeleton } from "@/components/layout/Skeleton";
+import { Select } from "@/components/layout/Select";
 import { openSettings, sectionQuery, useStore } from "@/state/store";
 
 const DEFAULT_QUERY = "logger.level:error";
@@ -355,7 +357,7 @@ export function GrafanaPane() {
     return (
       <div className="grafana-pane" data-testid="grafana-booting">
         <div className="grafana-body grafana-body-center">
-          <p className="muted">Loading Grafana…</p>
+          <Skeleton lines={4} label="Loading Grafana" />
         </div>
       </div>
     );
@@ -366,19 +368,20 @@ export function GrafanaPane() {
       <div className="grafana-pane grafana-empty">
         <div className="grafana-body grafana-body-center">
           <div className="empty-card">
-            <Mascot pose="rest" size={48} />
-            <h2>Grafana explorer</h2>
-            <p>
-              Open Grafana dashboards, query Elasticsearch logs, trace stack frames into linked
-              repos, and start an Ops loop agent.
-            </p>
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() => openSettings(dispatch, "integrations")}
-            >
-              Add Grafana
-            </button>
+            <EmptyHero
+              pose="rest"
+              title="Grafana explorer"
+              lead="Open Grafana dashboards, query Elasticsearch logs, trace stack frames into linked repos, and start an Ops loop agent."
+            />
+            <div className="empty-actions">
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => openSettings(dispatch, "integrations")}
+              >
+                Add Grafana
+              </button>
+            </div>
             {SECTION_FEATURE_HINTS.grafana ? (
               <FeatureHintRow hint={SECTION_FEATURE_HINTS.grafana} />
             ) : null}
@@ -395,7 +398,7 @@ export function GrafanaPane() {
           <section>
             <h3>Firing</h3>
             {alerts.length === 0 ? (
-              <p className="muted">No firing alerts.</p>
+              <EmptyHint title="No firing alerts." />
             ) : (
               <ul>
                 {alerts.map((row) => (
@@ -530,16 +533,18 @@ export function GrafanaPane() {
               <GrafanaCustomRange from={from} to={to} onApply={onApplyRange} />
               <label>
                 Refresh
-                <select
-                  aria-label="Refresh"
+                <Select
+                  compact
+                  ariaLabel="Refresh"
                   value={String(refreshMs)}
-                  onChange={(e) => setRefreshMs(Number(e.target.value))}
-                >
-                  <option value="0">Off</option>
-                  <option value="15000">15s</option>
-                  <option value="30000">30s</option>
-                  <option value="60000">1m</option>
-                </select>
+                  options={[
+                    { value: "0", label: "Off" },
+                    { value: "15000", label: "15s" },
+                    { value: "30000", label: "30s" },
+                    { value: "60000", label: "1m" },
+                  ]}
+                  onChange={(value) => setRefreshMs(Number(value))}
+                />
               </label>
               {dashboard?.url ? (
                 <a
@@ -568,14 +573,19 @@ export function GrafanaPane() {
               {status.datasources.length > 1 ? (
                 <label>
                   Datasource
-                  <select value={datasource} onChange={(e) => setDatasource(e.target.value)}>
-                    <option value="">Auto</option>
-                    {status.datasources.map((row) => (
-                      <option key={row.uid || row.name} value={row.name}>
-                        {row.name}
-                      </option>
-                    ))}
-                  </select>
+                  <Select
+                    compact
+                    ariaLabel="Datasource"
+                    value={datasource}
+                    options={[
+                      { value: "", label: "Auto" },
+                      ...status.datasources.map((row) => ({
+                        value: row.name,
+                        label: row.name,
+                      })),
+                    ]}
+                    onChange={setDatasource}
+                  />
                 </label>
               ) : null}
               <button type="submit" className="btn primary" disabled={busy === "query"}>
@@ -588,8 +598,8 @@ export function GrafanaPane() {
               ) : null}
             </form>
           )}
-          {status.error ? <p className="error">{status.error}</p> : null}
-          {error ? <p className="error">{error}</p> : null}
+          {status.error ? <InlineError message={status.error} /> : null}
+          {error ? <InlineError message={error} /> : null}
           {dashboardUid ? (
             <>
               <GrafanaVariables
@@ -697,7 +707,7 @@ export function GrafanaPane() {
                   {traceHop ? (
                     <div className="grafana-spans" data-testid="grafana-spans">
                       <h4>{traceHop.datasource ? `Trace · ${traceHop.datasource}` : "Trace"}</h4>
-                      {traceHop.error ? <p className="error">{traceHop.error}</p> : null}
+                      {traceHop.error ? <InlineError message={traceHop.error} /> : null}
                       {traceHop.spans.length ? (
                         <ol>
                           {traceHop.spans.slice(0, 12).map((span) => (
@@ -854,18 +864,16 @@ function GrafanaVariables({
             ) : row.multi ? (
               <GrafanaMultiVariable row={row} value={value} onChange={onChange} />
             ) : (
-              <select
-                aria-label={label}
+              <Select
+                compact
+                ariaLabel={label}
                 value={value}
-                onChange={(e) => onChange(row.name, e.target.value)}
-              >
-                {row.includeAll ? <option value="$__all">All</option> : null}
-                {row.options.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.text}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  ...(row.includeAll ? [{ value: "$__all", label: "All" }] : []),
+                  ...row.options.map((opt) => ({ value: opt.value, label: opt.text })),
+                ]}
+                onChange={(next) => onChange(row.name, next)}
+              />
             )}
           </div>
         );
@@ -953,16 +961,13 @@ function GrafanaDashboardSkeleton() {
       aria-label="Loading dashboard"
     >
       <div className="grafana-dash-skel-panel" style={{ gridColumn: "span 12", gridRow: "span 8" }}>
-        <span className="skeleton line" />
-        <span className="skeleton block" />
+        <Skeleton lines={2} />
       </div>
       <div className="grafana-dash-skel-panel" style={{ gridColumn: "span 12", gridRow: "span 8" }}>
-        <span className="skeleton line" />
-        <span className="skeleton block" />
+        <Skeleton lines={2} />
       </div>
       <div className="grafana-dash-skel-panel" style={{ gridColumn: "span 24", gridRow: "span 6" }}>
-        <span className="skeleton line" />
-        <span className="skeleton block" />
+        <Skeleton lines={2} />
       </div>
     </div>
   );
@@ -1074,7 +1079,7 @@ function GrafanaDashboardPanelBody({
   annotations: GrafanaAnnotation[];
   onOpenLink: (link: GrafanaRepoLink) => void;
 }) {
-  if (panel.error) return <p className="error">{panel.error}</p>;
+  if (panel.error) return <InlineError message={panel.error} />;
   if (panel.stat) {
     return (
       <p className="grafana-dash-stat">

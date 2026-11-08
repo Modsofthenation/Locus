@@ -168,6 +168,15 @@ describe("electron packaging", () => {
     expect(vite).toContain("../../packages/shared/src/index.ts");
   });
 
+  it("splits heavy shared canvas and tool modules out of the main Vite chunk", () => {
+    const vite = readFileSync(join(desktopRoot, "vite.config.ts"), "utf8");
+    expect(vite).toContain("codeSplitting");
+    expect(vite).toContain("shared-canvas");
+    expect(vite).toContain("shared-tools");
+    expect(vite).toContain("(?:game|asset|board|playwright)");
+    expect(vite).toContain("(?:tools|toolSchemas|recipes)");
+  });
+
   it("installs the Windows menu-bar input guard on the BrowserWindow", () => {
     const main = readFileSync(join(desktopRoot, "electron/main.cjs"), "utf8");
     expect(main).toContain('require("./windows-input.cjs")');

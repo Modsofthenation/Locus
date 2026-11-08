@@ -75,7 +75,7 @@ vi.mock("@/lib/api", () => ({
     rotateChromeExtension: vi.fn(),
     checkUpdates: vi.fn(async () => ({
       status: "unavailable",
-      current: "0.16.1",
+      current: "0.17.0",
       message: "No GitHub release found yet. Check for updates works after a v* tag is published.",
     })),
     refreshCursorCli: vi.fn(async () => ({ changed: false, models: [] })),
@@ -564,7 +564,7 @@ describe("Settings", () => {
     });
     const contrastCards = [...host!.querySelectorAll(".theme-card")];
     expect(contrastCards.map((el) => el.querySelector("h3")?.textContent)).toEqual([
-      "Signal",
+      "Contrast",
       "Beacon",
       "Ion",
       "Siren",
@@ -854,7 +854,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("Sentry");
     expect(host!.textContent).toContain("GitHub");
     const addMiro = [...host!.querySelectorAll("button")].find(
-      (el) => el.textContent === "Add Miro",
+      (el) => el.querySelector("strong")?.textContent === "Add Miro",
     );
     expect(addMiro).toBeTruthy();
     await act(async () => {
@@ -864,7 +864,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("miro_list");
     expect(host!.textContent).toContain("miro_export");
     const addConfluence = [...host!.querySelectorAll("button")].find(
-      (el) => el.textContent === "Add Confluence",
+      (el) => el.querySelector("strong")?.textContent === "Add Confluence",
     );
     expect(addConfluence).toBeTruthy();
     await act(async () => {
@@ -873,7 +873,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("confluence_search");
     expect(host!.textContent).toContain("confluence_comment");
     const addGrafana = [...host!.querySelectorAll("button")].find(
-      (el) => el.textContent === "Add Grafana",
+      (el) => el.querySelector("strong")?.textContent === "Add Grafana",
     );
     expect(addGrafana).toBeTruthy();
     await act(async () => {
@@ -882,7 +882,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("API key / service account token");
     expect(host!.textContent).toContain("grafana_query");
     const addIncident = [...host!.querySelectorAll("button")].find(
-      (el) => el.textContent === "Add incident.io",
+      (el) => el.querySelector("strong")?.textContent === "Add incident.io",
     );
     expect(addIncident).toBeTruthy();
     await act(async () => {
@@ -892,7 +892,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("incidentio_search");
     expect(host!.textContent).toContain("incidentio_create");
     const addLinear = [...host!.querySelectorAll("button")].find(
-      (el) => el.textContent === "Add Linear",
+      (el) => el.querySelector("strong")?.textContent === "Add Linear",
     );
     expect(addLinear).toBeTruthy();
     await act(async () => {
@@ -902,7 +902,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("linear_search");
     expect(host!.textContent).toContain("linear_create");
     const addAws = [...host!.querySelectorAll("button")].find(
-      (el) => el.textContent === "Add AWS IAM",
+      (el) => el.querySelector("strong")?.textContent === "Add AWS IAM",
     );
     expect(addAws).toBeTruthy();
     await act(async () => {
@@ -916,7 +916,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("aws_sts_identity");
     expect(host!.textContent).toContain("aws_iam_simulate");
     const addPortainer = [...host!.querySelectorAll("button")].find(
-      (el) => el.textContent === "Add Portainer",
+      (el) => el.querySelector("strong")?.textContent === "Add Portainer",
     );
     expect(addPortainer).toBeTruthy();
     await act(async () => {
@@ -926,7 +926,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("portainer_endpoints");
     expect(host!.textContent).toContain("portainer_container_action");
     const addFigma = [...host!.querySelectorAll("button")].find(
-      (el) => el.textContent === "Add Figma",
+      (el) => el.querySelector("strong")?.textContent === "Add Figma",
     );
     expect(addFigma).toBeTruthy();
     await act(async () => {
@@ -936,7 +936,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("figma_list");
     expect(host!.textContent).toContain("figma_comment");
     const addK8s = [...host!.querySelectorAll("button")].find(
-      (el) => el.textContent === "Add Kubernetes",
+      (el) => el.querySelector("strong")?.textContent === "Add Kubernetes",
     );
     expect(addK8s).toBeTruthy();
     await act(async () => {
@@ -947,7 +947,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("k8s_list");
     expect(host!.textContent).toContain("k8s_apply");
     const addSentry = [...host!.querySelectorAll("button")].find(
-      (el) => el.textContent === "Add Sentry",
+      (el) => el.querySelector("strong")?.textContent === "Add Sentry",
     );
     expect(addSentry).toBeTruthy();
     await act(async () => {
@@ -1563,7 +1563,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("Danger zone");
     expect(host!.textContent).toContain("/tmp");
     expect(host!.textContent).toContain("Autonomy");
-    expect(host!.textContent).toContain("Guided — ask for push, PR, MCP, plugins, and installs");
+    expect(host!.textContent).toContain("ask for push, PR, MCP, plugins, and installs");
     vi.spyOn(window, "confirm").mockReturnValueOnce(false);
     const button = [...host!.querySelectorAll("button")].find(
       (el) => el.textContent === "Reset all data",
@@ -1846,10 +1846,13 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("worker host");
     expect(host!.textContent).toContain("Steer interrupts");
     expect(host!.textContent).not.toContain("Add a key to enable this provider");
-    expect(host!.querySelector('select[aria-label="Fast"]')).toBeTruthy();
-    expect((host!.querySelector('select[aria-label="Fast"]') as HTMLSelectElement).value).toBe(
-      "off",
-    );
+    expect(host!.querySelector('[aria-label="Fast"]')).toBeTruthy();
+    expect(
+      host!
+        .querySelector('[aria-label="Fast"]')
+        ?.closest("[data-value]")
+        ?.getAttribute("data-value"),
+    ).toBe("off");
   });
 
   it("shows a Claude Code hint and optional key on the provider card", async () => {

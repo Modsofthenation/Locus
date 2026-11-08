@@ -19,6 +19,7 @@ import { useWorkspaceFullscreen } from "@/lib/useWorkspaceFullscreen";
 import { dockerRuntimeLabel } from "@/lib/workspaceTree";
 import { IconChevron, IconFolder, IconPanelRight } from "@/components/layout/Icons";
 import { MenuItem, OverflowMenu } from "@/components/layout/OverflowMenu";
+import { Select } from "@/components/layout/Select";
 import { ExpandableLog } from "@/components/chat/ExpandableLog";
 import { GuestTimeline, TimelinePreviewLayer } from "@/components/chat/GuestTimeline";
 import {
@@ -364,13 +365,15 @@ export function DockerWorkspace() {
         disabled={!vm || savingImage}
         onClick={() => {
           if (!sessionId) return;
-          const name = promptGoldenName(defaultGoldenName(session.title, "workspace"));
-          if (!name) return;
-          setSavingImage(true);
-          void api
-            .captureImage(sessionId, name)
-            .then(() => setLog((rows) => [...rows, `saved ${name}`].slice(-80)))
-            .finally(() => setSavingImage(false));
+          void (async () => {
+            const name = await promptGoldenName(defaultGoldenName(session.title, "workspace"));
+            if (!name) return;
+            setSavingImage(true);
+            void api
+              .captureImage(sessionId, name)
+              .then(() => setLog((rows) => [...rows, `saved ${name}`].slice(-80)))
+              .finally(() => setSavingImage(false));
+          })();
         }}
       >
         {savingImage ? "Saving image…" : "Save workspace image"}
@@ -433,12 +436,17 @@ export function DockerWorkspace() {
           {showingPreview ? (
             <>
               {preview.ports.length > 1 ? (
-                <select
+                <Select
                   className="preview-port"
-                  aria-label="Preview port"
-                  value={active?.port}
-                  onChange={(e) => {
-                    const port = Number(e.target.value);
+                  compact
+                  ariaLabel="Preview port"
+                  value={String(active?.port ?? "")}
+                  options={preview.ports.map((port) => ({
+                    value: String(port),
+                    label: `:${port}`,
+                  }))}
+                  onChange={(value) => {
+                    const port = Number(value);
                     if (!sessionId || !Number.isInteger(port)) return;
                     void api
                       .patchSession(sessionId, { preview: { port, path: active?.path } })
@@ -446,13 +454,7 @@ export function DockerWorkspace() {
                         dispatch({ type: "session", session: updated });
                       });
                   }}
-                >
-                  {preview.ports.map((port) => (
-                    <option key={port} value={port}>
-                      :{port}
-                    </option>
-                  ))}
-                </select>
+                />
               ) : null}
               <div className="viewport-toggle" role="group" aria-label="Viewport">
                 {VIEWPORTS.map((item) => (

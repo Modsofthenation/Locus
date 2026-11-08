@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 import { resolveAgentDefaults, loadLastAgent } from "@/lib/lastAgent";
 import { emptyPersonaDraft, personaFromDraft } from "@/lib/personaDraft";
 import { useStore } from "@/state/store";
+import { Select } from "@/components/layout/Select";
 
 function existingTeammateLabel(
   session: AgentSession,
@@ -194,20 +195,21 @@ export function TeamEditor(props: { project: ProjectDocument }) {
         <h3>Existing teammate</h3>
         <label>
           Teammate
-          <select
+          <Select
+            ariaLabel="Existing teammate"
             value={existingId}
-            aria-label="Existing teammate"
-            onChange={(event) => setExistingId(event.target.value)}
-          >
-            <option value="">
-              {existing.length ? "Choose a teammate" : "No teammates to add"}
-            </option>
-            {existing.map((session) => (
-              <option key={session.id} value={session.id}>
-                {existingTeammateLabel(session, props.project.id, state.projects)}
-              </option>
-            ))}
-          </select>
+            options={[
+              {
+                value: "",
+                label: existing.length ? "Choose a teammate" : "No teammates to add",
+              },
+              ...existing.map((session) => ({
+                value: session.id,
+                label: existingTeammateLabel(session, props.project.id, state.projects),
+              })),
+            ]}
+            onChange={setExistingId}
+          />
         </label>
         <button className="btn small" type="submit" disabled={memberBusy || !existingId}>
           {memberBusy ? "Adding…" : "Add to team"}
@@ -227,18 +229,15 @@ export function TeamEditor(props: { project: ProjectDocument }) {
         </label>
         <label>
           Role
-          <select
+          <Select
+            ariaLabel="Teammate role"
             value={role}
-            aria-label="Teammate role"
-            onChange={(event) => setRole(event.target.value)}
-          >
-            <option value="">Ask when we start</option>
-            {HUB_ROLE_PRESETS.map((preset) => (
-              <option key={preset} value={preset}>
-                {preset}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: "Ask when we start" },
+              ...HUB_ROLE_PRESETS.map((preset) => ({ value: preset, label: preset })),
+            ]}
+            onChange={setRole}
+          />
         </label>
         <label>
           Brief

@@ -3,6 +3,8 @@ import { useStore } from "@/state/store";
 import { pickCompareWinner } from "@/lib/compare";
 import { sessionNeedsYou } from "@/lib/mobileShell";
 import { api } from "@/lib/api";
+import { askAlert } from "@/lib/dialog";
+import { showUndoNotice } from "@/lib/notice";
 
 export function CompareBanner({ session }: { session: AgentSession }) {
   const { state, dispatch } = useStore();
@@ -12,11 +14,34 @@ export function CompareBanner({ session }: { session: AgentSession }) {
   async function keep(winner: AgentSession, losers: AgentSession[]) {
     try {
       const kept = await pickCompareWinner(winner, ...losers);
-      for (const loser of losers) {
+      const archived = losers.filter((row) => row.id !== winner.id);
+      for (const loser of archived) {
         dispatch({ type: "session", session: { ...loser, archived: true, compare: undefined } });
       }
       dispatch({ type: "session", session: kept });
       dispatch({ type: "select", id: kept.id });
+      if (archived.length) {
+        showUndoNotice(
+          archived.length === 1
+            ? `Archived ${archived[0]!.title}`
+            : `Archived ${archived.length} chats`,
+          () => {
+            void (async () => {
+              for (const loser of archived) {
+                try {
+                  const restored = await api.patchSession(loser.id, {
+                    archived: false,
+                    compare: loser.compare ?? null,
+                  });
+                  dispatch({ type: "session", session: restored });
+                } catch {
+                  dispatch({ type: "session", session: { ...loser, archived: false } });
+                }
+              }
+            })();
+          },
+        );
+      }
     } catch {
       /* stay in compare */
     }
@@ -54,7 +79,10 @@ export function CompareBanner({ session }: { session: AgentSession }) {
                 const text = rows
                   .map((row) => `## ${row.role} ${row.branch ?? ""}\n${row.diff || "(empty)"}`)
                   .join("\n\n");
-                window.alert(text.slice(0, 4000) || "No diffs yet");
+                void askAlert({
+                  title: "Worker diffs",
+                  body: text.slice(0, 4000) || "No diffs yet",
+                });
               });
             }}
           >
@@ -121,7 +149,10 @@ export function CompareBanner({ session }: { session: AgentSession }) {
               const text = rows
                 .map((row) => `## ${row.role} ${row.branch ?? ""}\n${row.diff || "(empty)"}`)
                 .join("\n\n");
-              window.alert(text.slice(0, 4000) || "No diffs yet");
+              void askAlert({
+                title: "Worker diffs",
+                body: text.slice(0, 4000) || "No diffs yet",
+              });
             });
           }}
         >
@@ -170,7 +201,10 @@ export function CompareBanner({ session }: { session: AgentSession }) {
             const text = rows
               .map((row) => `## ${row.role} ${row.branch ?? row.id}\n${row.diff || "(empty)"}`)
               .join("\n\n");
-            window.alert(text.slice(0, 4000) || "No diffs yet");
+            void askAlert({
+              title: "Worker diffs",
+              body: text.slice(0, 4000) || "No diffs yet",
+            });
           });
         }}
       >

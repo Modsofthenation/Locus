@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { resolveAgentDefaults } from "@/lib/lastAgent";
 import { useStore } from "@/state/store";
-import { Mascot } from "@/components/layout/Mascot";
+import { EmptyHero } from "@/components/layout/EmptyHero";
 import { IconPlus } from "@/components/layout/Icons";
 import { FeatureHintRow } from "@/components/layout/FeatureHint";
 import { SECTION_FEATURE_HINTS } from "@/lib/discoverability";
@@ -40,14 +40,10 @@ export function BoardEmpty() {
   return (
     <div className="empty design-start board-start">
       <div className="empty-card">
-        <div className="design-start-hero">
-          <Mascot pose="idle" size={72} />
-          <h2>Board</h2>
-          <p>
-            A local planning canvas. Stickies, frames, diagrams, live cards, and Locus on the canvas
-            — no guest.
-          </p>
-        </div>
+        <EmptyHero
+          title="Board"
+          lead="A local planning canvas. Stickies, frames, diagrams, live cards, and Locus on the canvas — no guest."
+        />
         {SECTION_FEATURE_HINTS.board ? <FeatureHintRow hint={SECTION_FEATURE_HINTS.board} /> : null}
         <div className="design-start-layout">
           <form

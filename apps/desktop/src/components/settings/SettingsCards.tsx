@@ -65,6 +65,9 @@ import {
 import { api, type HypervisorStatus } from "@/lib/api";
 import { CursorModelControls } from "./ModelPicker";
 import { IconChevron, IconLock } from "@/components/layout/Icons";
+import { Select } from "@/components/layout/Select";
+import { BusyButton, InlineError } from "@/components/layout/Skeleton";
+import { useDialogFocus } from "@/lib/useDialogFocus";
 
 export function isBuiltinProvider(provider: AiProvider): boolean {
   return BUILTIN_PROVIDERS.some((row) => row.kind === provider.kind && row.name === provider.name);
@@ -297,29 +300,25 @@ export function ProviderCard({
           <div className="field">
             <label>Default model</label>
             {p.models.length > 0 ? (
-              <select
+              <Select
+                ariaLabel="Default model"
                 value={
                   usesCursorModelIds(p)
                     ? cursorModelSelectValue(p.models, p.defaultModel)
                     : p.defaultModel
                 }
-                onChange={(e) =>
-                  onPatch({
-                    defaultModel: usesCursorModelIds(p)
-                      ? retargetCursorModel(p.defaultModel, e.target.value)
-                      : e.target.value,
-                  })
-                }
-              >
-                {(usesCursorModelIds(p)
+                options={(usesCursorModelIds(p)
                   ? cursorModelPickerIds([p.defaultModel, ...p.models])
                   : p.models
-                ).map((model) => (
-                  <option key={model} value={model}>
-                    {model}
-                  </option>
-                ))}
-              </select>
+                ).map((model) => ({ value: model, label: model }))}
+                onChange={(value) =>
+                  onPatch({
+                    defaultModel: usesCursorModelIds(p)
+                      ? retargetCursorModel(p.defaultModel, value)
+                      : value,
+                  })
+                }
+              />
             ) : (
               <input
                 value={p.defaultModel}
@@ -334,54 +333,58 @@ export function ProviderCard({
               onChange={(model) => onPatch({ defaultModel: model })}
             />
           ) : null}
-          <div className="grid-2">
-            <div className="field">
-              <label>Input $/1M</label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder={
-                  published?.inputUsdPerMillion != null
-                    ? String(published.inputUsdPerMillion)
-                    : "optional"
-                }
-                value={p.inputUsdPerMillion ?? ""}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  const n = raw === "" ? undefined : Number(raw);
-                  onPatch({
-                    inputUsdPerMillion: n != null && Number.isFinite(n) && n >= 0 ? n : undefined,
-                  });
-                }}
-              />
+          <details className="provider-advanced">
+            <summary>Prices and overrides</summary>
+            <div className="grid-2">
+              <div className="field">
+                <label>Input $/1M</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder={
+                    published?.inputUsdPerMillion != null
+                      ? String(published.inputUsdPerMillion)
+                      : "optional"
+                  }
+                  value={p.inputUsdPerMillion ?? ""}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const n = raw === "" ? undefined : Number(raw);
+                    onPatch({
+                      inputUsdPerMillion: n != null && Number.isFinite(n) && n >= 0 ? n : undefined,
+                    });
+                  }}
+                />
+              </div>
+              <div className="field">
+                <label>Output $/1M</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder={
+                    published?.outputUsdPerMillion != null
+                      ? String(published.outputUsdPerMillion)
+                      : "optional"
+                  }
+                  value={p.outputUsdPerMillion ?? ""}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const n = raw === "" ? undefined : Number(raw);
+                    onPatch({
+                      outputUsdPerMillion:
+                        n != null && Number.isFinite(n) && n >= 0 ? n : undefined,
+                    });
+                  }}
+                />
+              </div>
             </div>
-            <div className="field">
-              <label>Output $/1M</label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder={
-                  published?.outputUsdPerMillion != null
-                    ? String(published.outputUsdPerMillion)
-                    : "optional"
-                }
-                value={p.outputUsdPerMillion ?? ""}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  const n = raw === "" ? undefined : Number(raw);
-                  onPatch({
-                    outputUsdPerMillion: n != null && Number.isFinite(n) && n >= 0 ? n : undefined,
-                  });
-                }}
-              />
-            </div>
-          </div>
-          <p className="hint">
-            Leave blank to use approximate published per-model rates in the picker and spend
-            estimates. A value here overrides every model on this provider.
-          </p>
+            <p className="hint">
+              Leave blank to use approximate published per-model rates in the picker and spend
+              estimates. A value here overrides every model on this provider.
+            </p>
+          </details>
           <div className="provider-card-actions">
             <button type="button" className="btn small ghost" disabled={busy} onClick={onRefresh}>
               Refresh models
@@ -805,6 +808,8 @@ function DiskImageField({
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(open, () => setOpen(false), dialogRef);
 
   async function load(path?: string) {
     setBusy(true);
@@ -839,16 +844,23 @@ function DiskImageField({
           Browse
         </button>
         {onFetch ? (
-          <button type="button" className="btn small" disabled={fetching} onClick={onFetch}>
-            {fetching ? "Downloading…" : fetchLabel}
-          </button>
+          <BusyButton
+            className="btn small"
+            busy={fetching}
+            busyLabel="Downloading…"
+            onClick={onFetch}
+          >
+            {fetchLabel}
+          </BusyButton>
         ) : null}
       </div>
       {open ? (
         <div
           className="host-folder-picker"
           role="dialog"
+          aria-modal="true"
           aria-label={`Choose ${label.toLowerCase()}`}
+          ref={dialogRef}
         >
           <p className="host-folder-picker-path">{listing?.path ?? (busy ? "Listing…" : "")}</p>
           <div className="host-folder-picker-list">
@@ -874,7 +886,7 @@ function DiskImageField({
               </button>
             ))}
           </div>
-          {error ? <p className="hint">{error}</p> : null}
+          {error ? <InlineError message={error} /> : null}
           <div className="host-folder-picker-actions">
             <button type="button" className="btn ghost" onClick={() => setOpen(false)}>
               Cancel
@@ -1365,19 +1377,21 @@ export function McpServerCard({
           </div>
           <div className="field">
             <label>Runtime</label>
-            <select
+            <Select
+              ariaLabel="Runtime"
               value={server.runtime === "guest" ? "guest" : "host"}
               disabled={Boolean(server.url) || server.managed || hostLocked}
-              onChange={(e) =>
+              options={[
+                { value: "host", label: "Host (security exception)" },
+                { value: "guest", label: "Guest (Docker stdio)" },
+              ]}
+              onChange={(value) =>
                 onPatch((row) => ({
                   ...row,
-                  runtime: e.target.value === "guest" ? "guest" : "host",
+                  runtime: value === "guest" ? "guest" : "host",
                 }))
               }
-            >
-              <option value="host">Host (security exception)</option>
-              <option value="guest">Guest (Docker stdio)</option>
-            </select>
+            />
           </div>
           <label className="hint check">
             <input
@@ -1944,10 +1958,15 @@ export function IntegrationCard({
             </div>
             <div className="field">
               <label>Service</label>
-              <select
+              <Select
+                ariaLabel="Service"
                 value={account.kind}
-                onChange={(e) => {
-                  const kind = e.target.value as IntegrationKind;
+                options={INTEGRATION_KINDS.map((kind) => ({
+                  value: kind,
+                  label: integrationLabel(kind),
+                }))}
+                onChange={(value) => {
+                  const kind = value as IntegrationKind;
                   if (!isIntegrationKind(kind)) return;
                   onPatch((row) => ({
                     ...row,
@@ -1956,13 +1975,7 @@ export function IntegrationCard({
                     name: row.name || integrationLabel(kind),
                   }));
                 }}
-              >
-                {INTEGRATION_KINDS.map((kind) => (
-                  <option key={kind} value={kind}>
-                    {integrationLabel(kind)}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
           </div>
           <div className="field">
@@ -2559,23 +2572,27 @@ export function MachineInventory({
                   Open
                 </button>
                 {live ? (
-                  <button
+                  <BusyButton
                     type="button"
                     className="btn small"
-                    disabled={!session || busyId === session.id}
+                    busy={busyId === session?.id}
+                    busyLabel="Stopping…"
+                    disabled={!session}
                     onClick={() => session && onStop(session.id)}
                   >
-                    {busyId === session?.id ? "Stopping…" : "Stop"}
-                  </button>
+                    Stop
+                  </BusyButton>
                 ) : (
-                  <button
+                  <BusyButton
                     type="button"
                     className="btn small primary"
-                    disabled={!session || starting || busyId === session.id}
+                    busy={busyId === session?.id}
+                    busyLabel="Starting…"
+                    disabled={!session || starting}
                     onClick={() => session && onStart(session.id)}
                   >
-                    {busyId === session?.id ? "Starting…" : "Start"}
-                  </button>
+                    Start
+                  </BusyButton>
                 )}
               </span>
             </div>

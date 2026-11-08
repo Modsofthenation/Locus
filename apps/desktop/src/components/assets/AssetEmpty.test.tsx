@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AssetEmpty } from "./AssetEmpty";
 import { api } from "@/lib/api";
 import { Store, initialState } from "@/state/store";
+import { selectValue, setSelectValue } from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -95,10 +96,9 @@ describe("AssetEmpty", () => {
     expect(host.textContent).toContain("Printability");
     expect(host.querySelector("[aria-label='Asset kit']")).toBeTruthy();
     expect(host.textContent).toContain("Sprite pack");
-    const kit = host.querySelector("[aria-label='Asset kit']") as HTMLSelectElement;
+    expect(host.querySelector("[aria-label='Asset kit']")).toBeTruthy();
     act(() => {
-      kit.value = "rig-kit";
-      kit.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Asset kit", "rig-kit");
     });
     const starter = [...host.querySelectorAll("button")].find((btn) =>
       btn.textContent?.includes("Image to 3D"),
@@ -193,13 +193,12 @@ describe("AssetEmpty", () => {
         </Store.Provider>,
       );
     });
-    const picker = host.querySelector("[aria-label='Asset style']") as HTMLSelectElement;
-    expect(picker).toBeTruthy();
-    expect(picker.textContent).toContain("Clay hero");
+    expect(host.querySelector("[aria-label='Asset style']")).toBeTruthy();
+    expect(host.textContent).toContain("Clay hero");
     act(() => {
-      picker.value = "st1";
-      picker.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Asset style", "st1");
     });
+    expect(selectValue(host, "Asset style")).toBe("st1");
     const starter = [...host.querySelectorAll("button")].find((btn) =>
       btn.textContent?.includes("Image to 3D"),
     );

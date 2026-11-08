@@ -126,6 +126,24 @@ export function integrationLabel(kind: IntegrationKind): string {
   return "Slack";
 }
 
+export function integrationBlurb(kind: IntegrationKind): string {
+  if (kind === "jira") return "Search, create, and update issues";
+  if (kind === "confluence") return "Find and edit pages";
+  if (kind === "linear") return "Issues, comments, and updates";
+  if (kind === "grafana") return "Dashboards, logs, and investigate";
+  if (kind === "sentry") return "Errors, events, and issue status";
+  if (kind === "miro") return "Copy boards in and out";
+  if (kind === "figma") return "Read files and comment";
+  if (kind === "incidentio") return "Incidents and follow-ups";
+  if (kind === "aws") return "IAM and STS identity";
+  if (kind === "portainer") return "Containers and stacks";
+  if (kind === "gmail") return "Search and send mail";
+  if (kind === "gcal") return "List and create events";
+  if (kind === "gdrive") return "List and upload files";
+  if (kind === "kubernetes") return "List, logs, apply, and scale";
+  return "Read as you · post as you or Locus";
+}
+
 export function isLoopbackIntegrationUrl(baseUrl: string): boolean {
   try {
     const host = new URL(baseUrl).hostname.toLowerCase();

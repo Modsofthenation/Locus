@@ -102,7 +102,7 @@ describe("runHostCliTurn", () => {
     expect(append.mock.calls[0]?.[0]).toMatch(/Claude Code provider is not configured/);
   });
 
-  it("refuses a VM workspace", async () => {
+  it("refuses a VM workspace without SSH", async () => {
     const append = vi.fn();
     const result = await runHostCliTurn(
       ports({
@@ -128,7 +128,54 @@ describe("runHostCliTurn", () => {
       },
     );
     expect(result).toBe("");
-    expect(append.mock.calls[0]?.[0]).toMatch(/Docker or Host workspace/);
+    expect(append.mock.calls[0]?.[0]).toMatch(/running Linux guest with SSH/);
+  });
+
+  it("spawns Claude Code over SSH on a Linux VM", async () => {
+    const spawnOverSsh = vi.fn(() => ({
+      lines: (async function* () {
+        yield JSON.stringify({ type: "system", subtype: "init", session_id: "vm-cli" });
+        yield JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "hi from vm" }] },
+        });
+        yield JSON.stringify({ type: "result", subtype: "success", result: "hi from vm" });
+      })(),
+      wait: async () => ({ code: 0, stderr: "" }),
+      kill: () => undefined,
+    }));
+    const written: string[] = [];
+    const result = await runHostCliTurn(
+      ports({
+        require: async () => session({ runtime: "vm", providerId: "claude" }),
+        loadConfig: async () =>
+          ({
+            providers: [{ id: "claude", kind: "claude-code", enabled: true }],
+            integrations: [],
+            advanced: { bindPort: 7420 },
+          }) as unknown as LocusConfig,
+        guestSsh: async () => ({ host: "127.0.0.1", port: 2222, username: "locus" }),
+        spawnOverSsh,
+        writeWorkspace: async (_id, rel) => {
+          written.push(rel);
+        },
+        claudeCodeSpawner: () => {
+          throw new Error("must not spawn on the host");
+        },
+      }),
+      {
+        sessionId: "s1",
+        userText: "hi",
+        abort: new AbortController(),
+        turnId: "t1",
+        planTurn: false,
+        stop: () => false,
+        kind: "claude",
+      },
+    );
+    expect(spawnOverSsh).toHaveBeenCalled();
+    expect(written).toContain(".mcp.json");
+    expect(result).toBeTruthy();
   });
 
   it("appends a missing Kiro CLI provider note and stops", async () => {
