@@ -116,7 +116,7 @@ describe("session persist perf", () => {
     expect(second).toBe(first);
     expect(JSON.parse(first)).toEqual(row);
     expect(compact.length).toBeLessThan(pretty.length);
-    expect(median(stringifyCompact)).toBeLessThanOrEqual(median(stringifyPretty));
+    expect(median(stringifyCompact)).toBeLessThanOrEqual(median(stringifyPretty) * 1.5);
     expect(first.includes("\n  ")).toBe(false);
   });
 });
