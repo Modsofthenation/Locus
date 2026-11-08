@@ -10,6 +10,7 @@ import type {
   NetworkJail,
   VmInstance,
   VmLifecycle,
+  VmTemplate,
 } from "@locus/shared";
 import {
   dockerIdMatch,
@@ -60,9 +61,13 @@ export interface CreateContainerRequest {
   allowHosts?: string[];
   env?: Record<string, string>;
   /** Worker host runtime: skip Docker and use a folder on the worker. */
-  runtime?: "docker" | "host";
+  runtime?: "docker" | "host" | "vm";
   /** Absolute folder on the worker host. Empty means `host-workspaces/<sessionId>`. */
   hostDir?: string;
+  /** Worker QEMU: full template from the control plane (isoPath resolved on the worker). */
+  template?: VmTemplate;
+  /** Worker QEMU: optional golden overlay path on the worker. */
+  imagePath?: string;
 }
 
 export type ImageBuildListener = (id: string, progress: ImageBuildProgress) => void;
@@ -210,6 +215,9 @@ function locusContainerName(id: string): string {
 function assertNotHostRuntime(req: CreateContainerRequest): void {
   if (req.runtime === "host") {
     throw new Error("Host agents do not have a VM or container.");
+  }
+  if (req.runtime === "vm") {
+    throw new Error("VM guests use the QEMU hypervisor, not Docker.");
   }
 }
 
@@ -1084,11 +1092,33 @@ export class DockerCliEngine extends EventEmitter implements DockerEngine {
   }
 }
 
+export const CONTAINER_ENGINE_CANDIDATES = ["docker", "podman", "nerdctl"] as const;
+
+export async function resolveContainerEngine(
+  runner: CommandRunner,
+  preferred?: string,
+): Promise<string | null> {
+  const fromEnv =
+    preferred?.trim() ||
+    process.env.LOCUS_CONTAINER_ENGINE?.trim() ||
+    process.env.LOCUS_DOCKER?.trim() ||
+    "";
+  const names = fromEnv
+    ? [fromEnv, ...CONTAINER_ENGINE_CANDIDATES.filter((name) => name !== fromEnv)]
+    : [...CONTAINER_ENGINE_CANDIDATES];
+  for (const name of names) {
+    const found = await runner.which(name);
+    if (found) return found;
+  }
+  return null;
+}
+
 export async function createDockerEngine(
   dataDir: string,
   runner: CommandRunner = nodeRunner,
+  preferred?: string,
 ): Promise<DockerEngine> {
-  const dockerBin = await runner.which("docker");
+  const dockerBin = await resolveContainerEngine(runner, preferred);
   if (!dockerBin) return new MockDockerEngine(dataDir);
   return new DockerCliEngine(dataDir, runner, dockerBin);
 }

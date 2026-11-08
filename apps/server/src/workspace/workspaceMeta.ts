@@ -5,7 +5,8 @@ import {
   memoriesForRepo,
   mergeMemoryPrompts,
   normalizeMemories,
-  parseLocusEnvironment,
+  parseJsonc,
+  parseWorkspaceEnvironment,
   parseSkillMarkdown,
   type AgentSkill,
   type LocusEnvironment,
@@ -40,11 +41,13 @@ export async function loadWorkspaceEnvironment(
   for (const rel of [
     join(".locus", "environment.json"),
     join(".cursor", "environment.json"),
+    join(".devcontainer", "devcontainer.json"),
+    ".devcontainer.json",
     "environment.json",
   ]) {
     try {
-      const env = parseLocusEnvironment(
-        JSON.parse(await readFile(join(workspaceRoot, rel), "utf8")),
+      const env = parseWorkspaceEnvironment(
+        parseJsonc(await readFile(join(workspaceRoot, rel), "utf8")),
       );
       if (env) return env;
     } catch {

@@ -6,13 +6,7 @@ import type {
   SetupStatus,
   SlackStatus,
 } from "@locus/shared";
-import {
-  comparePeer,
-  isIdeSession,
-  lastUserPrompt,
-  setupHasRemainingTodos,
-  setupTodos,
-} from "@locus/shared";
+import { comparePeer, lastUserPrompt, setupHasRemainingTodos, setupTodos } from "@locus/shared";
 import type { UiSection } from "@/state/store";
 import type { SettingsTab } from "@/lib/settingsNav";
 import type { PaletteGroup, PaletteItem } from "@/lib/palette";
@@ -395,7 +389,7 @@ export function orderPaletteForBrowse(
   for (const id of tryIds) {
     const item = byId.get(id);
     if (!item) continue;
-    tryItems.push({ ...item, group: "Try next" });
+    tryItems.push({ ...item, group: "Recents" });
   }
   if (!tryItems.length) return items;
   const used = new Set(tryItems.map((item) => item.id));
@@ -416,7 +410,7 @@ export function chatNudgeForSession(input: {
     typeof dismissedCheck === "function" ? dismissedCheck : (id: string) => dismissedCheck.has(id);
 
   const assistantTurns = session.messages.filter((m) => m.role === "assistant").length;
-  if (assistantTurns < 1) return null;
+  if (assistantTurns < 2) return null;
 
   if (
     !dismissed("compare") &&
@@ -426,27 +420,8 @@ export function chatNudgeForSession(input: {
   ) {
     return {
       id: "compare",
-      text: "Compare models — fork and replay the last prompt on another model.",
+      text: "Try the same prompt on another model.",
       actionLabel: "Compare",
-    };
-  }
-
-  if (!dismissed("automation") && !input.hasAutomations && !session.automationId) {
-    return {
-      id: "automation",
-      text: "Run this prompt on a schedule or webhook with Automations.",
-      actionLabel: "Automations",
-    };
-  }
-
-  const toolWrites = session.messages.filter(
-    (m) => m.role === "tool" && /apply_patch|write_file|edit/i.test(m.content ?? ""),
-  ).length;
-  if (!dismissed("ide") && toolWrites >= 2 && !isIdeSession(session)) {
-    return {
-      id: "ide",
-      text: "Open the same folder in IDE for git, search, and debug.",
-      actionLabel: "Open IDE",
     };
   }
 

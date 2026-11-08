@@ -11,6 +11,7 @@ import { api } from "@/lib/api";
 import { clearIssueCaches, rememberIssueList } from "@/lib/issueCache";
 import { clearPullCaches, rememberPullList } from "@/lib/pullCache";
 import { Store, initialState, type Action } from "@/state/store";
+import { selectOptionValues, setSelectValue } from "@/lib/selectControl";
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../index.css"), "utf8");
 
@@ -395,7 +396,9 @@ describe("CodebasePane", () => {
     render();
     expect(host.textContent).toContain("Link a repository");
     expect(host.textContent).toContain("Import from Git");
-    expect(host.textContent).toContain("GitHub, GitLab, and Bitbucket");
+    expect(host.textContent).toContain(
+      "Catalog a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps repo",
+    );
     expect(host.textContent).not.toContain("no repository linked");
     expect(host.querySelector(".codebase-pane > .codebase-head")).toBeNull();
     expect(host.querySelector(".codebase-empty")).toBeTruthy();
@@ -463,15 +466,13 @@ describe("CodebasePane", () => {
     const search = host.querySelector("[aria-label='Search repositories']") as HTMLInputElement;
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(search, "local");
+      setter?.call(search, "locus");
       search.dispatchEvent(new Event("input", { bubbles: true }));
     });
     expect(host.querySelector("[aria-label='Modsofthenation/Locus']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Modsofthenation/docs-site']")).toBeNull();
     act(() => {
-      (
-        host.querySelector("[aria-label='Modsofthenation/Locus']") as HTMLInputElement
-      ).click();
+      (host.querySelector("[aria-label='Modsofthenation/Locus']") as HTMLInputElement).click();
     });
     await act(async () => {
       [...host.querySelectorAll("button")]
@@ -1443,8 +1444,7 @@ describe("CodebasePane", () => {
       (tab as HTMLButtonElement).click();
       await Promise.resolve();
     });
-    const filter = host.querySelector(".pr-inbox-filter") as HTMLSelectElement;
-    expect([...filter.options].map((opt) => opt.value)).toEqual(["open", "draft", "all"]);
+    expect(selectOptionValues(host, "Pull request filter")).toEqual(["open", "draft", "all"]);
     expect(host.querySelectorAll(".pr-inbox-item")).toHaveLength(2);
     expect(host.textContent).toContain("1 draft");
     expect(
@@ -1452,8 +1452,7 @@ describe("CodebasePane", () => {
     ).toBe(true);
 
     await act(async () => {
-      filter.value = "draft";
-      filter.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Pull request filter", "draft");
       await Promise.resolve();
     });
     expect(api.repoPulls).toHaveBeenCalledWith("r1", "draft");
@@ -1986,7 +1985,7 @@ describe("CodebasePane", () => {
     });
     expect(host.querySelector(".pr-inbox-item")).toBeTruthy();
     const expand = host.querySelector(
-      '.pr-detail-head button[title="Open diff full screen"]',
+      '.pr-detail-head button[aria-label="Open diff full screen"]',
     ) as HTMLButtonElement;
     expect(expand).toBeTruthy();
     act(() => {
@@ -2512,11 +2511,9 @@ describe("CodebasePane", () => {
     expect(host.querySelector(".pr-stack")?.classList.contains("has-diagram")).toBe(false);
     expect(host.querySelector(".pr-stack-diagram-caption")?.textContent).toMatch(/Call flow/);
     expect(host.querySelector(".pr-stack-range-summary")?.textContent).toMatch(/Add currency/);
-    const select = host.querySelector("[data-testid='pr-stack-revision']") as HTMLSelectElement;
-    expect(select).toBeTruthy();
+    expect(host.querySelector("[data-testid='pr-stack-revision']")).toBeTruthy();
     await act(async () => {
-      select.value = "deadbeefdead";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Change stack snapshot", "deadbeefdead");
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -2568,11 +2565,9 @@ describe("CodebasePane", () => {
     expect(host.querySelector(".pr-inbox-item.active")?.textContent).toContain("Login 500");
     expect(host.textContent).toContain("stack overflow");
     expect(host.textContent).toContain("repro on main");
-    const filter = host.querySelector(".pr-inbox-filter") as HTMLSelectElement;
-    expect([...filter.options].map((opt) => opt.value)).toEqual(["open", "closed", "all"]);
+    expect(selectOptionValues(host, "Issue filter")).toEqual(["open", "closed", "all"]);
     await act(async () => {
-      filter.value = "closed";
-      filter.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Issue filter", "closed");
       await Promise.resolve();
     });
     expect(api.repoIssues).toHaveBeenCalledWith("r1", "closed");

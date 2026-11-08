@@ -140,6 +140,7 @@ describe("HostWorkspace", () => {
   it("opens the host Files editor", async () => {
     render({
       ...initialState,
+      vmCollapsed: false,
       selectedId: session.id,
       sessions: [session],
     });
@@ -156,19 +157,19 @@ describe("HostWorkspace", () => {
     expect(host.querySelector('[title="Collapse files"]')).toBeTruthy();
     const fsBtn = host.querySelector('[data-testid="workspace-fullscreen"]') as HTMLButtonElement;
     expect(fsBtn).toBeTruthy();
-    expect(fsBtn.getAttribute("title")).toBe("Full screen files");
+    expect(fsBtn.getAttribute("aria-label")).toBe("Full screen files");
     await act(async () => {
       fsBtn.click();
     });
     expect(host.querySelector(".vm-pane.workspace-fs")).toBeTruthy();
-    expect(fsBtn.getAttribute("title")).toBe("Exit full screen");
+    expect(fsBtn.getAttribute("aria-label")).toBe("Exit full screen");
     expect(fsBtn.getAttribute("aria-pressed")).toBe("true");
     expect(host.querySelector('[title="Collapse files"]')).toBeNull();
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     });
     expect(host.querySelector(".vm-pane.workspace-fs")).toBeNull();
-    expect(fsBtn.getAttribute("title")).toBe("Full screen files");
+    expect(fsBtn.getAttribute("aria-label")).toBe("Full screen files");
   });
 
   it("keeps the editor open in the IDE section and hides the files collapse control", async () => {
@@ -260,20 +261,32 @@ describe("HostWorkspace", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    const preview = [...host.querySelectorAll("button")].find((btn) =>
+    const more = host.querySelector(".host-workspace-more summary") as HTMLElement;
+    expect(more).toBeTruthy();
+    await act(async () => {
+      more.click();
+      await Promise.resolve();
+    });
+    const preview = [...host.querySelectorAll(".menu-item")].find((btn) =>
       btn.textContent?.startsWith("Preview"),
-    );
+    ) as HTMLElement | undefined;
     expect(preview).toBeTruthy();
     await act(async () => {
       preview!.click();
       await Promise.resolve();
     });
-    const select = host.querySelector('[aria-label="Preview port"]') as HTMLSelectElement;
+    const select = host.querySelector('[aria-label="Preview port"]') as HTMLElement;
     expect(select).toBeTruthy();
-    expect(select.value).toBe("3000");
+    expect(select.closest("[data-value]")?.getAttribute("data-value")).toBe("3000");
     await act(async () => {
-      select.value = "5173";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      select.click();
+      await Promise.resolve();
+    });
+    const next = [...host.querySelectorAll(".menu-item")].find(
+      (btn) => btn.getAttribute("data-value") === "5173",
+    ) as HTMLElement | undefined;
+    await act(async () => {
+      next?.click();
       await Promise.resolve();
     });
     expect(api.patchSession).toHaveBeenCalledWith("s1", { preview: { port: 5173, path: "/" } });

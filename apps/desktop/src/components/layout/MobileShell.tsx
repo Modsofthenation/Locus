@@ -95,7 +95,6 @@ import { screenshotSrc } from "@/components/chat/GuestTimeline";
 import { BrowserPane } from "@/components/guest/BrowserPane";
 import {
   IconAgents,
-  IconChevron,
   IconGear,
   IconGlobe,
   IconHash,
@@ -109,9 +108,12 @@ import {
   IconStop,
 } from "./Icons";
 import { MenuItem, OverflowMenu } from "./OverflowMenu";
+import { Select } from "./Select";
 import { MobileFitPane } from "./MobileFitPane";
 import { observePinThreadToLatest } from "@/lib/threadScroll";
 import { visitMarkerId } from "@/lib/chatNewMarker";
+import { askConfirm } from "@/lib/dialog";
+import { showNotice } from "@/lib/notice";
 import { PatchCard, ToolPatch } from "@/components/chat/PatchCard";
 import { CloneProgressCard, ImageBuildCard } from "@/components/chat/CloneProgressCard";
 import { SubagentCard } from "@/components/chat/SubagentCard";
@@ -958,7 +960,7 @@ function MobileMore(props: {
               props.onOpenAgent(result.sessionId);
             },
             (err: unknown) => {
-              window.alert(err instanceof Error ? err.message : "Could not open project");
+              showNotice(err instanceof Error ? err.message : "Could not open project");
             },
           );
         }}
@@ -1030,29 +1032,29 @@ function MobileMore(props: {
         <label className="mobile-setting-row">
           <span>Theme</span>
           <span className="mobile-setting-value">
-            <select value={theme} onChange={(event) => void pickTheme(event.target.value)}>
-              {THEME_OPTIONS.map((opt) => (
-                <option key={opt.id} value={opt.id}>
-                  {opt.name}
-                </option>
-              ))}
-            </select>
-            <IconChevron />
+            <Select
+              compact
+              ariaLabel="Theme"
+              value={theme}
+              options={THEME_OPTIONS.map((opt) => ({ value: opt.id, label: opt.name }))}
+              onChange={(id) => void pickTheme(id)}
+            />
           </span>
         </label>
         <label className="mobile-setting-row">
           <span>Chat density</span>
           <span className="mobile-setting-value">
-            <select
+            <Select
+              compact
+              ariaLabel="Chat density"
               value={density}
-              aria-label="Chat density"
-              onChange={(event) => void pickDensity(event.target.value)}
-            >
-              <option value="comfortable">Comfortable</option>
-              <option value="compact">Compact</option>
-              <option value="dense">Dense</option>
-            </select>
-            <IconChevron />
+              options={[
+                { value: "comfortable", label: "Comfortable" },
+                { value: "compact", label: "Compact" },
+                { value: "dense", label: "Dense" },
+              ]}
+              onChange={(id) => void pickDensity(id)}
+            />
           </span>
         </label>
         <label className="mobile-setting-row">
@@ -1251,11 +1253,27 @@ function MobileMore(props: {
         </button>
       </section>
 
+      <section className="mobile-settings-block" data-testid="mobile-brain">
+        <h2>Brain</h2>
+        <button type="button" className="mobile-setting-row" onClick={goDesktop}>
+          <span>Open on desktop</span>
+          <span className="mobile-setting-value">Index · remember · orient</span>
+        </button>
+      </section>
+
       <section className="mobile-settings-block" data-testid="mobile-grafana">
         <h2>Grafana</h2>
         <button type="button" className="mobile-setting-row" onClick={() => setGrafanaOpen(true)}>
           <span>Open explorer</span>
           <span className="mobile-setting-value">Logs · traces · investigate</span>
+        </button>
+      </section>
+
+      <section className="mobile-settings-block" data-testid="mobile-docker">
+        <h2>Docker</h2>
+        <button type="button" className="mobile-setting-row" onClick={goDesktop}>
+          <span>Open on desktop</span>
+          <span className="mobile-setting-value">Containers · compose</span>
         </button>
       </section>
 
@@ -1377,8 +1395,7 @@ function MobileCompose(props: {
     setError(null);
     try {
       const isCanvas = props.kind === "design" || props.kind === "game" || props.kind === "assets";
-      const useDocker =
-        isCanvas || runtime === "docker" || (runtime === "vm" && Boolean(backendId));
+      const useDocker = isCanvas || runtime === "docker";
       const dockerImage = useDocker
         ? parseDockerImage(
             isCanvas ? DESIGN_DOCKER_IMAGE : (prefs.dockerImage ?? DEFAULT_DOCKER_IMAGE),
@@ -1395,7 +1412,7 @@ function MobileCompose(props: {
               : props.kind === "assets"
                 ? "assets"
                 : undefined,
-        runtime: isCanvas ? "docker" : runtime === "vm" && backendId ? "docker" : runtime,
+        runtime: isCanvas ? "docker" : runtime,
         dockerImage,
         providerId: defaults.providerId,
         model: defaults.model,
@@ -1408,7 +1425,7 @@ function MobileCompose(props: {
       saveLastAgent({
         ...prefs,
         os: isCanvas ? "ubuntu" : prefs.os,
-        runtime: isCanvas ? "docker" : runtime === "vm" && backendId ? "docker" : runtime,
+        runtime: isCanvas ? "docker" : runtime,
         dockerImage: isCanvas ? DESIGN_DOCKER_IMAGE : prefs.dockerImage,
         providerId: defaults.providerId,
         model: defaults.model,
@@ -1662,13 +1679,23 @@ function MobileChat(props: { session: AgentSession; onBack: () => void }) {
               {canClearChat(session) ? (
                 <MenuItem
                   onClick={() => {
-                    if (!window.confirm(CLEAR_CHAT_CONFIRM)) return;
-                    void api
-                      .clearChat(session.id)
-                      .then((updated) => dispatch({ type: "session", session: updated }))
-                      .catch((err) => {
+                    void (async () => {
+                      if (
+                        !(await askConfirm({
+                          title: "Clear chat?",
+                          body: CLEAR_CHAT_CONFIRM,
+                          confirmLabel: "Clear",
+                          danger: true,
+                        }))
+                      )
+                        return;
+                      try {
+                        const updated = await api.clearChat(session.id);
+                        dispatch({ type: "session", session: updated });
+                      } catch (err) {
                         setError(err instanceof Error ? err.message : "Couldn't clear");
-                      });
+                      }
+                    })();
                   }}
                 >
                   Clear chat

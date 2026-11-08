@@ -41,7 +41,7 @@ describe("IdeChat", () => {
   }
 
   it("renders chat on the right with a collapse control", () => {
-    render({ ...initialState, section: "ide" });
+    render({ ...initialState, section: "ide", vmCollapsed: false });
     expect(host.querySelector(".ide-chat")).toBeTruthy();
     expect(host.querySelector(".chat")?.textContent).toBe("thread");
     expect(host.querySelector('[title="Collapse chat"]')).toBeTruthy();

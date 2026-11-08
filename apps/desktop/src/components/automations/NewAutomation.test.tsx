@@ -10,6 +10,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NewAutomationModal } from "./NewAutomation";
 import { api } from "@/lib/api";
 import { Store, initialState, type Action } from "@/state/store";
+import {
+  selectOptionLabels,
+  selectOptionValues,
+  selectValue,
+  setSelectValue,
+} from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -266,13 +272,13 @@ describe("NewAutomationModal runtimes", () => {
       ),
     ).toBe(true);
     expect(host.textContent).toContain("Schedule");
-    expect(host.querySelector("summary")?.textContent).toBe("More options");
+    expect(host.querySelector("details.advanced > summary")?.textContent).toBe("More options");
     expect(host.textContent).toContain(
       "Named environment, placement, runtime, OS, hardware, jail, spend, autonomy, notify, MCP",
     );
-    const envPicker = host.querySelector('[aria-label="Named environment"]') as HTMLSelectElement;
+    const envPicker = host.querySelector('[aria-label="Named environment"]') as HTMLElement;
     expect(envPicker).toBeTruthy();
-    expect([...envPicker.options].map((opt) => opt.textContent).join(" ")).toContain(
+    expect(selectOptionLabels(host, "Named environment").join(" ")).toContain(
       "None — pick runtime below",
     );
     expect(host.querySelector("details.advanced")?.contains(envPicker)).toBe(true);
@@ -289,13 +295,9 @@ describe("NewAutomationModal runtimes", () => {
         expect.stringContaining("Webhook"),
       ]),
     );
-    const kind = [...host.querySelectorAll("select")].find((el) =>
-      [...el.options].some((opt) => opt.value === "adaptive"),
-    ) as HTMLSelectElement;
-    expect([...kind.options].map((opt) => opt.value)).toEqual(
-      expect.arrayContaining(["cron", "daily", "adaptive"]),
-    );
-    expect([...kind.options].map((opt) => opt.value)).not.toContain("webhook");
+    const kindValues = selectOptionValues(host, "Schedule");
+    expect(kindValues).toEqual(expect.arrayContaining(["cron", "daily", "adaptive"]));
+    expect(kindValues).not.toContain("webhook");
     expect(host.textContent).not.toContain("Git ref (optional)");
     expect(host.querySelector("[data-testid='auto-modal-starters']")?.textContent).toContain(
       "Nightly tests",
@@ -315,7 +317,7 @@ describe("NewAutomationModal runtimes", () => {
     );
     expect(spend).toBeTruthy();
     expect(spend!.closest(".grid-spend")).toBeTruthy();
-    expect(spend!.closest(".grid-spend")?.querySelector("select")).toBeTruthy();
+    expect(spend!.closest(".grid-spend")?.querySelector(".ui-select")).toBeTruthy();
   });
 
   it("creates an adaptive by-time-of-day schedule", async () => {
@@ -333,13 +335,9 @@ describe("NewAutomationModal runtimes", () => {
       },
     });
     render();
-    const kind = [...host.querySelectorAll("select")].find((el) =>
-      [...el.options].some((opt) => opt.value === "adaptive"),
-    ) as HTMLSelectElement;
-    expect([...kind.options].map((opt) => opt.value)).toContain("adaptive");
+    expect(selectOptionValues(host, "Schedule")).toContain("adaptive");
     act(() => {
-      kind.value = "adaptive";
-      kind.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Schedule", "adaptive");
     });
     expect(host.textContent).toContain("Faster inside a daily window");
     expect(host.textContent).toContain("Minutes during window");
@@ -449,14 +447,10 @@ describe("NewAutomationModal runtimes", () => {
       },
       newAutomationOpen: true,
     });
-    const picker = host.querySelector('[aria-label="Named environment"]') as HTMLSelectElement;
     act(() => {
-      picker.value = "env-1";
-      picker.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Named environment", "env-1");
     });
-    expect((host.querySelector('[aria-label="Jail"]') as HTMLSelectElement).value).toBe(
-      "restricted",
-    );
+    expect(selectValue(host, "Jail")).toBe("restricted");
     const reuse = [...host.querySelectorAll("label")]
       .find((label) => label.textContent?.includes("Reuse the last machine"))
       ?.querySelector("input") as HTMLInputElement;
@@ -556,9 +550,6 @@ describe("NewAutomationModal runtimes", () => {
         (el as HTMLInputElement).placeholder === "unlimited" ||
         (el as HTMLInputElement).placeholder === "20",
     ) as HTMLInputElement;
-    const image = [...host.querySelectorAll("select")].find((el) =>
-      [...el.options].some((opt) => opt.textContent?.includes("Empty /workspace")),
-    ) as HTMLSelectElement | undefined;
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
       setter.call(notify, "");
@@ -567,10 +558,7 @@ describe("NewAutomationModal runtimes", () => {
       channel.dispatchEvent(new Event("input", { bubbles: true }));
       setter.call(spend, "");
       spend.dispatchEvent(new Event("input", { bubbles: true }));
-      if (image) {
-        image.value = "";
-        image.dispatchEvent(new Event("change", { bubbles: true }));
-      }
+      setSelectValue(host, "Workspace image", "");
     });
     const save = [...host.querySelectorAll("button")].find((btn) => btn.textContent === "Save");
     await act(async () => {
@@ -625,10 +613,7 @@ describe("NewAutomationModal runtimes", () => {
     ) as HTMLInputElement;
     expect(name.value).toBe("Nightly tests");
     expect((host.querySelector("textarea") as HTMLTextAreaElement).value).toMatch(/test suite/);
-    const kind = [...host.querySelectorAll("select")].find((el) =>
-      [...el.options].some((opt) => opt.value === "daily"),
-    ) as HTMLSelectElement;
-    expect(kind.value).toBe("daily");
+    expect(selectValue(host, "Schedule")).toBe("daily");
     const time = host.querySelector('input[type="time"]') as HTMLInputElement;
     expect(time.value).toBe("02:00");
     expect(host.querySelector("[data-testid='auto-tz-hint']")?.textContent).toMatch(

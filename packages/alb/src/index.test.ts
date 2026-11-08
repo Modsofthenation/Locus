@@ -34,6 +34,7 @@ import {
   replayGateTrace,
   runPinnedScript,
   schemaHasConstraints,
+  DEFAULT_EXECUTION_LIMITS,
   WorkflowSchema,
 } from './index.js';
 
@@ -61,16 +62,7 @@ describe('WorkflowSchema', () => {
       createdAt: 't',
       updatedAt: 't',
     });
-    expect(wf.limits).toEqual({
-      maxIterations: 10,
-      maxExecutionTimeMs: 300_000,
-      maxTokenBudget: 100_000,
-      maxToolCalls: 50,
-      maxRetries: 3,
-      concurrencyLimit: 5,
-      requireHumanApproval: false,
-      requireGateBeforeSideEffects: true,
-    });
+    expect(wf.limits).toEqual(DEFAULT_EXECUTION_LIMITS);
   });
 });
 

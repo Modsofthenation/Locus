@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   AgentSession,
   ApprovalExportRow,
@@ -7,7 +7,7 @@ import type {
 } from "@locus/shared";
 import { api } from "@/lib/api";
 import { HttpError } from "@/lib/net";
-import { useDialogFocus } from "@/lib/useDialogFocus";
+import { Modal } from "@/components/layout/Modal";
 import { DebugLogView, formatBytes, formatWhen } from "@/components/settings/DebugLogView";
 
 export function TraceModal({ session, onClose }: { session: AgentSession; onClose: () => void }) {
@@ -16,8 +16,6 @@ export function TraceModal({ session, onClose }: { session: AgentSession; onClos
   const [approvals, setApprovals] = useState<ApprovalExportRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogFocus(true, onClose, dialogRef);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,55 +53,42 @@ export function TraceModal({ session, onClose }: { session: AgentSession; onClos
   }, [session.id]);
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal trace-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="trace-title"
-        ref={dialogRef}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <h2 id="trace-title">Trace</h2>
-        <p className="modal-lead">
-          Raw JSONL events for {session.title}. Tool args already drop secret-like keys.
+    <Modal titleId="trace-title" className="trace-modal" onClose={onClose}>
+      <h2 id="trace-title">Trace</h2>
+      <p className="modal-lead">
+        Raw JSONL events for {session.title}. Tool args already drop secret-like keys.
+      </p>
+      {detail ? (
+        <p className="hint">
+          {detail.source.summary} · {formatBytes(detail.source.bytes)} ·{" "}
+          {formatWhen(detail.source.mtime)}
         </p>
-        {detail ? (
-          <p className="hint">
-            {detail.source.summary} · {formatBytes(detail.source.bytes)} ·{" "}
-            {formatWhen(detail.source.mtime)}
-          </p>
-        ) : null}
-        {egress && (egress.hosts.length || egress.denied) ? (
-          <p className="hint" data-testid="egress-summary">
-            Egress: {egress.hosts.map((row) => `${row.host} (${row.kind})`).join(", ") || "none"} ·{" "}
-            {formatBytes(egress.bytesSent)} sent · {egress.denied} denied
-          </p>
-        ) : null}
-        {approvals.length ? (
-          <p className="hint" data-testid="approvals-export">
-            Approvals:{" "}
-            {approvals.map((row) => `${row.tool} ${row.decision} by ${row.by}`).join(" · ")}
-          </p>
-        ) : null}
-        {error ? (
-          <p className="scrim-note" style={{ color: "var(--danger)" }}>
-            {error}
-          </p>
-        ) : null}
-        {detail ? (
-          <DebugLogView detail={detail} onError={setError} />
-        ) : missing ? (
-          <p className="hint">No trace yet. Send a chat turn to write JSONL for {session.title}.</p>
-        ) : error ? null : (
-          <p className="hint">Loading trace…</p>
-        )}
-        <div className="modal-actions">
-          <button type="button" className="btn ghost" onClick={onClose}>
-            Close
-          </button>
-        </div>
+      ) : null}
+      {egress && (egress.hosts.length || egress.denied) ? (
+        <p className="hint" data-testid="egress-summary">
+          Egress: {egress.hosts.map((row) => `${row.host} (${row.kind})`).join(", ") || "none"} ·{" "}
+          {formatBytes(egress.bytesSent)} sent · {egress.denied} denied
+        </p>
+      ) : null}
+      {approvals.length ? (
+        <p className="hint" data-testid="approvals-export">
+          Approvals:{" "}
+          {approvals.map((row) => `${row.tool} ${row.decision} by ${row.by}`).join(" · ")}
+        </p>
+      ) : null}
+      {error ? <p className="scrim-note is-danger">{error}</p> : null}
+      {detail ? (
+        <DebugLogView detail={detail} onError={setError} />
+      ) : missing ? (
+        <p className="hint">No trace yet. Send a chat turn to write JSONL for {session.title}.</p>
+      ) : error ? null : (
+        <p className="hint">Loading trace…</p>
+      )}
+      <div className="modal-actions">
+        <button type="button" className="btn ghost" onClick={onClose}>
+          Close
+        </button>
       </div>
-    </div>
+    </Modal>
   );
 }

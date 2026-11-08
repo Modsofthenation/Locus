@@ -1,0 +1,542 @@
+/* Quiet-shell controls extracted from the main sheet so new UX can land
+   without growing index.css. Tokens still live on :root in index.css. */
+
+.ui-select {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ui-select > summary {
+  list-style: none;
+}
+
+.ui-select > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ui-select-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  max-width: 100%;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--type-sm);
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.ui-select-toggle:hover {
+  background: var(--hover);
+}
+
+.ui-select-toggle:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.ui-select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-select-chevron {
+  flex: none;
+  opacity: 0.55;
+  font-size: 10px;
+}
+
+.ui-select.compact .ui-select-toggle {
+  min-height: 28px;
+  padding: 2px 8px;
+  background: transparent;
+  border-color: transparent;
+}
+
+.ui-select-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+}
+
+.ui-select-option-label {
+  font-size: var(--type-sm);
+}
+
+.ui-select-option-hint {
+  font-size: var(--type-xs);
+  color: var(--muted);
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.model-picker-combined-label {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-settings-tabs {
+  display: flex;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.session-settings-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+
+.session-settings-tabs button.on {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.tool-checklist {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--space-1) var(--space-3);
+  max-height: 220px;
+  overflow: auto;
+  padding: var(--space-1) 0;
+}
+
+.integration-catalog {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.integration-catalog-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pane);
+  background: var(--bg-1);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.integration-catalog-card:hover {
+  background: var(--hover);
+}
+
+.integration-catalog-card strong {
+  font-size: var(--type-sm);
+}
+
+.integration-catalog-card span {
+  font-size: var(--type-xs);
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.integration-catalog-card .meta {
+  font-size: var(--type-xs);
+  color: var(--ok);
+}
+
+.provider-advanced {
+  margin-top: var(--space-2);
+}
+
+.chat-runtime-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--type-xs);
+  color: var(--muted);
+}
+
+.chat-empty-hint {
+  margin: var(--space-4) auto;
+  max-width: 36ch;
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--type-sm);
+  line-height: 1.45;
+}
+
+.setup-later {
+  margin: var(--space-3) 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pane);
+  padding: var(--space-2) var(--space-3);
+}
+
+.setup-later > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+}
+
+.theme-featured-note {
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-sm);
+  color: var(--muted);
+}
+
+.model-picker.compact {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.model-picker-combined-toggle {
+  max-width: 240px;
+}
+
+.model-picker-combined.on .model-picker-combined-label {
+  color: var(--text);
+}
+
+.setup-later .setup-list {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+}
+
+.host-workspace-more {
+  flex: none;
+}
+
+.docker-ide-tabs .host-workspace-more > summary {
+  list-style: none;
+}
+
+.dot[title] {
+  cursor: default;
+}
+
+.field > .ui-select,
+.design-system-picker-row > .ui-select {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+}
+
+.field .ui-select-toggle,
+.design-system-picker-row .ui-select-toggle {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.empty-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  text-align: left;
+}
+
+.empty-hero h2 {
+  margin: 0;
+  font-size: var(--type-xl);
+  font-weight: var(--weight-semibold);
+}
+
+.empty-hero p {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--type-sm);
+  line-height: 1.45;
+  max-width: 62ch;
+}
+
+.empty-hero .eyebrow {
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+details.advanced [hidden] {
+  display: none;
+}
+
+.ui-select.game-kit-select,
+.ui-select.design-phone-select,
+.ui-select.preview-port,
+.ui-select.workspace-git-select {
+  max-width: 160px;
+}
+
+.ui-select.pr-inbox-filter {
+  min-width: 88px;
+}
+
+.grafana-var .ui-select-toggle {
+  box-sizing: border-box;
+  min-width: 148px;
+  max-width: 220px;
+  height: 30px;
+  padding: 0 28px 0 10px;
+}
+
+.prompt-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.prompt-modal-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.prompt-modal-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.app-notice {
+  grid-template-columns: minmax(0, 1fr) auto 28px;
+}
+
+.app-notice-action {
+  align-self: center;
+}
+
+.ui-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.inline-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+  color: var(--danger);
+}
+
+.inline-error p {
+  margin: 0;
+  font-size: var(--type-sm);
+}
+
+.theme-family {
+  margin: var(--space-3) 0 0;
+}
+
+.theme-family-label {
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+  color: var(--muted);
+}
+
+.visual-appearance {
+  padding: var(--space-4);
+}
+
+.empty-hero.compact {
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.empty-hero.compact h2 {
+  font-size: var(--type-lg);
+}
+
+.empty-hint {
+  margin: var(--space-2) 0;
+  color: var(--muted);
+}
+
+.empty-hint-title,
+.empty-hint-lead {
+  margin: 0;
+  font-size: var(--type-sm);
+  line-height: 1.45;
+}
+
+.empty-hint-lead {
+  margin-top: var(--space-1);
+}
+
+.ui-busy-dot {
+  display: inline-block;
+  width: 0.55em;
+  height: 0.55em;
+  margin-right: var(--space-1-5);
+  border-radius: var(--radius-pill);
+  background: currentColor;
+  animation: ui-busy-pulse 900ms ease-in-out infinite;
+  vertical-align: 0.05em;
+}
+
+@keyframes ui-busy-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.ui-tooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ui-tooltip-bubble {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  z-index: var(--z-tooltip);
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  color: var(--text);
+  box-shadow: var(--elev-2);
+  font-size: var(--type-xs);
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-50%) translateY(2px);
+  transition:
+    opacity var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-standard);
+}
+
+/* `:focus-visible`, not `:focus-within`: menus hand focus back to their trigger after a
+   mouse pick, which would otherwise pin the bubble open. */
+.ui-tooltip:hover .ui-tooltip-bubble,
+.ui-tooltip:has(:focus-visible) .ui-tooltip-bubble {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.ui-tooltip.is-disabled {
+  cursor: not-allowed;
+}
+
+.ui-tooltip.is-disabled > :disabled {
+  pointer-events: none;
+}
+
+.ui-tooltip:has(details[open]) .ui-tooltip-bubble {
+  opacity: 0;
+}
+
+.field-inline {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-busy-dot {
+    animation: none;
+    opacity: 0.7;
+  }
+
+  .ui-tooltip-bubble {
+    transition: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .btn,
+  .ui-select-toggle,
+  input,
+  textarea,
+  select,
+  .modal,
+  .app-notice {
+    border-color: var(--line-strong);
+  }
+}
+
+@media (forced-colors: active) {
+  .ui-tooltip-bubble,
+  .modal,
+  .app-notice,
+  .menu-pop {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  .btn.primary {
+    background: Highlight;
+    color: HighlightText;
+    border-color: Highlight;
+  }
+
+  .ui-busy-dot,
+  .error-dot {
+    background: Highlight;
+  }
+}
+
+mark {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+
+.visual-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  max-width: 480px;
+}
+
+.slack-pane > .error-row,
+.docker-pane > .error-row {
+  margin: var(--space-2) 18px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 560px) {
+  .modal {
+    width: calc(100% - 16px);
+    padding: var(--space-4);
+  }
+
+  .app-notice {
+    grid-template-columns: minmax(0, 1fr) auto 28px;
+  }
+}

@@ -142,8 +142,7 @@ describe("ImportAccounts", () => {
     });
     expect(host.querySelector(".btn.primary")?.textContent).toBe("Link selected (2)");
     expect(
-      (host.querySelector("[aria-label='Modsofthenation/Locus']") as HTMLInputElement)
-        .checked,
+      (host.querySelector("[aria-label='Modsofthenation/Locus']") as HTMLInputElement).checked,
     ).toBe(true);
     expect(linkedBox.checked).toBe(true);
 

@@ -12,6 +12,41 @@ import {
 } from "./workspaceMeta.js";
 
 describe("workspace metadata", () => {
+  it("loads a Dev Container file when Locus and Cursor environment.json are missing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-meta-devcontainer-"));
+    await mkdir(join(dir, ".devcontainer"), { recursive: true });
+    await writeFile(
+      join(dir, ".devcontainer", "devcontainer.json"),
+      `{
+        // JSONC
+        "image": "node:22-bookworm",
+        "postCreateCommand": "npm ci",
+        "forwardPorts": [5173,],
+        "containerEnv": { "NODE_ENV": "development" },
+      }`,
+    );
+    const env = await loadWorkspaceEnvironment(dir);
+    expect(env?.image).toBe("node:22-bookworm");
+    expect(env?.install).toBe("npm ci");
+    expect(env?.ports).toEqual([5173]);
+    expect(env?.env).toEqual({ NODE_ENV: "development" });
+  });
+
+  it("prefers .locus/environment.json over a Dev Container", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-meta-pref-"));
+    await mkdir(join(dir, ".locus"), { recursive: true });
+    await mkdir(join(dir, ".devcontainer"), { recursive: true });
+    await writeFile(
+      join(dir, ".locus", "environment.json"),
+      JSON.stringify({ install: "from-locus" }),
+    );
+    await writeFile(
+      join(dir, ".devcontainer", "devcontainer.json"),
+      JSON.stringify({ postCreateCommand: "from-devcontainer" }),
+    );
+    expect((await loadWorkspaceEnvironment(dir))?.install).toBe("from-locus");
+  });
+
   it("loads a Cursor environment.json when .locus is missing", async () => {
     const dir = await mkdtemp(join(tmpdir(), "locus-meta-cursor-"));
     await mkdir(join(dir, ".cursor"), { recursive: true });

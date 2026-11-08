@@ -5,6 +5,8 @@ import {
   approvalPolicyForTier,
   AUTONOMOUS_DEFAULT_MAX_USD,
   formatAutonomy,
+  formatAutonomyHint,
+  formatAutonomyShort,
   mergeApprovalPolicy,
   parseAutonomyTier,
   resolveSpendCapUsd,
@@ -17,6 +19,8 @@ describe("autonomy tiers", () => {
     expect(parseAutonomyTier("nope")).toBe("guided");
     expect(sessionAutonomy(undefined, "autonomous")).toBe("autonomous");
     expect(formatAutonomy("autonomous")).toMatch(/overnight/);
+    expect(formatAutonomyShort("autonomous")).toBe("Autonomous");
+    expect(formatAutonomyHint("guided")).toMatch(/Host agents also ask for exec/);
   });
 
   it("asks for every mutating command in supervised", () => {

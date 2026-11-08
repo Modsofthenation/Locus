@@ -33,6 +33,29 @@ export function githubAuthHeaders(
   return out;
 }
 
+export function giteaAuthHeaders(
+  account: GitForgeAccount,
+  extra?: Record<string, string>,
+): Record<string, string> {
+  return {
+    ...(extra ?? {}),
+    authorization: `token ${account.token ?? ""}`,
+    accept: "application/json",
+  };
+}
+
+export function azureDevOpsAuthHeaders(
+  account: GitForgeAccount,
+  extra?: Record<string, string>,
+): Record<string, string> {
+  const token = account.token ?? "";
+  return {
+    ...(extra ?? {}),
+    authorization: `Basic ${Buffer.from(`:${token}`).toString("base64")}`,
+    accept: "application/json",
+  };
+}
+
 export function bitbucketAuthHeaders(
   account: GitForgeAccount,
   extra?: Record<string, string>,

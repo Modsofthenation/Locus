@@ -8,25 +8,27 @@ import {
 } from "./railNav";
 
 describe("railNav", () => {
-  it("keeps daily surfaces above the Automations separator and the rest below", () => {
+  it("keeps five daily surfaces on the rail and the rest behind More", () => {
     expect([...PRIMARY_RAIL_SECTIONS]).toEqual([
       "agents",
       "design",
-      "games",
-      "assets",
       "ide",
+      "codebase",
       "automations",
     ]);
     expect([...MORE_RAIL_SECTIONS]).toEqual([
+      "games",
+      "assets",
       "board",
       "project",
-      "codebase",
       "brain",
       "slack",
       "grafana",
       "docker",
     ]);
     expect(isMoreRailSection("slack")).toBe(true);
+    expect(isMoreRailSection("games")).toBe(true);
+    expect(isMoreRailSection("codebase")).toBe(false);
     expect(isMoreRailSection("automations")).toBe(false);
     expect(isMoreRailSection("agents")).toBe(false);
     expect(isMoreRailSection("settings")).toBe(false);

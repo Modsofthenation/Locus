@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type WorkspaceGrepHit, type WorkspaceIndexHit } from "@/lib/api";
+import { useDialogFocus } from "@/lib/useDialogFocus";
 
 export const WORKSPACE_GOTO_EVENT = "locus:workspace-goto";
 export const WORKSPACE_GOTO_SYMBOL_EVENT = "locus:workspace-goto-symbol";
@@ -70,6 +71,8 @@ export function WorkspaceQuickOpen({
   const [index, setIndex] = useState(0);
   const [fileCount, setFileCount] = useState<number | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(open, onClose, dialogRef);
   const seq = useRef(0);
   const filesRef = useRef<WorkspaceIndexHit[]>([]);
   const symbolsRef = useRef<WorkspaceIndexHit[]>([]);
@@ -157,7 +160,9 @@ export function WorkspaceQuickOpen({
       <div
         className="workspace-quick-open"
         role="dialog"
+        aria-modal="true"
         aria-label={mode === "symbol" ? "Go to symbol" : "Go to file"}
+        ref={dialogRef}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault();
@@ -254,7 +259,9 @@ export function WorkspaceFileSearch({
   const [replaced, setReplaced] = useState<number | null>(null);
   const [grepError, setGrepError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
+  useDialogFocus(open, onClose, dialogRef);
 
   useEffect(() => {
     if (!open) {
@@ -355,7 +362,9 @@ export function WorkspaceFileSearch({
       <div
         className="workspace-quick-open workspace-file-search"
         role="dialog"
+        aria-modal="true"
         aria-label="Search in files"
+        ref={dialogRef}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault();

@@ -8,20 +8,28 @@ import {
 } from "@locus/shared";
 import { applyTheme } from "@/lib/theme";
 import { api } from "@/lib/api";
-import { showNotice } from "@/lib/notice";
+import { showErrorNotice, showNotice } from "@/lib/notice";
+import { archiveOne } from "@/lib/sessionUndo";
+import { askConfirm } from "@/lib/dialog";
 import { exportSessionChat } from "@/lib/chatExport";
 import { liveDockerContainers, runStopContainers } from "@/lib/docker";
 import { defaultGoldenName, promptGoldenName } from "@/lib/goldenName";
 import { rememberBrainInbox } from "@/lib/brainViewPrefs";
 import { needsYouItems, needsYouSessions } from "@/lib/needsYou";
 import {
-  PALETTE_SHORTCUTS,
+  applyPaletteRecents,
   editorOwnsCommandK,
   filterPaletteItems,
   isPaletteShortcutsQuery,
   paletteItems,
   paletteItemsForMode,
 } from "@/lib/palette";
+import { matchModDigit, matchModKey } from "@/lib/shortcuts";
+import { KeyboardShortcutsSheet } from "./KeyboardShortcutsSheet";
+import { loadPaletteRecents, rememberPaletteRecent } from "@/lib/paletteRecents";
+import { setPendingSettingsQuery } from "@/lib/settingsQuery";
+import { HighlightQuery } from "@/lib/queryMark";
+import { Modal } from "./Modal";
 import { orderPaletteForBrowse, tryNextContext } from "@/lib/discoverability";
 import { confirmLeaveSettings, paletteActionLeavesSettings } from "@/lib/settingsLeave";
 import type { SettingsTab } from "@/lib/settingsNav";
@@ -42,19 +50,6 @@ import {
   requestWorkspaceTerminal,
   requestWorkspaceTerminalNew,
 } from "@/components/workspace/WorkspaceTerminal";
-
-function KeyboardShortcutsSheet() {
-  return (
-    <div className="palette-shortcuts" data-testid="palette-shortcuts">
-      {PALETTE_SHORTCUTS.map((row) => (
-        <div key={row.keys} className="palette-shortcut">
-          <span>{row.action}</span>
-          <kbd>{row.keys}</kbd>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export function SessionSwitcher() {
   const { state, dispatch } = useStore();
@@ -82,24 +77,31 @@ export function SessionSwitcher() {
       brain: state.brain,
       projects: state.projects,
       setup: state.setup,
+      config: state.config,
     });
     const scoped = paletteItemsForMode(raw, parseProductMode(state.config?.productMode));
     const filtered = filterPaletteItems(scoped, query);
     if (query.trim()) return filtered;
-    return orderPaletteForBrowse(
-      filtered,
-      tryNextContext({
-        automations: state.automations,
-        projects: state.projects,
-        boards: state.boards,
-        repos: state.repos,
-        brain: state.brain,
-        slackStatus: state.slackStatus,
-        mcpServerCount: state.config?.mcpServers?.length ?? 0,
-        session,
-        sessions: state.sessions,
-      }),
-    );
+    const recents = applyPaletteRecents(filtered, loadPaletteRecents());
+    const recentRows = recents.filter((item) => item.group === "Recents");
+    const rest = recents.filter((item) => item.group !== "Recents");
+    return [
+      ...recentRows,
+      ...orderPaletteForBrowse(
+        rest,
+        tryNextContext({
+          automations: state.automations,
+          projects: state.projects,
+          boards: state.boards,
+          repos: state.repos,
+          brain: state.brain,
+          slackStatus: state.slackStatus,
+          mcpServerCount: state.config?.mcpServers?.length ?? 0,
+          session,
+          sessions: state.sessions,
+        }),
+      ),
+    ];
   }, [
     state.sessions,
     state.repos,
@@ -113,6 +115,7 @@ export function SessionSwitcher() {
     state.slackStatus,
     state.config?.mcpServers,
     state.config?.productMode,
+    state.config,
     session,
     vm,
     query,
@@ -121,9 +124,7 @@ export function SessionSwitcher() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const meta = e.metaKey || e.ctrlKey;
-      if (meta && e.key.toLowerCase() === "k") {
-        if (e.shiftKey) return;
+      if (matchModKey(e, "k")) {
         if (editorOwnsCommandK(document.activeElement)) return;
         e.preventDefault();
         setShortcutsOpen(false);
@@ -132,7 +133,7 @@ export function SessionSwitcher() {
         setActive(0);
         return;
       }
-      if (meta && sessionForDigit(state.sessions, e.key)) {
+      if (matchModDigit(e) && sessionForDigit(state.sessions, e.key)) {
         e.preventDefault();
         const next = sessionForDigit(state.sessions, e.key);
         if (next) {
@@ -192,6 +193,10 @@ export function SessionSwitcher() {
     }
     setOpen(false);
     setQuery("");
+    rememberPaletteRecent(id);
+    if (id.startsWith("settings:") && query.trim()) {
+      setPendingSettingsQuery(query);
+    }
     if (id === "keyboard-shortcuts") {
       setShortcutsOpen(true);
       return;
@@ -446,10 +451,10 @@ export function SessionSwitcher() {
         if (!result) return;
         dispatch({ type: "containers", containers: result.containers });
         if (result.errors.length) {
-          window.alert(result.errors.map((row) => `${row.id}: ${row.error}`).join("\n"));
+          showNotice(result.errors.map((row) => `${row.id}: ${row.error}`).join("\n"));
         }
       } catch (err) {
-        window.alert(err instanceof Error ? err.message : "Could not stop containers");
+        showErrorNotice(err, "Could not stop containers");
       }
       return;
     }
@@ -458,7 +463,7 @@ export function SessionSwitcher() {
       return;
     }
     const guestErr = (err: unknown, fallback: string) => {
-      showNotice(err instanceof Error ? err.message : fallback);
+      showErrorNotice(err, fallback);
     };
     if (id === "guest-start" && session)
       await api.startVm(session.id).catch((err) => guestErr(err, "Could not start the guest"));
@@ -473,7 +478,7 @@ export function SessionSwitcher() {
         session.title,
         sessionRuntime(session) === "docker" ? "workspace" : "golden",
       );
-      const name = promptGoldenName(fallback);
+      const name = await promptGoldenName(fallback);
       if (!name) return;
       await api
         .captureImage(session.id, name)
@@ -488,16 +493,34 @@ export function SessionSwitcher() {
       return;
     }
     if (id === "chat-stop" && session) {
-      await api.abortChat(session.id).catch(() => undefined);
+      await api.abortChat(session.id).catch((err: unknown) => {
+        showErrorNotice(err, "Could not stop");
+      });
       return;
     }
     if (id === "chat-archive" && session) {
-      await api.patchSession(session.id, { archived: !session.archived }).catch(() => undefined);
+      if (session.archived) {
+        await api.patchSession(session.id, { archived: false }).catch(() => undefined);
+      } else {
+        archiveOne(session, dispatch);
+      }
       return;
     }
     if (id === "chat-clear" && session) {
-      if (!canClearChat(session) || !window.confirm(CLEAR_CHAT_CONFIRM)) return;
-      const updated = await api.clearChat(session.id).catch(() => undefined);
+      if (
+        !canClearChat(session) ||
+        !(await askConfirm({
+          title: "Clear chat?",
+          body: CLEAR_CHAT_CONFIRM,
+          confirmLabel: "Clear chat",
+          danger: true,
+        }))
+      )
+        return;
+      const updated = await api.clearChat(session.id).catch((err: unknown) => {
+        showErrorNotice(err, "Could not clear chat");
+        return undefined;
+      });
       if (updated) dispatch({ type: "session", session: updated });
       return;
     }
@@ -528,17 +551,14 @@ export function SessionSwitcher() {
 
   if (shortcutsOpen) {
     return (
-      <div className="modal-backdrop" onClick={() => setShortcutsOpen(false)}>
-        <div
-          className="modal switcher"
-          role="dialog"
-          aria-label="Keyboard shortcuts"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <h2 className="palette-shortcuts-title">Keyboard shortcuts</h2>
-          <KeyboardShortcutsSheet />
-        </div>
-      </div>
+      <Modal
+        label="Keyboard shortcuts"
+        className="switcher"
+        onClose={() => setShortcutsOpen(false)}
+      >
+        <h2 className="palette-shortcuts-title">Keyboard shortcuts</h2>
+        <KeyboardShortcutsSheet />
+      </Modal>
     );
   }
 
@@ -546,65 +566,60 @@ export function SessionSwitcher() {
 
   let lastGroup = "";
   return (
-    <div className="modal-backdrop" onClick={() => setOpen(false)}>
-      <div
-        className="modal switcher"
-        role="dialog"
-        aria-label="Command palette"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <SearchField
-          ref={input}
-          wrapClassName="switcher-search"
-          className="switcher-input"
-          placeholder={
-            parseProductMode(state.config?.productMode) === "swarm"
-              ? "Teammates, teams, configuration…"
-              : "Jump to an agent, settings, or command… (? shortcuts)"
-          }
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <div className="switcher-list">
-          {showShortcuts ? (
-            <KeyboardShortcutsSheet />
-          ) : items.length === 0 ? (
-            <p className="hint">No matching agents or commands</p>
-          ) : (
-            items.map((item, i) => {
-              const heading = item.group !== lastGroup ? item.group : null;
-              lastGroup = item.group;
-              const sessionIndex = item.id.startsWith("session:")
-                ? items
-                    .filter((row) => row.id.startsWith("session:"))
-                    .findIndex((row) => row.id === item.id)
-                : -1;
-              return (
-                <div key={item.id}>
-                  {heading ? <div className="switcher-group">{heading}</div> : null}
-                  <button
-                    type="button"
-                    className={`switcher-item ${i === active ? "active" : ""}`}
-                    onMouseEnter={() => setActive(i)}
-                    onClick={() => void run(item.id)}
-                  >
-                    <span
-                      className={`dot ${item.group === "Agents" || item.group === "Design" || item.group === "Board" || item.group === "IDE" ? "idle" : "cmd"}`}
-                    />
-                    <span>
-                      <div className="title">{item.title}</div>
-                      <div className="meta">{item.hint}</div>
-                    </span>
-                    {!query && sessionIndex >= 0 && sessionIndex < 9 ? (
-                      <kbd>{sessionIndex + 1}</kbd>
-                    ) : null}
-                  </button>
-                </div>
-              );
-            })
-          )}
-        </div>
+    <Modal label="Command palette" className="switcher" onClose={() => setOpen(false)}>
+      <SearchField
+        ref={input}
+        wrapClassName="switcher-search"
+        className="switcher-input"
+        placeholder={
+          parseProductMode(state.config?.productMode) === "swarm"
+            ? "Teammates, teams, configuration…"
+            : "Jump to an agent, settings, or command… (? shortcuts)"
+        }
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+      <div className="switcher-list">
+        {showShortcuts ? (
+          <KeyboardShortcutsSheet />
+        ) : items.length === 0 ? (
+          <p className="hint">No matching agents or commands</p>
+        ) : (
+          items.map((item, i) => {
+            const heading = item.group !== lastGroup ? item.group : null;
+            lastGroup = item.group;
+            const sessionIndex = item.id.startsWith("session:")
+              ? items
+                  .filter((row) => row.id.startsWith("session:"))
+                  .findIndex((row) => row.id === item.id)
+              : -1;
+            return (
+              <div key={item.id}>
+                {heading ? <div className="switcher-group">{heading}</div> : null}
+                <button
+                  type="button"
+                  className={`switcher-item ${i === active ? "active" : ""}`}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => void run(item.id)}
+                >
+                  <span
+                    className={`dot ${item.group === "Agents" || item.group === "Design" || item.group === "Board" || item.group === "IDE" ? "idle" : "cmd"}`}
+                  />
+                  <span>
+                    <div className="title">
+                      <HighlightQuery text={item.title} query={query} />
+                    </div>
+                    <div className="meta">{item.hint}</div>
+                  </span>
+                  {!query && sessionIndex >= 0 && sessionIndex < 9 ? (
+                    <kbd>{sessionIndex + 1}</kbd>
+                  ) : null}
+                </button>
+              </div>
+            );
+          })
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }

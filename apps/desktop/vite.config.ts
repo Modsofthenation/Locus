@@ -44,6 +44,16 @@ export default defineConfig({
               test: /node_modules[\\/]@xterm[\\/]/,
               priority: 15,
             },
+            {
+              name: "shared-canvas",
+              test: /packages[\\/]shared[\\/]src[\\/]models[\\/](?:game|asset|board|playwright)/,
+              priority: 12,
+            },
+            {
+              name: "shared-tools",
+              test: /packages[\\/]shared[\\/]src[\\/]models[\\/](?:tools|toolSchemas|recipes)\b/,
+              priority: 12,
+            },
           ],
         },
       },
@@ -64,5 +74,6 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    exclude: ["**/node_modules/**", "**/dist/**", "**/e2e/**"],
   },
 });

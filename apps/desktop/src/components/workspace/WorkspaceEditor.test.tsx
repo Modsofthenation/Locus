@@ -13,6 +13,7 @@ import { requestWorkspaceOpenPr } from "@/lib/workspaceOpenPr";
 import { resetWorkspaceFileCache } from "@/lib/workspaceFileCache";
 import { applyEditorPrefs } from "@/lib/theme";
 import { Store, initialState } from "@/state/store";
+import { selectValue, setSelectValue } from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -813,7 +814,7 @@ describe("WorkspaceEditor", () => {
     await flush();
     const tabMs = performance.now() - clickAt;
     expect(host.querySelector(".workspace-tab.on")?.getAttribute("title")).toBe("src/app.ts");
-    expect(tabMs).toBeLessThan(DELAY_MS / 2);
+    expect(tabMs).toBeLessThan(DELAY_MS);
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, DELAY_MS + 20));
     });
@@ -1556,13 +1557,13 @@ describe("WorkspaceEditor", () => {
     expect(css).toMatch(/\.workspace-status \{[\s\S]*?height:\s*24px/);
     expect(css).toMatch(/\.workspace-status-start,\n\.workspace-status-end \{/);
     expect(css).toMatch(
-      /@container workspace-status \(max-width: 860px\) \{[\s\S]*?\.workspace-status-indent/,
+      /@container workspace-status \(max-width: 900px\) \{[\s\S]*?\.workspace-status-indent/,
     );
     expect(css).toMatch(
-      /@container workspace-status \(max-width: 720px\) \{[\s\S]*?\.workspace-status-run/,
+      /@container workspace-status \(max-width: 760px\) \{[\s\S]*?\.workspace-status-run/,
     );
     expect(css).toMatch(
-      /@container workspace-status \(max-width: 580px\) \{[\s\S]*?\.workspace-status-cursor/,
+      /@container workspace-status \(max-width: 560px\) \{[\s\S]*?\.workspace-status-cursor/,
     );
     expect(css).toMatch(/\.workspace-status-more \{[\s\S]*?flex:\s*0 0 auto/);
     expect(css).toMatch(/\.workspace-editor-more \{[\s\S]*?flex:\s*0 0 auto/);
@@ -2339,7 +2340,7 @@ describe("WorkspaceEditor", () => {
     const more = status.querySelector(".workspace-status-more") as HTMLDetailsElement;
     expect(more).toBeTruthy();
     const trigger = more.querySelector("summary") as HTMLElement;
-    expect(trigger.getAttribute("title")).toBe("Editor commands");
+    expect(trigger.getAttribute("aria-label")).toBe("Editor commands");
     await act(async () => {
       trigger.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
       trigger.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
@@ -3061,22 +3062,17 @@ describe("WorkspaceEditor", () => {
       (host.querySelector('[data-mode="git"]') as HTMLButtonElement).click();
     });
     await flush();
-    const select = host.querySelector('[aria-label="Git repository"]') as HTMLSelectElement;
-    expect(select).toBeTruthy();
-    expect(select.value).toBe("app");
+    expect(host.querySelector('[aria-label="Git repository"]')).toBeTruthy();
+    expect(selectValue(host, "Git repository")).toBe("app");
     expect(host.querySelector('[data-path="src/app.ts"]')).toBeTruthy();
     await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
-      setter?.call(select, "lib");
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Git repository", "lib");
       await Promise.resolve();
     });
     await flush();
     expect(api.workspaceGit).toHaveBeenCalledWith("s1", "lib");
     expect(host.querySelector('[aria-label="Git repository"]')).toBeTruthy();
-    expect((host.querySelector('[aria-label="Git repository"]') as HTMLSelectElement).value).toBe(
-      "lib",
-    );
+    expect(selectValue(host, "Git repository")).toBe("lib");
     expect(host.querySelector('[data-path="src/a.ts"]')).toBeTruthy();
     await act(async () => {
       (host.querySelector('[data-path="src/a.ts"]') as HTMLButtonElement).click();

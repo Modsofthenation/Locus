@@ -399,14 +399,14 @@ describe("reducer", () => {
   it("collapses the agent list and the guest pane independently", () => {
     let state = reducer(initialState, { type: "toggleSidebar" });
     expect(state.collapsed).toBe(true);
-    expect(state.vmCollapsed).toBe(false);
+    expect(state.vmCollapsed).toBe(true);
     state = reducer(state, { type: "toggleVmPane" });
     expect(state.collapsed).toBe(true);
-    expect(state.vmCollapsed).toBe(true);
+    expect(state.vmCollapsed).toBe(false);
     state = reducer(state, { type: "toggleSidebar" });
     state = reducer(state, { type: "toggleVmPane" });
     expect(state.collapsed).toBe(false);
-    expect(state.vmCollapsed).toBe(false);
+    expect(state.vmCollapsed).toBe(true);
   });
 
   it("marks unread until the session is selected", () => {

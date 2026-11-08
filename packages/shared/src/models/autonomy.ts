@@ -81,6 +81,18 @@ export function formatAutonomy(tier: AutonomyTier): string {
   return "Guided — ask for push, PR, MCP, plugins, and installs (no default spend cap). Host agents also ask for exec.";
 }
 
+export function formatAutonomyShort(tier: AutonomyTier): string {
+  if (tier === "supervised") return "Supervised";
+  if (tier === "autonomous") return "Autonomous";
+  return "Guided";
+}
+
+export function formatAutonomyHint(tier: AutonomyTier): string {
+  const full = formatAutonomy(tier);
+  const sep = full.indexOf(" — ");
+  return sep >= 0 ? full.slice(sep + 3) : full;
+}
+
 export function approvalPolicyForTier(tier: AutonomyTier): ApprovalPolicy {
   if (tier === "supervised") {
     return {

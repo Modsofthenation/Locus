@@ -6,6 +6,7 @@ import { MobileShell } from "./MobileShell";
 import { api } from "@/lib/api";
 import { setUiShell } from "@/lib/mobileShell";
 import { Store, initialState, reducer, type UiState } from "@/state/store";
+import { selectOptionValues, selectValue, setSelectValue } from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -1380,13 +1381,8 @@ describe("MobileShell", () => {
     expect(row?.textContent).toMatch(/Needs you/);
     expect(host.querySelector("[data-testid='mobile-notify-needs-you']")).toBeTruthy();
     expect(host.querySelector("[data-testid='mobile-pairing']")?.textContent).toMatch(/desktop/i);
-    const density = host.querySelector('select[aria-label="Chat density"]') as HTMLSelectElement;
-    expect(density?.value).toBe("compact");
-    expect([...density.querySelectorAll("option")].map((opt) => opt.value)).toEqual([
-      "comfortable",
-      "compact",
-      "dense",
-    ]);
+    expect(selectValue(host, "Chat density")).toBe("compact");
+    expect(selectOptionValues(host, "Chat density")).toEqual(["comfortable", "compact", "dense"]);
   });
 
   it("points Slack sign-in at the desktop", async () => {
@@ -1829,13 +1825,9 @@ describe("MobileShell", () => {
     act(() => {
       row!.click();
     });
-    const scaffold = host.querySelector(
-      'select[aria-label="Promote scaffold"]',
-    ) as HTMLSelectElement;
-    expect(scaffold.value).toBe("vite-react");
+    expect(selectValue(host, "Promote scaffold")).toBe("vite-react");
     act(() => {
-      scaffold.value = "next";
-      scaffold.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Promote scaffold", "next");
     });
     const promote = [...host.querySelectorAll("button")].find(
       (btn) => btn.textContent === "Promote",

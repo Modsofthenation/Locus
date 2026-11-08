@@ -45,3 +45,15 @@ export function appendConfigList<K extends ConfigListKey>(
 ): LocusConfig {
   return { ...draft, [key]: [...rowsOf(draft, key), row] };
 }
+
+export function insertConfigList<K extends ConfigListKey>(
+  draft: LocusConfig,
+  key: K,
+  index: number,
+  row: ConfigListRow<K>,
+): LocusConfig {
+  const rows = rowsOf(draft, key);
+  const at = Math.max(0, Math.min(index, rows.length));
+  rows.splice(at, 0, row);
+  return { ...draft, [key]: rows };
+}

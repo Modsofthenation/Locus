@@ -1,5 +1,6 @@
 import { resolveAssetStyle, type AssetStyle } from "@locus/shared";
 import { useStore } from "@/state/store";
+import { Select } from "@/components/layout/Select";
 
 export function AssetStylePicker(props: {
   selectedId?: string;
@@ -16,22 +17,15 @@ export function AssetStylePicker(props: {
     <div className={`design-system-picker${props.compact ? " compact" : ""}`}>
       {!props.compact ? <div className="field-label">Asset style</div> : null}
       <div className="design-system-picker-row">
-        <select
-          aria-label="Asset style"
-          title="Asset style"
+        <Select
+          ariaLabel="Asset style"
           value={value}
-          onChange={(event) => {
-            const id = event.target.value;
-            props.onChange(id ? resolveAssetStyle(id, stored) : undefined);
-          }}
-        >
-          <option value="">No style</option>
-          {stored.map((row) => (
-            <option key={row.id} value={row.id}>
-              {row.name}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: "", label: "No style" },
+            ...stored.map((row) => ({ value: row.id, label: row.name })),
+          ]}
+          onChange={(id) => props.onChange(id ? resolveAssetStyle(id, stored) : undefined)}
+        />
         {props.manage !== false ? (
           <button
             type="button"

@@ -5,6 +5,7 @@ import {
   type DockerContainer,
   type DockerContainerStats,
 } from "@locus/shared";
+import { askConfirm } from "@/lib/dialog";
 
 export const DOCKER_EXPLORER_POLL_MS = 5000;
 export const DOCKER_EXPLORER_EXPANDED_KEY = "locus.dockerExplorer.containersExpanded";
@@ -24,39 +25,48 @@ export function liveDockerContainers(rows: DockerContainer[]): DockerContainer[]
   return rows.filter((row) => dockerContainerLive(row.state));
 }
 
-export function confirmStopContainers(rows: DockerContainer[]): boolean {
+export async function confirmStopContainers(rows: DockerContainer[]): Promise<boolean> {
   if (rows.length === 0) return false;
   const names = rows.map((row) => row.name);
   const agents = rows.filter((row) => row.sessionTitle);
   const agentNote = agents.length
     ? `\n\n${agents.map((row) => `${row.name} is the ${row.sessionTitle} agent.`).join("\n")}`
     : "";
-  return window.confirm(
-    `Stop ${names.length} container${names.length === 1 ? "" : "s"}?\n\n${names.join("\n")}${agentNote}`,
-  );
+  return askConfirm({
+    title: names.length === 1 ? "Stop container?" : "Stop containers?",
+    body: `Stop ${names.length} container${names.length === 1 ? "" : "s"}?\n\n${names.join("\n")}${agentNote}`,
+    confirmLabel: "Stop",
+    danger: true,
+  });
 }
 
-export function confirmDockerContainerAction(
+export async function confirmDockerContainerAction(
   action: "stop" | "restart",
   target: DockerContainer,
-): boolean {
-  return window.confirm(
-    `${action === "stop" ? "Stop" : "Restart"} ${target.name}?${
+): Promise<boolean> {
+  const verb = action === "stop" ? "Stop" : "Restart";
+  return askConfirm({
+    title: `${verb} container?`,
+    body: `${verb} ${target.name}?${
       target.sessionTitle ? ` This is the ${target.sessionTitle} agent.` : ""
     }`,
-  );
+    confirmLabel: verb,
+    danger: action === "stop",
+  });
 }
 
-export function confirmRestartContainers(rows: DockerContainer[]): boolean {
+export async function confirmRestartContainers(rows: DockerContainer[]): Promise<boolean> {
   if (rows.length === 0) return false;
   const names = rows.map((row) => row.name);
   const agents = rows.filter((row) => row.sessionTitle);
   const agentNote = agents.length
     ? `\n\n${agents.map((row) => `${row.name} is the ${row.sessionTitle} agent.`).join("\n")}`
     : "";
-  return window.confirm(
-    `Restart ${names.length} container${names.length === 1 ? "" : "s"}?\n\n${names.join("\n")}${agentNote}`,
-  );
+  return askConfirm({
+    title: names.length === 1 ? "Restart container?" : "Restart containers?",
+    body: `Restart ${names.length} container${names.length === 1 ? "" : "s"}?\n\n${names.join("\n")}${agentNote}`,
+    confirmLabel: "Restart",
+  });
 }
 
 export function dockerGroup(state: DockerContainer["state"]): DockerGroupId {
@@ -232,7 +242,7 @@ export async function runStopContainers(
   ops: {
     stop: (ids: string[]) => Promise<DockerBulkStopResult>;
     list: () => Promise<{ containers: DockerContainer[] }>;
-    confirm?: (rows: DockerContainer[]) => boolean;
+    confirm?: (rows: DockerContainer[]) => boolean | Promise<boolean>;
   },
 ): Promise<{
   containers: DockerContainer[];
@@ -241,7 +251,7 @@ export async function runStopContainers(
 } | null> {
   if (rows.length === 0) return null;
   const confirm = ops.confirm ?? confirmStopContainers;
-  if (!confirm(rows)) return null;
+  if (!(await confirm(rows))) return null;
   const result = await ops.stop(rows.map((row) => row.id));
   const snapshot = await ops.list();
   return {

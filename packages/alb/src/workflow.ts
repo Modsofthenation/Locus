@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import type { Workflow, WorkflowEdge, WorkflowNode } from './schema/index.js';
+import { DEFAULT_EXECUTION_LIMITS, type Workflow, type WorkflowEdge, type WorkflowNode } from './schema/index.js';
 import { createNodeData } from './catalog.js';
 
 export function createEmptyWorkflow(name = 'Untitled Workflow'): Workflow {
@@ -14,16 +14,7 @@ export function createEmptyWorkflow(name = 'Untitled Workflow'): Workflow {
     nodes: [],
     edges: [],
     variables: [],
-    limits: {
-      maxIterations: 10,
-      maxExecutionTimeMs: 300_000,
-      maxTokenBudget: 100_000,
-      maxToolCalls: 50,
-      maxRetries: 3,
-      concurrencyLimit: 5,
-      requireHumanApproval: false,
-      requireGateBeforeSideEffects: true,
-    },
+    limits: { ...DEFAULT_EXECUTION_LIMITS },
     tags: [],
     createdAt: now,
     updatedAt: now,

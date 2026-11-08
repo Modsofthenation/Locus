@@ -7,13 +7,21 @@ import type { ComputerUseToolName, VmInstance } from "@locus/shared";
 import {
   isGuestReady,
   isWindows,
+  LINUX_WORKSPACE,
   parsePreviewPort,
   WORKER_PROTOCOL,
   type WorkerHealth,
 } from "@locus/shared";
-import type { CreateContainerRequest, DockerEngine } from "@locus/hypervisor";
+import type { CreateContainerRequest, DockerEngine, Hypervisor } from "@locus/hypervisor";
 import { startAllowlistProxy, type AllowlistProxy } from "@locus/hypervisor";
-import { allowedWorkerCursorCliCommand, spawnWorkerCursorCli } from "./cursorCli.js";
+import { spawnCliOverSsh, sshTargetFromInstance, type GuestRuntime } from "@locus/guest-agent";
+import {
+  allowedWorkerCursorCliCommand,
+  spawnWorkerCursorCli,
+  workerCliArgs,
+  workerCliEnv,
+  workerGitMcpUrl,
+} from "./cursorCli.js";
 import {
   startWorkerLoopbackMcp,
   writeWorkerLocusMcpConfig,
@@ -27,7 +35,8 @@ import {
   safeWorkerSessionId,
   MAX_WORKER_ARCHIVE_BYTES,
 } from "./archive.js";
-import { WorkerGuestHub } from "./guests.js";
+import { isWorkerVmGuest, WorkerGuestHub } from "./guests.js";
+import { resolveWorkerVmTemplate } from "./vmMedia.js";
 import { serveWorkerPreview, workerPreviewPath } from "./previewProxy.js";
 import { workerTokenMatches } from "./token.js";
 import {
@@ -53,16 +62,28 @@ export interface WorkerAppOptions {
   onGuestDeleted?: (id: string) => void;
   /** Host-runtime guests run `sh -lc` on this machine. Off unless LOCUS_WORKER_ALLOW_HOST=1. */
   allowHostRuntime?: boolean;
+  /** Optional QEMU hypervisor for VM guests on this worker. */
+  hypervisor?: Hypervisor;
 }
 
 export function createWorkerApp(opts: WorkerAppOptions): Hono {
   const guests =
     opts.guests ??
-    new WorkerGuestHub({ liveDocker: Boolean(opts.engine.liveEngine), dataDir: opts.dataDir });
+    new WorkerGuestHub({
+      liveDocker: Boolean(opts.engine.liveEngine),
+      liveQemu: Boolean(opts.hypervisor?.liveEngine),
+      dataDir: opts.dataDir,
+    });
   guests.setLiveDocker(Boolean(opts.engine.liveEngine));
+  guests.setLiveQemu(Boolean(opts.hypervisor?.liveEngine));
   const hostGuests = opts.hostGuests ?? new Map<string, VmInstance>();
-  const getGuest = (id: string) => hostGuests.get(id) ?? opts.engine.get(id);
-  const listGuests = () => [...hostGuests.values(), ...opts.engine.list()];
+  const getGuest = (id: string) =>
+    hostGuests.get(id) ?? opts.engine.get(id) ?? opts.hypervisor?.get(id);
+  const listGuests = () => [
+    ...hostGuests.values(),
+    ...opts.engine.list(),
+    ...(opts.hypervisor?.list() ?? []),
+  ];
   const app = new Hono();
   const jailProxies = new Map<string, AllowlistProxy>();
   const cliMcpPending = new Map<
@@ -103,6 +124,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
       name: opts.name,
       hostname: opts.hostname ?? osHostname(),
       docker: opts.engine.kind,
+      qemu: opts.hypervisor?.kind ?? "none",
       guests: listGuests().length,
     });
   });
@@ -137,6 +159,25 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
           updatedAt: now,
         };
         hostGuests.set(vm.id, vm);
+        return c.json(vm, 201);
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : "Failed" }, 400);
+      }
+    }
+    if (body.runtime === "vm") {
+      try {
+        if (!opts.hypervisor) {
+          throw new Error("QEMU is not available on this worker. Install qemu-system and retry.");
+        }
+        if (!body.template) throw new Error("VM template is required");
+        const template = await resolveWorkerVmTemplate(opts.dataDir, body.template);
+        const vm = await opts.hypervisor.create({
+          sessionId: body.sessionId,
+          name: body.name,
+          template,
+          imagePath: body.imagePath,
+        });
+        vm.runtime = "vm";
         return c.json(vm, 201);
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : "Failed" }, 400);
@@ -194,6 +235,11 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
       return c.json(host);
     }
     try {
+      if (opts.hypervisor?.get(id)) {
+        let vm = await opts.hypervisor.start(id);
+        vm = await waitMachineReady(opts.hypervisor, vm.id);
+        return c.json(vm);
+      }
       let vm = await opts.engine.start(id);
       vm = await waitReady(opts.engine, vm.id);
       return c.json(vm);
@@ -211,6 +257,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
       return c.json(host);
     }
     try {
+      if (opts.hypervisor?.get(id)) return c.json(await opts.hypervisor.stop(id));
       return c.json(await opts.engine.stop(id));
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Failed" }, 400);
@@ -234,6 +281,10 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
         }
         return c.json({ ok: true });
       }
+      if (opts.hypervisor?.get(id)) {
+        await opts.hypervisor.destroy(id);
+        return c.json({ ok: true });
+      }
       await opts.engine.destroy(id);
       const sessionId = safeWorkerSessionId(vm?.sessionId);
       if (opts.dataDir && sessionId) {
@@ -253,6 +304,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
     if (!getGuest(id)) return c.json({ error: "Not found" }, 404);
     const host = hostGuests.get(id);
     if (host) return c.json({ logs: "" });
+    if (opts.hypervisor?.get(id)) return c.json({ logs: opts.hypervisor.logs(id) });
     return c.json({ logs: opts.engine.logs(id) });
   });
 
@@ -297,6 +349,15 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   app.get("/v1/guests/:id/workspace", async (c) => {
     const vm = getGuest(c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
+    if (isWorkerVmGuest(vm)) {
+      try {
+        return c.json({
+          entries: await listVmWorkspace(guests.forVm(vm), c.req.query("path") ?? ""),
+        });
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : "Failed" }, 400);
+      }
+    }
     const root = vm.diskPath?.trim();
     if (!root) return c.json({ error: "No workspace on this worker guest" }, 404);
     const entries = await listWorkerWorkspace(root, c.req.query("path") ?? "");
@@ -306,6 +367,15 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   app.get("/v1/guests/:id/workspace/file", async (c) => {
     const vm = getGuest(c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
+    if (isWorkerVmGuest(vm)) {
+      try {
+        const file = await readVmWorkspaceFile(guests.forVm(vm), c.req.query("path") ?? "");
+        if (!file) return c.json({ error: "File not found" }, 404);
+        return c.json(file);
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : "Failed" }, 400);
+      }
+    }
     const root = vm.diskPath?.trim();
     if (!root) return c.json({ error: "No workspace on this worker guest" }, 404);
     try {
@@ -320,6 +390,9 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   app.get("/v1/guests/:id/workspace/raw", async (c) => {
     const vm = getGuest(c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
+    if (isWorkerVmGuest(vm)) {
+      return c.json({ error: "Raw workspace bytes are not served for VM guests" }, 400);
+    }
     const root = vm.diskPath?.trim();
     if (!root) return c.json({ error: "No workspace on this worker guest" }, 404);
     try {
@@ -338,6 +411,21 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   app.put("/v1/guests/:id/workspace/file", async (c) => {
     const vm = getGuest(c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
+    if (isWorkerVmGuest(vm)) {
+      const body = (await c.req.json().catch(() => ({}))) as {
+        path?: string;
+        content?: string;
+        encoding?: string;
+      };
+      try {
+        const raw = body.content ?? "";
+        const content =
+          body.encoding === "base64" ? Buffer.from(raw, "base64").toString("utf8") : raw;
+        return c.json(await writeVmWorkspaceFile(guests.forVm(vm), body.path ?? "", content));
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : "Failed" }, 400);
+      }
+    }
     const root = vm.diskPath?.trim();
     if (!root) return c.json({ error: "No workspace on this worker guest" }, 404);
     const body = (await c.req.json().catch(() => ({}))) as {
@@ -357,6 +445,21 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   app.post("/v1/guests/:id/workspace/mkdir", async (c) => {
     const vm = getGuest(c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
+    if (isWorkerVmGuest(vm)) {
+      const body = (await c.req.json().catch(() => ({}))) as { path?: string };
+      try {
+        const rel = (body.path ?? "").replace(/^\/+/, "");
+        const dest = rel ? `${LINUX_WORKSPACE}/${rel}` : LINUX_WORKSPACE;
+        const result = await guests.forVm(vm).execute({
+          name: "exec",
+          args: { command: `mkdir -p -- ${JSON.stringify(dest)}` },
+        });
+        if (!result.ok) throw new Error(result.output || "mkdir failed");
+        return c.json({ path: dest }, 201);
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : "Failed" }, 400);
+      }
+    }
     const root = vm.diskPath?.trim();
     if (!root) return c.json({ error: "No workspace on this worker guest" }, 404);
     const body = (await c.req.json().catch(() => ({}))) as { path?: string };
@@ -370,6 +473,22 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   app.delete("/v1/guests/:id/workspace/file", async (c) => {
     const vm = getGuest(c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
+    if (isWorkerVmGuest(vm)) {
+      try {
+        const rel = (c.req.query("path") ?? "").replace(/^\/+/, "");
+        if (!rel) throw new Error("Path is required");
+        const dest = `${LINUX_WORKSPACE}/${rel}`;
+        const result = await guests.forVm(vm).execute({
+          name: "exec",
+          args: { command: `rm -rf -- ${JSON.stringify(dest)}` },
+        });
+        if (!result.ok) throw new Error(result.output || "delete failed");
+        return c.json({ path: dest });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed";
+        return c.json({ error: message }, message.includes("not found") ? 404 : 400);
+      }
+    }
     const root = vm.diskPath?.trim();
     if (!root) return c.json({ error: "No workspace on this worker guest" }, 404);
     try {
@@ -397,12 +516,18 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   app.put("/v1/guests/:id/workspace-seed", async (c) => {
     const vm = getGuest(c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
+    if (isWorkerVmGuest(vm)) {
+      return c.json({ error: "VM golden disks stay on the worker media folder" }, 400);
+    }
     return putArchive(c, vm.diskPath?.trim());
   });
 
   app.get("/v1/guests/:id/workspace.tgz", async (c) => {
     const vm = getGuest(c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
+    if (isWorkerVmGuest(vm)) {
+      return c.json({ error: "VM workspace is inside the guest, not a host folder" }, 400);
+    }
     const root = vm.diskPath?.trim();
     if (!root) return c.json({ error: "No workspace on this worker guest" }, 404);
     try {
@@ -455,7 +580,12 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   app.post("/v1/guests/:id/cursor-cli", async (c) => {
     const vm = getGuest(c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
-    const workspace = vm.diskPath?.trim();
+    const vmGuest = isWorkerVmGuest(vm);
+    if (vmGuest && isWindows(vm.os)) {
+      return c.json({ error: "CLI providers on a Windows worker VM are not supported" }, 400);
+    }
+    if (vmGuest && !vm.ssh) return c.json({ error: "VM has no SSH" }, 400);
+    const workspace = vmGuest ? LINUX_WORKSPACE : vm.diskPath?.trim();
     if (!workspace) return c.json({ error: "No workspace on this worker guest" }, 404);
     const sessionId = vm.sessionId?.trim();
     if (!sessionId) return c.json({ error: "No session on this worker guest" }, 404);
@@ -531,17 +661,28 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
               }),
           });
           closeMcp = mcp.close;
-          await writeWorkerLocusMcpConfig(workspace, mcp.sessionUrl);
-          const spawned = spawnWorkerCursorCli(
-            {
-              command,
-              args,
-              apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
-              gitMcpUrl: mcp.sessionUrl,
-            },
-            workspace,
-            c.req.raw.signal,
-          );
+          const spawned = vmGuest
+            ? await spawnVmWorkerCursorCli({
+                vm,
+                guests: guests.forVm(vm),
+                command,
+                args,
+                apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
+                gitMcpUrl: mcp.sessionUrl,
+                mcpPort: mcp.port,
+                signal: c.req.raw.signal,
+              })
+            : spawnWorkerCursorCli(
+                {
+                  command,
+                  args,
+                  apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
+                  gitMcpUrl: mcp.sessionUrl,
+                },
+                workspace,
+                c.req.raw.signal,
+              );
+          if (!vmGuest) await writeWorkerLocusMcpConfig(workspace, mcp.sessionUrl);
           killCli = spawned.kill;
           const reader = spawned.stream.getReader();
           try {
@@ -611,7 +752,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   return app;
 }
 
-async function waitReady(engine: DockerEngine, id: string, timeoutMs = 60_000) {
+async function waitMachineReady(engine: Pick<Hypervisor, "get">, id: string, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const vm = engine.get(id);
@@ -622,6 +763,148 @@ async function waitReady(engine: DockerEngine, id: string, timeoutMs = 60_000) {
   const last = engine.get(id);
   if (!last) throw new Error("Guest disappeared");
   return last;
+}
+
+async function waitReady(engine: DockerEngine, id: string, timeoutMs = 60_000) {
+  return waitMachineReady(engine, id, timeoutMs);
+}
+
+async function listVmWorkspace(
+  runtime: { execute: GuestRuntime["execute"] },
+  rel: string,
+): Promise<{ name: string; path: string; type: "file" | "dir"; size?: number }[]> {
+  const dest = guestWorkspacePath(rel);
+  const result = await runtime.execute({ name: "file_list", args: { path: dest } });
+  if (!result.ok) throw new Error(result.output || "list failed");
+  return parseLsEntries(result.output);
+}
+
+async function readVmWorkspaceFile(
+  runtime: { execute: GuestRuntime["execute"] },
+  rel: string,
+): Promise<{ path: string; content: string; mtime: string } | undefined> {
+  const dest = guestWorkspacePath(rel);
+  const result = await runtime.execute({ name: "file_read", args: { path: dest } });
+  if (!result.ok) return undefined;
+  return { path: dest, content: result.output, mtime: new Date().toISOString() };
+}
+
+async function writeVmWorkspaceFile(
+  runtime: { execute: GuestRuntime["execute"] },
+  rel: string,
+  content: string,
+): Promise<{ path: string; mtime: string }> {
+  const dest = guestWorkspacePath(rel);
+  const result = await runtime.execute({
+    name: "file_write",
+    args: { path: dest, content },
+  });
+  if (!result.ok) throw new Error(result.output || "write failed");
+  return { path: dest, mtime: new Date().toISOString() };
+}
+
+function guestWorkspacePath(rel: string): string {
+  const clean = rel.replace(/^\/+/, "").trim();
+  if (!clean || clean === "." || clean === LINUX_WORKSPACE.replace(/^\//, ""))
+    return LINUX_WORKSPACE;
+  if (clean.startsWith("home/locus/workspace/")) return `/${clean}`;
+  if (clean.startsWith("/")) return clean;
+  return `${LINUX_WORKSPACE}/${clean}`;
+}
+
+function parseLsEntries(
+  output: string,
+): { name: string; path: string; type: "file" | "dir"; size?: number }[] {
+  const entries: { name: string; path: string; type: "file" | "dir"; size?: number }[] = [];
+  for (const line of output.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.toLowerCase().startsWith("total ")) continue;
+    const name = trimmed.split(/\s+/).pop();
+    if (!name || name === "." || name === "..") continue;
+    entries.push({
+      name,
+      path: name,
+      type: trimmed.startsWith("d") ? "dir" : "file",
+    });
+  }
+  return entries;
+}
+
+async function spawnVmWorkerCursorCli(input: {
+  vm: VmInstance;
+  guests: { execute: GuestRuntime["execute"] };
+  command: string;
+  args: string[];
+  apiKey?: string;
+  gitMcpUrl: string;
+  mcpPort: number;
+  signal?: AbortSignal;
+}): Promise<{ stream: ReadableStream<Uint8Array>; kill: () => void }> {
+  const ssh = sshTargetFromInstance(input.vm);
+  if (!ssh) throw new Error("VM has no SSH");
+  const args = workerCliArgs(input.command, input.args, LINUX_WORKSPACE, input.gitMcpUrl);
+  const env = workerCliEnv(input.command, input.apiKey, workerGitMcpUrl(args) ?? input.gitMcpUrl);
+  const mcpJson = `${JSON.stringify({ mcpServers: { locus: { url: input.gitMcpUrl } } }, null, 2)}\n`;
+  const claudeJson = `${JSON.stringify({ mcpServers: { locus: { type: "http", url: input.gitMcpUrl } } }, null, 2)}\n`;
+  const kiroJson = `${JSON.stringify({ mcpServers: { locus: { url: input.gitMcpUrl, autoApprove: ["*"] } } }, null, 2)}\n`;
+  await input.guests.execute({
+    name: "file_write",
+    args: { path: `${LINUX_WORKSPACE}/.cursor/mcp.json`, content: mcpJson },
+  });
+  await input.guests.execute({
+    name: "file_write",
+    args: { path: `${LINUX_WORKSPACE}/.mcp.json`, content: claudeJson },
+  });
+  await input.guests.execute({
+    name: "file_write",
+    args: { path: `${LINUX_WORKSPACE}/.kiro/settings/mcp.json`, content: kiroJson },
+  });
+  const handle = spawnCliOverSsh(
+    ssh,
+    { command: input.command, args, cwd: LINUX_WORKSPACE, env, signal: input.signal },
+    { reverseForwards: [{ listenPort: input.mcpPort, hostPort: input.mcpPort }] },
+  );
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        for await (const line of handle.lines) {
+          try {
+            controller.enqueue(encoder.encode(`${line}\n`));
+          } catch {
+            handle.kill?.();
+            return;
+          }
+        }
+        const result = await handle.wait();
+        if (result.code && result.code !== 0) {
+          const message = result.stderr.trim() || `Cursor CLI exited ${result.code}`;
+          try {
+            controller.enqueue(encoder.encode(`${JSON.stringify({ type: "error", message })}\n`));
+          } catch {
+            /* already closed */
+          }
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Worker VM CLI failed";
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify({ type: "error", message })}\n`));
+        } catch {
+          /* already closed */
+        }
+      } finally {
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
+      }
+    },
+    cancel() {
+      handle.kill?.();
+    },
+  });
+  return { stream, kill: () => handle.kill?.() };
 }
 
 function isDefaultHostWorkspace(dataDir: string, diskPath: string): boolean {

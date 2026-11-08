@@ -17,7 +17,8 @@ import {
 import { useStore } from "@/state/store";
 import { DockerStatsPanel, useDockerStats } from "./DockerStatsPanel";
 import { IconArrowUpRight, IconClose, IconCopy, IconStop } from "@/components/layout/Icons";
-import { Mascot } from "@/components/layout/Mascot";
+import { EmptyHero } from "@/components/layout/EmptyHero";
+import { ErrorBanner } from "@/components/layout/Skeleton";
 import { SearchField } from "@/components/layout/SearchField";
 import { WorkspaceEditor } from "@/components/workspace/WorkspaceEditor";
 import { DockerSwarmPane } from "./DockerSwarm";
@@ -150,7 +151,7 @@ function DockerContainersPane() {
 
   async function restartPicked() {
     if (!picked.length || busy) return;
-    if (!confirmRestartContainers(picked)) return;
+    if (!(await confirmRestartContainers(picked))) return;
     setBusy("restart-picked");
     setError(null);
     try {
@@ -209,18 +210,17 @@ function DockerContainersPane() {
     return (
       <div className="empty">
         <div className="empty-card">
-          <div className="empty-hero">
-            <Mascot pose="rest" size={76} />
-            <div>
-              <p className="eyebrow">Docker</p>
-              <h2>No containers</h2>
-            </div>
-          </div>
-          <p>
-            {state.dockerKind === "docker"
-              ? "No containers on this Docker engine. Start an agent, or run something with the Docker CLI — it will show up here."
-              : "Using a mock Docker engine until the Docker CLI is installed. New Docker agents still appear here so you can stop, restart, and read logs."}
-          </p>
+          <EmptyHero
+            pose="rest"
+            size={76}
+            eyebrow="Docker"
+            title="No containers"
+            lead={
+              state.dockerKind === "docker"
+                ? "No containers on this Docker engine. Start an agent, or run something with the Docker CLI — it will show up here."
+                : "Using a mock Docker engine until the Docker CLI is installed. New Docker agents still appear here so you can stop, restart, and read logs."
+            }
+          />
           <div className="empty-actions">
             <button
               className="btn primary"
@@ -325,7 +325,7 @@ function DockerContainersPane() {
           <dd>{dockerStatusLabel(item)}</dd>
         </div>
       </dl>
-      {error ? <p className="docker-error">{error}</p> : null}
+      {error ? <ErrorBanner message={error} onRetry={() => void refreshList()} /> : null}
       <div className="docker-tabs" role="tablist" aria-label="Container views">
         {(["logs", "inspect", "stats", "files"] as const).map((id) => (
           <button

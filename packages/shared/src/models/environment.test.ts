@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   environmentInstallCommand,
   formatSetupPrompt,
+  parseDevcontainer,
+  parseJsonc,
   parseLocusEnvironment,
+  parseWorkspaceEnvironment,
 } from "./environment.js";
 
 describe("locus environment", () => {
@@ -48,6 +51,61 @@ describe("locus environment", () => {
 
   it("ignores snapshot-only Cursor files", () => {
     expect(parseLocusEnvironment({ snapshot: "snap-1" })).toBeUndefined();
+  });
+
+  it("maps a Dev Container spec onto install, start, ports, and env", () => {
+    const env = parseDevcontainer({
+      image: "mcr.microsoft.com/devcontainers/javascript-node:22",
+      forwardPorts: [5173, { port: 7420 }],
+      postCreateCommand: "npm ci",
+      postStartCommand: "npm run dev -- --host 0.0.0.0",
+      containerEnv: { NODE_ENV: "development" },
+      remoteEnv: { FOO: "bar" },
+    });
+    expect(env).toEqual({
+      install: "npm ci",
+      start: "npm run dev -- --host 0.0.0.0",
+      ports: [5173, 7420],
+      image: "mcr.microsoft.com/devcontainers/javascript-node:22",
+      env: { NODE_ENV: "development", FOO: "bar" },
+    });
+  });
+
+  it("joins Dev Container command arrays and folds onCreate into install", () => {
+    const env = parseDevcontainer({
+      onCreateCommand: ["sudo", "apt-get", "update"],
+      postCreateCommand: "pnpm install --frozen-lockfile",
+      postStartCommand: ["pnpm", "dev"],
+    });
+    expect(env?.install).toBe("sudo apt-get update && pnpm install --frozen-lockfile");
+    expect(env?.start).toBe("pnpm dev");
+  });
+
+  it("parses a Dev Container through parseWorkspaceEnvironment", () => {
+    const env = parseWorkspaceEnvironment({
+      image: "node:22-bookworm",
+      postCreateCommand: "npm ci",
+      forwardPorts: [5173],
+      containerEnv: { NODE_ENV: "development" },
+    });
+    expect(env).toEqual({
+      install: "npm ci",
+      ports: [5173],
+      image: "node:22-bookworm",
+      env: { NODE_ENV: "development" },
+    });
+  });
+
+  it("parses JSONC comments and trailing commas", () => {
+    const env = parseLocusEnvironment(
+      parseJsonc(`{
+        // bootstrap
+        "install": "npm ci",
+        "ports": [5173,],
+      }`),
+    );
+    expect(env?.install).toBe("npm ci");
+    expect(env?.ports).toEqual([5173]);
   });
 
   it("formats the Codebase setup prompt", () => {

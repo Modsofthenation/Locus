@@ -17,7 +17,14 @@ import {
   type PullRequestRef,
   type RepoBranchList,
 } from "@locus/shared";
-import { fail, forgeJson, githubAuthHeaders, pullFlags, type ForgeFetcher } from "./forgeHttp.js";
+import {
+  fail,
+  forgeJson,
+  giteaAuthHeaders,
+  githubAuthHeaders,
+  pullFlags,
+  type ForgeFetcher,
+} from "./forgeHttp.js";
 import type {
   CreatePullInput,
   CreatedPull,
@@ -27,13 +34,27 @@ import type {
   PostReviewInput,
 } from "./forgeAdapter.js";
 
+function githubCompatible(account: GitForgeAccount): boolean {
+  return account.kind === "gitea" || account.kind === "forgejo";
+}
+
 function githubJson<T>(
   fetchFn: ForgeFetcher,
   account: GitForgeAccount,
   path: string,
   init?: RequestInit,
 ) {
-  return forgeJson<T>(fetchFn, account, path, init, githubAuthHeaders);
+  return forgeJson<T>(
+    fetchFn,
+    account,
+    path,
+    init,
+    githubCompatible(account) ? giteaAuthHeaders : githubAuthHeaders,
+  );
+}
+
+function mapForge(account: GitForgeAccount): GitForgeAccount["kind"] {
+  return githubCompatible(account) ? account.kind : "github";
 }
 
 export async function listGithubRepos(
@@ -53,17 +74,23 @@ export async function listGithubRepos(
   >(
     fetchFn,
     account,
-    "/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member",
+    githubCompatible(account)
+      ? "/user/repos?limit=50&sort=updated"
+      : "/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member",
   );
   if (!ok || !Array.isArray(json)) throw fail({ status: 400 } as Response, text);
   return json.flatMap((row) => {
     const owner = row.owner?.login || row.full_name?.split("/")[0];
     const name = row.name;
-    const url = row.clone_url || (owner && name ? `https://github.com/${owner}/${name}.git` : "");
+    const origin =
+      account.kind === "gitea" || account.kind === "forgejo"
+        ? account.apiBaseUrl.replace(/\/api\/v1\/?$/i, "")
+        : "https://github.com";
+    const url = row.clone_url || (owner && name ? `${origin}/${owner}/${name}.git` : "");
     if (!owner || !name || !url) return [];
     return [
       {
-        forge: "github" as const,
+        forge: mapForge(account),
         accountId: account.id,
         accountName: account.name,
         owner,
@@ -98,8 +125,10 @@ export async function listGithubPulls(
   repo: string,
   state: PullListState,
 ): Promise<Omit<PullRequestRef, "repoId">[]> {
-  const fromGraphql = await listGithubPullsGraphql(fetchFn, account, owner, repo, state);
-  if (fromGraphql) return fromGraphql;
+  if (!githubCompatible(account)) {
+    const fromGraphql = await listGithubPullsGraphql(fetchFn, account, owner, repo, state);
+    if (fromGraphql) return fromGraphql;
+  }
   return listGithubPullsRest(fetchFn, account, owner, repo, state);
 }
 
@@ -117,10 +146,13 @@ async function listGithubPullsRest(
     `/repos/${owner}/${repo}/pulls?state=${ghState}&per_page=30`,
   );
   if (!ok || !Array.isArray(json)) throw fail({ status: 400 } as Response, text);
-  return json.flatMap((row) => mapGithubRestPull(row) ?? []);
+  return json.flatMap((row) => mapGithubRestPull(row, mapForge(account)) ?? []);
 }
 
-function mapGithubRestPull(row: GithubPullListRow): Omit<PullRequestRef, "repoId"> | undefined {
+function mapGithubRestPull(
+  row: GithubPullListRow,
+  forge: GitForgeAccount["kind"] = "github",
+): Omit<PullRequestRef, "repoId"> | undefined {
   if (!row.number || !row.html_url) return undefined;
   const flags = pullFlags({
     state: row.state,
@@ -131,7 +163,7 @@ function mapGithubRestPull(row: GithubPullListRow): Omit<PullRequestRef, "repoId
     .map((item) => item.login?.trim())
     .filter((name): name is string => Boolean(name));
   return {
-    forge: "github",
+    forge,
     number: row.number,
     title: row.title || `#${row.number}`,
     state: flags.state,
@@ -292,7 +324,7 @@ export async function getGithubPull(
     .map((item) => item.login?.trim())
     .filter((name): name is string => Boolean(name));
   summary = {
-    forge: "github",
+    forge: mapForge(account),
     number: pull.json.number ?? number,
     title: pull.json.title || `#${number}`,
     state: flags.state,
@@ -522,6 +554,7 @@ async function githubViewedPaths(
   number: number,
 ): Promise<Set<string>> {
   const viewed = new Set<string>();
+  if (githubCompatible(account)) return viewed;
   try {
     const { ok, json } = await githubGraphql<{
       data?: {
@@ -786,13 +819,16 @@ function githubIssueLabels(row: GithubIssueRow): string[] | undefined {
   return names.length ? names : undefined;
 }
 
-function mapGithubIssue(row: GithubIssueRow): Omit<IssueRef, "repoId"> | undefined {
+function mapGithubIssue(
+  row: GithubIssueRow,
+  forge: GitForgeAccount["kind"] = "github",
+): Omit<IssueRef, "repoId"> | undefined {
   if (!row.number || !row.html_url || row.pull_request) return undefined;
   const assignees = (row.assignees ?? [])
     .map((item) => item.login?.trim())
     .filter((name): name is string => Boolean(name));
   return {
-    forge: "github",
+    forge,
     number: row.number,
     title: row.title || `#${row.number}`,
     state: parseIssueState(row.state),
@@ -848,7 +884,7 @@ export async function listGithubIssues(
   );
   if (status === 404 || status === 410) return [];
   if (!ok || !Array.isArray(json)) throw fail({ status: 400 } as Response, text);
-  return json.flatMap((row) => mapGithubIssue(row) ?? []);
+  return json.flatMap((row) => mapGithubIssue(row, mapForge(account)) ?? []);
 }
 
 export async function getGithubIssue(
@@ -867,7 +903,7 @@ export async function getGithubIssue(
   if (issue.json.pull_request) {
     throw fail({ status: 400 } as Response, "That's a pull request — use git_pr_get");
   }
-  const summary = mapGithubIssue(issue.json);
+  const summary = mapGithubIssue(issue.json, mapForge(account));
   if (!summary) throw fail({ status: 400 } as Response, issue.text || "Issue not found");
   const comments = await githubJson<
     Array<{

@@ -161,6 +161,7 @@ import {
 import { finishCanvasSrcDoc, paintCanvasHtml } from "@/lib/canvasPaint";
 import { canvasFrameSrc, isCanvasFrameReady, postCanvasFrameHtml } from "@/lib/canvasFrame";
 import { useStore } from "@/state/store";
+import { matchModKey } from "@/lib/shortcuts";
 import { useDeferredCollapse } from "@/lib/useDeferredCollapse";
 import { DesignPalettePicker } from "./DesignPalettePicker";
 import { DesignSystemPicker } from "./DesignSystemPicker";
@@ -186,6 +187,7 @@ import { filesFromDataTransfer, filesToAttachments, isImageFile } from "@/lib/at
 import { IconMore, IconPanelRight } from "@/components/layout/Icons";
 import { ImageBuildCard } from "@/components/chat/CloneProgressCard";
 import { MenuItem, MenuSep, OverflowMenu } from "@/components/layout/OverflowMenu";
+import { Select } from "@/components/layout/Select";
 import { GamePlayLinkPanel } from "@/components/game/GamePlayLink";
 
 type Viewport = DesignViewport | "landscape";
@@ -2391,12 +2393,10 @@ export function DesignCanvas() {
       );
     }
     function onKey(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
       if (typing(event.target)) return;
-      const key = event.key.toLowerCase();
-      if (key !== "z") return;
+      if (!matchModKey(event, "z") && !matchModKey(event, "z", true)) return;
       event.preventDefault();
-      if (event.shiftKey) {
+      if (matchModKey(event, "z", true)) {
         if (historyAtRef.current < history.current.length - 1) {
           void restoreHistory(historyAtRef.current + 1);
         }
@@ -2486,26 +2486,25 @@ export function DesignCanvas() {
         <div className="vm-toolbar-actions">
           <div className="design-toolbar-group" role="group" aria-label="Appearance">
             {game || assets ? (
-              <select
+              <Select
                 className="game-kit-select"
-                aria-label={assets ? "Asset kit" : "Game kit"}
-                title={assets ? "Asset kit" : "Game kit"}
+                compact
+                ariaLabel={assets ? "Asset kit" : "Game kit"}
                 value={session.designSystemId ?? ""}
-                onChange={(event) => {
-                  const id = event.target.value;
+                options={[
+                  { value: "", label: "No kit" },
+                  ...(assets ? ASSET_KITS : GAME_KITS).map((kit) => ({
+                    value: kit.id,
+                    label: kit.title,
+                  })),
+                ]}
+                onChange={(id) => {
                   void api
                     .patchSession(session.id, { designSystemId: id || null })
                     .then((updated) => dispatch({ type: "session", session: updated }))
                     .catch(() => undefined);
                 }}
-              >
-                <option value="">No kit</option>
-                {(assets ? ASSET_KITS : GAME_KITS).map((kit) => (
-                  <option key={kit.id} value={kit.id}>
-                    {kit.title}
-                  </option>
-                ))}
-              </select>
+              />
             ) : (
               <DesignSystemPicker
                 compact
@@ -2523,17 +2522,30 @@ export function DesignCanvas() {
               />
             )}
             {game ? (
-              <GameStylePicker
-                compact
-                manage={false}
-                selectedId={session.gameStyleId}
-                onChange={(style) => {
-                  void api
-                    .patchSession(session.id, { gameStyleId: style?.id ?? null })
-                    .then((updated) => dispatch({ type: "session", session: updated }))
-                    .catch(() => undefined);
-                }}
-              />
+              <>
+                <GameStylePicker
+                  compact
+                  manage={false}
+                  selectedId={session.gameStyleId}
+                  onChange={(style) => {
+                    void api
+                      .patchSession(session.id, { gameStyleId: style?.id ?? null })
+                      .then((updated) => dispatch({ type: "session", session: updated }))
+                      .catch(() => undefined);
+                  }}
+                />
+                <Select
+                  className="game-kit-select"
+                  compact
+                  ariaLabel="Viewport"
+                  value={viewport}
+                  options={viewports.map((item) => ({
+                    value: item.id,
+                    label: item.label,
+                  }))}
+                  onChange={(value) => setResponsiveViewport(value as Viewport)}
+                />
+              </>
             ) : null}
             {assets ? (
               <AssetStylePicker
@@ -2575,35 +2587,19 @@ export function DesignCanvas() {
               />
             )}
           </div>
-          {assets ? null : <span className="design-toolbar-sep" aria-hidden="true" />}
-          {assets ? null : game ? (
-            <select
-              className="game-kit-select"
-              aria-label="Viewport"
-              title="Viewport"
-              value={viewport}
-              onChange={(event) => setResponsiveViewport(event.target.value as Viewport)}
-            >
-              {viewports.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          ) : mobile ? (
-            <select
+          {assets ? null : game ? null : <span className="design-toolbar-sep" aria-hidden="true" />}
+          {assets ? null : game ? null : mobile ? (
+            <Select
               className="design-phone-select"
-              aria-label="Phone model"
-              title={formatPhoneDeviceCaption(phone)}
+              compact
+              ariaLabel="Phone model"
               value={phone.id}
-              onChange={(event) => setPhoneId(event.target.value)}
-            >
-              {DESIGN_PHONE_DEVICES.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
+              options={DESIGN_PHONE_DEVICES.map((item) => ({
+                value: item.id,
+                label: item.label,
+              }))}
+              onChange={setPhoneId}
+            />
           ) : (
             <div className="control-cluster" role="group" aria-label="Viewport">
               {viewports.map((item) => (
@@ -2620,19 +2616,17 @@ export function DesignCanvas() {
             </div>
           )}
           {game && mobile ? (
-            <select
+            <Select
               className="design-phone-select"
-              aria-label="Phone model"
-              title={formatPhoneDeviceCaption(phone)}
+              compact
+              ariaLabel="Phone model"
               value={phone.id}
-              onChange={(event) => setPhoneId(event.target.value)}
-            >
-              {DESIGN_PHONE_DEVICES.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
+              options={DESIGN_PHONE_DEVICES.map((item) => ({
+                value: item.id,
+                label: item.label,
+              }))}
+              onChange={setPhoneId}
+            />
           ) : null}
           {game || assets ? (
             <>
@@ -3151,27 +3145,29 @@ export function DesignCanvas() {
             </div>
             <div className="canvas-menu-field">
               <label htmlFor="canvas-variant">Variant</label>
-              <select
+              <Select
                 id="canvas-variant"
                 className="variant-select"
-                aria-label="Design variant"
+                compact
+                ariaLabel="Design variant"
                 disabled={swapping}
                 value={session.activeVariantId ?? ""}
-                onChange={(event) => {
-                  const id = event.target.value;
+                options={[
+                  {
+                    value: "",
+                    label: (session.designVariants ?? []).length ? "Variants" : "No variants",
+                    disabled: true,
+                  },
+                  ...(session.designVariants ?? []).map((item) => ({
+                    value: item.id,
+                    label: item.name,
+                  })),
+                ]}
+                onChange={(id) => {
                   if (!id) return;
                   void activateVariant(id);
                 }}
-              >
-                <option value="" disabled>
-                  {(session.designVariants ?? []).length ? "Variants" : "No variants"}
-                </option>
-                {(session.designVariants ?? []).map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
+              />
               <input
                 className="variant-name"
                 value={variantName}
@@ -3317,35 +3313,35 @@ export function DesignCanvas() {
             <MenuSep />
             <div className="canvas-menu-field">
               <label htmlFor="canvas-scaffold">{game ? "Grow as" : "Promote as"}</label>
-              <select
+              <Select
                 id="canvas-scaffold"
                 className="promote-scaffold"
-                aria-label="Promote scaffold"
+                compact
+                ariaLabel="Promote scaffold"
                 value={scaffold}
-                onChange={(event) => setScaffold(event.target.value as CanvasScaffold)}
-              >
-                {game ? (
-                  <>
-                    <option value="canvas-vite">Canvas + Vite</option>
-                    <option value="three-vite">Three.js + Vite</option>
-                    <option value="phaser">Phaser + Vite</option>
-                    <option value="static">Static HTML</option>
-                  </>
-                ) : assets ? (
-                  <>
-                    <option value="three-vite">Three.js + Vite</option>
-                    <option value="canvas-vite">Canvas + Vite</option>
-                    <option value="static">Static HTML</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="vite-react">Vite + React</option>
-                    <option value="next">Next.js</option>
-                    <option value="astro">Astro</option>
-                    <option value="static">Static HTML</option>
-                  </>
-                )}
-              </select>
+                options={
+                  game
+                    ? [
+                        { value: "canvas-vite", label: "Canvas + Vite" },
+                        { value: "three-vite", label: "Three.js + Vite" },
+                        { value: "phaser", label: "Phaser + Vite" },
+                        { value: "static", label: "Static HTML" },
+                      ]
+                    : assets
+                      ? [
+                          { value: "three-vite", label: "Three.js + Vite" },
+                          { value: "canvas-vite", label: "Canvas + Vite" },
+                          { value: "static", label: "Static HTML" },
+                        ]
+                      : [
+                          { value: "vite-react", label: "Vite + React" },
+                          { value: "next", label: "Next.js" },
+                          { value: "astro", label: "Astro" },
+                          { value: "static", label: "Static HTML" },
+                        ]
+                }
+                onChange={(value) => setScaffold(value as CanvasScaffold)}
+              />
             </div>
             <MenuItem disabled={promoting} onClick={() => void promote()}>
               {promoting
@@ -3484,25 +3480,22 @@ export function DesignCanvas() {
               wide
             >
               <div className="asset-clip-bar" role="group" aria-label="Timeline">
-                <select
+                <Select
                   className="game-kit-select"
-                  aria-label="Clip"
-                  title="Animation clip"
+                  compact
+                  ariaLabel="Clip"
                   disabled={!html?.trim()}
                   value={visibleClips.includes(clip) ? clip : (visibleClips[0] ?? "idle")}
-                  onChange={(event) => {
-                    const next = event.target.value as (typeof ASSET_CLIPS)[number];
-                    setClip(next);
+                  options={visibleClips.map((id) => ({
+                    value: id,
+                    label: formatAssetClipLabel(id),
+                  }))}
+                  onChange={(next) => {
+                    setClip(next as (typeof ASSET_CLIPS)[number]);
                     setAssetPaused(false);
                     postGame({ type: "locus-asset-play", clip: next });
                   }}
-                >
-                  {visibleClips.map((id) => (
-                    <option key={id} value={id}>
-                      {formatAssetClipLabel(id)}
-                    </option>
-                  ))}
-                </select>
+                />
                 <button
                   type="button"
                   className="btn small"

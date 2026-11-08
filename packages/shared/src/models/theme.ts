@@ -102,6 +102,9 @@ export type ThemeId = (typeof THEME_IDS)[number];
 
 export const DEFAULT_THEME: ThemeId = "ember";
 
+/** Themes the Appearance page designs against. The rest stay in See all. */
+export const FEATURED_THEME_IDS: readonly ThemeId[] = ["ember", "midnight", "paper", "contrast"];
+
 export interface ThemeOption {
   id: ThemeId;
   name: string;
@@ -230,7 +233,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: "contrast",
-    name: "Signal",
+    name: "Contrast",
     summary: "High-contrast black, white, and amber.",
     scheme: "dark",
     contrast: true,

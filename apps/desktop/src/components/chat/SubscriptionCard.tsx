@@ -67,8 +67,8 @@ export function SubscriptionList({
   if (!subscriptions.length) {
     return (
       <p className="modal-lead" data-testid="subscription-empty">
-        Ask this agent to subscribe to a Slack channel or thread, a GitHub/GitLab/Bitbucket pull
-        request, or a timer.
+        Ask this agent to subscribe to a Slack channel or thread, a GitHub/GitLab/Bitbucket/Gitea
+        pull request, a Linear/Jira/Sentry/incident.io issue, a Grafana alert, or a timer.
       </p>
     );
   }

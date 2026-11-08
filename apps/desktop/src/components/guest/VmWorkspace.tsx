@@ -234,7 +234,7 @@ export function VmWorkspace(props: { embedded?: boolean } = {}) {
 
   async function saveImage() {
     if (!sessionId) return;
-    const name = promptGoldenName(defaultGoldenName(session?.title));
+    const name = await promptGoldenName(defaultGoldenName(session?.title));
     if (!name) return;
     setSavingImage(true);
     setSaveError(null);

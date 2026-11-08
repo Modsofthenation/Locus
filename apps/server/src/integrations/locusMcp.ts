@@ -78,7 +78,7 @@ export async function handleLocusMcpRpc(
     const result = {
       protocolVersion: requested.trim() || "2024-11-05",
       capabilities: { tools: { listChanged: false } },
-      serverInfo: { name: "locus", version: "0.16.1" },
+      serverInfo: { name: "locus", version: "0.17.0" },
       ...(ctx.instructions?.trim() ? { instructions: ctx.instructions.trim() } : {}),
     };
     return {

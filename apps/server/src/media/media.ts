@@ -4,7 +4,7 @@ import * as http from "node:http";
 import * as https from "node:https";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
-import { CLOUD_IMAGE_CATALOG, VIRTIO_ISO, type GuestOs } from "@locus/shared";
+import { cloudImageFor, VIRTIO_ISO, type GuestOs } from "@locus/shared";
 
 type MediaItem = { name: string; url: string; filename: string };
 
@@ -139,7 +139,7 @@ export async function fetchCloudImage(
   dataDir: string,
   os: GuestOs,
 ): Promise<{ path: string; url: string; name: string }> {
-  const item = CLOUD_IMAGE_CATALOG.find((c) => c.os === os);
+  const item = cloudImageFor(os);
   if (!item) throw new Error(`No cloud image catalog entry for ${os}`);
   return saveMedia(dataDir, item);
 }

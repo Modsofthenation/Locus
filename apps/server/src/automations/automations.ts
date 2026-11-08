@@ -229,7 +229,9 @@ export class AutomationService {
       repo: input.repo,
     });
     if (gitEvent && !attached.repo?.url) {
-      throw new Error("Attach a GitHub, GitLab, or Bitbucket repository to run on git events");
+      throw new Error(
+        "Attach a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps repository to run on git events",
+      );
     }
     if (
       input.notifyWebhook?.trim() &&
@@ -504,7 +506,9 @@ export class AutomationService {
       (item.schedule.kind === "forge" || item.schedule.kind === "pull_request") &&
       !item.repo?.url
     ) {
-      throw new Error("Attach a GitHub, GitLab, or Bitbucket repository to run on git events");
+      throw new Error(
+        "Attach a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps repository to run on git events",
+      );
     }
     if (runtime === "host") {
       if (isWindows(item.os)) item.os = "ubuntu";

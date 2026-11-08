@@ -20,14 +20,14 @@ describe("golden names", () => {
     ).toBe(64);
   });
 
-  it("prompts and keeps the fallback on a blank answer", () => {
+  it("prompts and keeps the fallback on a blank answer", async () => {
     vi.spyOn(window, "prompt").mockReturnValue("nightly-node");
-    expect(promptGoldenName("Web app image")).toBe("nightly-node");
+    expect(await promptGoldenName("Web app image")).toBe("nightly-node");
     vi.mocked(window.prompt).mockReturnValue("  ");
-    expect(promptGoldenName("Web app image")).toBe("Web app image");
+    expect(await promptGoldenName("Web app image")).toBe("Web app image");
     vi.mocked(window.prompt).mockReturnValue(null);
-    expect(promptGoldenName("Web app image")).toBeNull();
+    expect(await promptGoldenName("Web app image")).toBeNull();
     vi.mocked(window.prompt).mockReturnValue(undefined as unknown as string);
-    expect(promptGoldenName("Web app image")).toBeNull();
+    expect(await promptGoldenName("Web app image")).toBeNull();
   });
 });

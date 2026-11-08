@@ -52,15 +52,20 @@ describe("named environment", () => {
     });
   });
 
-  it("rejects worker placement on a VM", () => {
-    expect(
-      parseNamedEnvironment({
-        ...base,
-        runtime: "vm",
-        placement: "worker",
-        backendId: "studio",
-      }),
-    ).toBeUndefined();
+  it("parses worker placement on a VM", () => {
+    const env = parseNamedEnvironment({
+      ...base,
+      runtime: "vm",
+      dockerImage: undefined,
+      placement: "worker",
+      backendId: "studio",
+    });
+    expect(env).toMatchObject({
+      name: "restricted-oncall",
+      runtime: "vm",
+      placement: "worker",
+      backendId: "studio",
+    });
   });
 
   it("parses worker placement on Host", () => {

@@ -1,20 +1,20 @@
 import type { ProductMode } from "@locus/shared";
 import type { UiSection } from "@/state/store";
 
-/** Top of the icon rail (above the secondary separator). */
+/** Daily coding surfaces — always on the icon rail. */
 export const PRIMARY_RAIL_SECTIONS = [
   "agents",
   "design",
-  "games",
-  "assets",
   "ide",
+  "codebase",
   "automations",
 ] as const;
-/** Below the primary/secondary separator — formerly behind More. */
+/** Secondary surfaces — behind the More overflow. */
 export const MORE_RAIL_SECTIONS = [
+  "games",
+  "assets",
   "board",
   "project",
-  "codebase",
   "brain",
   "slack",
   "grafana",
@@ -43,7 +43,7 @@ export function primaryRailSections(mode: ProductMode = "developer"): readonly U
   return mode === "swarm" ? SWARM_PRIMARY_RAIL_SECTIONS : PRIMARY_RAIL_SECTIONS;
 }
 
-/** Sections rendered on the rail below the primary/secondary separator. */
+/** Sections listed in the rail More menu. */
 export function moreRailSections(mode: ProductMode = "developer"): readonly UiSection[] {
   return mode === "swarm" ? SWARM_MORE_RAIL_SECTIONS : MORE_RAIL_SECTIONS;
 }

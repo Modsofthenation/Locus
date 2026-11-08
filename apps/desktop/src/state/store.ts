@@ -267,7 +267,7 @@ export const initialState: UiState = {
   section: "agents",
   queries: {},
   collapsed: false,
-  vmCollapsed: false,
+  vmCollapsed: true,
   settingsTab: "providers",
   settingsReturnSection: "agents",
   sessionSettingsOpen: false,

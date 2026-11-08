@@ -880,12 +880,7 @@ describe("locus CLI", () => {
         checkout: { url: (body as { url: string }).url },
       }),
     });
-    const result = await cli([
-      "repo",
-      "link",
-      "--url",
-      "https://github.com/Modsofthenation/Locus",
-    ]);
+    const result = await cli(["repo", "link", "--url", "https://github.com/Modsofthenation/Locus"]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Locus");
   });

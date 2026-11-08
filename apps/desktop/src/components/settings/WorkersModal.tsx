@@ -5,11 +5,12 @@ import {
   lastUserPrompt,
   type AgentSession,
 } from "@locus/shared";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useStore } from "@/state/store";
 import { api } from "@/lib/api";
 import { startWorkers } from "@/lib/compare";
-import { useDialogFocus } from "@/lib/useDialogFocus";
+import { Modal } from "@/components/layout/Modal";
+import { Select } from "@/components/layout/Select";
 
 export function WorkersModal({ session, onClose }: { session: AgentSession; onClose: () => void }) {
   const { dispatch } = useStore();
@@ -17,8 +18,6 @@ export function WorkersModal({ session, onClose }: { session: AgentSession; onCl
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const prompt = lastUserPrompt(session.messages);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogFocus(true, onClose, dialogRef);
 
   async function start() {
     if (!prompt) return;
@@ -41,52 +40,38 @@ export function WorkersModal({ session, onClose }: { session: AgentSession; onCl
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="workers-title"
-        ref={dialogRef}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 id="workers-title">Spawn workers</h2>
-        <p className="modal-lead">
-          Snapshot this workspace and run the last prompt on {count} isolated Docker containers.
-          Keep one, archive the rest.
-        </p>
-        <div className="field">
-          <label>Workers</label>
-          <select value={count} onChange={(e) => setCount(Number(e.target.value))}>
-            {Array.from(
-              { length: WORKER_COUNT_MAX - WORKER_COUNT_MIN + 1 },
-              (_, i) => WORKER_COUNT_MIN + i,
-            ).map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </div>
-        {error && (
-          <p className="scrim-note" style={{ color: "var(--danger)" }}>
-            {error}
-          </p>
-        )}
-        <div className="modal-actions">
-          <button type="button" className="btn ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={busy || !prompt}
-            onClick={() => void start()}
-          >
-            {busy ? "Starting…" : "Spawn workers"}
-          </button>
-        </div>
+    <Modal titleId="workers-title" onClose={onClose}>
+      <h2 id="workers-title">Spawn workers</h2>
+      <p className="modal-lead">
+        Snapshot this workspace and run the last prompt on {count} isolated Docker containers. Keep
+        one, archive the rest.
+      </p>
+      <div className="field">
+        <label>Workers</label>
+        <Select
+          ariaLabel="Workers"
+          value={String(count)}
+          options={Array.from(
+            { length: WORKER_COUNT_MAX - WORKER_COUNT_MIN + 1 },
+            (_, i) => WORKER_COUNT_MIN + i,
+          ).map((n) => ({ value: String(n), label: String(n) }))}
+          onChange={(value) => setCount(Number(value))}
+        />
       </div>
-    </div>
+      {error && <p className="scrim-note is-danger">{error}</p>}
+      <div className="modal-actions">
+        <button type="button" className="btn ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn primary"
+          disabled={busy || !prompt}
+          onClick={() => void start()}
+        >
+          {busy ? "Starting…" : "Spawn workers"}
+        </button>
+      </div>
+    </Modal>
   );
 }

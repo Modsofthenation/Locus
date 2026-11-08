@@ -18,10 +18,11 @@ import {
   type DesignTypography,
   type PaletteRole,
 } from "@locus/shared";
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/state/store";
-import { useDialogFocus } from "@/lib/useDialogFocus";
+import { Modal } from "@/components/layout/Modal";
+import { askConfirm } from "@/lib/dialog";
 import { IconClose, IconPlus } from "@/components/layout/Icons";
 
 function emptyDraft(palette: DesignPalette = { ...DEFAULT_DESIGN_PALETTE }): EditorState {
@@ -119,8 +120,6 @@ export function DesignSystemsModal() {
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState<{ name: string; size: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const openedAt = useRef(0);
-  const dialogRef = useRef<HTMLDivElement>(null);
   const session = state.sessions.find((s) => s.id === state.selectedId);
   const defaultId = state.config?.defaultDesignSystemId;
   const builtin = isBuiltinDesignSystemId(draft.id);
@@ -136,19 +135,24 @@ export function DesignSystemsModal() {
     setError(null);
   }
 
-  function confirmDiscard(): boolean {
+  async function confirmDiscard(): Promise<boolean> {
     if (JSON.stringify(draft) === JSON.stringify(origin)) return true;
-    return window.confirm("Discard unsaved changes to this design system?");
+    return askConfirm({
+      title: "Discard unsaved changes?",
+      body: "Unsaved changes to this design system will be lost.",
+      confirmLabel: "Discard",
+      danger: true,
+    });
   }
 
   function load(next: EditorState) {
-    if (!confirmDiscard()) return;
-    applyEditor(next);
+    void confirmDiscard().then((ok) => {
+      if (ok) applyEditor(next);
+    });
   }
 
   useEffect(() => {
     if (!state.designSystemsOpen) return;
-    openedAt.current = Date.now();
     setError(null);
     const first = state.designSystems[0];
     if (first) {
@@ -169,21 +173,21 @@ export function DesignSystemsModal() {
   }, [state.designSystemsOpen]);
 
   const close = useCallback(() => {
-    if (
-      JSON.stringify(draft) !== JSON.stringify(origin) &&
-      !window.confirm("Discard unsaved changes to this design system?")
-    ) {
-      return;
-    }
-    dispatch({ type: "designSystems", open: false });
+    void (async () => {
+      if (
+        JSON.stringify(draft) !== JSON.stringify(origin) &&
+        !(await askConfirm({
+          title: "Discard unsaved changes?",
+          body: "Unsaved changes to this design system will be lost.",
+          confirmLabel: "Discard",
+          danger: true,
+        }))
+      ) {
+        return;
+      }
+      dispatch({ type: "designSystems", open: false });
+    })();
   }, [dispatch, draft, origin]);
-  useDialogFocus(state.designSystemsOpen, close, dialogRef);
-
-  function onBackdrop(event: MouseEvent<HTMLDivElement>) {
-    if (event.target !== event.currentTarget) return;
-    if (Date.now() - openedAt.current < 250) return;
-    close();
-  }
 
   function setRole(role: PaletteRole, raw: string) {
     const hex = normalizeHex(raw);
@@ -233,9 +237,12 @@ export function DesignSystemsModal() {
   async function remove() {
     if (!draft.id || builtin) return;
     if (
-      !window.confirm(
-        `Delete “${draft.name.trim() || "this design system"}”? This cannot be undone.`,
-      )
+      !(await askConfirm({
+        title: `Delete “${draft.name.trim() || "this design system"}”?`,
+        body: "This cannot be undone.",
+        confirmLabel: "Delete",
+        danger: true,
+      }))
     ) {
       return;
     }
@@ -354,394 +361,382 @@ export function DesignSystemsModal() {
   if (!state.designSystemsOpen) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onBackdrop}>
-      <div
-        className="modal design-systems-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="design-systems-title"
-        aria-busy={blocked || undefined}
-        ref={dialogRef}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="ds-head">
-          <div>
-            <h2 id="design-systems-title">Design systems</h2>
-            <p className="modal-lead">
-              Reusable brand tokens for Design. Create one, import a Locus JSON file or a Claude
-              Design zip/HTML export, or export to share. New designs can start from the default.
+    <Modal
+      titleId="design-systems-title"
+      className="design-systems-modal"
+      busy={blocked}
+      closeGuardMs={250}
+      onClose={close}
+    >
+      <header className="ds-head">
+        <div>
+          <h2 id="design-systems-title">Design systems</h2>
+          <p className="modal-lead">
+            Reusable brand tokens for Design. Create one, import a Locus JSON file or a Claude
+            Design zip/HTML export, or export to share. New designs can start from the default.
+          </p>
+        </div>
+        <div className="ds-head-actions">
+          <input
+            ref={fileInput}
+            type="file"
+            hidden
+            accept=".json,.html,.css,.md,.zip,.locus-design.json,application/json,text/html,text/css,application/zip"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void importFile(file);
+            }}
+          />
+          <button
+            type="button"
+            className="btn ghost small"
+            onClick={() => fileInput.current?.click()}
+            disabled={blocked}
+          >
+            {importing ? "Importing…" : "Import"}
+          </button>
+          <button
+            type="button"
+            className="btn ghost small"
+            onClick={exportCurrent}
+            disabled={blocked}
+          >
+            Export
+          </button>
+          <button type="button" className="btn icon ghost small" aria-label="Close" onClick={close}>
+            <IconClose />
+          </button>
+        </div>
+      </header>
+
+      <div className="ds-body">
+        {importing ? (
+          <div
+            className="ds-import-overlay"
+            data-testid="ds-import-overlay"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="ds-import-spinner" aria-hidden />
+            <p className="ds-import-title">Importing {importing.name}</p>
+            <p className="hint">
+              {importing.size >= 8 * 1024 * 1024
+                ? `${formatDesignImportBytes(importing.size)} · reading token files. Source uploads and nested zips stay in the archive.`
+                : `${formatDesignImportBytes(importing.size)} · reading design tokens…`}
             </p>
           </div>
-          <div className="ds-head-actions">
-            <input
-              ref={fileInput}
-              type="file"
-              hidden
-              accept=".json,.html,.css,.md,.zip,.locus-design.json,application/json,text/html,text/css,application/zip"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.target.value = "";
-                if (file) void importFile(file);
-              }}
-            />
-            <button
-              type="button"
-              className="btn ghost small"
-              onClick={() => fileInput.current?.click()}
-              disabled={blocked}
-            >
-              {importing ? "Importing…" : "Import"}
-            </button>
-            <button
-              type="button"
-              className="btn ghost small"
-              onClick={exportCurrent}
-              disabled={blocked}
-            >
-              Export
-            </button>
-            <button
-              type="button"
-              className="btn icon ghost small"
-              aria-label="Close"
-              onClick={close}
-            >
-              <IconClose />
-            </button>
-          </div>
-        </header>
-
-        <div className="ds-body">
-          {importing ? (
-            <div
-              className="ds-import-overlay"
-              data-testid="ds-import-overlay"
-              role="status"
-              aria-live="polite"
-            >
-              <div className="ds-import-spinner" aria-hidden />
-              <p className="ds-import-title">Importing {importing.name}</p>
-              <p className="hint">
-                {importing.size >= 8 * 1024 * 1024
-                  ? `${formatDesignImportBytes(importing.size)} · reading token files. Source uploads and nested zips stay in the archive.`
-                  : `${formatDesignImportBytes(importing.size)} · reading design tokens…`}
-              </p>
-            </div>
-          ) : null}
-          <nav className="ds-nav" aria-label="Saved systems">
-            <button
-              type="button"
-              className={`ds-new ${!draft.id ? "active" : ""}`}
-              onClick={() => load(emptyDraft(session?.palette))}
-            >
-              <IconPlus /> New system
-            </button>
-            {saved.length ? (
-              <>
-                <div className="ds-nav-group">Saved</div>
-                {saved.map((row) => (
-                  <button
-                    key={row.id}
-                    type="button"
-                    className={`ds-nav-item ${draft.id === row.id ? "active" : ""}`}
-                    onClick={() => load(toEditor(row))}
-                  >
-                    <MiniSwatches palette={row.palette} />
-                    <span className="ds-nav-name">
-                      {row.name}
-                      {defaultId === row.id ? (
-                        <span className="design-system-default">default</span>
-                      ) : null}
-                    </span>
-                  </button>
-                ))}
-              </>
-            ) : null}
-            <div className="ds-nav-group">Starters</div>
-            {PALETTE_PRESETS.map((preset) => {
-              const id = `preset:${preset.id}`;
-              return (
+        ) : null}
+        <nav className="ds-nav" aria-label="Saved systems">
+          <button
+            type="button"
+            className={`ds-new ${!draft.id ? "active" : ""}`}
+            onClick={() => load(emptyDraft(session?.palette))}
+          >
+            <IconPlus /> New system
+          </button>
+          {saved.length ? (
+            <>
+              <div className="ds-nav-group">Saved</div>
+              {saved.map((row) => (
                 <button
-                  key={id}
+                  key={row.id}
                   type="button"
-                  className={`ds-nav-item ${draft.id === id ? "active" : ""}`}
-                  onClick={() =>
-                    load({
-                      ...emptyDraft(preset.colors),
-                      id,
-                      name: preset.name,
-                      summary: preset.summary,
-                    })
-                  }
+                  className={`ds-nav-item ${draft.id === row.id ? "active" : ""}`}
+                  onClick={() => load(toEditor(row))}
                 >
-                  <MiniSwatches palette={preset.colors} />
-                  <span className="ds-nav-name">{preset.name}</span>
+                  <MiniSwatches palette={row.palette} />
+                  <span className="ds-nav-name">
+                    {row.name}
+                    {defaultId === row.id ? (
+                      <span className="design-system-default">default</span>
+                    ) : null}
+                  </span>
                 </button>
-              );
-            })}
-          </nav>
+              ))}
+            </>
+          ) : null}
+          <div className="ds-nav-group">Starters</div>
+          {PALETTE_PRESETS.map((preset) => {
+            const id = `preset:${preset.id}`;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`ds-nav-item ${draft.id === id ? "active" : ""}`}
+                onClick={() =>
+                  load({
+                    ...emptyDraft(preset.colors),
+                    id,
+                    name: preset.name,
+                    summary: preset.summary,
+                  })
+                }
+              >
+                <MiniSwatches palette={preset.colors} />
+                <span className="ds-nav-name">{preset.name}</span>
+              </button>
+            );
+          })}
+        </nav>
 
-          <div className="ds-editor">
-            <div className="ds-fields">
-              <div className="field">
-                <label>Name</label>
-                <input
-                  value={draft.name}
-                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                  placeholder="Acme brand"
-                />
-              </div>
-              <div className="field">
-                <label>Summary</label>
-                <input
-                  value={draft.summary}
-                  onChange={(e) => setDraft({ ...draft, summary: e.target.value })}
-                  placeholder="Warm editorial, copper CTAs"
-                />
-              </div>
+        <div className="ds-editor">
+          <div className="ds-fields">
+            <div className="field">
+              <label>Name</label>
+              <input
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                placeholder="Acme brand"
+              />
             </div>
+            <div className="field">
+              <label>Summary</label>
+              <input
+                value={draft.summary}
+                onChange={(e) => setDraft({ ...draft, summary: e.target.value })}
+                placeholder="Warm editorial, copper CTAs"
+              />
+            </div>
+          </div>
 
-            <div className="ds-section-label">Colors</div>
-            <div className="ds-tokens">
-              {PALETTE_ROLES.map((role) => (
-                <label key={role} className="ds-token">
+          <div className="ds-section-label">Colors</div>
+          <div className="ds-tokens">
+            {PALETTE_ROLES.map((role) => (
+              <label key={role} className="ds-token">
+                <input
+                  type="color"
+                  aria-label={PALETTE_ROLE_LABELS[role]}
+                  value={draft.palette[role]}
+                  onChange={(e) => setRole(role, e.target.value)}
+                />
+                <span>
+                  <span className="ds-token-name">{PALETTE_ROLE_LABELS[role]}</span>
                   <input
-                    type="color"
-                    aria-label={PALETTE_ROLE_LABELS[role]}
+                    type="text"
+                    spellCheck={false}
                     value={draft.palette[role]}
                     onChange={(e) => setRole(role, e.target.value)}
                   />
-                  <span>
-                    <span className="ds-token-name">{PALETTE_ROLE_LABELS[role]}</span>
-                    <input
-                      type="text"
-                      spellCheck={false}
-                      value={draft.palette[role]}
-                      onChange={(e) => setRole(role, e.target.value)}
-                    />
-                  </span>
-                </label>
-              ))}
-            </div>
-
-            <div className="ds-section-label">Type</div>
-            <div className="ds-type-list">
-              {TYPE_ROWS.map((row) => (
-                <label key={row.key} className="ds-type-row">
-                  <span
-                    className="ds-type-sample"
-                    style={{ fontFamily: draft.typography[row.key] }}
-                  >
-                    {row.sample}
-                  </span>
-                  <span className="ds-type-meta">
-                    <span>{row.label}</span>
-                    <input
-                      value={draft.typography[row.key]}
-                      onChange={(e) =>
-                        setDraft({
-                          ...draft,
-                          typography: { ...draft.typography, [row.key]: e.target.value },
-                        })
-                      }
-                    />
-                  </span>
-                </label>
-              ))}
-            </div>
-
-            <div className="design-system-metrics">
-              <label>
-                Size
-                <input
-                  type="number"
-                  min={10}
-                  max={28}
-                  value={draft.typography.basePx}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      typography: { ...draft.typography, basePx: Number(e.target.value) || 16 },
-                    })
-                  }
-                />
+                </span>
               </label>
-              <label>
-                Radius
-                <input
-                  type="number"
-                  min={0}
-                  max={48}
-                  value={draft.radiusPx}
-                  onChange={(e) => setDraft({ ...draft, radiusPx: Number(e.target.value) || 0 })}
-                />
-              </label>
-              <label>
-                Grid
-                <input
-                  type="number"
-                  min={4}
-                  max={32}
-                  value={draft.spacePx}
-                  onChange={(e) => setDraft({ ...draft, spacePx: Number(e.target.value) || 8 })}
-                />
-              </label>
-            </div>
-
-            <div className="field">
-              <label>Guidelines (optional)</label>
-              <textarea
-                value={draft.guidelines}
-                onChange={(e) => setDraft({ ...draft, guidelines: e.target.value })}
-                placeholder="Tone, layout habits, what to avoid…"
-              />
-            </div>
-            {builtin ? (
-              <p className="hint">
-                Starter palettes are built in. Save a copy to edit or set as default.
-              </p>
-            ) : null}
-            {error ? (
-              <p className="scrim-note" style={{ color: "var(--danger)" }}>
-                {error}
-              </p>
-            ) : null}
+            ))}
           </div>
 
-          <aside className="ds-preview" aria-label="System preview">
+          <div className="ds-section-label">Type</div>
+          <div className="ds-type-list">
+            {TYPE_ROWS.map((row) => (
+              <label key={row.key} className="ds-type-row">
+                <span className="ds-type-sample" style={{ fontFamily: draft.typography[row.key] }}>
+                  {row.sample}
+                </span>
+                <span className="ds-type-meta">
+                  <span>{row.label}</span>
+                  <input
+                    value={draft.typography[row.key]}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        typography: { ...draft.typography, [row.key]: e.target.value },
+                      })
+                    }
+                  />
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <div className="design-system-metrics">
+            <label>
+              Size
+              <input
+                type="number"
+                min={10}
+                max={28}
+                value={draft.typography.basePx}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    typography: { ...draft.typography, basePx: Number(e.target.value) || 16 },
+                  })
+                }
+              />
+            </label>
+            <label>
+              Radius
+              <input
+                type="number"
+                min={0}
+                max={48}
+                value={draft.radiusPx}
+                onChange={(e) => setDraft({ ...draft, radiusPx: Number(e.target.value) || 0 })}
+              />
+            </label>
+            <label>
+              Grid
+              <input
+                type="number"
+                min={4}
+                max={32}
+                value={draft.spacePx}
+                onChange={(e) => setDraft({ ...draft, spacePx: Number(e.target.value) || 8 })}
+              />
+            </label>
+          </div>
+
+          <div className="field">
+            <label>Guidelines (optional)</label>
+            <textarea
+              value={draft.guidelines}
+              onChange={(e) => setDraft({ ...draft, guidelines: e.target.value })}
+              placeholder="Tone, layout habits, what to avoid…"
+            />
+          </div>
+          {builtin ? (
+            <p className="hint">
+              Starter palettes are built in. Save a copy to edit or set as default.
+            </p>
+          ) : null}
+          {error ? (
+            <p className="scrim-note" style={{ color: "var(--danger)" }}>
+              {error}
+            </p>
+          ) : null}
+        </div>
+
+        <aside className="ds-preview" aria-label="System preview">
+          <div
+            className="ds-specimen"
+            style={{
+              background: draft.palette.bg,
+              color: draft.palette.text,
+              borderColor: `color-mix(in srgb, ${draft.palette.text} 14%, ${draft.palette.bg})`,
+              fontFamily: draft.typography.sans,
+              fontSize: draft.typography.basePx,
+              ["--ds-radius" as string]: `${draft.radiusPx}px`,
+            }}
+          >
+            <div className="ds-specimen-head">
+              <div>
+                <h3 style={{ fontFamily: draft.typography.display }}>A specimen of the system</h3>
+                <p style={{ color: draft.palette.muted }}>
+                  {draft.summary.trim() || "Title, muted subtitle, primary CTA top-right."}
+                </p>
+              </div>
+              <span
+                className="ds-specimen-primary"
+                style={{ background: draft.palette.primary, color: primaryInk }}
+              >
+                New task
+              </span>
+            </div>
+            <div className="ds-specimen-kicker" style={{ color: draft.palette.muted }}>
+              Your scheduled tasks
+              <span
+                className="ds-specimen-count"
+                style={{ background: draft.palette.surface, color: draft.palette.muted }}
+              >
+                1
+              </span>
+            </div>
             <div
-              className="ds-specimen"
+              className="ds-specimen-row"
               style={{
                 background: draft.palette.bg,
-                color: draft.palette.text,
                 borderColor: `color-mix(in srgb, ${draft.palette.text} 14%, ${draft.palette.bg})`,
-                fontFamily: draft.typography.sans,
-                fontSize: draft.typography.basePx,
-                ["--ds-radius" as string]: `${draft.radiusPx}px`,
               }}
             >
-              <div className="ds-specimen-head">
-                <div>
-                  <h3 style={{ fontFamily: draft.typography.display }}>A specimen of the system</h3>
-                  <p style={{ color: draft.palette.muted }}>
-                    {draft.summary.trim() || "Title, muted subtitle, primary CTA top-right."}
-                  </p>
-                </div>
+              <div className="ds-specimen-row-copy">
+                <strong>Morning print queue</strong>
+                <span style={{ color: draft.palette.muted }}>Weekdays at 8:00am</span>
+              </div>
+              <div className="ds-specimen-actions">
                 <span
                   className="ds-specimen-primary"
                   style={{ background: draft.palette.primary, color: primaryInk }}
                 >
-                  New task
+                  Run
                 </span>
-              </div>
-              <div className="ds-specimen-kicker" style={{ color: draft.palette.muted }}>
-                Your scheduled tasks
                 <span
-                  className="ds-specimen-count"
-                  style={{ background: draft.palette.surface, color: draft.palette.muted }}
+                  className="ds-specimen-secondary"
+                  style={{ borderColor: draft.palette.primary, color: draft.palette.primary }}
                 >
-                  1
+                  Pause
                 </span>
-              </div>
-              <div
-                className="ds-specimen-row"
-                style={{
-                  background: draft.palette.bg,
-                  borderColor: `color-mix(in srgb, ${draft.palette.text} 14%, ${draft.palette.bg})`,
-                }}
-              >
-                <div className="ds-specimen-row-copy">
-                  <strong>Morning print queue</strong>
-                  <span style={{ color: draft.palette.muted }}>Weekdays at 8:00am</span>
-                </div>
-                <div className="ds-specimen-actions">
-                  <span
-                    className="ds-specimen-primary"
-                    style={{ background: draft.palette.primary, color: primaryInk }}
-                  >
-                    Run
-                  </span>
-                  <span
-                    className="ds-specimen-secondary"
-                    style={{ borderColor: draft.palette.primary, color: draft.palette.primary }}
-                  >
-                    Pause
-                  </span>
-                </div>
-              </div>
-              <div
-                className="ds-specimen-starter"
-                style={{
-                  borderColor: `color-mix(in srgb, ${draft.palette.text} 14%, ${draft.palette.bg})`,
-                }}
-              >
-                <span className="ds-specimen-tile" style={{ background: draft.palette.surface }} />
-                <span className="ds-specimen-row-copy">
-                  <strong>Open tickets</strong>
-                  <span style={{ color: draft.palette.muted }}>Weekdays at 8:30am</span>
-                </span>
-                <span style={{ color: draft.palette.muted }}>+</span>
               </div>
             </div>
-            <p className={`ds-contrast ${ratio >= 4.5 ? "ok" : "fail"}`}>
-              Contrast text on background: {contrastLabel}
-            </p>
-          </aside>
-        </div>
-
-        <footer className="ds-foot">
-          <div className="ds-foot-left">
-            <span className="hint">
-              {dirty
-                ? `Unsaved changes${draft.name.trim() ? ` to ${draft.name.trim()}` : ""}`
-                : "No unsaved changes"}
-            </span>
-            {draft.id && !builtin ? (
-              <button
-                type="button"
-                className="btn ghost small"
-                disabled={blocked}
-                onClick={() => void setDefault(defaultId === draft.id ? "none" : draft.id)}
-              >
-                {defaultId === draft.id ? "Clear default" : "Use for new designs"}
-              </button>
-            ) : null}
-            {isDesignSession(session ?? {}) && draft.id ? (
-              <button
-                type="button"
-                className="btn ghost small"
-                disabled={blocked}
-                onClick={() => void applyToSession()}
-              >
-                Apply to canvas
-              </button>
-            ) : null}
-            {draft.id && !builtin ? (
-              <button
-                type="button"
-                className="btn ghost small danger"
-                disabled={blocked}
-                onClick={() => void remove()}
-              >
-                Delete
-              </button>
-            ) : null}
+            <div
+              className="ds-specimen-starter"
+              style={{
+                borderColor: `color-mix(in srgb, ${draft.palette.text} 14%, ${draft.palette.bg})`,
+              }}
+            >
+              <span className="ds-specimen-tile" style={{ background: draft.palette.surface }} />
+              <span className="ds-specimen-row-copy">
+                <strong>Open tickets</strong>
+                <span style={{ color: draft.palette.muted }}>Weekdays at 8:30am</span>
+              </span>
+              <span style={{ color: draft.palette.muted }}>+</span>
+            </div>
           </div>
-          <div className="ds-foot-right">
-            <button type="button" className="btn ghost" onClick={close}>
-              Close
-            </button>
+          <p className={`ds-contrast ${ratio >= 4.5 ? "ok" : "fail"}`}>
+            Contrast text on background: {contrastLabel}
+          </p>
+        </aside>
+      </div>
+
+      <footer className="ds-foot">
+        <div className="ds-foot-left">
+          <span className="hint">
+            {dirty
+              ? `Unsaved changes${draft.name.trim() ? ` to ${draft.name.trim()}` : ""}`
+              : "No unsaved changes"}
+          </span>
+          {draft.id && !builtin ? (
             <button
               type="button"
-              className="btn primary"
+              className="btn ghost small"
               disabled={blocked}
-              onClick={() => void save()}
+              onClick={() => void setDefault(defaultId === draft.id ? "none" : draft.id)}
             >
-              {busy ? "Saving…" : builtin || !draft.id ? "Save copy" : "Save"}
+              {defaultId === draft.id ? "Clear default" : "Use for new designs"}
             </button>
-          </div>
-        </footer>
-      </div>
-    </div>
+          ) : null}
+          {isDesignSession(session ?? {}) && draft.id ? (
+            <button
+              type="button"
+              className="btn ghost small"
+              disabled={blocked}
+              onClick={() => void applyToSession()}
+            >
+              Apply to canvas
+            </button>
+          ) : null}
+          {draft.id && !builtin ? (
+            <button
+              type="button"
+              className="btn ghost small danger"
+              disabled={blocked}
+              onClick={() => void remove()}
+            >
+              Delete
+            </button>
+          ) : null}
+        </div>
+        <div className="ds-foot-right">
+          <button type="button" className="btn ghost" onClick={close}>
+            Close
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={blocked}
+            onClick={() => void save()}
+          >
+            {busy ? "Saving…" : builtin || !draft.id ? "Save copy" : "Save"}
+          </button>
+        </div>
+      </footer>
+    </Modal>
   );
 }

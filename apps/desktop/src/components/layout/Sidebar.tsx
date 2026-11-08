@@ -87,10 +87,10 @@ import {
   IconStop,
   IconWrench,
   IconInbox,
+  IconMore,
 } from "./Icons";
 import { DesignThumb } from "@/components/design/DesignThumb";
 import { MenuItem, MenuLabel, MenuSep, OverflowMenu } from "./OverflowMenu";
-import { Mascot } from "./Mascot";
 import { SearchField } from "./SearchField";
 import { rememberBrainInbox } from "@/lib/brainViewPrefs";
 import { needsYouSessions, sessionHasNeedsYou } from "@/lib/needsYou";
@@ -147,11 +147,14 @@ import {
   settingsNavTabs,
 } from "@/lib/settingsNav";
 import { confirmLeaveSettings } from "@/lib/settingsLeave";
-import { showNotice } from "@/lib/notice";
+import { showErrorNotice, showNotice, showUndoNotice } from "@/lib/notice";
+import { askConfirm, askPrompt } from "@/lib/dialog";
+import { archiveOne, archiveSessions, deleteSessionWithUndo } from "@/lib/sessionUndo";
 import { moreRailSections, primaryRailSections } from "@/lib/railNav";
-import { ProductModeToggle } from "@/components/layout/ProductModeToggle";
 import { swarmShellKeepsSection } from "@/lib/productMode";
+import { sessionStatusLabel } from "@/lib/sessionStatus";
 import { PersonaAvatar } from "@/components/layout/PersonaAvatar";
+import { EmptyListNote } from "./EmptyHero";
 
 const SECTION_META: Record<Exclude<UiSection, "settings">, { label: string; icon: ReactNode }> = {
   agents: { label: "Agents", icon: <IconAgents /> },
@@ -212,16 +215,14 @@ function sectionSearchPlaceholder(
   return mode === "swarm" ? "Search teammates" : "Search agents";
 }
 
-function EmptyListNote({ children }: { children: ReactNode }) {
-  return (
-    <div className="empty-list">
-      <Mascot pose="rest" size={36} />
-      <div className="empty-list-body">{children}</div>
-    </div>
-  );
-}
-
-const FORGE_ORDER: ForgeKind[] = ["github", "gitlab", "bitbucket"];
+const FORGE_ORDER: ForgeKind[] = [
+  "github",
+  "gitlab",
+  "bitbucket",
+  "gitea",
+  "forgejo",
+  "azuredevops",
+];
 
 function groupRepos(repos: LinkedRepo[]): Array<{ forge: ForgeKind; repos: LinkedRepo[] }> {
   const buckets = new Map<ForgeKind, LinkedRepo[]>();
@@ -372,24 +373,20 @@ function SessionRow(props: {
 
   function patch(next: { pinned?: boolean; archived?: boolean; title?: string }) {
     void api.patchSession(s.id, next).catch((err: unknown) => {
-      showNotice(err instanceof Error ? err.message : "Could not update this agent");
+      showErrorNotice(err, "Could not update this agent");
     });
   }
 
   function rename() {
-    const next = window.prompt("Rename", s.title)?.trim();
-    if (!next || next === s.title) return;
-    patch({ title: next });
+    void (async () => {
+      const next = (await askPrompt({ title: "Rename", value: s.title }))?.trim();
+      if (!next || next === s.title) return;
+      patch({ title: next });
+    })();
   }
 
   function remove() {
-    if (!window.confirm(`Delete ${s.title}? This cannot be undone.`)) return;
-    void api
-      .deleteSession(s.id)
-      .then(() => dispatch({ type: "deleted", id: s.id }))
-      .catch((err: unknown) => {
-        showNotice(err instanceof Error ? err.message : "Could not delete this agent");
-      });
+    void deleteSessionWithUndo(s, dispatch, askConfirm);
   }
 
   function duplicateSession() {
@@ -400,7 +397,7 @@ function SessionRow(props: {
         dispatch({ type: "select", id: forked.id });
       })
       .catch((err: unknown) => {
-        showNotice(err instanceof Error ? err.message : "Could not duplicate");
+        showErrorNotice(err, "Could not duplicate");
       });
   }
 
@@ -410,7 +407,9 @@ function SessionRow(props: {
 
   function hideTeammate() {
     if (!rosterPrefs) return;
+    const previous = rosterPrefs;
     updateRoster(hideSwarmSession(rosterPrefs, s.id));
+    showUndoNotice(`Hidden ${s.title}`, () => updateRoster(previous));
   }
 
   function restoreTeammate() {
@@ -420,9 +419,11 @@ function SessionRow(props: {
 
   function newSection() {
     if (!rosterPrefs) return;
-    const name = window.prompt("Section name")?.trim();
-    if (!name) return;
-    updateRoster(addSwarmRosterSection(rosterPrefs, name, s.id));
+    void (async () => {
+      const name = (await askPrompt({ title: "Section name" }))?.trim();
+      if (!name) return;
+      updateRoster(addSwarmRosterSection(rosterPrefs, name, s.id));
+    })();
   }
 
   function moveToSection(sectionId: string | null) {
@@ -463,7 +464,12 @@ function SessionRow(props: {
         </>
       ) : null}
       <MenuItem onClick={rename}>Rename</MenuItem>
-      <MenuItem onClick={() => patch({ archived: !s.archived })}>
+      <MenuItem
+        onClick={() => {
+          if (s.archived) patch({ archived: false });
+          else archiveOne(s, dispatch);
+        }}
+      >
         {s.archived ? "Unarchive" : "Archive"}
       </MenuItem>
       <MenuSep />
@@ -497,7 +503,7 @@ function SessionRow(props: {
       >
         <div className="design-thumb-hit" onClick={() => props.onSelect(s.id)}>
           {props.preview}
-          <span className={`dot ${s.status}`} />
+          <span className={`dot ${s.status}`} title={sessionStatusLabel(s.status)} />
         </div>
         <button
           type="button"
@@ -524,7 +530,7 @@ function SessionRow(props: {
           title={rowTitle}
           onClick={() => props.onSelect(s.id)}
         >
-          <span className={`dot ${s.status}`} />
+          <span className={`dot ${s.status}`} title={sessionStatusLabel(s.status)} />
           <span>{copy}</span>
         </button>
         {trust}
@@ -558,7 +564,7 @@ function SessionRow(props: {
             title={sessionDisplayName(s)}
           />
         ) : null}
-        <span className={`dot ${s.status}`} />
+        <span className={`dot ${s.status}`} title={sessionStatusLabel(s.status)} />
         <span className={props.hub ? "session-item-copy" : undefined}>{copy}</span>
       </button>
       {menu}
@@ -933,27 +939,10 @@ export function Sidebar() {
         showNotice(result.errors.map((row) => `${row.id}: ${row.error}`).join("\n"));
       }
     } catch (err) {
-      showNotice(err instanceof Error ? err.message : "Could not stop containers");
+      showErrorNotice(err, "Could not stop containers");
     } finally {
       setStopping(false);
     }
-  }
-
-  async function archiveSessions(targets: AgentSession[], prompt: string) {
-    if (!targets.length) return;
-    if (!window.confirm(prompt)) return;
-    const errors: string[] = [];
-    for (const session of targets) {
-      try {
-        await api.patchSession(session.id, { archived: true });
-        dispatch({ type: "session", session: { ...session, archived: true } });
-      } catch (err) {
-        errors.push(
-          `${session.title}: ${err instanceof Error ? err.message : "Could not archive"}`,
-        );
-      }
-    }
-    if (errors.length) showNotice(errors.join("\n"));
   }
 
   const sessionListMenu =
@@ -969,9 +958,8 @@ export function Sidebar() {
             const n = idleTargets.length;
             void archiveSessions(
               idleTargets,
-              n === 1
-                ? "Archive 1 idle chat older than 7 days?"
-                : `Archive ${n} idle chats older than 7 days?`,
+              dispatch,
+              n === 1 ? "Archived 1 idle chat" : `Archived ${n} idle chats`,
             );
           }}
         >
@@ -983,9 +971,8 @@ export function Sidebar() {
             const n = emptyDrafts.length;
             void archiveSessions(
               emptyDrafts,
-              n === 1
-                ? "Archive 1 empty draft that never sent a prompt?"
-                : `Archive ${n} empty drafts that never sent a prompt?`,
+              dispatch,
+              n === 1 ? "Archived 1 empty draft" : `Archived ${n} empty drafts`,
             );
           }}
         >
@@ -1042,7 +1029,7 @@ export function Sidebar() {
 
   return (
     <aside className={`sidebar${swarmMode ? " swarm-sidebar" : ""}`}>
-      {swarmMode ? null : (
+      {
         <div className="side-rail">
           <div className="brand-mark rail-brand" aria-hidden="true" />
           <nav className="side-rail-nav" aria-label="Sections">
@@ -1066,8 +1053,24 @@ export function Sidebar() {
                   className={state.section === row.id ? "active" : ""}
                   aria-label={label}
                   aria-current={state.section === row.id ? "page" : undefined}
+                  data-testid={
+                    swarmMode && row.id === "agents"
+                      ? "swarm-teammates"
+                      : swarmMode && row.id === "project"
+                        ? "swarm-teams"
+                        : undefined
+                  }
                   onClick={() => {
                     if (state.section === "settings" && !confirmLeaveSettings()) return;
+                    if (swarmMode && row.id === "project") {
+                      const selected = state.projects.find(
+                        (item) => item.id === state.selectedProjectId,
+                      );
+                      if (!selected || selected.surface !== "swarm") {
+                        dispatch({ type: "selectProject", id: null });
+                        return;
+                      }
+                    }
                     dispatch({ type: "section", section: row.id });
                   }}
                 >
@@ -1080,30 +1083,48 @@ export function Sidebar() {
               );
             })}
             {secondarySections.length ? <div className="rail-sep" role="separator" /> : null}
-            {secondarySections.map((row) => {
-              const unread =
-                (row.id === "slack" && slackUnread) ||
-                (row.id === "board" && boardWaiting.length > 0);
-              const label = unread ? `${row.label}, unread` : row.label;
-              return (
-                <button
-                  key={row.id}
-                  className={state.section === row.id ? "active" : ""}
-                  aria-label={label}
-                  aria-current={state.section === row.id ? "page" : undefined}
-                  onClick={() => {
-                    if (state.section === "settings" && !confirmLeaveSettings()) return;
-                    dispatch({ type: "section", section: row.id });
-                  }}
-                >
-                  <span className="rail-icon" aria-hidden="true">
-                    {row.icon}
-                  </span>
-                  {unread ? <span className="unread-dot" aria-hidden="true" /> : null}
-                  <span className="rail-label">{row.label}</span>
-                </button>
-              );
-            })}
+            {secondarySections.length ? (
+              <OverflowMenu
+                className={`rail-more${secondarySections.some((row) => row.id === state.section) ? " active" : ""}`}
+                title="More"
+                align="after"
+                label={
+                  <>
+                    <span className="rail-icon" aria-hidden="true">
+                      <IconMore />
+                    </span>
+                    {secondarySections.some(
+                      (row) =>
+                        (row.id === "slack" && slackUnread) ||
+                        (row.id === "board" && boardWaiting.length > 0),
+                    ) ? (
+                      <span className="unread-dot" aria-hidden="true" />
+                    ) : null}
+                    <span className="rail-label">More</span>
+                  </>
+                }
+                toggleClassName="rail-more-toggle"
+              >
+                {secondarySections.map((row) => {
+                  const unread =
+                    (row.id === "slack" && slackUnread) ||
+                    (row.id === "board" && boardWaiting.length > 0);
+                  return (
+                    <MenuItem
+                      key={row.id}
+                      active={state.section === row.id}
+                      onClick={() => {
+                        if (state.section === "settings" && !confirmLeaveSettings()) return;
+                        dispatch({ type: "section", section: row.id });
+                      }}
+                    >
+                      {row.label}
+                      {unread ? " · unread" : ""}
+                    </MenuItem>
+                  );
+                })}
+              </OverflowMenu>
+            ) : null}
           </nav>
           <span className="rail-spacer" />
           <div className="side-rail-chrome">
@@ -1180,11 +1201,11 @@ export function Sidebar() {
             </button>
           </div>
         </div>
-      )}
+      }
       <div
         className="side-main"
-        inert={swarmMode ? undefined : state.collapsed || undefined}
-        aria-hidden={swarmMode ? undefined : state.collapsed || undefined}
+        inert={state.collapsed || undefined}
+        aria-hidden={state.collapsed || undefined}
       >
         <div className="brand">
           <div className="brand-mark" aria-hidden="true" />
@@ -1202,43 +1223,8 @@ export function Sidebar() {
                     : sectionLabel(state.section, productMode)}
             </p>
           </div>
-          <div className="brand-actions">
-            <ProductModeToggle />
-          </div>
+          <div className="brand-actions" />
         </div>
-        {swarmMode && state.section !== "settings" ? (
-          <nav className="swarm-shell-nav" aria-label="Swarm">
-            <button
-              type="button"
-              className={state.section === "agents" ? "active" : ""}
-              aria-current={state.section === "agents" ? "page" : undefined}
-              data-testid="swarm-teammates"
-              onClick={() => {
-                if (!confirmLeaveSettings()) return;
-                dispatch({ type: "section", section: "agents" });
-              }}
-            >
-              Teammates
-            </button>
-            <button
-              type="button"
-              className={state.section === "project" ? "active" : ""}
-              aria-current={state.section === "project" ? "page" : undefined}
-              data-testid="swarm-teams"
-              onClick={() => {
-                if (!confirmLeaveSettings()) return;
-                const selected = state.projects.find((row) => row.id === state.selectedProjectId);
-                if (!selected || selected.surface !== "swarm") {
-                  dispatch({ type: "selectProject", id: null });
-                  return;
-                }
-                dispatch({ type: "section", section: "project" });
-              }}
-            >
-              Teams
-            </button>
-          </nav>
-        ) : null}
         {state.section !== "settings" ? (
           <div className="side-actions">
             {state.section === "automations" ? (
@@ -1338,7 +1324,7 @@ export function Sidebar() {
                   void api.slackConversations(true).then(
                     (conversations) => dispatch({ type: "slackConversations", conversations }),
                     (err: unknown) => {
-                      showNotice(err instanceof Error ? err.message : "Could not refresh Slack");
+                      showErrorNotice(err, "Could not refresh Slack");
                     },
                   );
                 }}
@@ -1371,7 +1357,7 @@ export function Sidebar() {
                         }
                       },
                       (err: unknown) => {
-                        showNotice(err instanceof Error ? err.message : "Could not refresh Docker");
+                        showErrorNotice(err, "Could not refresh Docker");
                       },
                     );
                   }}
@@ -1849,11 +1835,20 @@ export function Sidebar() {
                       <MenuItem
                         danger
                         onClick={() => {
-                          if (!window.confirm(`Delete ${row.title}? This cannot be undone.`))
-                            return;
-                          void api
-                            .deleteBoard(row.id)
-                            .then(() => dispatch({ type: "boardDeleted", id: row.id }));
+                          void (async () => {
+                            if (
+                              !(await askConfirm({
+                                title: `Delete ${row.title}?`,
+                                body: "This cannot be undone.",
+                                confirmLabel: "Delete",
+                                danger: true,
+                              }))
+                            )
+                              return;
+                            void api
+                              .deleteBoard(row.id)
+                              .then(() => dispatch({ type: "boardDeleted", id: row.id }));
+                          })();
                         }}
                       >
                         Delete
@@ -1939,17 +1934,22 @@ export function Sidebar() {
                         <MenuItem
                           danger
                           onClick={() => {
-                            if (
-                              !window.confirm(
-                                swarmMode
-                                  ? `Delete ${displayName}? Teammates stay in Swarm.`
-                                  : `Delete ${displayName}? Members stay on Agents.`,
+                            void (async () => {
+                              if (
+                                !(await askConfirm({
+                                  title: `Delete ${displayName}?`,
+                                  body: swarmMode
+                                    ? "Teammates stay in Swarm."
+                                    : "Members stay on Agents.",
+                                  confirmLabel: "Delete",
+                                  danger: true,
+                                }))
                               )
-                            )
-                              return;
-                            void api
-                              .deleteProject(row.id)
-                              .then(() => dispatch({ type: "projectDeleted", id: row.id }));
+                                return;
+                              void api
+                                .deleteProject(row.id)
+                                .then(() => dispatch({ type: "projectDeleted", id: row.id }));
+                            })();
                           }}
                         >
                           Delete
@@ -2102,22 +2102,27 @@ export function Sidebar() {
                               <MenuItem
                                 danger
                                 onClick={() => {
-                                  if (
-                                    !window.confirm(
-                                      `Unlink ${row.name}? Agents keep their checkout.`,
+                                  void (async () => {
+                                    if (
+                                      !(await askConfirm({
+                                        title: `Unlink ${row.name}?`,
+                                        body: "Agents keep their checkout.",
+                                        confirmLabel: "Unlink",
+                                        danger: true,
+                                      }))
                                     )
-                                  )
-                                    return;
-                                  void api.deleteRepo(row.id).then(
-                                    () => dispatch({ type: "repoDeleted", id: row.id }),
-                                    (err: unknown) => {
-                                      showNotice(
-                                        err instanceof Error
-                                          ? err.message
-                                          : `Could not unlink ${row.name}`,
-                                      );
-                                    },
-                                  );
+                                      return;
+                                    void api.deleteRepo(row.id).then(
+                                      () => dispatch({ type: "repoDeleted", id: row.id }),
+                                      (err: unknown) => {
+                                        showNotice(
+                                          err instanceof Error
+                                            ? err.message
+                                            : `Could not unlink ${row.name}`,
+                                        );
+                                      },
+                                    );
+                                  })();
                                 }}
                               >
                                 Unlink

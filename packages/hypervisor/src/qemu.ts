@@ -15,6 +15,7 @@ import { appendFile, copyFile, mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createConnection } from "node:net";
 import { buildQemuArgv, displayPort, type LaunchContext } from "./args.js";
+import { hostQemuArch, qemuArchForOs, type QemuGuestArch } from "./qemuArch.js";
 import { writeCloudInitDir } from "./cloudinit.js";
 import { writeDirectoryIso } from "./iso.js";
 import { writeOmarchyCidataDir } from "./omarchy.js";
@@ -172,6 +173,17 @@ export class QemuHypervisor extends EventEmitter implements Hypervisor {
     this.opts = opts;
   }
 
+  private guestArch(os: GuestOs): QemuGuestArch {
+    return qemuArchForOs(os, this.opts.caps.guestArch ?? hostQemuArch());
+  }
+
+  private qemuBinaryFor(arch: QemuGuestArch): string {
+    if (arch === "aarch64") {
+      return this.opts.caps.qemuAarch64Binary || this.opts.qemuBinary;
+    }
+    return this.opts.caps.qemuX86Binary || this.opts.qemuBinary;
+  }
+
   isoError(
     template: { os: string; isoPath: string },
     opts?: { imageId?: string },
@@ -251,6 +263,7 @@ export class QemuHypervisor extends EventEmitter implements Hypervisor {
       status: "creating",
       diskPath,
       slot,
+      runtime: "vm",
       display: {
         protocol: template.hardware.display,
         host: "127.0.0.1",
@@ -374,10 +387,19 @@ export class QemuHypervisor extends EventEmitter implements Hypervisor {
       seedDir = unattendDir;
     }
 
+    const arch = this.guestArch(template.os);
+    const ovmfVarsSrc =
+      arch === "aarch64"
+        ? (this.opts.caps.ovmfAarch64VarsPath ?? this.opts.caps.ovmfVarsPath)
+        : this.opts.caps.ovmfVarsPath;
+    const ovmfCodeSrc =
+      arch === "aarch64"
+        ? (this.opts.caps.ovmfAarch64CodePath ?? this.opts.caps.ovmfCodePath)
+        : this.opts.caps.ovmfCodePath;
     let ovmfVarsCopyPath: string | undefined;
-    if (needsUefi(template.os, template.hardware) && this.opts.caps.ovmfVarsPath) {
+    if ((needsUefi(template.os, template.hardware) || arch === "aarch64") && ovmfVarsSrc) {
       ovmfVarsCopyPath = join(vmDir, "OVMF_VARS.fd");
-      await copyFile(this.opts.caps.ovmfVarsPath, ovmfVarsCopyPath);
+      await copyFile(ovmfVarsSrc, ovmfVarsCopyPath);
     }
 
     let swtpmSocket: string | undefined;
@@ -429,8 +451,9 @@ export class QemuHypervisor extends EventEmitter implements Hypervisor {
       seedIsoPath,
       seedDir: seedIsoPath ? undefined : seedDir,
       virtfs: this.opts.caps.hasVirtfs,
-      ovmfCodePath: this.opts.caps.ovmfCodePath ?? undefined,
+      ovmfCodePath: ovmfCodeSrc ?? undefined,
       ovmfVarsCopyPath,
+      arch,
       swtpmSocket,
       swtpmTcpPort,
       qmpPort: live.qmpPort,
@@ -440,7 +463,7 @@ export class QemuHypervisor extends EventEmitter implements Hypervisor {
       hostSharePath: live.hostSharePath,
     };
     const argv = buildQemuArgv(template, ctx);
-    const child = this.opts.runner.spawn(this.opts.qemuBinary, argv, { cwd: vmDir });
+    const child = this.opts.runner.spawn(this.qemuBinaryFor(arch), argv, { cwd: vmDir });
     live.process = child;
     live.instance.pid = child.pid;
     this.setStatus(id, "booting");

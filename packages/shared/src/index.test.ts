@@ -221,6 +221,21 @@ describe("parseRepoUrl", () => {
     });
   });
 
+  it("parses Gitea, Forgejo, and Azure DevOps urls", () => {
+    expect(parseRepoUrl("https://gitea.example.com/acme/app.git")).toEqual({
+      forge: "gitea",
+      url: "https://gitea.example.com/acme/app.git",
+    });
+    expect(parseRepoUrl("https://codeberg.org/acme/app.git")).toEqual({
+      forge: "forgejo",
+      url: "https://codeberg.org/acme/app.git",
+    });
+    expect(parseRepoUrl("https://dev.azure.com/org/proj/_git/app")).toEqual({
+      forge: "azuredevops",
+      url: "https://dev.azure.com/org/proj/_git/app",
+    });
+  });
+
   it("returns null for empty input", () => {
     expect(parseRepoUrl("")).toBeNull();
     expect(parseRepoUrl("   ")).toBeNull();
@@ -2550,7 +2565,8 @@ describe("assessSetup", () => {
       needsWizard: true,
       ready: false,
       dockerFound: false,
-      qemuHint: "sudo apt install qemu-system-x86 qemu-utils ovmf swtpm",
+      qemuHint:
+        "sudo apt install qemu-system-x86 qemu-system-arm qemu-utils ovmf qemu-efi-aarch64 swtpm",
       hostOs: { platform: "linux", label: "Linux" },
       qemuInstall: { method: "apt", canInstall: false },
     });

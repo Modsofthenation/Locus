@@ -8,7 +8,7 @@ export {
   WORKER_CLI_MCP_REL,
   type WorkerCliMcpRequest,
 } from "./loopbackMcp.js";
-export { WorkerGuestHub } from "./guests.js";
+export { WorkerGuestHub, isWorkerVmGuest } from "./guests.js";
 export { WorkerBrowserHub } from "./browserHub.js";
 export { attachWorkerBrowser } from "./browserSockets.js";
 export { WorkerBrowserDriver } from "./browserDriver.js";

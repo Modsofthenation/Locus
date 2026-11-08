@@ -67,7 +67,8 @@ import {
   saveFinishSetupDismissed,
 } from "@/components/settings/FinishSetupChecklist";
 import { LaunchWorkspace, type LaunchWorkspaceSelection } from "./LaunchWorkspace";
-import { Mascot } from "./Mascot";
+import { EmptyHero } from "./EmptyHero";
+import { Select } from "./Select";
 import { PersonaAvatarPicker } from "./PersonaAvatar";
 
 export function EmptyState() {
@@ -152,7 +153,7 @@ export function EmptyState() {
       : undefined;
   const launchHostDir = hostChat && workspace.kind === "host" ? workspace.path : undefined;
   const mockDocker = effectiveRuntime === "docker" && state.dockerKind === "mock" && !backendId;
-  const mockHypervisor = effectiveRuntime === "vm" && state.hypervisorKind === "mock";
+  const mockHypervisor = effectiveRuntime === "vm" && !backendId && state.hypervisorKind === "mock";
   const engineBlocked = mockDocker || mockHypervisor;
   const canCreate =
     Boolean(state.config) &&
@@ -161,7 +162,7 @@ export function EmptyState() {
       (effectiveRuntime === "docker" ? Boolean(launchDockerImage) : available.length > 0));
   const showRuntimeChrome = !hubMode || showAdvanced;
   const workerHint = backendId
-    ? `${effectiveRuntime === "host" ? "The host workspace" : "The container"} runs on ${
+    ? `${effectiveRuntime === "host" ? "The host workspace" : effectiveRuntime === "vm" ? "The VM" : "The container"} runs on ${
         selectedWorker ? workerWhereLabel(selectedWorker) : "the worker"
       }. Chat and keys stay on this machine.${
         selectedWorker && workerIsMetered(selectedWorker)
@@ -226,8 +227,7 @@ export function EmptyState() {
     setRuntime(next);
     setNamedEnvId("");
     setWorkspace({ kind: "private" });
-    if (next === "vm") setBackendId("");
-    if (next === "docker") {
+    if (next === "docker" || next === "vm") {
       const last = loadLastAgent();
       setBackendId((id) => id || rememberedWorkerId(last, workers));
     }
@@ -407,7 +407,12 @@ export function EmptyState() {
   );
   const showEngineCallout = engineBlocked && !checklistOpen;
   const showImageCallout = Boolean(
-    setup && runtime === "vm" && !engineBlocked && !setup.linuxImageReady && !checklistOpen,
+    setup &&
+    runtime === "vm" &&
+    !backendId &&
+    !engineBlocked &&
+    !setup.linuxImageReady &&
+    !checklistOpen,
   );
   const showGitCallout = Boolean(
     state.config && !hasForge && !checklistOpen && !showEngineCallout && !setupHintDismissed,
@@ -422,15 +427,16 @@ export function EmptyState() {
   return (
     <div className={`empty agent-start${hubMode ? " hub-start" : ""}`}>
       <div className="empty-card">
-        <header className="launch-hero">
-          {hubMode ? null : <Mascot pose="idle" size={48} followCursor />}
-          <h2>{hubMode ? "Create a teammate" : "What should we talk about?"}</h2>
-          <p>
-            {hubMode
+        <EmptyHero
+          hideMascot={hubMode}
+          followCursor
+          title={hubMode ? "Create a teammate" : "What should we talk about?"}
+          lead={
+            hubMode
               ? "Name them, pick a look, and give them a role."
-              : "Choose how it runs, then the folder it can touch."}
-          </p>
-        </header>
+              : "Choose how it runs, then the folder it can touch."
+          }
+        />
 
         {hubMode ? (
           <div className="hub-persona-fields">
@@ -447,10 +453,15 @@ export function EmptyState() {
               </div>
               <div className="field">
                 <label htmlFor="hub-role">Role (optional)</label>
-                <select
+                <Select
                   id="hub-role"
+                  ariaLabel="Role (optional)"
                   value={hubRole}
-                  onChange={(e) => {
+                  options={[
+                    { value: "", label: "Ask when we start" },
+                    ...HUB_ROLE_PRESETS.map((role) => ({ value: role, label: role })),
+                  ]}
+                  onChange={(value) => {
                     const next = applyHubRoleToDraft(
                       {
                         displayName,
@@ -461,21 +472,13 @@ export function EmptyState() {
                         hubRole,
                         personality,
                       },
-                      e.target.value,
+                      value,
                     );
                     setHubRole(next.hubRole);
                     setPersonality(next.personality);
                     setAvatarId(next.avatarId);
                   }}
-                  data-testid="hub-role"
-                >
-                  <option value="">Ask when we start</option>
-                  {HUB_ROLE_PRESETS.map((role) => (
-                    <option key={role} value={role}>
-                      {role}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
               <div className="field">
                 <label htmlFor="hub-personality">Personality (optional)</label>
@@ -609,12 +612,6 @@ export function EmptyState() {
                 value={backendId}
                 onChange={(id) => {
                   setBackendId(id);
-                  if (id) {
-                    if (runtime === "vm") changeRuntime("docker");
-                    else if (recipeId && recipes.find((r) => r.id === recipeId)?.runtime === "vm") {
-                      clearRecipeExtras();
-                    }
-                  }
                 }}
               />
               <p className="hint launch-runtime-hint">{workerHint || "\u00a0"}</p>
@@ -639,7 +636,6 @@ export function EmptyState() {
                 disabledRuntimes={hostAgentsLocked ? ["host"] : []}
                 onRuntimeChange={(next) => {
                   if (hostAgentsLocked && next === "host") return;
-                  if (backendId && next === "vm") setBackendId("");
                   changeRuntime(next);
                 }}
               />
@@ -779,11 +775,7 @@ export function EmptyState() {
             </div>
           </div>
 
-          {error && (
-            <p className="scrim-note" style={{ color: "var(--danger)" }}>
-              {error}
-            </p>
-          )}
+          {error && <p className="scrim-note is-danger">{error}</p>}
 
           {showOptions ? (
             <ComposerMoreOptions

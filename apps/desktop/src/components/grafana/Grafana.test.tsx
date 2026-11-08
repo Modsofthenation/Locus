@@ -8,6 +8,7 @@ import { GrafanaPane } from "./Grafana";
 import { api } from "@/lib/api";
 import { Store, initialState, type Action, type UiState } from "@/state/store";
 import type { AgentSession, GrafanaDashboardQueryResult } from "@locus/shared";
+import { selectValue } from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -621,9 +622,9 @@ describe("GrafanaPane", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    const env = host.querySelector("[aria-label='Environment']") as HTMLSelectElement;
+    const env = host.querySelector("[aria-label='Environment']") as HTMLElement;
     const groups = host.querySelector(".grafana-var-menu summary") as HTMLElement;
-    expect(env.value).toBe("prod");
+    expect(selectValue(host, "Environment")).toBe("prod");
     expect(getComputedStyle(env).minWidth).toBe("148px");
     expect(getComputedStyle(env).paddingLeft).not.toBe("0px");
     expect(groups.textContent).toBe("2 selected");

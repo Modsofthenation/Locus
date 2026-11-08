@@ -26,7 +26,10 @@ import {
   projectTeamName,
 } from "@locus/shared";
 import { api } from "@/lib/api";
-import { showNotice } from "@/lib/notice";
+import { showErrorNotice } from "@/lib/notice";
+import { askConfirm } from "@/lib/dialog";
+import { archiveOne, deleteSessionWithUndo } from "@/lib/sessionUndo";
+import { Tooltip } from "./Tooltip";
 import {
   liveDockerContainers,
   confirmDockerContainerAction,
@@ -70,14 +73,14 @@ export function Topbar() {
         dispatch({ type: "select", id: forked.id });
       })
       .catch((err: unknown) => {
-        showNotice(err instanceof Error ? err.message : "Could not duplicate");
+        showErrorNotice(err, "Could not duplicate");
       });
   }
 
   async function runDocker(action: "start" | "stop" | "restart") {
     const item = state.containers.find((row) => row.id === state.selectedContainerId);
     if (!item) return;
-    if (action !== "start" && !confirmDockerContainerAction(action, item)) return;
+    if (action !== "start" && !(await confirmDockerContainerAction(action, item))) return;
     setDockerBusy(action);
     try {
       const next = await api.dockerContainerAction(item.id, action);
@@ -85,7 +88,7 @@ export function Topbar() {
       const snapshot = await api.dockerContainers();
       dispatch({ type: "containers", containers: snapshot.containers });
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Command failed");
+      showErrorNotice(err, "Command failed");
     } finally {
       setDockerBusy(null);
     }
@@ -476,7 +479,7 @@ export function Topbar() {
                       dispatch({ type: "selectBoard", id: board.id });
                     })
                     .catch((err: unknown) => {
-                      showNotice(err instanceof Error ? err.message : "Could not duplicate");
+                      showErrorNotice(err, "Could not duplicate");
                     });
                 }}
               >
@@ -487,10 +490,20 @@ export function Topbar() {
               <MenuItem
                 danger
                 onClick={() => {
-                  if (!confirm(`Delete ${item.title}? This cannot be undone.`)) return;
-                  void api
-                    .deleteBoard(item.id)
-                    .then(() => dispatch({ type: "boardDeleted", id: item.id }));
+                  void (async () => {
+                    if (
+                      !(await askConfirm({
+                        title: `Delete ${item.title}?`,
+                        body: "This cannot be undone.",
+                        confirmLabel: "Delete",
+                        danger: true,
+                      }))
+                    )
+                      return;
+                    void api
+                      .deleteBoard(item.id)
+                      .then(() => dispatch({ type: "boardDeleted", id: item.id }));
+                  })();
                 }}
               >
                 Delete
@@ -575,7 +588,7 @@ export function Topbar() {
                       dispatch({ type: "selectProject", id: project.id });
                     })
                     .catch((err: unknown) => {
-                      showNotice(err instanceof Error ? err.message : "Could not duplicate");
+                      showErrorNotice(err, "Could not duplicate");
                     });
                 }}
               >
@@ -586,17 +599,22 @@ export function Topbar() {
               <MenuItem
                 danger
                 onClick={() => {
-                  if (
-                    !confirm(
-                      `Delete ${hub ? (teamTitle ?? item.title) : item.title}? ${
-                        hub ? "Teammates stay in Swarm." : "Members stay on Agents."
-                      }`,
-                    )
-                  )
-                    return;
-                  void api
-                    .deleteProject(item.id)
-                    .then(() => dispatch({ type: "projectDeleted", id: item.id }));
+                  void (async () => {
+                    const name = hub ? (teamTitle ?? item.title) : item.title;
+                    const ok = await askConfirm({
+                      title: `Delete ${name}?`,
+                      body: hub ? "Teammates stay in Swarm." : "Members stay on Agents.",
+                      confirmLabel: "Delete",
+                      danger: true,
+                    });
+                    if (!ok) return;
+                    try {
+                      await api.deleteProject(item.id);
+                      dispatch({ type: "projectDeleted", id: item.id });
+                    } catch (err) {
+                      showErrorNotice(err, "Could not delete");
+                    }
+                  })();
                 }}
               >
                 Delete
@@ -663,9 +681,7 @@ export function Topbar() {
                   onClick={() =>
                     void api
                       .resumeVm(session.id)
-                      .catch((err: unknown) =>
-                        showNotice(err instanceof Error ? err.message : "Could not resume"),
-                      )
+                      .catch((err: unknown) => showErrorNotice(err, "Could not resume"))
                   }
                 >
                   <IconPlay /> Resume
@@ -678,9 +694,7 @@ export function Topbar() {
                   onClick={() =>
                     void api
                       .pauseVm(session.id)
-                      .catch((err: unknown) =>
-                        showNotice(err instanceof Error ? err.message : "Could not pause"),
-                      )
+                      .catch((err: unknown) => showErrorNotice(err, "Could not pause"))
                   }
                 >
                   <IconPause /> Pause
@@ -693,9 +707,7 @@ export function Topbar() {
                 onClick={() =>
                   void api
                     .stopVm(session.id)
-                    .catch((err: unknown) =>
-                      showNotice(err instanceof Error ? err.message : "Could not stop"),
-                    )
+                    .catch((err: unknown) => showErrorNotice(err, "Could not stop"))
                 }
               >
                 <IconStop /> Stop
@@ -709,9 +721,7 @@ export function Topbar() {
               onClick={() =>
                 void api
                   .stopVm(session.id)
-                  .catch((err: unknown) =>
-                    showNotice(err instanceof Error ? err.message : "Could not stop"),
-                  )
+                  .catch((err: unknown) => showErrorNotice(err, "Could not stop"))
               }
             >
               <IconStop /> Stop
@@ -721,7 +731,11 @@ export function Topbar() {
               type="button"
               className="btn small primary"
               title="Start"
-              onClick={() => void api.startVm(session.id)}
+              onClick={() =>
+                void api
+                  .startVm(session.id)
+                  .catch((err: unknown) => showErrorNotice(err, "Could not start"))
+              }
             >
               <IconPlay /> Start
             </button>
@@ -739,10 +753,22 @@ export function Topbar() {
             <MenuItem
               disabled={!canClearChat(session)}
               onClick={() => {
-                if (!confirm(CLEAR_CHAT_CONFIRM)) return;
-                void api
-                  .clearChat(session.id)
-                  .then((updated) => dispatch({ type: "session", session: updated }));
+                void (async () => {
+                  if (
+                    !(await askConfirm({
+                      title: "Clear chat?",
+                      body: CLEAR_CHAT_CONFIRM,
+                      confirmLabel: "Clear chat",
+                      danger: true,
+                    }))
+                  )
+                    return;
+                  const updated = await api.clearChat(session.id).catch((err: unknown) => {
+                    showErrorNotice(err, "Could not clear chat");
+                    return undefined;
+                  });
+                  if (updated) dispatch({ type: "session", session: updated });
+                })();
               }}
             >
               Clear chat
@@ -753,7 +779,10 @@ export function Topbar() {
               {session.pinned ? "Unpin" : "Pin"}
             </MenuItem>
             <MenuItem
-              onClick={() => void api.patchSession(session.id, { archived: !session.archived })}
+              onClick={() => {
+                if (session.archived) void api.patchSession(session.id, { archived: false });
+                else archiveOne(session, dispatch);
+              }}
             >
               {session.archived ? "Unarchive" : "Archive"}
             </MenuItem>
@@ -791,13 +820,7 @@ export function Topbar() {
             <MenuItem
               danger
               onClick={() => {
-                if (!confirm(`Delete ${session.title}? This cannot be undone.`)) return;
-                void api
-                  .deleteSession(session.id)
-                  .then(() => dispatch({ type: "deleted", id: session.id }))
-                  .catch((err: unknown) =>
-                    showNotice(err instanceof Error ? err.message : "Could not delete"),
-                  );
+                void deleteSessionWithUndo(session, dispatch, askConfirm);
               }}
             >
               Delete
@@ -899,15 +922,16 @@ export function Topbar() {
       <div className="topbar-actions">
         {session.error && <ExpandableLog compact danger text={session.error} />}
         {hubMode ? (
-          <button
-            type="button"
-            className="btn icon ghost"
-            title={state.vmCollapsed ? "Show computer" : "Hide computer"}
-            aria-label={state.vmCollapsed ? "Show computer" : "Hide computer"}
-            onClick={() => dispatch({ type: "toggleVmPane" })}
-          >
-            <IconPanelRight />
-          </button>
+          <Tooltip label={state.vmCollapsed ? "Show computer" : "Hide computer"}>
+            <button
+              type="button"
+              className="btn icon ghost"
+              aria-label={state.vmCollapsed ? "Show computer" : "Hide computer"}
+              onClick={() => dispatch({ type: "toggleVmPane" })}
+            >
+              <IconPanelRight />
+            </button>
+          </Tooltip>
         ) : null}
         {hubMode || hostChat ? null : vm &&
           (vm.status === "running" || vm.status === "ready" || vm.status === "paused") ? (
@@ -940,9 +964,7 @@ export function Topbar() {
                   onClick={() =>
                     void api
                       .resumeVm(session.id)
-                      .catch((err: unknown) =>
-                        showNotice(err instanceof Error ? err.message : "Could not resume"),
-                      )
+                      .catch((err: unknown) => showErrorNotice(err, "Could not resume"))
                   }
                 >
                   <IconPlay /> Resume
@@ -955,9 +977,7 @@ export function Topbar() {
                   onClick={() =>
                     void api
                       .pauseVm(session.id)
-                      .catch((err: unknown) =>
-                        showNotice(err instanceof Error ? err.message : "Could not pause"),
-                      )
+                      .catch((err: unknown) => showErrorNotice(err, "Could not pause"))
                   }
                 >
                   <IconPause /> Pause
@@ -970,9 +990,7 @@ export function Topbar() {
                 onClick={() =>
                   void api
                     .stopVm(session.id)
-                    .catch((err: unknown) =>
-                      showNotice(err instanceof Error ? err.message : "Could not stop"),
-                    )
+                    .catch((err: unknown) => showErrorNotice(err, "Could not stop"))
                 }
               >
                 <IconStop /> Stop
@@ -987,9 +1005,7 @@ export function Topbar() {
             onClick={() =>
               void api
                 .stopVm(session.id)
-                .catch((err: unknown) =>
-                  showNotice(err instanceof Error ? err.message : "Could not stop"),
-                )
+                .catch((err: unknown) => showErrorNotice(err, "Could not stop"))
             }
           >
             <IconStop /> Stop
@@ -999,7 +1015,11 @@ export function Topbar() {
             type="button"
             className="btn small primary"
             title="Start"
-            onClick={() => void api.startVm(session.id)}
+            onClick={() =>
+              void api
+                .startVm(session.id)
+                .catch((err: unknown) => showErrorNotice(err, "Could not start"))
+            }
           >
             <IconPlay /> Start
           </button>
@@ -1049,10 +1069,22 @@ export function Topbar() {
           <MenuItem
             disabled={!canClearChat(session)}
             onClick={() => {
-              if (!confirm(CLEAR_CHAT_CONFIRM)) return;
-              void api
-                .clearChat(session.id)
-                .then((updated) => dispatch({ type: "session", session: updated }));
+              void (async () => {
+                if (
+                  !(await askConfirm({
+                    title: "Clear chat?",
+                    body: CLEAR_CHAT_CONFIRM,
+                    confirmLabel: "Clear chat",
+                    danger: true,
+                  }))
+                )
+                  return;
+                const updated = await api.clearChat(session.id).catch((err: unknown) => {
+                  showErrorNotice(err, "Could not clear chat");
+                  return undefined;
+                });
+                if (updated) dispatch({ type: "session", session: updated });
+              })();
             }}
           >
             Clear chat
@@ -1068,7 +1100,10 @@ export function Topbar() {
             {session.pinned ? "Unpin" : "Pin"}
           </MenuItem>
           <MenuItem
-            onClick={() => void api.patchSession(session.id, { archived: !session.archived })}
+            onClick={() => {
+              if (session.archived) void api.patchSession(session.id, { archived: false });
+              else archiveOne(session, dispatch);
+            }}
           >
             {session.archived ? "Unarchive" : "Archive"}
           </MenuItem>
@@ -1095,10 +1130,15 @@ export function Topbar() {
                 !vm || (vm.status !== "running" && vm.status !== "ready" && vm.status !== "paused")
               }
               onClick={() => {
-                const fallback = defaultGoldenName(session.title, docker ? "workspace" : "golden");
-                const name = promptGoldenName(fallback);
-                if (!name) return;
-                void api.captureImage(session.id, name);
+                void (async () => {
+                  const fallback = defaultGoldenName(
+                    session.title,
+                    docker ? "workspace" : "golden",
+                  );
+                  const name = await promptGoldenName(fallback);
+                  if (!name) return;
+                  void api.captureImage(session.id, name);
+                })();
               }}
             >
               Save golden image…
@@ -1110,13 +1150,15 @@ export function Topbar() {
                 !vm || (vm.status !== "running" && vm.status !== "ready" && vm.status !== "paused")
               }
               onClick={() => {
-                const fallback = defaultEnvironmentName(session.title);
-                const name = promptEnvironmentName(fallback);
-                if (!name) return;
-                void api.saveEnvironment(session.id, name).then((result) => {
-                  dispatch({ type: "config", config: result.config });
-                  if (result.repo) dispatch({ type: "repo", repo: result.repo });
-                });
+                void (async () => {
+                  const fallback = defaultEnvironmentName(session.title);
+                  const name = await promptEnvironmentName(fallback);
+                  if (!name) return;
+                  void api.saveEnvironment(session.id, name).then((result) => {
+                    dispatch({ type: "config", config: result.config });
+                    if (result.repo) dispatch({ type: "repo", repo: result.repo });
+                  });
+                })();
               }}
             >
               Save as environment…
@@ -1140,13 +1182,7 @@ export function Topbar() {
           <MenuItem
             danger
             onClick={() => {
-              if (!confirm(`Delete ${session.title}? This cannot be undone.`)) return;
-              void api
-                .deleteSession(session.id)
-                .then(() => dispatch({ type: "deleted", id: session.id }))
-                .catch((err: unknown) =>
-                  showNotice(err instanceof Error ? err.message : "Could not delete"),
-                );
+              void deleteSessionWithUndo(session, dispatch, askConfirm);
             }}
           >
             Delete

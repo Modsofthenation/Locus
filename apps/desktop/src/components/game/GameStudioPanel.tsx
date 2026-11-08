@@ -25,6 +25,7 @@ import {
 } from "@locus/shared";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { Select } from "@/components/layout/Select";
 
 export function GameStudioPanel(props: {
   session: AgentSession;
@@ -277,20 +278,19 @@ export function GameStudioPanel(props: {
       <div className="control-cluster" role="group" aria-label="Recipe feel">
         <label>
           Feel set
-          <select
-            aria-label="Feel set"
+          <Select
+            compact
+            ariaLabel="Feel set"
             value={props.studio.recipeId ?? ""}
-            onChange={(event) =>
-              save({ ...props.studio, recipeId: event.target.value || undefined })
-            }
-          >
-            <option value="">All knobs</option>
-            {GAME_RECIPES.map((recipe) => (
-              <option key={recipe.id} value={recipe.id}>
-                {recipe.title}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: "All knobs" },
+              ...GAME_RECIPES.map((recipe) => ({
+                value: recipe.id,
+                label: recipe.title,
+              })),
+            ]}
+            onChange={(value) => save({ ...props.studio, recipeId: value || undefined })}
+          />
         </label>
         {extras.map((key) => {
           const bounds = GAME_EXTRA_FEEL_DEFAULTS[key];
@@ -334,23 +334,22 @@ export function GameStudioPanel(props: {
         {GAME_INPUT_CODES.map((code) => (
           <label key={code}>
             {code}
-            <select
-              aria-label={`Remap ${code}`}
+            <Select
+              compact
+              ariaLabel={`Remap ${code}`}
               value={props.studio.inputMap[code] ?? code}
-              onChange={(event) => {
+              options={GAME_INPUT_CODES.map((target) => ({
+                value: target,
+                label: target,
+              }))}
+              onChange={(value) => {
                 const inputMap = { ...props.studio.inputMap };
-                if (event.target.value === code) delete inputMap[code];
-                else inputMap[code] = event.target.value;
+                if (value === code) delete inputMap[code];
+                else inputMap[code] = value;
                 save({ ...props.studio, inputMap });
                 props.postGame({ type: "locus-game-remap", map: inputMap });
               }}
-            >
-              {GAME_INPUT_CODES.map((target) => (
-                <option key={target} value={target}>
-                  {target}
-                </option>
-              ))}
-            </select>
+            />
           </label>
         ))}
         <button

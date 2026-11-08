@@ -1,4 +1,6 @@
+import { useRef } from "react";
 import { PairingQr } from "@/components/settings/PairingQr";
+import { useDialogFocus } from "@/lib/useDialogFocus";
 
 export function GamePlayLinkPanel(props: {
   url: string;
@@ -7,8 +9,16 @@ export function GamePlayLinkPanel(props: {
   onClose: () => void;
 }) {
   const qrUrl = props.lanUrls[0] || props.url;
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(true, props.onClose, dialogRef);
   return (
-    <div className="game-play-link" role="dialog" aria-label="Play link">
+    <div
+      className="game-play-link"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Play link"
+      ref={dialogRef}
+    >
       <header className="game-play-link-head">
         <p className="game-play-link-badge">Unlisted</p>
         <button

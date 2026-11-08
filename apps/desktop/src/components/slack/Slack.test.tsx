@@ -720,15 +720,12 @@ describe("SlackPane", () => {
     await act(async () => {
       ask!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    const provider = host.querySelector(
-      '.slack-ask select[aria-label="Provider"]',
-    ) as HTMLSelectElement;
-    const model = host.querySelector('.slack-ask select[aria-label="Model"]') as HTMLSelectElement;
-    expect(provider?.value).toBe("openai");
-    expect(model?.value).toBe("gpt-4.1");
+    const picker = host.querySelector(".slack-ask .model-picker-combined") as HTMLElement;
+    expect(picker.querySelector(".model-picker-combined-label")?.textContent).toBe(
+      "OpenAI · gpt-4.1",
+    );
     const bar = host.querySelector(".slack-ask-bar");
-    expect(bar?.contains(provider)).toBe(true);
-    expect(bar?.contains(model)).toBe(true);
+    expect(bar?.contains(picker)).toBe(true);
     const actions = bar!.querySelector(".slack-ask-actions");
     expect([...actions!.querySelectorAll("button")].map((el) => el.textContent)).toEqual([
       "Cancel",
@@ -737,17 +734,17 @@ describe("SlackPane", () => {
     expect(css).toMatch(/\.slack-ask-bar \{[\s\S]*?flex-wrap:\s*wrap/);
     expect(css).toMatch(/\.slack-ask-actions \{[\s\S]*?flex:\s*0 0 auto/);
     await act(async () => {
-      provider.value = "anthropic";
-      provider.dispatchEvent(new Event("change", { bubbles: true }));
+      picker.querySelector("summary")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    const nextModel = host.querySelector(
-      '.slack-ask select[aria-label="Model"]',
-    ) as HTMLSelectElement;
-    expect(nextModel.value).toBe("claude-sonnet-4-5");
+    const opus = [...host.querySelectorAll(".slack-ask [role='menuitem']")].find(
+      (el) => el.textContent === "claude-opus-4-5",
+    );
     await act(async () => {
-      nextModel.value = "claude-opus-4-5";
-      nextModel.dispatchEvent(new Event("change", { bubbles: true }));
+      opus?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
+    expect(picker.querySelector(".model-picker-combined-label")?.textContent).toBe(
+      "Anthropic · claude-opus-4-5",
+    );
     const input = host.querySelector(".slack-ask input") as HTMLInputElement;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -800,12 +797,9 @@ describe("SlackPane", () => {
     await act(async () => {
       ask!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    const provider = host.querySelector(
-      '.slack-ask select[aria-label="Provider"]',
-    ) as HTMLSelectElement;
-    const model = host.querySelector('.slack-ask select[aria-label="Model"]') as HTMLSelectElement;
-    expect(provider?.value).toBe("anthropic");
-    expect(model?.value).toBe("claude-opus-4-5");
+    expect(host.querySelector(".slack-ask .model-picker-combined-label")?.textContent).toBe(
+      "Anthropic · claude-opus-4-5",
+    );
   });
 
   it("searches Slack messages and jumps to a hit", async () => {

@@ -117,6 +117,7 @@ export class MockHypervisor extends EventEmitter implements Hypervisor {
       status: "creating",
       diskPath: `${this.dataDir}/disks/${id}.qcow2`,
       slot,
+      runtime: "vm",
       display: displayFor(template.os, slot),
       serial: serialFor(id),
       ssh: isLinux(template.os)

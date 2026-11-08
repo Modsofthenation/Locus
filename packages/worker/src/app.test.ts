@@ -3,7 +3,8 @@ import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { MockDockerEngine } from "@locus/hypervisor";
+import { MockDockerEngine, MockHypervisor } from "@locus/hypervisor";
+import { defaultNetworking, UBUNTU_DEFAULT_HARDWARE } from "@locus/shared";
 import { createWorkerApp } from "./app.js";
 import { WorkerClient } from "./client.js";
 import { parseWorkerCliMcpLine } from "./loopbackMcp.js";
@@ -138,6 +139,49 @@ describe("locus worker HTTP", () => {
         hostDir: "/",
       }),
     ).rejects.toThrow(/filesystem root/);
+  });
+
+  it("creates a QEMU guest on the worker hypervisor", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-worker-vm-"));
+    const engine = new MockDockerEngine(dir);
+    const hypervisor = new MockHypervisor(dir);
+    const app = createWorkerApp({
+      engine,
+      hypervisor,
+      token: "secret",
+      name: "studio",
+      dataDir: dir,
+    });
+    const fetchFn: typeof fetch = async (input, init) =>
+      app.request(String(input).replace("http://127.0.0.1:7421", ""), init);
+    const client = new WorkerClient(
+      { id: "w1", name: "studio", url: "http://127.0.0.1:7421", token: "secret" },
+      fetchFn,
+    );
+    const created = await client.create({
+      sessionId: "s-vm",
+      name: "vm-agent",
+      image: "vm",
+      runtime: "vm",
+      template: {
+        id: "ubuntu-24.04",
+        name: "Ubuntu",
+        os: "ubuntu",
+        description: "test",
+        isoPath: "",
+        hardware: { ...UBUNTU_DEFAULT_HARDWARE },
+        networking: defaultNetworking("ubuntu", 0),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+    expect(created.runtime).toBe("vm");
+    expect(engine.list()).toHaveLength(0);
+    expect(hypervisor.get(created.id)?.runtime).toBe("vm");
+    const started = await client.start(created.id);
+    expect(["running", "ready", "booting"]).toContain(started.status);
+    await client.destroy(created.id);
+    expect(hypervisor.get(created.id)).toBeUndefined();
   });
 
   it("refuses host-runtime guests unless the worker opted in", async () => {

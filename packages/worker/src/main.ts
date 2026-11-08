@@ -2,9 +2,10 @@ import { createServer } from "node:https";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
-import { DEFAULT_WORKER_PORT } from "@locus/shared";
-import { createDockerEngine } from "@locus/hypervisor";
-import type { VmInstance } from "@locus/shared";
+import { DEFAULT_ADVANCED, DEFAULT_WORKER_PORT } from "@locus/shared";
+import { createDockerEngine, createHypervisor } from "@locus/hypervisor";
+import { ensureHostKey, guestReadyTimeoutMs, waitForGuest } from "@locus/guest-agent";
+import type { GuestOs, VmInstance } from "@locus/shared";
 import { createWorkerApp } from "./app.js";
 import { WorkerBrowserHub } from "./browserHub.js";
 import { attachWorkerBrowser } from "./browserSockets.js";
@@ -22,11 +23,25 @@ const loaded = await loadOrCreateWorkerToken(dataDir);
 const token = loaded.token;
 const tls = await loadOrCreateWorkerTls(dataDir);
 const engine = await createDockerEngine(dataDir);
+const hostKey = await ensureHostKey(dataDir);
+const { hypervisor } = await createHypervisor({ ...DEFAULT_ADVANCED, dataDir }, undefined, {
+  sshPublicKey: hostKey.publicKey,
+  sshIdentityFile: hostKey.privateKeyPath,
+  waitGuest: (guest: { os: GuestOs }, signal: AbortSignal) =>
+    waitForGuest(guest, { signal, timeoutMs: guestReadyTimeoutMs(guest.os) }),
+});
 const hostGuests = new Map<string, VmInstance>();
-const guests = new WorkerGuestHub({ liveDocker: Boolean(engine.liveEngine), dataDir });
-const browsers = new WorkerBrowserHub(guests, engine, (id) => hostGuests.get(id));
+const guests = new WorkerGuestHub({
+  liveDocker: Boolean(engine.liveEngine),
+  liveQemu: Boolean(hypervisor.liveEngine),
+  dataDir,
+  identityFile: hostKey.privateKeyPath,
+});
+const lookupGuest = (id: string) => hostGuests.get(id) ?? hypervisor.get(id);
+const browsers = new WorkerBrowserHub(guests, engine, lookupGuest);
 const app = createWorkerApp({
   engine,
+  hypervisor,
   token,
   name,
   guests,
@@ -69,5 +84,5 @@ attachWorkerBrowser(server, {
   engine,
   guests,
   browsers,
-  lookupGuest: (id) => hostGuests.get(id),
+  lookupGuest,
 });

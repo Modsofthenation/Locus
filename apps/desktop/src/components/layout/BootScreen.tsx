@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 import { Mascot } from "./Mascot";
+import { Skeleton } from "./Skeleton";
 import { useStore } from "@/state/store";
 
 export function BootScreen(props: { onRetry?: () => void }) {
@@ -19,7 +20,11 @@ export function BootScreen(props: { onRetry?: () => void }) {
           size={76}
           title={error ? "Locus could not load" : "Locus is loading"}
         />
-        <p className={error ? "boot-screen-error" : undefined}>{error ?? "Loading…"}</p>
+        {error ? (
+          <p className="boot-screen-error">{error}</p>
+        ) : (
+          <Skeleton lines={1} label="Loading…" />
+        )}
         {error && props.onRetry ? (
           <button
             type="button"

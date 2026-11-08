@@ -4,9 +4,9 @@ import {
   formatAssetExportTitle,
   type AssetExportJob,
 } from "@locus/shared";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { useDialogFocus } from "@/lib/useDialogFocus";
+import { Modal } from "@/components/layout/Modal";
 import { HostFolderPicker } from "@/components/workspace/HostFolderField";
 
 export const ASSET_EXPORT_DIR_KEY = "locus.assetExportDir";
@@ -41,7 +41,6 @@ export function AssetExportModal(props: {
   onExport?: (next: { filename: string; folder: string }) => void;
 }) {
   const { progress, onClose, onExport } = props;
-  const dialogRef = useRef<HTMLDivElement>(null);
   const saveAs = progress.phase === "save";
   const busy = !saveAs && progress.phase !== "done" && progress.phase !== "error";
   const determinate = progress.phase !== "start";
@@ -49,7 +48,6 @@ export function AssetExportModal(props: {
   const [filename, setFilename] = useState(progress.filename ?? "");
   const [folder, setFolder] = useState(progress.folder ?? "");
   const [browseOpen, setBrowseOpen] = useState(false);
-  useDialogFocus(true, onClose, dialogRef);
 
   useEffect(() => {
     if (progress.phase !== "done") return;
@@ -65,15 +63,13 @@ export function AssetExportModal(props: {
   }
 
   const dialog = (
-    <div className="modal-backdrop" onClick={onClose} data-testid="asset-export-modal">
-      <div
-        className="modal close-confirm asset-export"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="asset-export-title"
-        aria-busy={busy}
-        ref={dialogRef}
-        onClick={(event) => event.stopPropagation()}
+    <>
+      <Modal
+        titleId="asset-export-title"
+        className="close-confirm asset-export"
+        testId="asset-export-modal"
+        busy={busy}
+        onClose={onClose}
       >
         <h2 id="asset-export-title">{formatAssetExportTitle(progress.format)}</h2>
         <p className="modal-lead" aria-live="polite">
@@ -151,7 +147,7 @@ export function AssetExportModal(props: {
             </button>
           ) : null}
         </div>
-      </div>
+      </Modal>
       <HostFolderPicker
         open={browseOpen}
         initialPath={folder}
@@ -161,7 +157,7 @@ export function AssetExportModal(props: {
         onClose={() => setBrowseOpen(false)}
         onPick={setFolder}
       />
-    </div>
+    </>
   );
 
   return createPortal(dialog, document.body);

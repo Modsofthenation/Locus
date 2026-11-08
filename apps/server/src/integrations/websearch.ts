@@ -5,8 +5,7 @@ const MAX_RESULTS = 8;
 const DEFAULT_RESULTS = 5;
 const FETCH_MS = 12_000;
 const MAX_BODY = 512_000;
-const USER_AGENT =
-  "Mozilla/5.0 (compatible; Locus/0.1; +https://github.com/Modsofthenation/Locus)";
+const USER_AGENT = "Mozilla/5.0 (compatible; Locus/0.1; +https://github.com/Modsofthenation/Locus)";
 
 const FETCH_HOSTS = new Set([
   "html.duckduckgo.com",

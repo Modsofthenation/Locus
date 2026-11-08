@@ -14,7 +14,7 @@ import {
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/state/store";
-import { Mascot } from "@/components/layout/Mascot";
+import { EmptyHero } from "@/components/layout/EmptyHero";
 import { IconPlus } from "@/components/layout/Icons";
 import { PersonaAvatar } from "@/components/layout/PersonaAvatar";
 import { FeatureHintRow } from "@/components/layout/FeatureHint";
@@ -93,15 +93,14 @@ export function ProjectEmpty() {
   return (
     <div className="empty design-start board-start">
       <div className="empty-card">
-        <div className="design-start-hero">
-          <Mascot pose="idle" size={72} />
-          <h2>{hubMode ? "Teams" : "Projects"}</h2>
-          <p>
-            {hubMode
+        <EmptyHero
+          title={hubMode ? "Teams" : "Projects"}
+          lead={
+            hubMode
               ? "A team with a coordinator, shared context, and teammates who can hand work to each other."
-              : "A body of work with a coordinator, shared context, and members. The coordinator plans and delegates — it does not write application code."}
-          </p>
-        </div>
+              : "A body of work with a coordinator, shared context, and members. The coordinator plans and delegates — it does not write application code."
+          }
+        />
         {SECTION_FEATURE_HINTS.project ? (
           <FeatureHintRow hint={SECTION_FEATURE_HINTS.project} />
         ) : null}

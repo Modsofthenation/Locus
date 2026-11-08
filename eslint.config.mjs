@@ -11,6 +11,9 @@ export default tseslint.config(
       "**/dist-electron/**",
       "**/build/**",
       "**/coverage/**",
+      "**/playwright-report/**",
+      "**/test-results/**",
+      "**/blob-report/**",
       "**/buildResources/**",
       "**/node_modules/**",
       "apps/server/fixtures/coding-eval/**",
@@ -83,7 +86,7 @@ export default tseslint.config(
   // Test files: mock generators may legitimately yield nothing; non-null
   // assertions are common when reaching into fixtures.
   {
-    files: ["**/*.test.{ts,tsx}", "**/*.mjs", "**/*.cjs"],
+    files: ["**/*.test.{ts,tsx}", "**/*.spec.ts", "**/*.mjs", "**/*.cjs"],
     rules: {
       "require-yield": "off",
       "@typescript-eslint/no-non-null-assertion": "off",

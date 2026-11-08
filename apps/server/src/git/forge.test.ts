@@ -98,6 +98,66 @@ describe("ForgeClient", () => {
     expect(bb[0]).toMatchObject({ forge: "bitbucket", owner: "acme", name: "mobile" });
   });
 
+  it("lists Gitea repos with token auth and Azure DevOps repos with a PAT", async () => {
+    const azAuth = `Basic ${Buffer.from(":az-pat").toString("base64")}`;
+    const forge = clientFor((url, init) => {
+      const headers = new Headers(init?.headers);
+      const auth = headers.get("authorization") ?? "";
+      if (url.includes("gitea.example.com/api/v1/user/repos") && auth === "token gt-token") {
+        return json([
+          {
+            name: "app",
+            full_name: "acme/app",
+            clone_url: "https://gitea.example.com/acme/app.git",
+            owner: { login: "acme" },
+            default_branch: "main",
+          },
+        ]);
+      }
+      if (url.includes("dev.azure.com/acme/_apis/git/repositories") && auth === azAuth) {
+        return json({
+          value: [
+            {
+              name: "app",
+              remoteUrl: "https://dev.azure.com/acme/proj/_git/app",
+              defaultBranch: "refs/heads/main",
+              project: { name: "proj" },
+            },
+          ],
+        });
+      }
+      return json({ error: url }, 404);
+    });
+    const gitea = await forge.listRepos(
+      account({
+        id: "gt1",
+        kind: "gitea",
+        token: "gt-token",
+        apiBaseUrl: "https://gitea.example.com/api/v1",
+      }),
+    );
+    expect(gitea[0]).toMatchObject({
+      forge: "gitea",
+      owner: "acme",
+      name: "app",
+      url: "https://gitea.example.com/acme/app.git",
+    });
+    const az = await forge.listRepos(
+      account({
+        id: "az1",
+        kind: "azuredevops",
+        token: "az-pat",
+        apiBaseUrl: "https://dev.azure.com/acme",
+      }),
+    );
+    expect(az[0]).toMatchObject({
+      forge: "azuredevops",
+      owner: "acme/proj",
+      name: "app",
+      url: "https://dev.azure.com/acme/proj/_git/app",
+    });
+  });
+
   it("lists and opens pull requests on all three forges", async () => {
     const forge = clientFor((url, init) => {
       if (url.includes("/repos/acme/app/pulls") && !url.includes("/pulls/")) {

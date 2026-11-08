@@ -9,6 +9,7 @@ import {
   type BoardTimelineScale,
 } from "@locus/shared";
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Select } from "@/components/layout/Select";
 
 function monthLabel(day: string): string {
   const t = boardDayUtc(day);
@@ -126,19 +127,21 @@ export function BoardTimelineObject(props: {
             {props.obj.text || "Timeline view"}
           </button>
         )}
-        <label className="board-widget-ui board-timeline-scale">
-          <select
+        <label
+          className="board-widget-ui board-timeline-scale"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <Select
+            compact
+            ariaLabel="Timeline scale"
             value={data.scale}
-            aria-label="Timeline scale"
-            onPointerDown={(event) => event.stopPropagation()}
-            onChange={(event) =>
-              patch({ ...timeline, scale: event.target.value as BoardTimelineScale })
-            }
-          >
-            <option value="days">Days</option>
-            <option value="weeks">Weeks</option>
-            <option value="months">Months</option>
-          </select>
+            options={[
+              { value: "days", label: "Days" },
+              { value: "weeks", label: "Weeks" },
+              { value: "months", label: "Months" },
+            ]}
+            onChange={(value) => patch({ ...timeline, scale: value as BoardTimelineScale })}
+          />
         </label>
       </div>
       <div className="board-timeline-body">

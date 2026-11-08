@@ -98,7 +98,8 @@ export class RepoService {
 
   async link(input: CreateLinkedRepoInput): Promise<LinkedRepo> {
     const parsed = parseRepoUrl(input.url);
-    if (!parsed) throw new Error("Enter a GitHub, GitLab, or Bitbucket URL");
+    if (!parsed)
+      throw new Error("Enter a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps URL");
     const config = await this.store.loadConfig();
     const account = resolveForgeAccount(config.forges, {
       accountId: input.accountId,
@@ -143,7 +144,9 @@ export class RepoService {
     const config = await this.store.loadConfig();
     const accounts = forgesWithTokens(config.forges);
     if (!accounts.length)
-      throw new Error("Sign in or add a GitHub, GitLab, or Bitbucket token in Settings → Git");
+      throw new Error(
+        "Sign in or add a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps token in Settings → Git",
+      );
     const results = await Promise.all(
       accounts.map(async (account) => {
         try {

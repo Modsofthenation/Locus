@@ -12,11 +12,10 @@ import type {
   VisionMode,
 } from "@locus/shared";
 import {
-  AUTONOMY_TIERS,
   DEFAULT_DOCKER_IMAGE,
   applyNamedEnvironment,
   defaultNetworkJail,
-  formatAutonomy,
+  isNetworkJail,
   latestGoldenImage,
   matchRepoHardware,
   parseAutonomyTier,
@@ -31,8 +30,16 @@ import {
   workerIsMetered,
   workerWhereLabel,
 } from "@locus/shared";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useDialogFocus } from "@/lib/useDialogFocus";
+import { useEffect, useMemo, useState } from "react";
+import { FormTabs, Select } from "@/components/layout/Select";
+import {
+  AUTONOMY_SELECT_OPTIONS,
+  JAIL_SELECT_OPTIONS,
+  LIVE_CHROME_SELECT_OPTIONS,
+  VISION_SELECT_OPTIONS,
+  WEB_SEARCH_SELECT_OPTIONS,
+} from "@/lib/formOptions";
+import { Modal } from "@/components/layout/Modal";
 import { suggestedHardware } from "@/lib/hardware";
 import {
   loadLastAgent,
@@ -80,8 +87,6 @@ export function NewSessionModal() {
   const [startVm, setStartVm] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogFocus(true, () => dispatch({ type: "new", open: false }), dialogRef);
   const [hwDirty, setHwDirty] = useState(false);
   const [cpuCores, setCpuCores] = useState(4);
   const [memoryMb, setMemoryMb] = useState(4096);
@@ -99,6 +104,7 @@ export function NewSessionModal() {
   const [netDirty, setNetDirty] = useState(false);
   const [namedEnvId, setNamedEnvId] = useState("");
   const [branchLock, setBranchLock] = useState(false);
+  const [advancedTab, setAdvancedTab] = useState<"agent" | "tools" | "runtime">("agent");
   const [images, setImages] = useState<GoldenImage[]>([]);
   const selectedWorker = workers.find((row) => row.id === backendId);
 
@@ -138,7 +144,7 @@ export function NewSessionModal() {
     if (nextRuntime === "host" && !policyAllowsHostAgents(state.config?.managedPolicy)) {
       nextRuntime = "docker";
     }
-    const workerId = nextRuntime === "vm" ? "" : nextWorker;
+    const workerId = nextWorker;
     const nextOs =
       nextRuntime === "vm"
         ? pickConfiguredOs(state.config?.templates, state.newOs ?? last.os)
@@ -234,7 +240,7 @@ export function NewSessionModal() {
   async function submit() {
     setError(null);
     if (repo.trim() && !parsed) {
-      setError("Enter a GitHub, GitLab, or Bitbucket URL");
+      setError("Enter a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps URL");
       return;
     }
     const override: HardwareOverride | undefined =
@@ -313,229 +319,353 @@ export function NewSessionModal() {
   }
 
   return (
-    <div className="modal-backdrop" onClick={() => dispatch({ type: "new", open: false })}>
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="new-session-title"
-        ref={dialogRef}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 id="new-session-title">New agent</h2>
-        <EnvironmentPicker
-          value={namedEnvId}
-          onChange={(_id, env) => applyEnv(env)}
-          snapshot={{
-            runtime,
-            os,
-            templateId: templateId || undefined,
-            dockerImage: runtime === "docker" ? dockerImage : undefined,
-            imageId: imageId || undefined,
-            network: runtime === "host" ? undefined : network,
-            maxUsd: parseSpendUsd(maxUsd),
-            placement: backendId ? "worker" : "local",
-            backendId: backendId || undefined,
-          }}
-        />
-        <PlacementToggle
-          workers={workers}
-          value={backendId}
-          onChange={(id) => {
-            setBackendId(id);
-            if (id) {
-              if (runtime === "vm") setRuntime("docker");
-              setVision("off");
-              setStartVm(true);
-              setImageId("");
-            }
-          }}
-        />
-        <RuntimeToggle
-          value={runtime}
-          runtimes={backendId ? ["docker", "host"] : undefined}
-          disabledRuntimes={policyAllowsHostAgents(state.config?.managedPolicy) ? [] : ["host"]}
-          onChange={(next) => {
-            setRuntime(next);
-            if (next === "vm") setBackendId("");
-            const nextOs =
-              next !== "vm" && (os === "windows-11" || os === "windows-10") ? "ubuntu" : os;
-            if (nextOs !== os) setOs(nextOs);
-            setVision(next === "vm" ? "latest" : "off");
-            setStartVm(next !== "host" || Boolean(backendId));
-            if (next === "host") setAllowedTools("");
-            setImageId(
-              next === "host" || backendId
-                ? ""
-                : (latestGoldenImage(images, nextOs, next === "docker" ? "docker" : "vm")?.id ??
-                    ""),
-            );
-          }}
-        />
-        <p className="hint">
-          {backendId
-            ? `${runtime === "host" ? "The host workspace" : "The container"} runs on ${selectedWorker ? workerWhereLabel(selectedWorker) : "the worker"}. Chat and keys stay on this machine.${
-                selectedWorker && workerIsMetered(selectedWorker)
-                  ? " Stop destroys the guest. Idle TTL applies on the metered VM."
-                  : ""
-              }`
-            : runtime === "host"
-              ? "A coding agent on this machine. No VM or container — files, shell, and git run here (a security exception)."
+    <Modal titleId="new-session-title" onClose={() => dispatch({ type: "new", open: false })}>
+      <h2 id="new-session-title">New agent</h2>
+      <EnvironmentPicker
+        value={namedEnvId}
+        onChange={(_id, env) => applyEnv(env)}
+        snapshot={{
+          runtime,
+          os,
+          templateId: templateId || undefined,
+          dockerImage: runtime === "docker" ? dockerImage : undefined,
+          imageId: imageId || undefined,
+          network: runtime === "host" ? undefined : network,
+          maxUsd: parseSpendUsd(maxUsd),
+          placement: backendId ? "worker" : "local",
+          backendId: backendId || undefined,
+        }}
+      />
+      <PlacementToggle
+        workers={workers}
+        value={backendId}
+        onChange={(id) => {
+          setBackendId(id);
+          if (id) {
+            setVision("off");
+            setStartVm(true);
+            setImageId("");
+          }
+        }}
+      />
+      <RuntimeToggle
+        value={runtime}
+        disabledRuntimes={policyAllowsHostAgents(state.config?.managedPolicy) ? [] : ["host"]}
+        onChange={(next) => {
+          setRuntime(next);
+          const nextOs =
+            next !== "vm" && (os === "windows-11" || os === "windows-10") ? "ubuntu" : os;
+          if (nextOs !== os) setOs(nextOs);
+          setVision(next === "vm" ? "latest" : "off");
+          setStartVm(next !== "host" || Boolean(backendId));
+          if (next === "host") setAllowedTools("");
+          setImageId(
+            next === "host" || backendId
+              ? ""
+              : (latestGoldenImage(images, nextOs, next === "docker" ? "docker" : "vm")?.id ?? ""),
+          );
+        }}
+      />
+      <p className="hint">
+        {backendId
+          ? `${runtime === "host" ? "The host workspace" : runtime === "vm" ? "The VM" : "The container"} runs on ${selectedWorker ? workerWhereLabel(selectedWorker) : "the worker"}. Chat and keys stay on this machine.${
+              selectedWorker && workerIsMetered(selectedWorker)
+                ? " Stop destroys the guest. Idle TTL applies on the metered VM."
+                : ""
+            }`
+          : runtime === "host"
+            ? "A coding agent on this machine. No VM or container — files, shell, and git run here (a security exception)."
+            : runtime === "docker"
+              ? "Daily path: Docker + locus/agent. Windows guests need a QEMU VM."
+              : "QEMU is the Windows-desktop / installer-QA path. Hardware overrides are VM-only."}
+      </p>
+      <div className="field">
+        <label>Task</label>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder={
+            runtime === "host"
+              ? "What should we talk about? Sent as the first message."
               : runtime === "docker"
-                ? "Daily path: Docker + locus/agent. Windows guests need a QEMU VM."
-                : "QEMU is the Windows-desktop / installer-QA path. Hardware overrides are VM-only."}
-        </p>
-        <div className="field">
-          <label>Task</label>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder={
-              runtime === "host"
-                ? "What should we talk about? Sent as the first message."
-                : runtime === "docker"
-                  ? "What should this container do? Sent as the first message after the container starts."
-                  : "What should this machine do? Sent as the first message after the VM starts."
-            }
-          />
-        </div>
-        {runtime === "host" ? (
-          <HostFolderField value={hostDir} onChange={setHostDir} remote={Boolean(backendId)} />
-        ) : null}
-        {runtime === "docker" ? (
-          <>
-            <DockerImageField value={dockerImage} onChange={setDockerImage} />
-            {images.some((img) => img.runtime === "docker") && !backendId ? (
-              <div className="field">
-                <label>Workspace image</label>
-                <select value={imageId} onChange={(e) => setImageId(e.target.value)}>
-                  <option value="">Empty /workspace</option>
-                  {images
+                ? "What should this container do? Sent as the first message after the container starts."
+                : "What should this machine do? Sent as the first message after the VM starts."
+          }
+        />
+      </div>
+      {runtime === "host" ? (
+        <HostFolderField value={hostDir} onChange={setHostDir} remote={Boolean(backendId)} />
+      ) : null}
+      {runtime === "docker" ? (
+        <>
+          <DockerImageField value={dockerImage} onChange={setDockerImage} />
+          {images.some((img) => img.runtime === "docker") && !backendId ? (
+            <div className="field">
+              <label>Workspace image</label>
+              <Select
+                ariaLabel="Workspace image"
+                value={imageId}
+                options={[
+                  { value: "", label: "Empty /workspace" },
+                  ...images
                     .filter((img) => img.runtime === "docker")
-                    .map((img) => (
-                      <option key={img.id} value={img.id}>
-                        {img.name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-            ) : null}
-          </>
-        ) : runtime === "vm" ? (
-          <>
-            <OsPicker
-              templates={templates}
-              value={os}
-              onChange={(next) => {
-                setOs(next);
-                const defaults = resolveAgentDefaults(state.config, next, loadLastAgent());
-                setTemplateId(defaults.templateId);
-                setHwDirty(false);
-                setImageId(latestGoldenImage(images, next)?.id ?? "");
-              }}
-            />
-            <OsSoloHint templates={templates} os={os} />
-          </>
-        ) : null}
-        <ModelPicker
-          providers={providers}
-          providerId={providerId}
-          model={model}
-          onChange={(next) => {
-            setProviderId(next.providerId);
-            setModel(next.model);
-            setReasoningEffort(undefined);
-          }}
-        />
-        <CodexReasoningPicker
-          provider={provider}
-          model={model}
-          value={reasoningEffort}
-          onChange={setReasoningEffort}
-        />
-        <details className="advanced">
-          <summary>More options</summary>
-          <p className="hint">
-            Jail, spend cap, environment extras, and hardware. Runtime and repo stay fixed after
-            create; branch lock is optional below.
-          </p>
-          <h3 className="new-session-group-title">Environment</h3>
-          {runtime === "vm" ? (
-            <div className="field">
-              <label>Template</label>
-              <select
-                value={templateId}
-                onChange={(e) => {
-                  setTemplateId(e.target.value);
-                  setHwDirty(false);
-                }}
-              >
-                {osTemplates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
-          <RepoField
-            repos={state.repos}
-            repoId={repoId}
-            extraRepoIds={extraRepoIds}
-            url={repo}
-            onRepoId={(id) => {
-              const hadRepo = Boolean(repoId);
-              setRepoId(id);
-              if (!id) setBranchLock(false);
-              else if (!hadRepo) setBranchLock(true);
-            }}
-            onExtraRepoIds={setExtraRepoIds}
-            onUrl={(next) => {
-              setRepo(next);
-              setHwDirty(false);
-            }}
-            onRef={setRef}
-          />
-          {repoId ? (
-            <div className="field">
-              <label>Branch</label>
-              <ComposerBranchPicker
-                repoId={repoId}
-                value={ref}
-                fallback={state.repos.find((row) => row.id === repoId)?.checkout.ref}
-                onChange={setRef}
+                    .map((img) => ({ value: img.id, label: img.name })),
+                ]}
+                onChange={setImageId}
               />
             </div>
-          ) : (
-            <div className="field">
-              <label>Git ref (optional)</label>
-              <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="main" />
-            </div>
-          )}
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={branchLock}
-              disabled={!repoId && !parsed}
-              onChange={(e) => setBranchLock(e.target.checked)}
+          ) : null}
+        </>
+      ) : runtime === "vm" ? (
+        <>
+          <OsPicker
+            templates={templates}
+            value={os}
+            onChange={(next) => {
+              setOs(next);
+              const defaults = resolveAgentDefaults(state.config, next, loadLastAgent());
+              setTemplateId(defaults.templateId);
+              setHwDirty(false);
+              setImageId(latestGoldenImage(images, next)?.id ?? "");
+            }}
+          />
+          <OsSoloHint templates={templates} os={os} />
+        </>
+      ) : null}
+      <ModelPicker
+        providers={providers}
+        providerId={providerId}
+        model={model}
+        onChange={(next) => {
+          setProviderId(next.providerId);
+          setModel(next.model);
+          setReasoningEffort(undefined);
+        }}
+      />
+      <CodexReasoningPicker
+        provider={provider}
+        model={model}
+        value={reasoningEffort}
+        onChange={setReasoningEffort}
+      />
+      <details className="advanced">
+        <summary>More options</summary>
+        <p className="hint">Repo, jail, tools, and hardware. Runtime stays fixed after create.</p>
+        <FormTabs
+          ariaLabel="More options"
+          value={advancedTab}
+          onChange={setAdvancedTab}
+          tabs={[
+            { id: "agent", label: "Agent" },
+            { id: "tools", label: "Tools" },
+            { id: "runtime", label: "Runtime" },
+          ]}
+        />
+        {advancedTab === "agent" ? (
+          <>
+            <RepoField
+              repos={state.repos}
+              repoId={repoId}
+              extraRepoIds={extraRepoIds}
+              url={repo}
+              onRepoId={(id) => {
+                const hadRepo = Boolean(repoId);
+                setRepoId(id);
+                if (!id) setBranchLock(false);
+                else if (!hadRepo) setBranchLock(true);
+              }}
+              onExtraRepoIds={setExtraRepoIds}
+              onUrl={(next) => {
+                setRepo(next);
+                setHwDirty(false);
+              }}
+              onRef={setRef}
             />
-            Lock branch after create
-          </label>
-          {runtime === "vm" && (
-            <>
+            {repoId ? (
+              <div className="field">
+                <label>Branch</label>
+                <ComposerBranchPicker
+                  repoId={repoId}
+                  value={ref}
+                  fallback={state.repos.find((row) => row.id === repoId)?.checkout.ref}
+                  onChange={setRef}
+                />
+              </div>
+            ) : (
+              <div className="field">
+                <label>Git ref (optional)</label>
+                <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="main" />
+              </div>
+            )}
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={branchLock}
+                disabled={!repoId && !parsed}
+                onChange={(e) => setBranchLock(e.target.checked)}
+              />
+              Lock branch after create
+            </label>
+            {runtime === "host" ? null : (
+              <div className="field">
+                <label>{runtime === "docker" ? "Container network" : "Guest network"}</label>
+                <Select
+                  ariaLabel="Jail"
+                  value={network}
+                  disabled={Boolean(policyForcedJail(state.config?.managedPolicy))}
+                  options={JAIL_SELECT_OPTIONS}
+                  onChange={(value) => {
+                    if (!isNetworkJail(value)) return;
+                    setNetDirty(true);
+                    setNetwork(value);
+                  }}
+                />
+                {runtime === "docker" ? (
+                  <p className="hint">
+                    Restricted sets HTTP(S)_PROXY to an allowlist CONNECT proxy (on this machine, or
+                    on the worker). None uses --network none.
+                  </p>
+                ) : null}
+              </div>
+            )}
+            <div className="grid-2">
+              <div className="field">
+                <label>Autonomy</label>
+                <Select
+                  ariaLabel="Autonomy"
+                  value={autonomy}
+                  disabled={!policyAllowsAutonomous(state.config?.managedPolicy)}
+                  options={AUTONOMY_SELECT_OPTIONS}
+                  onChange={(value) => setAutonomy(parseAutonomyTier(value))}
+                />
+              </div>
+              <div className="field">
+                <label>
+                  {selectedWorker && workerIsMetered(selectedWorker)
+                    ? "Spend cap (USD, LLM + VM)"
+                    : "Spend cap (USD)"}
+                </label>
+                <input
+                  aria-label="Spend cap (USD)"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={maxUsd}
+                  placeholder={autonomy === "autonomous" ? "20" : "unlimited"}
+                  onChange={(e) => setMaxUsd(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="field">
+              <label>Instructions (optional)</label>
+              <textarea
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+                placeholder={
+                  runtime === "host"
+                    ? "Prefer short answers, cite sources, …"
+                    : runtime === "docker"
+                      ? "Always work in /workspace, commit on a feature branch, …"
+                      : "Always use /mnt/host, commit on a feature branch, …"
+                }
+              />
+            </div>
+            <div className="field">
+              <label>Playbook (optional)</label>
+              <textarea
+                value={playbook}
+                onChange={(e) => setPlaybook(e.target.value)}
+                placeholder="Project SOP injected every turn — how we test, branch, and ship."
+              />
+            </div>
+          </>
+        ) : null}
+        {advancedTab === "tools" ? (
+          <>
+            {runtime === "host" ? null : (
+              <div className="field">
+                <label>Vision</label>
+                <Select
+                  ariaLabel="Vision"
+                  value={vision}
+                  options={VISION_SELECT_OPTIONS}
+                  onChange={(value) => setVision(value as VisionMode)}
+                />
+              </div>
+            )}
+            <div className="field">
+              <label>Web search</label>
+              <Select
+                ariaLabel="Web search"
+                value={webSearch ? "on" : "off"}
+                options={WEB_SEARCH_SELECT_OPTIONS}
+                onChange={(value) => setWebSearch(value === "on")}
+              />
+            </div>
+            {runtime === "host" ? (
+              <div className="field">
+                <label>Use my Chrome</label>
+                <Select
+                  ariaLabel="Use my Chrome"
+                  value={liveChrome ? "on" : "off"}
+                  disabled={!policyAllowsLiveChrome(state.config?.managedPolicy)}
+                  options={LIVE_CHROME_SELECT_OPTIONS}
+                  onChange={(value) => setLiveChrome(value === "on")}
+                />
+              </div>
+            ) : null}
+            <div className="field">
+              <label>Allowed tools (optional)</label>
+              <input
+                value={allowedTools}
+                onChange={(e) => setAllowedTools(e.target.value)}
+                placeholder={
+                  runtime === "host"
+                    ? "git_pr, git_pr_list, websearch"
+                    : runtime === "docker"
+                      ? "exec, screenshot, file_read, git_commit, git_push, git_pr"
+                      : "exec, screenshot, git_commit, git_push, git_pr"
+                }
+              />
+            </div>
+          </>
+        ) : null}
+        {advancedTab === "runtime" ? (
+          <>
+            {runtime === "vm" ? (
+              <div className="field">
+                <label>Template</label>
+                <Select
+                  ariaLabel="Template"
+                  value={templateId}
+                  options={osTemplates.map((t) => ({ value: t.id, label: t.name }))}
+                  onChange={(value) => {
+                    setTemplateId(value);
+                    setHwDirty(false);
+                  }}
+                />
+              </div>
+            ) : null}
+            {runtime === "vm" ? (
               <div className="field">
                 <label>Golden image</label>
-                <select value={imageId} onChange={(e) => setImageId(e.target.value)}>
-                  <option value="">Fresh disk from ISO / cloud image</option>
-                  {images
-                    .filter((img) => img.os === os && img.runtime !== "docker")
-                    .map((img) => (
-                      <option key={img.id} value={img.id}>
-                        {img.name}
-                        {img.id === latestGoldenImage(images, os)?.id ? " (default)" : ""}
-                      </option>
-                    ))}
-                </select>
+                <Select
+                  ariaLabel="Golden image"
+                  value={imageId}
+                  options={[
+                    { value: "", label: "Fresh disk from ISO / cloud image" },
+                    ...images
+                      .filter((img) => img.os === os && img.runtime !== "docker")
+                      .map((img) => ({
+                        value: img.id,
+                        label:
+                          img.id === latestGoldenImage(images, os)?.id
+                            ? `${img.name} (default)`
+                            : img.name,
+                      })),
+                  ]}
+                  onChange={setImageId}
+                />
                 {images.some((img) => img.os === os && img.runtime !== "docker") ? (
                   <p className="hint">
                     Boots a copy of a saved disk so you skip the next OS install.
@@ -547,138 +677,8 @@ export function NewSessionModal() {
                   </p>
                 )}
               </div>
-            </>
-          )}
-          <h3 className="new-session-group-title">Jail & spend</h3>
-          {runtime === "host" ? null : (
-            <div className="field">
-              <label>{runtime === "docker" ? "Container network" : "Guest network"}</label>
-              <select
-                aria-label="Jail"
-                value={network}
-                disabled={Boolean(policyForcedJail(state.config?.managedPolicy))}
-                onChange={(e) => {
-                  setNetDirty(true);
-                  setNetwork(e.target.value as NetworkJail);
-                }}
-              >
-                <option value="open">Open — full internet (needed for first-boot apt)</option>
-                <option value="restricted">Restricted — forge and providers only</option>
-                <option value="none">None — no guest internet</option>
-              </select>
-              {runtime === "docker" ? (
-                <p className="hint">
-                  Restricted sets HTTP(S)_PROXY to an allowlist CONNECT proxy (on this machine, or
-                  on the worker). None uses --network none.
-                </p>
-              ) : null}
-            </div>
-          )}
-          <div className="grid-2">
-            <div className="field">
-              <label>Autonomy</label>
-              <select
-                value={autonomy}
-                disabled={!policyAllowsAutonomous(state.config?.managedPolicy)}
-                onChange={(e) => setAutonomy(parseAutonomyTier(e.target.value))}
-              >
-                {AUTONOMY_TIERS.map((tier) => (
-                  <option key={tier} value={tier}>
-                    {formatAutonomy(tier)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>
-                {selectedWorker && workerIsMetered(selectedWorker)
-                  ? "Spend cap (USD, LLM + VM)"
-                  : "Spend cap (USD)"}
-              </label>
-              <input
-                aria-label="Spend cap (USD)"
-                type="number"
-                min={0}
-                step="0.01"
-                value={maxUsd}
-                placeholder={autonomy === "autonomous" ? "20" : "unlimited"}
-                onChange={(e) => setMaxUsd(e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="field">
-            <label>Instructions (optional)</label>
-            <textarea
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              placeholder={
-                runtime === "host"
-                  ? "Prefer short answers, cite sources, …"
-                  : runtime === "docker"
-                    ? "Always work in /workspace, commit on a feature branch, …"
-                    : "Always use /mnt/host, commit on a feature branch, …"
-              }
-            />
-          </div>
-          <div className="field">
-            <label>Playbook (optional)</label>
-            <textarea
-              value={playbook}
-              onChange={(e) => setPlaybook(e.target.value)}
-              placeholder="Project SOP injected every turn — how we test, branch, and ship."
-            />
-          </div>
-          {runtime === "host" ? null : (
-            <div className="field">
-              <label>Vision</label>
-              <select value={vision} onChange={(e) => setVision(e.target.value as VisionMode)}>
-                <option value="latest">
-                  Latest screenshot — model sees the guest after GUI tools
-                </option>
-                <option value="off">Off — text and accessibility trees only</option>
-              </select>
-            </div>
-          )}
-          <div className="field">
-            <label>Web search</label>
-            <select
-              value={webSearch ? "on" : "off"}
-              onChange={(e) => setWebSearch(e.target.value === "on")}
-            >
-              <option value="off">Off — model cannot query the public web from the host</option>
-              <option value="on">On — model can call websearch on the host</option>
-            </select>
-          </div>
-          {runtime === "host" ? (
-            <div className="field">
-              <label>Use my Chrome</label>
-              <select
-                value={liveChrome ? "on" : "off"}
-                disabled={!policyAllowsLiveChrome(state.config?.managedPolicy)}
-                onChange={(e) => setLiveChrome(e.target.value === "on")}
-              >
-                <option value="off">Off — isolated host-chrome profile</option>
-                <option value="on">On — drive the Chrome tabs already open on this machine</option>
-              </select>
-            </div>
-          ) : null}
-          <div className="field">
-            <label>Allowed tools (optional)</label>
-            <input
-              value={allowedTools}
-              onChange={(e) => setAllowedTools(e.target.value)}
-              placeholder={
-                runtime === "host"
-                  ? "git_pr, git_pr_list, websearch"
-                  : runtime === "docker"
-                    ? "exec, screenshot, file_read, git_commit, git_push, git_pr"
-                    : "exec, screenshot, git_commit, git_push, git_pr"
-              }
-            />
-          </div>
-          {runtime === "vm" && (
-            <>
-              <h3 className="new-session-group-title">Hardware</h3>
+            ) : null}
+            {runtime === "vm" ? (
               <HardwareFields
                 cpuCores={cpuCores}
                 memoryMb={memoryMb}
@@ -695,39 +695,35 @@ export function NewSessionModal() {
                   setDiskSizeGb(next.diskSizeGb);
                 }}
               />
-            </>
-          )}
-          {runtime === "host" ? null : (
-            <label className="hint check">
-              <input
-                type="checkbox"
-                checked={startVm}
-                onChange={(e) => setStartVm(e.target.checked)}
-              />
-              {runtime === "docker"
-                ? "Start the container immediately"
-                : "Start the VM immediately"}
-            </label>
-          )}
-        </details>
-        {error && (
-          <p className="scrim-note" style={{ color: "var(--danger)" }}>
-            {error}
-          </p>
-        )}
-        <div className="modal-actions">
-          <button className="btn ghost" onClick={() => dispatch({ type: "new", open: false })}>
-            Cancel
-          </button>
-          <button
-            className="btn primary"
-            disabled={busy || (runtime === "docker" && !parseDockerImage(dockerImage))}
-            onClick={() => void submit()}
-          >
-            {busy ? "Creating…" : runtime === "host" ? "Start chat" : "Create agent"}
-          </button>
-        </div>
+            ) : null}
+            {runtime === "host" ? null : (
+              <label className="hint check">
+                <input
+                  type="checkbox"
+                  checked={startVm}
+                  onChange={(e) => setStartVm(e.target.checked)}
+                />
+                {runtime === "docker"
+                  ? "Start the container immediately"
+                  : "Start the VM immediately"}
+              </label>
+            )}
+          </>
+        ) : null}
+      </details>
+      {error && <p className="scrim-note is-danger">{error}</p>}
+      <div className="modal-actions">
+        <button className="btn ghost" onClick={() => dispatch({ type: "new", open: false })}>
+          Cancel
+        </button>
+        <button
+          className="btn primary"
+          disabled={busy || (runtime === "docker" && !parseDockerImage(dockerImage))}
+          onClick={() => void submit()}
+        >
+          {busy ? "Creating…" : runtime === "host" ? "Start chat" : "Create agent"}
+        </button>
       </div>
-    </div>
+    </Modal>
   );
 }

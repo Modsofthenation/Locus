@@ -104,7 +104,7 @@ describe("DockerWorkspace preview", () => {
     document.body.appendChild(host);
     root = createRoot(host);
     const node: ReactNode = (
-      <Store.Provider value={{ state, dispatch }}>
+      <Store.Provider value={{ state: { ...state, vmCollapsed: false }, dispatch }}>
         <DockerWorkspace />
       </Store.Provider>
     );
@@ -145,7 +145,7 @@ describe("DockerWorkspace preview", () => {
     );
     const fsBtn = host.querySelector('[data-testid="workspace-fullscreen"]') as HTMLButtonElement;
     expect(fsBtn).toBeTruthy();
-    expect(fsBtn.getAttribute("title")).toBe("Full screen files");
+    expect(fsBtn.getAttribute("aria-label")).toBe("Full screen files");
     await act(async () => {
       fsBtn.click();
     });
@@ -845,6 +845,7 @@ describe("DockerWorkspace preview", () => {
     function Live() {
       const [state, dispatch] = useReducer(reducer, {
         ...initialState,
+        vmCollapsed: false,
         selectedId: session.id,
         sessions: [session],
         vms: [vm],

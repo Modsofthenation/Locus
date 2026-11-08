@@ -53,7 +53,7 @@ describe("BootScreen", () => {
     expect(host.querySelector("[data-testid='locus-mascot']")?.getAttribute("aria-label")).toBe(
       "Locus is loading",
     );
-    expect(host.textContent).toContain("Loading…");
+    expect(host.querySelector('[aria-label="Loading…"]')).toBeTruthy();
     expect(host.querySelector(".app")).toBeNull();
     expect(css).toMatch(/\.boot-screen\s*\{[\s\S]*?position:\s*fixed/);
     expect(css).toMatch(/\.boot-screen\s*\{[\s\S]*?inset:\s*0/);

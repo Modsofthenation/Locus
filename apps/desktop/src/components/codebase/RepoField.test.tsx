@@ -3,6 +3,7 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComposerBranchPicker, ComposerRepoPicker } from "./RepoField";
+import { selectOptionLabels } from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -113,12 +114,14 @@ describe("ComposerRepoPicker", () => {
     });
   }
 
-  it("keeps a single-select native picker for design context", () => {
+  it("keeps a single-select picker for design context", () => {
     render([], { multiple: false, repos: repos.slice(0, 1) });
-    const picker = host.querySelector("[aria-label='Repository']") as HTMLSelectElement;
-    expect(picker.tagName).toBe("SELECT");
-    expect(picker.options[0]?.textContent).toBe("No repo");
-    expect(picker.textContent).toContain(forgeLabel("github"));
+    const picker = host.querySelector("[aria-label='Repository']");
+    expect(picker).toBeTruthy();
+    expect(picker instanceof HTMLSelectElement).toBe(false);
+    const labels = selectOptionLabels(host, "Repository");
+    expect(labels[0]).toBe("No repo");
+    expect(labels.some((label) => label.includes(forgeLabel("github")))).toBe(true);
   });
 
   it("opens a checkbox list instead of a separate Add repo select", () => {

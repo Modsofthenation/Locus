@@ -230,20 +230,9 @@ export function prepareCreateInput(
   const placement = parseAgentPlacement(input.placement);
   const backendId =
     placement === "worker" && typeof input.backendId === "string" ? input.backendId.trim() : "";
-  if ((cursorCli || claudeCode || codexCli || kiroCli) && runtime === "vm") {
-    throw new Error(
-      cursorCli
-        ? "Cursor CLI needs Docker or Host so it can see the workspace folder."
-        : claudeCode
-          ? "Claude Code needs Docker or Host so it can see the workspace folder."
-          : kiroCli
-            ? "Kiro CLI needs Docker or Host so it can see the workspace folder."
-            : "Codex CLI needs Docker or Host so it can see the workspace folder.",
-    );
-  }
   if (placement === "worker") {
     if (!placementAllowsRuntime(placement, runtime)) {
-      throw new Error("Workers run Docker or Host");
+      throw new Error("Workers run Docker, Host, or VM");
     }
     const worker = (ctx.config.workers ?? []).find((row) => row.id === backendId);
     if (!worker) throw new Error("Pick a worker in Settings → Workers");

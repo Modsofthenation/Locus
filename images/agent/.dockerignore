@@ -1,3 +1,5 @@
 *
 !Dockerfile
 !git-credential-locus
+!vendor/
+!vendor/**

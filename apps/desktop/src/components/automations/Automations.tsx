@@ -51,7 +51,10 @@ import {
 } from "@/lib/automations";
 import { openSettings, useStore } from "@/state/store";
 import { ExpandableLog } from "@/components/chat/ExpandableLog";
-import { Mascot } from "@/components/layout/Mascot";
+import { EmptyHero, EmptyHint } from "@/components/layout/EmptyHero";
+import { ErrorBanner, InlineError } from "@/components/layout/Skeleton";
+import { Select } from "@/components/layout/Select";
+import { OVERLAP_SELECT_OPTIONS } from "@/lib/formOptions";
 import { ConfirmModal } from "@/components/layout/ConfirmModal";
 import { TrustActions } from "@/components/chat/TrustActions";
 import { IconCopy, IconPlay, IconStop } from "@/components/layout/Icons";
@@ -282,17 +285,12 @@ export function AutomationsPane() {
     return (
       <div className="empty auto-start">
         <div className="empty-card">
-          <div className="empty-hero">
-            <Mascot pose="rest" size={76} />
-            <div>
-              <p className="eyebrow">Automations</p>
-              <h2>When should an agent run?</h2>
-            </div>
-          </div>
-          <p>
-            Pick a trigger — clock, git push, pull request, or webhook — then a prompt. Each run
-            executes on Docker, VM, or host and keeps a thread you can open.
-          </p>
+          <EmptyHero
+            pose="rest"
+            eyebrow="Automations"
+            title="When should an agent run?"
+            lead="Pick a trigger — clock, git push, pull request, or webhook — then a prompt. Each run executes on Docker, VM, or host and keeps a thread you can open."
+          />
           <button
             className="btn primary"
             onClick={() => dispatch({ type: "newAutomation", open: true })}
@@ -579,9 +577,9 @@ export function AutomationsPane() {
           </button>
         </div>
       </div>
-      {nameError ? <p className="error auto-rename-error">{nameError}</p> : null}
-      {paneError ? <p className="error auto-pane-error">{paneError}</p> : null}
-      {runActionError ? <p className="error auto-pane-error">{runActionError}</p> : null}
+      {nameError ? <InlineError message={nameError} testId="auto-rename-error" /> : null}
+      {paneError ? <ErrorBanner message={paneError} testId="auto-pane-error" /> : null}
+      {runActionError ? <ErrorBanner message={runActionError} testId="auto-pane-error" /> : null}
       {confirmDelete ? (
         <ConfirmModal
           title={`Delete ${item.name}?`}
@@ -720,7 +718,7 @@ export function AutomationsPane() {
         ) : (
           <p>{item.prompt}</p>
         )}
-        {promptError ? <p className="error">{promptError}</p> : null}
+        {promptError ? <InlineError message={promptError} /> : null}
       </section>
       <RunHistory
         item={item}
@@ -919,8 +917,8 @@ function WebhookCard(props: { item: Automation; highlighted?: boolean }) {
         />
       ) : null}
       {testHint ? <p className="hint">{testHint}</p> : null}
-      {testError ? <p className="error">{testError}</p> : null}
-      {rotateError ? <p className="error">{rotateError}</p> : null}
+      {testError ? <InlineError message={testError} /> : null}
+      {rotateError ? <InlineError message={rotateError} /> : null}
       <p className="hint">
         Simulate trigger writes a test row in history. It does not POST the webhook or boot an
         agent. Use Copy curl for a real POST. Send <code>X-Locus-Secret</code> and{" "}
@@ -1068,17 +1066,17 @@ function ScheduleMiniEditor(props: {
             <div className="auto-schedule-fields">
               <label className="auto-schedule-field">
                 <span className="hint">Weekday</span>
-                <select
-                  value={weekday}
+                <Select
+                  compact
+                  ariaLabel="Weekday"
+                  value={String(weekday)}
                   disabled={busy}
-                  onChange={(e) => setWeekday(Number(e.target.value))}
-                >
-                  {SCHEDULE_WEEKDAYS.map((day, i) => (
-                    <option key={day} value={i}>
-                      {day}
-                    </option>
-                  ))}
-                </select>
+                  options={SCHEDULE_WEEKDAYS.map((day, i) => ({
+                    value: String(i),
+                    label: day,
+                  }))}
+                  onChange={(value) => setWeekday(Number(value))}
+                />
               </label>
               <label className="auto-schedule-field">
                 <span className="hint">Time</span>
@@ -1210,7 +1208,7 @@ function ScheduleMiniEditor(props: {
           </div>
         </>
       ) : null}
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineError message={error} /> : null}
     </section>
   );
 }
@@ -1261,19 +1259,16 @@ function JobOptions(props: { item: Automation; onSaved: (automation: Automation)
       <div className="auto-schedule-fields">
         <label className="auto-schedule-field">
           <span className="hint">Overlap</span>
-          <select
-            aria-label="Overlap"
+          <Select
+            compact
+            ariaLabel="Overlap"
             value={props.item.overlap ?? "skip"}
             disabled={busy}
-            onChange={(e) => {
-              const overlap = e.target.value as "skip" | "coalesce" | "queue";
-              void patch({ overlap });
+            options={OVERLAP_SELECT_OPTIONS}
+            onChange={(overlap) => {
+              void patch({ overlap: overlap as "skip" | "coalesce" | "queue" });
             }}
-          >
-            <option value="skip">Skip if busy</option>
-            <option value="coalesce">Run latest when free</option>
-            <option value="queue">Queue one</option>
-          </select>
+          />
         </label>
         {clock ? (
           <label className="auto-schedule-field">
@@ -1349,7 +1344,7 @@ function JobOptions(props: { item: Automation; onSaved: (automation: Automation)
         These replace the global failed-only switch for this job. Slack still uses the notify
         webhook and channel in Settings.
       </p>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineError message={error} /> : null}
     </section>
   );
 }
@@ -1440,7 +1435,7 @@ function RunHistory(props: {
           </button>
         </div>
       ) : filtered.length === 0 ? (
-        <p className="hint">No runs match this filter.</p>
+        <EmptyHint title="No runs match this filter." />
       ) : (
         <>
           <table className="run-table">
@@ -1639,7 +1634,7 @@ function AutomationMemoryEditor(props: {
         >
           Enable memory
         </button>
-        {error ? <p className="error">{error}</p> : null}
+        {error ? <InlineError message={error} /> : null}
       </section>
     );
   }
@@ -1783,7 +1778,7 @@ function AutomationMemoryEditor(props: {
         </button>
         {atCap ? <span className="hint">Memory is full. Remove a fact to add another.</span> : null}
       </div>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <InlineError message={error} /> : null}
     </section>
   );
 }

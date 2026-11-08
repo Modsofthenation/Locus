@@ -6,10 +6,11 @@ import {
   lastAssetLookPrompt,
   type AssetStyle,
 } from "@locus/shared";
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/state/store";
-import { useDialogFocus } from "@/lib/useDialogFocus";
+import { Modal } from "@/components/layout/Modal";
+import { askConfirm } from "@/lib/dialog";
 import { IconClose, IconPlus } from "@/components/layout/Icons";
 
 interface EditorState {
@@ -38,8 +39,6 @@ export function AssetStylesModal() {
   const [origin, setOrigin] = useState<EditorState>(emptyDraft());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const openedAt = useRef(0);
-  const dialogRef = useRef<HTMLDivElement>(null);
   const session = state.sessions.find((s) => s.id === state.selectedId);
   const defaultId = state.config?.defaultAssetStyleId;
   const dirty = JSON.stringify(draft) !== JSON.stringify(origin);
@@ -55,11 +54,8 @@ export function AssetStylesModal() {
     dispatch({ type: "assetStyles", open: false });
   }, [dispatch]);
 
-  useDialogFocus(state.assetStylesOpen, close, dialogRef);
-
   useEffect(() => {
     if (!state.assetStylesOpen) return;
-    openedAt.current = Date.now();
     setError(null);
     const boundId = isAssetSession(session ?? {}) ? session?.assetStyleId : undefined;
     const bound = boundId ? state.assetStyles.find((row) => row.id === boundId) : undefined;
@@ -76,12 +72,6 @@ export function AssetStylesModal() {
     if (first) load(toEditor(first));
     else load(emptyDraft());
   }, [state.assetStylesOpen]);
-
-  function onBackdrop(event: MouseEvent<HTMLDivElement>) {
-    if (event.target !== event.currentTarget) return;
-    if (Date.now() - openedAt.current < 250) return;
-    close();
-  }
 
   async function refresh() {
     const catalog = await api.assetStyles();
@@ -169,7 +159,15 @@ export function AssetStylesModal() {
 
   async function remove() {
     if (!draft.id) return;
-    if (!window.confirm(`Delete “${draft.name || "this style"}”?`)) return;
+    if (
+      !(await askConfirm({
+        title: `Delete “${draft.name || "this style"}”?`,
+        body: "This cannot be undone.",
+        confirmLabel: "Delete",
+        danger: true,
+      }))
+    )
+      return;
     setBusy(true);
     setError(null);
     try {
@@ -246,185 +244,166 @@ export function AssetStylesModal() {
   if (!state.assetStylesOpen) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onBackdrop}>
-      <div
-        className="modal design-systems-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="asset-styles-title"
-        ref={dialogRef}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="ds-head">
-          <div>
-            <h2 id="asset-styles-title">Asset styles</h2>
-            <p className="modal-lead">
-              Reusable art direction for Assets. Save a look from a studio, then apply it to later
-              generations.
-            </p>
+    <Modal
+      titleId="asset-styles-title"
+      className="design-systems-modal"
+      closeGuardMs={250}
+      onClose={close}
+    >
+      <header className="ds-head">
+        <div>
+          <h2 id="asset-styles-title">Asset styles</h2>
+          <p className="modal-lead">
+            Reusable art direction for Assets. Save a look from a studio, then apply it to later
+            generations.
+          </p>
+        </div>
+        <div className="ds-head-actions">
+          <button type="button" className="btn ghost small" onClick={exportCurrent} disabled={busy}>
+            Export
+          </button>
+          <button type="button" className="btn icon ghost small" aria-label="Close" onClick={close}>
+            <IconClose />
+          </button>
+        </div>
+      </header>
+
+      <div className="ds-body">
+        <nav className="ds-nav" aria-label="Saved styles">
+          <button
+            type="button"
+            className={`ds-new ${!draft.id ? "active" : ""}`}
+            onClick={() => load(emptyDraft())}
+          >
+            <IconPlus /> New style
+          </button>
+          {saved.length ? (
+            <>
+              <div className="ds-nav-group">Saved</div>
+              {saved.map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  className={`ds-nav-item ${draft.id === row.id ? "active" : ""}`}
+                  onClick={() => load(toEditor(row))}
+                >
+                  <span className="ds-nav-name">
+                    {row.name}
+                    {defaultId === row.id ? (
+                      <span className="design-system-default">default</span>
+                    ) : null}
+                  </span>
+                </button>
+              ))}
+            </>
+          ) : (
+            <p className="hint">No saved styles yet.</p>
+          )}
+        </nav>
+
+        <div className="ds-editor">
+          <div className="ds-fields">
+            <div className="field">
+              <label>Name</label>
+              <input
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                placeholder="Clay hero"
+              />
+            </div>
+            <div className="field">
+              <label>Summary</label>
+              <input
+                value={draft.summary}
+                onChange={(e) => setDraft({ ...draft, summary: e.target.value })}
+                placeholder="Chunky terracotta, cream grout"
+              />
+            </div>
           </div>
-          <div className="ds-head-actions">
+          <div className="field">
+            <label>Guidelines</label>
+            <textarea
+              rows={10}
+              value={draft.guidelines}
+              onChange={(e) => setDraft({ ...draft, guidelines: e.target.value })}
+              placeholder="Silhouette, materials, poly budget, color language…"
+            />
+          </div>
+          {error ? (
+            <p className="hint" style={{ color: "var(--danger)" }}>
+              {error}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      <footer className="ds-foot">
+        <div className="ds-foot-left">
+          <span className="hint">
+            {dirty
+              ? `Unsaved changes${draft.name.trim() ? ` to ${draft.name.trim()}` : ""}`
+              : "No unsaved changes"}
+          </span>
+          {draft.id ? (
             <button
               type="button"
               className="btn ghost small"
-              onClick={exportCurrent}
               disabled={busy}
+              onClick={() => void setDefault(defaultId === draft.id ? "none" : draft.id)}
             >
-              Export
+              {defaultId === draft.id ? "Clear default" : "Use for new assets"}
             </button>
+          ) : null}
+          {isAssetSession(session ?? {}) && draft.id ? (
             <button
               type="button"
-              className="btn icon ghost small"
-              aria-label="Close"
-              onClick={close}
+              className="btn ghost small"
+              disabled={busy}
+              onClick={() => void applyToSession()}
             >
-              <IconClose />
+              Apply to studio
             </button>
-          </div>
-        </header>
-
-        <div className="ds-body">
-          <nav className="ds-nav" aria-label="Saved styles">
+          ) : null}
+          {isAssetSession(session ?? {}) ? (
+            <>
+              <button
+                type="button"
+                className="btn ghost small"
+                disabled={busy}
+                onClick={() => void fillFromStudio()}
+              >
+                Load from studio
+              </button>
+              <button
+                type="button"
+                className="btn ghost small"
+                disabled={busy}
+                onClick={() => void saveFromStudio()}
+              >
+                Save from this studio
+              </button>
+            </>
+          ) : null}
+          {draft.id ? (
             <button
               type="button"
-              className={`ds-new ${!draft.id ? "active" : ""}`}
-              onClick={() => load(emptyDraft())}
+              className="btn ghost small danger"
+              disabled={busy}
+              onClick={() => void remove()}
             >
-              <IconPlus /> New style
+              Delete
             </button>
-            {saved.length ? (
-              <>
-                <div className="ds-nav-group">Saved</div>
-                {saved.map((row) => (
-                  <button
-                    key={row.id}
-                    type="button"
-                    className={`ds-nav-item ${draft.id === row.id ? "active" : ""}`}
-                    onClick={() => load(toEditor(row))}
-                  >
-                    <span className="ds-nav-name">
-                      {row.name}
-                      {defaultId === row.id ? (
-                        <span className="design-system-default">default</span>
-                      ) : null}
-                    </span>
-                  </button>
-                ))}
-              </>
-            ) : (
-              <p className="hint">No saved styles yet.</p>
-            )}
-          </nav>
-
-          <div className="ds-editor">
-            <div className="ds-fields">
-              <div className="field">
-                <label>Name</label>
-                <input
-                  value={draft.name}
-                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                  placeholder="Clay hero"
-                />
-              </div>
-              <div className="field">
-                <label>Summary</label>
-                <input
-                  value={draft.summary}
-                  onChange={(e) => setDraft({ ...draft, summary: e.target.value })}
-                  placeholder="Chunky terracotta, cream grout"
-                />
-              </div>
-            </div>
-            <div className="field">
-              <label>Guidelines</label>
-              <textarea
-                rows={10}
-                value={draft.guidelines}
-                onChange={(e) => setDraft({ ...draft, guidelines: e.target.value })}
-                placeholder="Silhouette, materials, poly budget, color language…"
-              />
-            </div>
-            {error ? (
-              <p className="hint" style={{ color: "var(--danger)" }}>
-                {error}
-              </p>
-            ) : null}
-          </div>
+          ) : null}
         </div>
-
-        <footer className="ds-foot">
-          <div className="ds-foot-left">
-            <span className="hint">
-              {dirty
-                ? `Unsaved changes${draft.name.trim() ? ` to ${draft.name.trim()}` : ""}`
-                : "No unsaved changes"}
-            </span>
-            {draft.id ? (
-              <button
-                type="button"
-                className="btn ghost small"
-                disabled={busy}
-                onClick={() => void setDefault(defaultId === draft.id ? "none" : draft.id)}
-              >
-                {defaultId === draft.id ? "Clear default" : "Use for new assets"}
-              </button>
-            ) : null}
-            {isAssetSession(session ?? {}) && draft.id ? (
-              <button
-                type="button"
-                className="btn ghost small"
-                disabled={busy}
-                onClick={() => void applyToSession()}
-              >
-                Apply to studio
-              </button>
-            ) : null}
-            {isAssetSession(session ?? {}) ? (
-              <>
-                <button
-                  type="button"
-                  className="btn ghost small"
-                  disabled={busy}
-                  onClick={() => void fillFromStudio()}
-                >
-                  Load from studio
-                </button>
-                <button
-                  type="button"
-                  className="btn ghost small"
-                  disabled={busy}
-                  onClick={() => void saveFromStudio()}
-                >
-                  Save from this studio
-                </button>
-              </>
-            ) : null}
-            {draft.id ? (
-              <button
-                type="button"
-                className="btn ghost small danger"
-                disabled={busy}
-                onClick={() => void remove()}
-              >
-                Delete
-              </button>
-            ) : null}
-          </div>
-          <div className="ds-foot-right">
-            <button type="button" className="btn ghost" onClick={close}>
-              Close
-            </button>
-            <button
-              type="button"
-              className="btn primary"
-              disabled={busy}
-              onClick={() => void save()}
-            >
-              {busy ? "Saving…" : draft.id ? "Save" : "Save copy"}
-            </button>
-          </div>
-        </footer>
-      </div>
-    </div>
+        <div className="ds-foot-right">
+          <button type="button" className="btn ghost" onClick={close}>
+            Close
+          </button>
+          <button type="button" className="btn primary" disabled={busy} onClick={() => void save()}>
+            {busy ? "Saving…" : draft.id ? "Save" : "Save copy"}
+          </button>
+        </div>
+      </footer>
+    </Modal>
   );
 }

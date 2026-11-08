@@ -58,9 +58,9 @@ describe("workspaceRelFromToolPath", () => {
   });
 
   it("relativizes host-absolute Cursor CLI / host-agent paths", () => {
-    expect(
-      workspaceRelFromToolPath("/home/locus/.locus/host-workspaces/ee26bc7e/src/app.ts"),
-    ).toBe("src/app.ts");
+    expect(workspaceRelFromToolPath("/home/locus/.locus/host-workspaces/ee26bc7e/src/app.ts")).toBe(
+      "src/app.ts",
+    );
     expect(
       workspaceRelFromToolPath(
         "C:\\Users\\locus\\.locus\\host-workspaces\\712f0b2e-8dd8-4557-914b-e5a38cb4d9c8\\index.js",

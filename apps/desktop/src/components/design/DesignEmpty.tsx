@@ -89,7 +89,8 @@ import {
 import { ComposerMoreOptions } from "@/components/chat/ComposerMoreOptions";
 import { IconReturn } from "@/components/layout/Icons";
 import { OverflowMenu } from "@/components/layout/OverflowMenu";
-import { Mascot } from "@/components/layout/Mascot";
+import { Select } from "@/components/layout/Select";
+import { EmptyHero } from "@/components/layout/EmptyHero";
 import {
   LaunchWorkspace,
   type LaunchWorkspaceSelection,
@@ -525,11 +526,7 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
   return (
     <div className="empty design-start">
       <div className="empty-card">
-        <header className="launch-hero design-start-hero">
-          <Mascot pose="idle" size={48} />
-          <h2>{launch.heading}</h2>
-          <p>{launch.lead}</p>
-        </header>
+        <EmptyHero title={launch.heading} lead={launch.lead} />
 
         <section className="launch" aria-label={launch.aria}>
           {compactAssets ? null : (
@@ -811,23 +808,23 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                   </OverflowMenu>
                 ) : (
                   <>
-                    <select
+                    <Select
                       className="game-kit-select"
-                      aria-label={surface === "assets" ? "Asset kit" : "Game kit"}
-                      title={surface === "assets" ? "Asset kit" : "Game kit"}
+                      compact
+                      ariaLabel={surface === "assets" ? "Asset kit" : "Game kit"}
                       value={designSystemId}
-                      onChange={(event) => {
+                      options={[
+                        { value: "", label: "No kit" },
+                        ...(surface === "assets" ? ASSET_KITS : GAME_KITS).map((kit) => ({
+                          value: kit.id,
+                          label: kit.title,
+                        })),
+                      ]}
+                      onChange={(id) => {
                         setSystemTouched(true);
-                        setDesignSystemId(event.target.value);
+                        setDesignSystemId(id);
                       }}
-                    >
-                      <option value="">No kit</option>
-                      {(surface === "assets" ? ASSET_KITS : GAME_KITS).map((kit) => (
-                        <option key={kit.id} value={kit.id}>
-                          {kit.title}
-                        </option>
-                      ))}
-                    </select>
+                    />
                     {surface === "game" ? (
                       <OverflowMenu
                         className="composer-look-more"

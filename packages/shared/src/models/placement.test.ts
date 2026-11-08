@@ -27,11 +27,11 @@ describe("agent placement", () => {
     expect(parseAgentPlacement("aws")).toBe("local");
   });
 
-  it("allows Docker and Host on a worker", () => {
+  it("allows Docker, Host, and VM on a worker", () => {
     expect(placementAllowsRuntime("local", "host")).toBe(true);
     expect(placementAllowsRuntime("worker", "docker")).toBe(true);
     expect(placementAllowsRuntime("worker", "host")).toBe(true);
-    expect(placementAllowsRuntime("worker", "vm")).toBe(false);
+    expect(placementAllowsRuntime("worker", "vm")).toBe(true);
   });
 });
 

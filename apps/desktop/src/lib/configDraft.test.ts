@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { LocusConfig, WorkerBackend } from "@locus/shared";
 import { UBUNTU_DEFAULT_HARDWARE, defaultNetworking } from "@locus/shared";
-import { appendConfigList, patchConfigList, removeConfigList } from "./configDraft";
+import {
+  appendConfigList,
+  insertConfigList,
+  patchConfigList,
+  removeConfigList,
+} from "./configDraft";
 
 const worker = (patch: Partial<WorkerBackend> = {}): WorkerBackend => ({
   id: "w1",
@@ -90,5 +95,7 @@ describe("appendConfigList / removeConfigList", () => {
     expect(before.workers).toHaveLength(1);
     const removed = removeConfigList(added, "workers", 0);
     expect(removed.workers?.map((row) => row.id)).toEqual(["w2"]);
+    const restored = insertConfigList(removed, "workers", 0, added.workers![0]!);
+    expect(restored.workers?.map((row) => row.id)).toEqual(["w1", "w2"]);
   });
 });

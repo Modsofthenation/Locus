@@ -111,7 +111,7 @@ describe("featurePaletteItems", () => {
 });
 
 describe("orderPaletteForBrowse", () => {
-  it("lifts underused sections into Try next", () => {
+  it("lifts underused sections into Recents", () => {
     const items: PaletteItem[] = [
       {
         id: "new-agent",
@@ -155,13 +155,13 @@ describe("orderPaletteForBrowse", () => {
         mcpServerCount: 0,
       }),
     );
-    expect(ordered[0]?.group).toBe("Try next");
+    expect(ordered[0]?.group).toBe("Recents");
     expect(ordered[0]?.id).toBe("section:brain");
   });
 });
 
 describe("chatNudgeForSession", () => {
-  it("suggests compare after an assistant turn", () => {
+  it("suggests compare after two assistant turns", () => {
     const current = session({
       id: "a",
       title: "Fix",
@@ -178,6 +178,18 @@ describe("chatNudgeForSession", () => {
           content: "done",
           createdAt: "2020-01-01T00:00:01.000Z",
         },
+        {
+          id: "u2",
+          role: "user",
+          content: "again",
+          createdAt: "2020-01-01T00:00:02.000Z",
+        },
+        {
+          id: "a2",
+          role: "assistant",
+          content: "ok",
+          createdAt: "2020-01-01T00:00:03.000Z",
+        },
       ],
     });
     const nudge = chatNudgeForSession({
@@ -189,7 +201,7 @@ describe("chatNudgeForSession", () => {
     expect(nudge?.id).toBe("compare");
   });
 
-  it("falls back to automation when compare is dismissed", () => {
+  it("stays quiet after a single assistant turn", () => {
     const current = session({
       id: "a",
       title: "Fix",
@@ -212,8 +224,8 @@ describe("chatNudgeForSession", () => {
       session: current,
       sessions: [current],
       hasAutomations: false,
-      dismissed: (id) => id === "compare",
+      dismissed: () => false,
     });
-    expect(nudge?.id).toBe("automation");
+    expect(nudge).toBeNull();
   });
 });

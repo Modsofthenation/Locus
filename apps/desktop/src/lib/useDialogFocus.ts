@@ -9,18 +9,21 @@ function focusableIn(root: HTMLElement): HTMLElement[] {
   );
 }
 
-/** Trap Tab, handle Escape, move first focus in, restore the opener on close. */
+/** Trap Tab, handle Escape, move first focus in, restore the opener on close.
+ *  Pass `{ trap: false }` for drawers that should close on Escape without trapping Tab. */
 export function useDialogFocus(
   open: boolean,
   onClose: () => void,
   dialogRef: RefObject<HTMLElement | null>,
+  opts?: { trap?: boolean },
 ) {
+  const trap = opts?.trap !== false;
   useEffect(() => {
     if (!open) return;
     const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const root = dialogRef.current;
-    const first = root ? focusableIn(root)[0] : undefined;
-    queueMicrotask(() => first?.focus());
+    const first = trap && root ? focusableIn(root)[0] : undefined;
+    if (trap) queueMicrotask(() => first?.focus());
 
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -28,7 +31,7 @@ export function useDialogFocus(
         onClose();
         return;
       }
-      if (event.key !== "Tab" || !root) return;
+      if (!trap || event.key !== "Tab" || !root) return;
       const nodes = focusableIn(root);
       if (!nodes.length) return;
       event.preventDefault();
@@ -48,5 +51,5 @@ export function useDialogFocus(
       window.removeEventListener("keydown", onKey);
       prev?.focus();
     };
-  }, [open, onClose, dialogRef]);
+  }, [open, onClose, dialogRef, trap]);
 }

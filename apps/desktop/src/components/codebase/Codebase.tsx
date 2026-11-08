@@ -48,6 +48,7 @@ import {
   type AgentSession,
 } from "@locus/shared";
 import { api } from "@/lib/api";
+import { askConfirm } from "@/lib/dialog";
 import { CloneProgressCard } from "@/components/chat/CloneProgressCard";
 import { peekPullDetail, peekPullList } from "@/lib/pullCache";
 import { peekIssueDetail, peekIssueList } from "@/lib/issueCache";
@@ -67,12 +68,15 @@ import { ArchitecturePane } from "./ArchitecturePane";
 import { ChangeStackPanel } from "./ChangeStackPanel";
 import { PullSummaryCell, PullTable } from "./PullTable";
 import { IconCompress, IconExpand, IconMore } from "@/components/layout/Icons";
-import { Mascot } from "@/components/layout/Mascot";
-import { FeatureHintRow } from "@/components/layout/FeatureHint";
-import { SECTION_FEATURE_HINTS } from "@/lib/discoverability";
+import { EmptyHero, EmptyHint } from "@/components/layout/EmptyHero";
+import { Splitter } from "@/components/layout/Splitter";
+import { stepSplitValue } from "@/lib/splitter";
+import { BusyButton, ErrorBanner as ErrorBannerView, Skeleton } from "@/components/layout/Skeleton";
+import { Tooltip } from "@/components/layout/Tooltip";
 import { ImportAccounts } from "@/components/settings/ImportAccounts";
 import { SearchField } from "@/components/layout/SearchField";
 import { MenuItem, MenuSep, OverflowMenu } from "@/components/layout/OverflowMenu";
+import { Select } from "@/components/layout/Select";
 
 type RepoTab =
   "overview" | "architecture" | "pulls" | "issues" | "agents" | "automations" | "settings";
@@ -222,15 +226,16 @@ function ErrorBanner({ error }: { error: string }) {
   const message = formatRemoteError(error);
   const auth = isForgeAuthError(message);
   return (
-    <div className="error-row" role="alert">
-      <span className="error-dot" aria-hidden="true" />
-      <p>{message}</p>
-      {auth ? (
-        <button type="button" className="btn small" onClick={() => openSettings(dispatch, "git")}>
-          Open Git settings
-        </button>
-      ) : null}
-    </div>
+    <ErrorBannerView
+      message={message}
+      action={
+        auth ? (
+          <button type="button" className="btn small" onClick={() => openSettings(dispatch, "git")}>
+            Open Git settings
+          </button>
+        ) : null
+      }
+    />
   );
 }
 
@@ -636,7 +641,7 @@ export function CodebasePane() {
     setError(null);
     const parsed = parseRepoUrl(linkUrl);
     if (!parsed) {
-      setError("Enter a GitHub, GitLab, or Bitbucket URL");
+      setError("Enter a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps URL");
       return;
     }
     setBusy(true);
@@ -961,7 +966,15 @@ export function CodebasePane() {
 
   async function unlink() {
     if (!repo) return;
-    if (!window.confirm(`Unlink ${repo.name}? Agents keep their checkout.`)) return;
+    if (
+      !(await askConfirm({
+        title: `Unlink ${repo.name}?`,
+        body: "Agents keep their checkout.",
+        confirmLabel: "Unlink",
+        danger: true,
+      }))
+    )
+      return;
     setBusy(true);
     try {
       await api.deleteRepo(repo.id);
@@ -1030,7 +1043,15 @@ export function CodebasePane() {
 
   async function mergePull() {
     if (!repo || !state.selectedPullNumber) return;
-    if (!window.confirm("Merge this pull request on the forge?")) return;
+    if (
+      !(await askConfirm({
+        title: "Merge pull request?",
+        body: "Merge this pull request on the forge?",
+        confirmLabel: "Merge",
+        danger: true,
+      }))
+    )
+      return;
     setBusy(true);
     setError(null);
     try {
@@ -1092,16 +1113,13 @@ export function CodebasePane() {
       <div className="codebase-pane">
         <div className="empty">
           <div className={`empty-card codebase-empty${importing || accounts ? " has-import" : ""}`}>
-            <div className="empty-hero">
-              <Mascot pose="rest" size={76} />
-              <div>
-                <p className="eyebrow">Codebase</p>
-                <h2>Link a repository</h2>
-              </div>
-            </div>
+            <EmptyHero
+              pose="rest"
+              eyebrow="Codebase"
+              title="Link a repository"
+              lead="Catalog a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps repo, then review pulls here."
+            />
             <p>
-              GitHub, GitLab, and Bitbucket can all be active at once. Locus stays the local
-              catalog.{" "}
               <button
                 type="button"
                 className="linkish"
@@ -1110,16 +1128,18 @@ export function CodebasePane() {
                 {tokened.length ? "Manage tokens in Settings → Git" : "Add a GitHub token"}
               </button>
             </p>
-            {SECTION_FEATURE_HINTS.codebase ? (
-              <FeatureHintRow hint={SECTION_FEATURE_HINTS.codebase} />
-            ) : null}
             <div className="codebase-start-cards">
               <section className="codebase-start-card">
                 <h3>Sign in and pick a repo</h3>
                 <p className="meta">Import from accounts already connected in Settings.</p>
-                <button className="btn" disabled={importing} onClick={() => void importFromGit()}>
-                  {importing ? "Importing…" : "Import from Git"}
-                </button>
+                <BusyButton
+                  className="btn"
+                  busy={importing}
+                  busyLabel="Importing…"
+                  onClick={() => void importFromGit()}
+                >
+                  Import from Git
+                </BusyButton>
               </section>
               <section className="codebase-start-card">
                 <h3>Paste a URL</h3>
@@ -1135,17 +1155,18 @@ export function CodebasePane() {
                 {tokened.length > 1 ? (
                   <div className="field">
                     <label>Account</label>
-                    <select
+                    <Select
+                      ariaLabel="Account"
                       value={linkAccountId}
-                      onChange={(e) => setLinkAccountId(e.target.value)}
-                    >
-                      <option value="">Auto (one token per forge)</option>
-                      {tokened.map((row) => (
-                        <option key={row.id} value={row.id}>
-                          {row.name} · {forgeLabel(row.kind)}
-                        </option>
-                      ))}
-                    </select>
+                      options={[
+                        { value: "", label: "Auto (one token per forge)" },
+                        ...tokened.map((row) => ({
+                          value: row.id,
+                          label: `${row.name} · ${forgeLabel(row.kind)}`,
+                        })),
+                      ]}
+                      onChange={setLinkAccountId}
+                    />
                   </div>
                 ) : null}
                 <button className="btn primary" disabled={busy} onClick={() => void link()}>
@@ -1206,9 +1227,14 @@ export function CodebasePane() {
               Start agent
             </button>
           )}
-          <button className="btn" disabled={busy} onClick={() => void openInIde()}>
-            {openingLabel ?? "Open in IDE"}
-          </button>
+          <BusyButton
+            className="btn"
+            busy={busy || Boolean(openingLabel)}
+            busyLabel={openingLabel ?? "Open in IDE"}
+            onClick={() => void openInIde()}
+          >
+            Open in IDE
+          </BusyButton>
           <OverflowMenu
             label={<IconMore />}
             title="Repo actions"
@@ -1307,10 +1333,11 @@ export function CodebasePane() {
           <section className="surface-pane overview-remote">
             <header>
               <span className="pane-label">Brain</span>
-              <button
+              <BusyButton
                 type="button"
                 className="btn small"
-                disabled={brainBusy}
+                busy={brainBusy}
+                busyLabel="Building…"
                 onClick={() => {
                   setBrainBusy(true);
                   void api
@@ -1325,8 +1352,8 @@ export function CodebasePane() {
                     .finally(() => setBrainBusy(false));
                 }}
               >
-                {brainBusy ? "Building…" : "Index into brain"}
-              </button>
+                Index into brain
+              </BusyButton>
             </header>
             <div className="surface-pane-body">
               <p className="hint">{brainHint}</p>
@@ -1529,16 +1556,17 @@ export function CodebasePane() {
           </div>
           <div className="field">
             <label>Account</label>
-            <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-              <option value="">Auto</option>
-              {(state.config?.forges ?? [])
-                .filter((row) => row.kind === repo.checkout.forge)
-                .map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {row.name}
-                  </option>
-                ))}
-            </select>
+            <Select
+              ariaLabel="Account"
+              value={accountId}
+              options={[
+                { value: "", label: "Auto" },
+                ...(state.config?.forges ?? [])
+                  .filter((row) => row.kind === repo.checkout.forge)
+                  .map((row) => ({ value: row.id, label: row.name })),
+              ]}
+              onChange={setAccountId}
+            />
           </div>
           <div className="field">
             <label>Docker image</label>
@@ -1640,31 +1668,16 @@ type PullDetailProps = {
 
 function PullListSkeleton() {
   return (
-    <div className="pr-skeleton-list" data-testid="pr-list-skeleton" aria-hidden>
-      {Array.from({ length: 6 }, (_, i) => (
-        <div className="pr-skeleton-item" key={i}>
-          <span className="skeleton chip" />
-          <span className="skeleton line" />
-          <span className="skeleton time" />
-        </div>
-      ))}
+    <div className="pr-skeleton-list" data-testid="pr-list-skeleton">
+      <Skeleton lines={6} label="Loading pull requests" />
     </div>
   );
 }
 
 function PullDetailSkeleton() {
   return (
-    <div className="pr-skeleton-detail" data-testid="pr-detail-skeleton" aria-busy="true">
-      <span className="skeleton title" />
-      <span className="skeleton line wide" />
-      <span className="skeleton line" />
-      <div className="pr-stat-grid">
-        <span className="skeleton card" />
-        <span className="skeleton card" />
-        <span className="skeleton card" />
-      </div>
-      <span className="skeleton block" />
-      <span className="skeleton block short" />
+    <div className="pr-skeleton-detail" data-testid="pr-detail-skeleton">
+      <Skeleton lines={5} label="Loading pull request" />
     </div>
   );
 }
@@ -1725,21 +1738,23 @@ function PullInbox(
               {draftCount ? ` · ${draftCount} draft` : ""}
             </p>
           </div>
-          <select
+          <Select
             className="pr-inbox-filter"
+            compact
+            ariaLabel="Pull request filter"
             value={props.pullState}
-            aria-label="Pull request filter"
-            onChange={(e) => props.setPullState(parsePullListState(e.target.value))}
-          >
-            <option value="open">Open</option>
-            <option value="draft">Draft</option>
-            <option value="all">All</option>
-          </select>
+            options={[
+              { value: "open", label: "Open" },
+              { value: "draft", label: "Draft" },
+              { value: "all", label: "All" },
+            ]}
+            onChange={(value) => props.setPullState(parsePullListState(value))}
+          />
         </div>
         {props.pullsLoading && props.pulls.length === 0 ? (
           <PullListSkeleton />
         ) : props.pulls.length === 0 ? (
-          <p className="hint pr-inbox-empty">No pull requests.</p>
+          <EmptyHint title="No pull requests." />
         ) : (
           props.pulls.map((row) => {
             const active = props.selectedNumber === row.number;
@@ -1756,16 +1771,31 @@ function PullInbox(
           })
         )}
       </div>
-      <div
+      <Splitter
         className="pr-inbox-gutter"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize pull request list"
-        aria-valuenow={props.listWidth}
-        aria-valuemin={PR_LIST_MIN}
-        aria-valuemax={PR_LIST_MAX}
+        orientation="vertical"
+        label="Resize pull request list"
+        value={props.listWidth}
+        min={PR_LIST_MIN}
+        max={PR_LIST_MAX}
+        valueText={`${props.listWidth} pixels`}
         hidden={props.focused}
         onPointerDown={onGutterDown}
+        onKeyDown={(event) => {
+          const next = stepSplitValue({
+            key: event.key,
+            shift: event.shiftKey,
+            value: props.listWidth,
+            min: PR_LIST_MIN,
+            max: PR_LIST_MAX,
+            axis: "vertical",
+            step: 16,
+          });
+          if (next == null) return;
+          event.preventDefault();
+          props.onListWidth(next);
+        }}
+        onDoubleClick={() => props.onListWidth(PR_LIST_DEFAULT)}
       />
       <div className="pr-inbox-detail">
         {props.pull ? (
@@ -1775,7 +1805,7 @@ function PullInbox(
         ) : props.pullLoadError ? (
           <ErrorBanner error={props.pullLoadError} />
         ) : (
-          <p className="hint">Select a pull request.</p>
+          <EmptyHint title="Select a pull request." />
         )}
       </div>
     </div>
@@ -1838,21 +1868,23 @@ function IssueInbox(props: {
             <h3>Issues</h3>
             <p className="hint">{openCount} open</p>
           </div>
-          <select
+          <Select
             className="pr-inbox-filter"
+            compact
+            ariaLabel="Issue filter"
             value={props.issueState}
-            aria-label="Issue filter"
-            onChange={(e) => props.setIssueState(parseIssueListState(e.target.value))}
-          >
-            <option value="open">Open</option>
-            <option value="closed">Closed</option>
-            <option value="all">All</option>
-          </select>
+            options={[
+              { value: "open", label: "Open" },
+              { value: "closed", label: "Closed" },
+              { value: "all", label: "All" },
+            ]}
+            onChange={(value) => props.setIssueState(parseIssueListState(value))}
+          />
         </div>
         {props.issuesLoading && props.issues.length === 0 ? (
           <PullListSkeleton />
         ) : props.issues.length === 0 ? (
-          <p className="hint pr-inbox-empty">No issues.</p>
+          <EmptyHint title="No issues." />
         ) : (
           props.issues.map((row) => {
             const active = props.selectedNumber === row.number;
@@ -1869,16 +1901,31 @@ function IssueInbox(props: {
           })
         )}
       </div>
-      <div
+      <Splitter
         className="pr-inbox-gutter"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize issue list"
-        aria-valuenow={props.listWidth}
-        aria-valuemin={PR_LIST_MIN}
-        aria-valuemax={PR_LIST_MAX}
+        orientation="vertical"
+        label="Resize issue list"
+        value={props.listWidth}
+        min={PR_LIST_MIN}
+        max={PR_LIST_MAX}
+        valueText={`${props.listWidth} pixels`}
         hidden={props.focused}
         onPointerDown={onGutterDown}
+        onKeyDown={(event) => {
+          const next = stepSplitValue({
+            key: event.key,
+            shift: event.shiftKey,
+            value: props.listWidth,
+            min: PR_LIST_MIN,
+            max: PR_LIST_MAX,
+            axis: "vertical",
+            step: 16,
+          });
+          if (next == null) return;
+          event.preventDefault();
+          props.onListWidth(next);
+        }}
+        onDoubleClick={() => props.onListWidth(PR_LIST_DEFAULT)}
       />
       <div className="pr-inbox-detail">
         {props.issue ? (
@@ -1896,7 +1943,7 @@ function IssueInbox(props: {
         ) : props.issueLoadError ? (
           <ErrorBanner error={props.issueLoadError} />
         ) : (
-          <p className="hint">Select an issue.</p>
+          <EmptyHint title="Select an issue." />
         )}
       </div>
     </div>
@@ -1946,14 +1993,11 @@ function IssueDetail(props: {
           <h2>{issue.title}</h2>
         </div>
         <div className="pr-detail-actions">
-          <button
-            type="button"
-            className="btn small ghost"
-            onClick={props.onToggleFocus}
-            title={props.focused ? "Show list" : "Focus issue"}
-          >
-            {props.focused ? <IconCompress /> : <IconExpand />}
-          </button>
+          <Tooltip label={props.focused ? "Show list" : "Focus issue"}>
+            <button type="button" className="btn small ghost" onClick={props.onToggleFocus}>
+              {props.focused ? <IconCompress /> : <IconExpand />}
+            </button>
+          </Tooltip>
           <a className="btn small" href={issue.url} target="_blank" rel="noreferrer">
             Open on forge
           </a>
@@ -2382,15 +2426,16 @@ function PullDetail(props: PullDetailProps) {
           </p>
         </div>
         <div className="row-actions">
-          <button
-            type="button"
-            className={`btn icon ghost ${props.focused ? "on" : ""}`}
-            title={props.focused ? "Exit full-screen diff" : "Open diff full screen"}
-            aria-pressed={props.focused}
-            onClick={props.onToggleFocus}
-          >
-            {props.focused ? <IconCompress /> : <IconExpand />}
-          </button>
+          <Tooltip label={props.focused ? "Exit full-screen diff" : "Open diff full screen"}>
+            <button
+              type="button"
+              className={`btn icon ghost ${props.focused ? "on" : ""}`}
+              aria-pressed={props.focused}
+              onClick={props.onToggleFocus}
+            >
+              {props.focused ? <IconCompress /> : <IconExpand />}
+            </button>
+          </Tooltip>
           <button className="btn" disabled={props.busy} onClick={props.onFix}>
             Fix with agent
           </button>
@@ -2633,15 +2678,15 @@ function PullDetail(props: PullDetailProps) {
             {props.commentPath.trim() ? (
               <div className="field">
                 <label>Side</label>
-                <select
+                <Select
+                  ariaLabel="Side"
                   value={props.commentSide || "RIGHT"}
-                  onChange={(e) =>
-                    props.setCommentSide(e.target.value === "LEFT" ? "LEFT" : "RIGHT")
-                  }
-                >
-                  <option value="RIGHT">New file</option>
-                  <option value="LEFT">Old file</option>
-                </select>
+                  options={[
+                    { value: "RIGHT", label: "New file" },
+                    { value: "LEFT", label: "Old file" },
+                  ]}
+                  onChange={(value) => props.setCommentSide(value === "LEFT" ? "LEFT" : "RIGHT")}
+                />
               </div>
             ) : null}
             <button

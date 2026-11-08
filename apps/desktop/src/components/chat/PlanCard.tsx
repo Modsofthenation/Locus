@@ -12,6 +12,7 @@ import {
   type SessionPlan,
 } from "@locus/shared";
 import { api } from "@/lib/api";
+import { showNotice } from "@/lib/notice";
 import { useStore } from "@/state/store";
 
 function stepStatus(item: PlanItem): PlanItem["status"] {
@@ -42,7 +43,7 @@ export function PlanCard({ session }: { session: AgentSession }) {
   async function pinToBoard() {
     const boardId = state.selectedBoardId ?? state.boards.find((row) => !row.archived)?.id;
     if (!boardId) {
-      window.alert("Open or create a Board first, then pin the plan onto a frame.");
+      showNotice("Open or create a Board first, then pin the plan onto a frame.");
       return;
     }
     try {
@@ -71,12 +72,12 @@ export function PlanCard({ session }: { session: AgentSession }) {
         frameId = board.objects.find((row) => row.type === "frame")?.id;
       }
       if (!frameId) {
-        window.alert("Could not find a frame on the board");
+        showNotice("Could not find a frame on the board");
         return;
       }
       await commitPin(boardId, frameId);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Could not pin plan");
+      showNotice(err instanceof Error ? err.message : "Could not pin plan");
     }
   }
 
@@ -87,7 +88,7 @@ export function PlanCard({ session }: { session: AgentSession }) {
       dispatch({ type: "selectBoard", id: boardId });
       setPinFrames(null);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Could not pin plan");
+      showNotice(err instanceof Error ? err.message : "Could not pin plan");
     }
   }
 

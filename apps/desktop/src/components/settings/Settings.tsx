@@ -4,10 +4,8 @@ import {
   FORGE_KINDS,
   GUEST_OS_OPTIONS,
   INTEGRATION_KINDS,
-  AUTONOMY_TIERS,
   defaultForgeApiUrl,
   defaultIntegrationUrl,
-  formatAutonomy,
   forgeLabel,
   forgeOauthCallbackUrl,
   formatForgeUsedAt,
@@ -17,6 +15,7 @@ import {
   preferredPairingLink,
   generateGuestPassword,
   integrationLabel,
+  integrationBlurb,
   isCursorCliProvider,
   parseAutonomyTier,
   providerAllowedByPolicy,
@@ -60,6 +59,8 @@ import {
 } from "@/lib/settingsNav";
 import { setSettingsDirty, setSettingsPersist } from "@/lib/settingsLeave";
 import { applyProductModeSideEffects, beginProductModeTransition } from "@/lib/productMode";
+import { Select } from "@/components/layout/Select";
+import { AUTONOMY_SELECT_OPTIONS } from "@/lib/formOptions";
 import { blankSkill, configForSave } from "@/lib/configPersist";
 import { useStore } from "@/state/store";
 import { PairingQr } from "./PairingQr";
@@ -84,8 +85,15 @@ import { PolicyBanner, policyControlLocked } from "./PolicyBanner";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { SearchField } from "@/components/layout/SearchField";
+import { BusyButton } from "@/components/layout/Skeleton";
+import { EmptyHint } from "@/components/layout/EmptyHero";
+import { askConfirm } from "@/lib/dialog";
+import { showUndoNotice } from "@/lib/notice";
+import { HighlightQuery } from "@/lib/queryMark";
+import { takePendingSettingsQuery } from "@/lib/settingsQuery";
 import {
   appendConfigList,
+  insertConfigList,
   patchConfigList,
   removeConfigList,
   type ConfigListKey,
@@ -184,6 +192,10 @@ export function Settings() {
   } | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [find, setFind] = useState("");
+  useEffect(() => {
+    const pending = takePendingSettingsQuery();
+    if (pending) setFind(pending);
+  }, []);
   const pairingLink =
     phone?.enabled && phone.urls.length ? preferredPairingLink(phone.urls) : undefined;
   const draftRef = useRef(draft);
@@ -708,8 +720,17 @@ export function Settings() {
     setDraft((current) => (current ? patchConfigList(current, key, index, patch) : current));
   }
 
-  function removeList<K extends ConfigListKey>(key: K, index: number) {
-    setDraft((current) => (current ? removeConfigList(current, key, index) : current));
+  function removeListUndoable<K extends ConfigListKey>(key: K, index: number, label: string) {
+    setDraft((current) => {
+      if (!current) return current;
+      const rows = [...((current[key] as ConfigListRow<K>[] | undefined) ?? [])];
+      const removed = rows[index];
+      if (!removed) return current;
+      showUndoNotice(`Removed ${label}`, () => {
+        setDraft((draft) => (draft ? insertConfigList(draft, key, index, removed) : draft));
+      });
+      return removeConfigList(current, key, index);
+    });
   }
 
   function appendList<K extends ConfigListKey>(key: K, row: ConfigListRow<K>) {
@@ -719,13 +740,24 @@ export function Settings() {
   async function resetAll() {
     const dir = state.config?.advanced.dataDir ?? current.advanced.dataDir;
     if (
-      !window.confirm(
-        `Delete all Locus data in ${dir}? Sessions, secrets, disks, golden images, media, and automations will be gone. QEMU and Docker on this host stay.`,
-      )
+      !(await askConfirm({
+        title: "Delete all Locus data?",
+        body: `Delete all Locus data in ${dir}? Sessions, secrets, disks, golden images, media, and automations will be gone. QEMU and Docker on this host stay.`,
+        confirmLabel: "Continue",
+        danger: true,
+      }))
     ) {
       return;
     }
-    if (!window.confirm("Reset all data? This cannot be undone.")) return;
+    if (
+      !(await askConfirm({
+        title: "Reset all data?",
+        body: "This cannot be undone.",
+        confirmLabel: "Reset",
+        danger: true,
+      }))
+    )
+      return;
     setError(null);
     setResetting(true);
     try {
@@ -1086,8 +1118,10 @@ export function Settings() {
               {findHits.slice(0, 8).map((hit) => (
                 <li key={`${hit.tab}:${hit.id ?? ""}`}>
                   <button type="button" onClick={() => focusSettingsHit(hit)}>
-                    {settingsNavLabel(hit.tab)}
-                    {hit.id ? ` · ${hit.label}` : ""}
+                    <HighlightQuery
+                      text={`${settingsNavLabel(hit.tab)}${hit.id ? ` · ${hit.label}` : ""}`}
+                      query={find}
+                    />
                   </button>
                 </li>
               ))}
@@ -1134,34 +1168,34 @@ export function Settings() {
                 Add provider
               </button>
             </div>
-            {draft.providers.map((p, i) => (
-              <ProviderCard
-                key={p.id}
-                provider={p}
-                expanded={expandedProvider === p.id}
-                busy={busyProvider === p.id}
-                probe={probe[p.id]}
-                locked={
-                  Boolean(draft.managedPolicy?.active) &&
-                  !providerAllowedByPolicy(p, draft.managedPolicy?.policy)
-                }
-                onToggleExpand={() => setExpandedProvider((id) => (id === p.id ? null : p.id))}
-                onPatch={(patch) => patchProvider(i, patch)}
-                onRefresh={() => void refreshModels(i)}
-                onTest={() => void testConn(i)}
-                onRemove={
-                  isBuiltinProvider(p)
-                    ? undefined
-                    : () => {
-                        setDraft({
-                          ...draft,
-                          providers: draft.providers.filter((row) => row.id !== p.id),
-                        });
-                        setExpandedProvider((id) => (id === p.id ? null : id));
-                      }
-                }
-              />
-            ))}
+            {draft.providers
+              .map((p, i) => ({ p, i }))
+              .sort((a, b) => Number(b.p.enabled) - Number(a.p.enabled))
+              .map(({ p, i }) => (
+                <ProviderCard
+                  key={p.id}
+                  provider={p}
+                  expanded={expandedProvider === p.id}
+                  busy={busyProvider === p.id}
+                  probe={probe[p.id]}
+                  locked={
+                    Boolean(draft.managedPolicy?.active) &&
+                    !providerAllowedByPolicy(p, draft.managedPolicy?.policy)
+                  }
+                  onToggleExpand={() => setExpandedProvider((id) => (id === p.id ? null : p.id))}
+                  onPatch={(patch) => patchProvider(i, patch)}
+                  onRefresh={() => void refreshModels(i)}
+                  onTest={() => void testConn(i)}
+                  onRemove={
+                    isBuiltinProvider(p)
+                      ? undefined
+                      : () => {
+                          removeListUndoable("providers", i, p.name);
+                          setExpandedProvider((id) => (id === p.id ? null : id));
+                        }
+                  }
+                />
+              ))}
           </>
         )}
 
@@ -1213,10 +1247,7 @@ export function Settings() {
                   isBuiltinTemplate(t.id)
                     ? undefined
                     : () => {
-                        setDraft({
-                          ...draft,
-                          templates: draft.templates.filter((row) => row.id !== t.id),
-                        });
+                        removeListUndoable("templates", i, t.name);
                         setExpandedMachine((id) => (id === t.id ? null : id));
                       }
                 }
@@ -1241,7 +1272,7 @@ export function Settings() {
               container pane. New agents default to the latest matching image.
             </p>
             {images.length === 0 ? (
-              <p className="hint">No golden images yet.</p>
+              <EmptyHint title="No golden images yet." />
             ) : (
               images.map((img) => (
                 <div
@@ -1269,9 +1300,9 @@ export function Settings() {
               Repo hardware
             </h3>
             <p className="scrim-note" style={{ marginTop: 0, marginBottom: 12 }}>
-              Match a GitHub, GitLab, or Bitbucket URL (or a substring like org/repo) to give that
-              project a different CPU, RAM, or disk than the guest default. Agent and automation
-              forms still let you override per run.
+              Match a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps URL (or a substring
+              like org/repo) to give that project a different CPU, RAM, or disk than the guest
+              default. Agent and automation forms still let you override per run.
             </p>
             {(draft.hardwareProfiles ?? []).map((profile, i) => (
               <div className="template-row" key={profile.id}>
@@ -1350,38 +1381,26 @@ export function Settings() {
                 <div className="grid-2">
                   <div className="field">
                     <label>Guest OS (optional)</label>
-                    <select
+                    <Select
+                      ariaLabel="Guest OS (optional)"
                       value={profile.os ?? ""}
-                      onChange={(e) => {
+                      options={[
+                        { value: "", label: "Any" },
+                        ...GUEST_OS_OPTIONS.map((opt) => ({ value: opt.os, label: opt.name })),
+                      ]}
+                      onChange={(value) => {
                         patchList("hardwareProfiles", i, (profile) => ({
                           ...profile,
-                          os:
-                            e.target.value === ""
-                              ? undefined
-                              : (e.target.value as typeof profile.os),
+                          os: value === "" ? undefined : (value as typeof profile.os),
                         }));
                       }}
-                    >
-                      <option value="">Any</option>
-                      {GUEST_OS_OPTIONS.map((opt) => (
-                        <option key={opt.os} value={opt.os}>
-                          {opt.name}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </div>
                   <div className="field" style={{ justifyContent: "flex-end" }}>
                     <label>&nbsp;</label>
                     <button
                       className="btn small danger ghost"
-                      onClick={() => {
-                        setDraft({
-                          ...draft,
-                          hardwareProfiles: (draft.hardwareProfiles ?? []).filter(
-                            (p) => p.id !== profile.id,
-                          ),
-                        });
-                      }}
+                      onClick={() => removeListUndoable("hardwareProfiles", i, profile.name)}
                     >
                       Remove
                     </button>
@@ -1417,10 +1436,10 @@ export function Settings() {
               <p className="hint">
                 Paste the add line from <code>npm run dev:worker</code> (or{" "}
                 <code>locus config workers add</code>). Locus does not scan the LAN. Chat, keys, and
-                approvals stay on this computer. Docker or Host. Cloud VMs destroy guests on stop
-                and after idle TTL. Set hourly USD so the spend cap meters VM time. Cloud VMs need
-                an image allowlist. Fargate needs a size allowlist and a task definition that
-                already runs locus-worker.
+                approvals stay on this computer. Docker, Host, or QEMU VM. Cloud VMs destroy guests
+                on stop and after idle TTL. Set hourly USD so the spend cap meters VM time. Cloud
+                VMs need an image allowlist. Fargate needs a size allowlist and a task definition
+                that already runs locus-worker.
               </p>
             </div>
             <div className="worker-add-paste">
@@ -1468,7 +1487,7 @@ export function Settings() {
                   onPatch={(patch) => patchList("workers", i, patch)}
                   onTest={() => void testWorker(row)}
                   onRemove={() => {
-                    removeList("workers", i);
+                    removeListUndoable("workers", i, row.name);
                     setExpandedWorker((id) => (id === row.id ? null : id));
                   }}
                 />
@@ -1529,12 +1548,7 @@ export function Settings() {
                   onToggleExpand={() => setExpandedEnv((id) => (id === env.id ? null : env.id))}
                   onRename={(name) => patchList("namedEnvironments", i, { name })}
                   onRemove={() => {
-                    setDraft({
-                      ...draft,
-                      namedEnvironments: (draft.namedEnvironments ?? []).filter(
-                        (row) => row.id !== env.id,
-                      ),
-                    });
+                    removeListUndoable("namedEnvironments", i, env.name);
                     setExpandedEnv((id) => (id === env.id ? null : id));
                   }}
                 />
@@ -1545,11 +1559,12 @@ export function Settings() {
         {tab === "git" && (
           <>
             <p className="scrim-note">
-              Add one or more GitHub, GitLab, and Bitbucket accounts. Sign in with GitHub, GitLab,
-              or Bitbucket so SSO-protected orgs work, or paste a token. Either is enough to clone,
-              fetch a branch or pull request, and push over HTTPS — no SSH key required. Multiple
-              accounts of the same forge can be active at once; each linked repo remembers which
-              account to use.
+              Add one or more GitHub, GitLab, Bitbucket, Gitea, Forgejo, and Azure DevOps accounts.
+              Sign in with GitHub, GitLab, or Bitbucket so SSO-protected orgs work, or paste a token
+              (Gitea, Forgejo, and Azure DevOps are PAT-only). Either is enough to clone, fetch a
+              branch or pull request, and push over HTTPS — no SSH key required. Multiple accounts
+              of the same forge can be active at once; each linked repo remembers which account to
+              use.
             </p>
             <div className="git-accounts">
               {draft.forges.map((f, i) => {
@@ -1576,7 +1591,7 @@ export function Settings() {
                     onDisconnect={() => void disconnectOauth(f.id)}
                     onRemove={() => {
                       const next = draft.forges[i - 1]?.id ?? draft.forges[i + 1]?.id ?? null;
-                      removeList("forges", i);
+                      removeListUndoable("forges", i, f.name);
                       setExpandedForge((id) => (id === f.id ? next : id));
                     }}
                   />
@@ -1609,18 +1624,18 @@ export function Settings() {
         {tab === "integrations" && (
           <>
             <p className="scrim-note">
-              First-party GitHub, GitLab, Bitbucket, Jira, Confluence, Linear, Slack, Grafana,
-              Sentry, Miro, Figma, incident.io, AWS IAM, Portainer, Gmail, Google Calendar, Google
-              Drive, and Kubernetes, plus plugins the Locus agent can author. Tokens stay in the
-              vault, never in the guest or the prompt. Sign in with Slack so Locus can act as you by
-              default. Sign in with Google for Gmail, Calendar, and Drive. Composer and slack_post
-              can also send as the Locus bot when a bot token is present. Agents only get those
-              tools after that account has the required values. Mutating Jira comments, creates,
-              transitions, Confluence pages, Linear comments/creates/updates, Slack posts, Sentry
-              updates, Miro exports, Figma comments, incident.io creates/updates, Portainer
-              start/stop, Gmail sends, Calendar creates, Drive uploads, Kubernetes
-              apply/delete/scale, and plugin writes wait for Approve / Deny. Ask an agent to add a
-              plugin for a bespoke HTTP API.
+              First-party GitHub, GitLab, Bitbucket, Gitea, Forgejo, Azure DevOps, Jira, Confluence,
+              Linear, Slack, Grafana, Sentry, Miro, Figma, incident.io, AWS IAM, Portainer, Gmail,
+              Google Calendar, Google Drive, and Kubernetes, plus plugins the Locus agent can
+              author. Tokens stay in the vault, never in the guest or the prompt. Sign in with Slack
+              so Locus can act as you by default. Sign in with Google for Gmail, Calendar, and
+              Drive. Composer and slack_post can also send as the Locus bot when a bot token is
+              present. Agents only get those tools after that account has the required values.
+              Mutating Jira comments, creates, transitions, Confluence pages, Linear
+              comments/creates/updates, Slack posts, Sentry updates, Miro exports, Figma comments,
+              incident.io creates/updates, Portainer start/stop, Gmail sends, Calendar creates,
+              Drive uploads, Kubernetes apply/delete/scale, and plugin writes wait for Approve /
+              Deny. Ask an agent to add a plugin for a bespoke HTTP API.
             </p>
             <h3>Git forges</h3>
             <p className="hint">
@@ -1649,7 +1664,10 @@ export function Settings() {
                   .join(" · ")}
               </p>
             ) : (
-              <p className="hint">No Git accounts yet. Add GitHub, GitLab, or Bitbucket in Git.</p>
+              <p className="hint">
+                No Git accounts yet. Add GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps
+                in Git.
+              </p>
             )}
             <h3>
               Jira, Confluence, Linear, Slack, Grafana, Sentry, Miro, Figma, incident.io, AWS IAM,
@@ -1666,11 +1684,20 @@ export function Settings() {
               className="btn small"
               data-testid="revoke-all-tokens"
               onClick={() => {
-                if (!window.confirm("Revoke every integration token stored in the vault?")) return;
-                void api.revokeAllIntegrations().then((result) => {
+                void (async () => {
+                  if (
+                    !(await askConfirm({
+                      title: "Revoke all tokens?",
+                      body: "Revoke every integration token stored in the vault?",
+                      confirmLabel: "Revoke",
+                      danger: true,
+                    }))
+                  )
+                    return;
+                  const result = await api.revokeAllIntegrations();
                   setDraft(result.config);
                   dispatch({ type: "config", config: result.config });
-                });
+                })();
               }}
             >
               Revoke all tokens
@@ -1701,16 +1728,17 @@ export function Settings() {
                 onSignInGoogle={() => void startGoogleOauth(row)}
                 onDisconnectGoogle={() => void disconnectGoogle(row.id)}
                 onRemove={() => {
-                  removeList("integrations", i);
+                  removeListUndoable("integrations", i, row.name);
                   setExpandedIntegration((id) => (id === row.id ? null : id));
                 }}
               />
             ))}
-            <div className="row-actions">
+            <div className="integration-catalog">
               {INTEGRATION_KINDS.map((kind) => (
                 <button
                   key={kind}
-                  className="btn small"
+                  type="button"
+                  className="integration-catalog-card"
                   onClick={() => {
                     const next: IntegrationAccount = {
                       id: crypto.randomUUID(),
@@ -1723,7 +1751,8 @@ export function Settings() {
                     setExpandedIntegration(next.id);
                   }}
                 >
-                  Add {integrationLabel(kind)}
+                  <strong>Add {integrationLabel(kind)}</strong>
+                  <span>{integrationBlurb(kind)}</span>
                 </button>
               ))}
             </div>
@@ -1733,7 +1762,7 @@ export function Settings() {
               Secrets stay in the vault.
             </p>
             {(draft.integrationPlugins ?? []).length === 0 ? (
-              <p className="hint">No plugins yet.</p>
+              <EmptyHint title="No plugins yet." />
             ) : (
               (draft.integrationPlugins ?? []).map((plugin, i) => (
                 <IntegrationPluginCard
@@ -1746,12 +1775,7 @@ export function Settings() {
                   onPatch={(patch) => patchPlugin(draft, setDraft, i, patch)}
                   onPatchConfig={(key, value) => patchPluginConfig(draft, setDraft, i, key, value)}
                   onRemove={() => {
-                    setDraft({
-                      ...draft,
-                      integrationPlugins: (draft.integrationPlugins ?? []).filter(
-                        (_, idx) => idx !== i,
-                      ),
-                    });
+                    removeListUndoable("integrationPlugins", i, plugin.name || plugin.id);
                     setExpandedPlugin((id) => (id === plugin.id ? null : id));
                   }}
                 />
@@ -1789,7 +1813,7 @@ export function Settings() {
                   }
                   onPatch={(patch) => patchList("mcpServers", i, patch)}
                   onRemove={() => {
-                    removeList("mcpServers", i);
+                    removeListUndoable("mcpServers", i, server.name);
                     setExpandedMcp((id) => (id === server.id ? null : id));
                   }}
                 />
@@ -1811,7 +1835,7 @@ export function Settings() {
                 onToggleExpand={() => setExpandedSkill((id) => (id === skill.id ? null : skill.id))}
                 onPatch={(patch) => patchList("skills", i, patch)}
                 onRemove={() => {
-                  removeList("skills", i);
+                  removeListUndoable("skills", i, skill.title || skill.name);
                   setExpandedSkill((id) => (id === skill.id ? null : id));
                 }}
               />
@@ -2405,11 +2429,14 @@ export function Settings() {
               </div>
               <div className="field">
                 <label>Tailscale Funnel</label>
-                <div className="row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button
+                <div className="field-inline">
+                  <BusyButton
                     type="button"
                     className={`btn small ${tailscale?.funnelEnabled ? "primary" : ""}`}
-                    disabled={funnelBusy || !tailscale?.installed}
+                    busy={funnelBusy}
+                    busyLabel="Working…"
+                    disabled={!tailscale?.installed}
+                    disabledReason="Install Tailscale first"
                     onClick={() => {
                       setFunnelBusy(true);
                       void api
@@ -2432,12 +2459,8 @@ export function Settings() {
                         .finally(() => setFunnelBusy(false));
                     }}
                   >
-                    {funnelBusy
-                      ? "Working…"
-                      : tailscale?.funnelEnabled
-                        ? "Disable Funnel"
-                        : "Expose /api/hooks"}
-                  </button>
+                    {tailscale?.funnelEnabled ? "Disable Funnel" : "Expose /api/hooks"}
+                  </BusyButton>
                   <span className="hint">
                     {tailscale?.funnelUrl ??
                       tailscale?.error ??
@@ -2496,25 +2519,21 @@ export function Settings() {
               </div>
               <div className="field">
                 <label>Autonomy</label>
-                <select
+                <Select
+                  ariaLabel="Autonomy"
                   value={parseAutonomyTier(draft.advanced.autonomy)}
                   disabled={policyControlLocked(draft, "autonomous")}
-                  onChange={(e) =>
+                  options={AUTONOMY_SELECT_OPTIONS}
+                  onChange={(value) =>
                     setDraft({
                       ...draft,
                       advanced: {
                         ...draft.advanced,
-                        autonomy: parseAutonomyTier(e.target.value),
+                        autonomy: parseAutonomyTier(value),
                       },
                     })
                   }
-                >
-                  {AUTONOMY_TIERS.map((tier) => (
-                    <option key={tier} value={tier}>
-                      {formatAutonomy(tier)}
-                    </option>
-                  ))}
-                </select>
+                />
                 <p className="hint">
                   One ladder from showing every mutating command to overnight CI. Autonomous
                   auto-allows push, PR, MCP, plugins, and package installs (protected default
@@ -2661,14 +2680,16 @@ export function Settings() {
                   and automations. Host QEMU/Docker installs are not touched. First-run setup runs
                   again.
                 </p>
-                <button
+                <BusyButton
                   type="button"
                   className="btn danger"
-                  disabled={saving || resetting}
+                  busy={resetting}
+                  busyLabel="Resetting…"
+                  disabled={saving}
                   onClick={() => void resetAll()}
                 >
-                  {resetting ? "Resetting…" : "Reset all data"}
-                </button>
+                  Reset all data
+                </BusyButton>
               </div>
             </details>
           </>
@@ -2699,14 +2720,15 @@ export function Settings() {
             </dl>
             <div className="about-updates">
               <div className="about-updates-actions">
-                <button
+                <BusyButton
                   type="button"
                   className="btn small"
-                  disabled={updateBusy}
+                  busy={updateBusy}
+                  busyLabel="Checking…"
                   onClick={() => void checkForUpdates()}
                 >
-                  {updateBusy ? "Checking…" : "Check for updates"}
-                </button>
+                  Check for updates
+                </BusyButton>
                 <a href={APP_RELEASES_URL} target="_blank" rel="noreferrer">
                   GitHub releases
                 </a>

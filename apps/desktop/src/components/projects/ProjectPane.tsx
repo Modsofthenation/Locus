@@ -21,10 +21,14 @@ import {
   type ProjectDocument,
 } from "@locus/shared";
 import { api } from "@/lib/api";
+import { askPrompt } from "@/lib/dialog";
+import { showNotice } from "@/lib/notice";
 import { useStore } from "@/state/store";
 import { ChatPane } from "@/components/chat/ChatPane";
 import { IconBrain, IconPause, IconPlay } from "@/components/layout/Icons";
 import { PersonaAvatar } from "@/components/layout/PersonaAvatar";
+import { Select } from "@/components/layout/Select";
+import { ErrorBanner, Skeleton } from "@/components/layout/Skeleton";
 import { WorkspaceBody } from "@/components/workspace/WorkspaceBody";
 import { formatWhen } from "@/components/automations/Automations";
 import { ProjectEmpty } from "./ProjectEmpty";
@@ -60,14 +64,14 @@ export function ProjectPane() {
   if (error) {
     return (
       <div className="empty">
-        <p className="error-text">{error}</p>
+        <ErrorBanner message={error} />
       </div>
     );
   }
   if (!cached) {
     return (
       <div className="empty">
-        <p>Loading project…</p>
+        <Skeleton lines={4} label="Loading project" />
       </div>
     );
   }
@@ -162,7 +166,7 @@ export function ProjectFleet(props: { project: ProjectDocument }) {
       const project = await api.patchProject(props.project.id, { paused: !props.project.paused });
       dispatch({ type: "project", project });
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Could not pause project");
+      showNotice(err instanceof Error ? err.message : "Could not pause project");
     }
   }
 
@@ -173,7 +177,7 @@ export function ProjectFleet(props: { project: ProjectDocument }) {
       });
       dispatch({ type: "project", project });
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Could not update keep-alive");
+      showNotice(err instanceof Error ? err.message : "Could not update keep-alive");
     }
   }
 
@@ -182,15 +186,17 @@ export function ProjectFleet(props: { project: ProjectDocument }) {
     action: "approve" | "answer" | "retry" | "cancel" | "takeover",
   ) {
     const response =
-      action === "answer" ? (window.prompt("Answer for the teammate") ?? "") : undefined;
-    if (action === "answer" && !(response ?? "").trim()) return;
+      action === "answer"
+        ? ((await askPrompt({ title: "Answer for the teammate" })) ?? "").trim()
+        : undefined;
+    if (action === "answer" && !response) return;
     setNeedBusy(needId);
     try {
       const project = await api.projectNeedAction(props.project.id, needId, action, response);
       dispatch({ type: "project", project });
       setMission(await api.projectMissionControl(props.project.id));
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Could not update Needs you");
+      showNotice(err instanceof Error ? err.message : "Could not update Needs you");
     } finally {
       setNeedBusy(null);
     }
@@ -208,7 +214,7 @@ export function ProjectFleet(props: { project: ProjectDocument }) {
       setHandoffTask("");
       setMission(await api.projectMissionControl(props.project.id));
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Could not send team handoff");
+      showNotice(err instanceof Error ? err.message : "Could not send team handoff");
     } finally {
       setHandoffBusy(null);
     }
@@ -221,7 +227,7 @@ export function ProjectFleet(props: { project: ProjectDocument }) {
       await api.projectHandoffAction(props.project.id, handoffId, action);
       setMission(await api.projectMissionControl(props.project.id));
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Could not update team handoff");
+      showNotice(err instanceof Error ? err.message : "Could not update team handoff");
     } finally {
       setHandoffBusy(null);
     }
@@ -357,18 +363,18 @@ export function ProjectFleet(props: { project: ProjectDocument }) {
       <h3>Team handoffs</h3>
       {swarmTeams.length > 0 ? (
         <div className="project-handoff-compose">
-          <select
+          <Select
+            ariaLabel="Receiving team"
             value={handoffTarget}
-            onChange={(event) => setHandoffTarget(event.target.value)}
-            aria-label="Receiving team"
-          >
-            <option value="">Choose a receiving team</option>
-            {swarmTeams.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.teamName ?? row.title}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: "Choose a receiving team" },
+              ...swarmTeams.map((row) => ({
+                value: row.id,
+                label: row.teamName ?? row.title,
+              })),
+            ]}
+            onChange={setHandoffTarget}
+          />
           <textarea
             value={handoffTask}
             onChange={(event) => setHandoffTask(event.target.value)}
@@ -454,20 +460,17 @@ export function ProjectFleet(props: { project: ProjectDocument }) {
         <p className="meta">Pin a planning canvas to this project.</p>
       )}
       <div className="board-pop-actions">
-        <select
-          aria-label="Board"
+        <Select
+          ariaLabel="Board"
           value={boardPick}
-          onChange={(event) => setBoardPick(event.target.value)}
-        >
-          <option value="">No board</option>
-          {state.boards
-            .filter((row) => !row.archived)
-            .map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.title}
-              </option>
-            ))}
-        </select>
+          options={[
+            { value: "", label: "No board" },
+            ...state.boards
+              .filter((row) => !row.archived)
+              .map((row) => ({ value: row.id, label: row.title })),
+          ]}
+          onChange={setBoardPick}
+        />
         <button
           type="button"
           className="btn small"
@@ -571,18 +574,17 @@ export function ProjectFleet(props: { project: ProjectDocument }) {
         <section className="project-team-switcher" aria-label="Team switcher">
           <label>
             <span className="meta">Active team</span>
-            <select
+            <Select
+              ariaLabel="Active team"
               value={props.project.id}
-              onChange={(event) => dispatch({ type: "selectProject", id: event.target.value })}
-            >
-              {state.projects
+              options={state.projects
                 .filter((row) => row.surface === "swarm")
-                .map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {row.teamName ?? row.title}
-                  </option>
-                ))}
-            </select>
+                .map((row) => ({
+                  value: row.id,
+                  label: row.teamName ?? row.title,
+                }))}
+              onChange={(id) => dispatch({ type: "selectProject", id })}
+            />
           </label>
           <button
             type="button"
@@ -735,7 +737,7 @@ export function ProjectFleet(props: { project: ProjectDocument }) {
                   Close
                 </button>
               </div>
-              {briefBusy ? <p className="meta">Loading…</p> : null}
+              {briefBusy ? <Skeleton lines={2} label="Loading briefing" /> : null}
               {briefError ? <p className="error-text">{briefError}</p> : null}
               {briefContent != null && !briefBusy ? (
                 <>
@@ -839,7 +841,7 @@ export function ProjectFleet(props: { project: ProjectDocument }) {
             {group.label} <span className="meta">{group.members.length}</span>
           </h3>
           {group.members.length === 0 ? (
-            <p className="meta project-fleet-empty">None</p>
+            <p className="meta project-fleet-empty">No one in this column yet</p>
           ) : (
             group.members.map((row) => {
               const teamMember = props.project.team?.members.find(
@@ -933,7 +935,7 @@ export function ProjectFleet(props: { project: ProjectDocument }) {
                 Close
               </button>
             </div>
-            {briefBusy ? <p className="meta">Loading…</p> : null}
+            {briefBusy ? <Skeleton lines={2} label="Loading briefing" /> : null}
             {briefError ? <p className="error-text">{briefError}</p> : null}
             {briefContent != null && !briefBusy ? (
               <>

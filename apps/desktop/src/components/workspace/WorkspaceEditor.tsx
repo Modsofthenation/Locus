@@ -37,6 +37,13 @@ import {
   type WorkspaceSignatureHelp,
 } from "@/lib/api";
 import { formatMarkdown } from "@/lib/markdown";
+import { askConfirm, askPrompt } from "@/lib/dialog";
+import { showUndoNotice } from "@/lib/notice";
+import { BusyButton } from "@/components/layout/Skeleton";
+import { Tooltip } from "@/components/layout/Tooltip";
+import { WorkspaceEditorTabs } from "./WorkspaceEditorTabs";
+import { matchModKey } from "@/lib/shortcuts";
+import { useDialogFocus } from "@/lib/useDialogFocus";
 import { isUnreachableError, UNREACHABLE_ERROR } from "@/lib/net";
 import { loadEditorDrafts, saveEditorDrafts } from "@/lib/editorDrafts";
 import { loadEditorOpenFiles, saveEditorOpenFiles } from "@/lib/editorOpenFiles";
@@ -755,6 +762,8 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
   const [pylspMissing, setPylspMissing] = useState(false);
   const [prComments, setPrComments] = useState<WorkspacePrCommentMark[]>([]);
   const [openPrComment, setOpenPrComment] = useState<WorkspacePrCommentMark | null>(null);
+  const prCommentRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(Boolean(openPrComment), () => setOpenPrComment(null), prCommentRef);
   const [wrapWidth, setWrapWidth] = useState(640);
   const [signature, setSignature] = useState<{
     help: WorkspaceSignatureHelp;
@@ -1076,28 +1085,25 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
 
   useEffect(() => {
     function onKey(event: globalThis.KeyboardEvent) {
-      const meta = event.metaKey || event.ctrlKey;
-      if (!meta || event.altKey) return;
       if (document.querySelector(".modal")) return;
-      const key = event.key.toLowerCase();
-      if (key === "p" && !event.shiftKey) {
+      if (matchModKey(event, "p")) {
         event.preventDefault();
         setSymbolOpen(false);
         setQuickOpen(true);
         return;
       }
-      if (key === "t" && !event.shiftKey) {
+      if (matchModKey(event, "t")) {
         event.preventDefault();
         setQuickOpen(false);
         setSymbolOpen(true);
         return;
       }
-      if (key === "f" && event.shiftKey) {
+      if (matchModKey(event, "f", true)) {
         event.preventDefault();
         setFileSearch(true);
         return;
       }
-      if ((key === "\\" || event.code === "Backslash") && !event.shiftKey) {
+      if (matchModKey(event, "\\")) {
         event.preventDefault();
         toggleSplitRef.current();
       }
@@ -2221,11 +2227,14 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
     if (typeof api.promoteIdeToDocker !== "function") return;
     const runtime = store?.state.dockerKind === "docker" ? "docker" : "host";
     if (
-      !window.confirm(
-        runtime === "docker"
-          ? "Create a Docker agent from this folder?"
-          : "Docker is not available. Create a Host agent from this folder?",
-      )
+      !(await askConfirm({
+        title: runtime === "docker" ? "Create a Docker agent?" : "Create a Host agent?",
+        body:
+          runtime === "docker"
+            ? "Create a Docker agent from this folder?"
+            : "Docker is not available. Create a Host agent from this folder?",
+        confirmLabel: "Create",
+      }))
     ) {
       return;
     }
@@ -2420,24 +2429,30 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
   }
 
   function closeTab(path: string, group?: 0 | 1) {
+    const snapshot = { docs, activePath, split: splitRef.current };
     const currentSplit = splitRef.current;
     if (currentSplit) {
       const result = closeInGroup(currentSplit, group ?? currentSplit.focused, path);
       if (result.dropBuffer) {
-        const doc = docs.find((item) => item.path === path);
-        if (doc && doc.content !== doc.original && !window.confirm("Discard unsaved edits?"))
-          return;
         setDocs((current) => current.filter((item) => item.path !== path));
       }
       setSplit(result.split);
       setActivePath(result.active);
+      showUndoNotice(`Closed ${path}`, () => {
+        setDocs(snapshot.docs);
+        setActivePath(snapshot.activePath);
+        setSplit(snapshot.split);
+      });
       return;
     }
-    const doc = docs.find((item) => item.path === path);
-    if (doc && doc.content !== doc.original && !window.confirm("Discard unsaved edits?")) return;
     const next = docs.filter((item) => item.path !== path);
     setDocs(next);
     if (activePath === path) setActivePath(next.at(-1)?.path ?? "");
+    showUndoNotice(`Closed ${path}`, () => {
+      setDocs(snapshot.docs);
+      setActivePath(snapshot.activePath);
+      setSplit(snapshot.split);
+    });
   }
 
   async function saveAll() {
@@ -2459,21 +2474,25 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
 
   function closeOthers() {
     if (!activePath) return;
+    const snapshot = { docs, activePath, split: splitRef.current };
     const currentSplit = splitRef.current;
     if (currentSplit) {
       setSplit(closeOthersInFocused(currentSplit));
+      showUndoNotice("Closed other tabs", () => {
+        setDocs(snapshot.docs);
+        setActivePath(snapshot.activePath);
+        setSplit(snapshot.split);
+      });
       return;
     }
     const keep = docs.find((doc) => doc.path === activePath);
     if (!keep) return;
-    const others = docs.filter((doc) => doc.path !== activePath);
-    if (
-      others.some((doc) => doc.content !== doc.original) &&
-      !window.confirm("Close other tabs and discard unsaved edits?")
-    ) {
-      return;
-    }
     setDocs([keep]);
+    showUndoNotice("Closed other tabs", () => {
+      setDocs(snapshot.docs);
+      setActivePath(snapshot.activePath);
+      setSplit(snapshot.split);
+    });
   }
 
   function closeSaved() {
@@ -2775,10 +2794,10 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
   }
 
   async function createFile(fromDir?: string) {
-    const name = window.prompt(
-      "New file",
-      suggestedChildPath(fromDir ?? parentDir(), "untitled.ts"),
-    );
+    const name = await askPrompt({
+      title: "New file",
+      value: suggestedChildPath(fromDir ?? parentDir(), "untitled.ts"),
+    });
     if (!name) return;
     const path = name.replace(/^\/+/, "").trim();
     if (!path) return;
@@ -2794,7 +2813,10 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
   }
 
   async function createFolder(fromDir?: string) {
-    const name = window.prompt("New folder", suggestedChildPath(fromDir ?? parentDir(), "src"));
+    const name = await askPrompt({
+      title: "New folder",
+      value: suggestedChildPath(fromDir ?? parentDir(), "src"),
+    });
     if (!name) return;
     const path = name.replace(/^\/+/, "").trim();
     if (!path) return;
@@ -2808,7 +2830,15 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
   }
 
   async function removePath(path: string) {
-    if (!window.confirm(`Delete ${path}?`)) return;
+    if (
+      !(await askConfirm({
+        title: `Delete ${path}?`,
+        body: "This cannot be undone.",
+        confirmLabel: "Delete",
+        danger: true,
+      }))
+    )
+      return;
     setError(null);
     try {
       await api.deleteWorkspaceFile(sessionId, path);
@@ -2969,7 +2999,7 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
     }
   }
 
-  function onEditorKey(e: KeyboardEvent<HTMLTextAreaElement>) {
+  async function onEditorKey(e: KeyboardEvent<HTMLTextAreaElement>) {
     const ta = e.currentTarget;
     const meta = e.metaKey || e.ctrlKey;
     if (hover && e.key !== "Shift" && e.key !== "Control" && e.key !== "Alt" && e.key !== "Meta") {
@@ -2985,7 +3015,7 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
       closeInlineAi();
       return;
     }
-    if (meta && e.shiftKey && e.key.toLowerCase() === "k") {
+    if (matchModKey(e, "k", true)) {
       e.preventDefault();
       e.stopPropagation();
       openInlineAi();
@@ -3028,7 +3058,7 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
       scheduleComplete(ta.value, ta.selectionStart, true);
       return;
     }
-    if (meta && e.key.toLowerCase() === "s") {
+    if (matchModKey(e, "s")) {
       e.preventDefault();
       e.stopPropagation();
       void save();
@@ -3052,15 +3082,14 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
       void renameSymbol();
       return;
     }
-    if (meta && e.key.toLowerCase() === "z") {
-      e.preventDefault();
-      if (e.shiftKey) redoEdit();
-      else undoEdit();
-      return;
-    }
-    if (meta && e.key.toLowerCase() === "y") {
+    if (matchModKey(e, "z", true) || matchModKey(e, "y")) {
       e.preventDefault();
       redoEdit();
+      return;
+    }
+    if (matchModKey(e, "z")) {
+      e.preventDefault();
+      undoEdit();
       return;
     }
     if (e.altKey && e.shiftKey && e.key.toLowerCase() === "f") {
@@ -3073,39 +3102,38 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
       void organizeActive();
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && e.key === ".") {
+    if (matchModKey(e, ".")) {
       e.preventDefault();
       void requestFixes();
       return;
     }
-    if (meta && e.shiftKey && e.key.toLowerCase() === "s") {
+    if (matchModKey(e, "s", true)) {
       e.preventDefault();
       void saveAll();
       return;
     }
-    if (meta && e.key.toLowerCase() === "w") {
+    if (matchModKey(e, "w")) {
       e.preventDefault();
       e.stopPropagation();
-      closeTab(activePath);
+      void closeTab(activePath);
       return;
     }
-    if (meta && e.key.toLowerCase() === "f") {
+    if (matchModKey(e, "f", true)) {
       e.preventDefault();
       e.stopPropagation();
-      if (e.shiftKey) setFileSearch(true);
-      else openFind();
+      setFileSearch(true);
       return;
     }
-    if (meta && e.key.toLowerCase() === "h") {
+    if (matchModKey(e, "f") || matchModKey(e, "h")) {
       e.preventDefault();
       e.stopPropagation();
       openFind();
       return;
     }
-    if (meta && e.key.toLowerCase() === "g") {
+    if (matchModKey(e, "g")) {
       e.preventDefault();
       e.stopPropagation();
-      const raw = window.prompt("Go to line", String(cursor.line));
+      const raw = await askPrompt({ title: "Go to line", value: String(cursor.line) });
       const line = Number.parseInt(raw ?? "", 10);
       if (!Number.isFinite(line) || line < 1) return;
       const start = offsetAtLine(content, line);
@@ -3171,81 +3199,24 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
     group?: 0 | 1,
     listRef?: RefObject<HTMLDivElement | null>,
   ) {
-    const items = paths
-      .map((path) => docs.find((doc) => doc.path === path) ?? stubOpenDoc(path))
-      .filter((doc) => paths.includes(doc.path));
     return (
-      <div
-        className="workspace-tabs"
-        ref={listRef}
-        role="tablist"
-        aria-label={group == null ? "Open files" : `Editor group ${group + 1}`}
-      >
-        {items.map((doc) => {
-          const name = doc.path.split("/").pop() ?? doc.path;
-          const tabDirty =
-            doc.kind !== "image" && doc.kind !== "pdf" && doc.content !== doc.original;
-          const glyph =
-            languageFromPath(doc.path) === "json"
-              ? "{}"
-              : languageFromPath(doc.path) === "tsx" || languageFromPath(doc.path) === "jsx"
-                ? "<>"
-                : "";
-          const on = doc.path === selected;
-          return (
-            <div
-              key={doc.path}
-              role="tab"
-              tabIndex={0}
-              title={doc.path}
-              data-tab={doc.path}
-              aria-selected={on}
-              className={`workspace-tab ${on ? "on" : ""}`}
-              onClick={() => {
-                noteOpenPath(doc.path, group);
-                setEditing(true);
-                if (doc.cold) void openFile(doc.path);
-                else expandToFile(doc.path);
-              }}
-              onAuxClick={(event) => {
-                if (event.button !== 1) return;
-                event.preventDefault();
-                closeTab(doc.path, group);
-              }}
-              onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "w") {
-                  event.preventDefault();
-                  closeTab(doc.path, group);
-                  return;
-                }
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  noteOpenPath(doc.path, group);
-                  setEditing(true);
-                  if (doc.cold) void openFile(doc.path);
-                  else expandToFile(doc.path);
-                }
-              }}
-            >
-              {tabDirty ? <span className="workspace-tab-dot" title="Unsaved" /> : null}
-              {glyph ? <span className="workspace-tab-kind">{glyph}</span> : null}
-              {name}
-              <button
-                type="button"
-                className="workspace-tab-close"
-                title="Close"
-                aria-label={`Close ${name}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  closeTab(doc.path, group);
-                }}
-              >
-                <IconClose />
-              </button>
-            </div>
-          );
-        })}
-      </div>
+      <WorkspaceEditorTabs
+        paths={paths}
+        selected={selected}
+        docs={docs}
+        group={group}
+        listRef={listRef}
+        stubDoc={stubOpenDoc}
+        onOpen={(path, cold) => {
+          noteOpenPath(path, group);
+          setEditing(true);
+          if (cold) void openFile(path);
+          else expandToFile(path);
+        }}
+        onClose={(path) => {
+          void closeTab(path, group);
+        }}
+      />
     );
   }
 
@@ -3255,33 +3226,36 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
         <div className="workspace-tree-head">
           <strong>EXPLORER</strong>
           <div className="workspace-tree-actions">
-            <button
-              type="button"
-              className="btn icon ghost workspace-tree-refresh"
-              title="Refresh"
-              aria-label="Refresh"
-              onClick={() => void refresh()}
-            >
-              <IconRefresh />
-            </button>
-            <button
-              type="button"
-              className="btn icon ghost workspace-tree-refresh"
-              title="New file"
-              aria-label="New file"
-              onClick={() => void createFile()}
-            >
-              <IconPlus />
-            </button>
-            <button
-              type="button"
-              className="btn icon ghost workspace-tree-refresh"
-              title="New folder"
-              aria-label="New folder"
-              onClick={() => void createFolder()}
-            >
-              <IconFolder />
-            </button>
+            <Tooltip label="Refresh">
+              <button
+                type="button"
+                className="btn icon ghost workspace-tree-refresh"
+                aria-label="Refresh"
+                onClick={() => void refresh()}
+              >
+                <IconRefresh />
+              </button>
+            </Tooltip>
+            <Tooltip label="New file">
+              <button
+                type="button"
+                className="btn icon ghost workspace-tree-refresh"
+                aria-label="New file"
+                onClick={() => void createFile()}
+              >
+                <IconPlus />
+              </button>
+            </Tooltip>
+            <Tooltip label="New folder">
+              <button
+                type="button"
+                className="btn icon ghost workspace-tree-refresh"
+                aria-label="New folder"
+                onClick={() => void createFolder()}
+              >
+                <IconFolder />
+              </button>
+            </Tooltip>
           </div>
         </div>
         <WorkspaceExplorerFiles
@@ -3458,14 +3432,16 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
                       {showDiff ? "Edit" : "Diff"}
                     </button>
                   ) : null}
-                  <button
+                  <BusyButton
                     type="button"
                     className={`workspace-save ${dirty ? "" : "saved"}`}
-                    disabled={!dirty || saving}
+                    busy={saving}
+                    busyLabel="Saving…"
+                    disabled={!dirty}
                     onClick={() => void save()}
                   >
-                    {saving ? "Saving…" : dirty ? "Save" : "Saved"}
-                  </button>
+                    {dirty ? "Save" : "Saved"}
+                  </BusyButton>
                 </>
               )
             ) : (
@@ -3498,7 +3474,7 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
                     Minimap
                   </MenuItem>
                   <MenuSep />
-                  <MenuItem onClick={closeOthers}>Close others</MenuItem>
+                  <MenuItem onClick={() => void closeOthers()}>Close others</MenuItem>
                   <MenuItem onClick={closeSaved}>Close saved</MenuItem>
                   {onAskAgent ? (
                     <MenuItem onClick={askAboutFile}>
@@ -4386,7 +4362,9 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
                       <div
                         className="workspace-pr-comment"
                         role="dialog"
+                        aria-modal="true"
                         aria-label="Review comment"
+                        ref={prCommentRef}
                       >
                         {openPrComment.author ? <strong>{openPrComment.author}</strong> : null}
                         <p>{openPrComment.body}</p>

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   THEME_OPTIONS,
+  FEATURED_THEME_IDS,
   editorFontSize,
   filterThemeOptions,
   parseChatDensity,
@@ -11,6 +12,7 @@ import {
   themeOption,
   type ChatDensity,
   type ProductMode,
+  type ThemeFamily,
   type ThemeFilter,
   type ThemeId,
   type ThemeOption,
@@ -100,10 +102,14 @@ export function AppearanceSettings(props: {
   const recents = loadThemeRecents()
     .filter((id) => id !== selected)
     .slice(0, 3);
-  const pinnedIds = [selected, ...recents];
+  const featuredIds = [
+    selected,
+    ...FEATURED_THEME_IDS.filter((id) => id !== selected),
+    ...recents.filter((id) => id !== selected && !FEATURED_THEME_IDS.includes(id)),
+  ];
   const shown =
     filter === "all" && !seeAll
-      ? pinnedIds
+      ? featuredIds
           .map((id) => themes.find((opt) => opt.id === id) ?? themeOption(id))
           .filter((opt, index, rows) => rows.findIndex((row) => row.id === opt.id) === index)
       : themes;
@@ -228,23 +234,50 @@ export function AppearanceSettings(props: {
         ) : null}
         {filter === "all" && !seeAll ? (
           <div className="theme-recents">
+            <p className="theme-featured-note">
+              Featured: Ember, Midnight, Paper, and Contrast. Hover to preview.
+            </p>
             <button type="button" className="btn small ghost" onClick={() => setSeeAll(true)}>
               See all {themes.length} themes
             </button>
           </div>
         ) : null}
-        <div className="theme-grid">
-          {shown.map((opt) => (
-            <ThemeCard
-              key={opt.id}
-              opt={opt}
-              selected={selected === opt.id}
-              onSelect={() => selectTheme(opt.id)}
-              onPreview={() => setHoverId(opt.id)}
-              onPreviewEnd={() => setHoverId((id) => (id === opt.id ? null : id))}
-            />
-          ))}
-        </div>
+        {filter === "all" && seeAll ? (
+          groupedThemeFamilies(themes).map((row) => (
+            <section
+              key={row.family}
+              className="theme-family"
+              data-testid={`theme-family-${row.family}`}
+            >
+              <h3 className="theme-family-label">{themeFamilyLabel(row.family)}</h3>
+              <div className="theme-grid">
+                {row.items.map((opt) => (
+                  <ThemeCard
+                    key={opt.id}
+                    opt={opt}
+                    selected={selected === opt.id}
+                    onSelect={() => selectTheme(opt.id)}
+                    onPreview={() => setHoverId(opt.id)}
+                    onPreviewEnd={() => setHoverId((id) => (id === opt.id ? null : id))}
+                  />
+                ))}
+              </div>
+            </section>
+          ))
+        ) : (
+          <div className="theme-grid">
+            {shown.map((opt) => (
+              <ThemeCard
+                key={opt.id}
+                opt={opt}
+                selected={selected === opt.id}
+                onSelect={() => selectTheme(opt.id)}
+                onPreview={() => setHoverId(opt.id)}
+                onPreviewEnd={() => setHoverId((id) => (id === opt.id ? null : id))}
+              />
+            ))}
+          </div>
+        )}
       </div>
       <aside className="appearance-preview">
         <ThemePreview
@@ -256,6 +289,17 @@ export function AppearanceSettings(props: {
       </aside>
     </div>
   );
+}
+
+const THEME_FAMILY_ORDER: ThemeFamily[] = ["dark", "light", "contrast", "gradient"];
+
+function groupedThemeFamilies(
+  themes: ThemeOption[],
+): { family: ThemeFamily; items: ThemeOption[] }[] {
+  return THEME_FAMILY_ORDER.map((family) => ({
+    family,
+    items: themes.filter((opt) => themeFamily(opt) === family),
+  })).filter((row) => row.items.length);
 }
 
 function ThemeCard(props: {

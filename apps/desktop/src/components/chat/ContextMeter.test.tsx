@@ -111,6 +111,25 @@ describe("ContextMeter", () => {
     });
   }
 
+  it("hides the chip when occupancy is still 0%", () => {
+    render(
+      <ContextMeter
+        session={{
+          model: "grok-4",
+          context: {
+            window: 128_000,
+            used: 0,
+            reserved: 0,
+            charsPerToken: 4,
+            measured: false,
+            parts: [],
+          },
+        }}
+      />,
+    );
+    expect(host.querySelector("[aria-label='Context usage']")).toBeNull();
+  });
+
   it("opens a card with a stable width and unclipped token counts", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
     Object.defineProperty(window, "innerHeight", { configurable: true, value: 600 });

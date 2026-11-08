@@ -9,6 +9,7 @@ import {
 } from "./forgeHttp.js";
 import { createGithubForgeAdapter } from "./githubForge.js";
 import { createGitlabForgeAdapter } from "./gitlabForge.js";
+import { createAzureDevOpsForgeAdapter } from "./azureDevopsForge.js";
 
 export type { ForgeFetcher } from "./forgeHttp.js";
 export type {
@@ -24,6 +25,7 @@ export type {
 function selectForgeAdapter(kind: GitForgeAccount["kind"], fetchFn: ForgeFetcher): ForgeAdapter {
   if (kind === "gitlab") return createGitlabForgeAdapter(fetchFn);
   if (kind === "bitbucket") return createBitbucketForgeAdapter(fetchFn);
+  if (kind === "azuredevops") return createAzureDevOpsForgeAdapter(fetchFn);
   return createGithubForgeAdapter(fetchFn);
 }
 

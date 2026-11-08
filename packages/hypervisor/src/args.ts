@@ -1,5 +1,12 @@
 import type { Accelerator, GuestOs, VmNetworking, VmTemplate } from "@locus/shared";
 import { defaultNetworking, isLinux, isWindows, needsUefi, qemuPathUnsafe } from "@locus/shared";
+import {
+  qemuCpuType,
+  qemuDisplayDevice,
+  qemuMachineType,
+  qemuTpmDevice,
+  type QemuGuestArch,
+} from "./qemuArch.js";
 
 export interface LaunchContext {
   vmId: string;
@@ -18,6 +25,7 @@ export interface LaunchContext {
   networking?: VmNetworking;
   hostSharePath?: string;
   virtfs?: boolean;
+  arch?: QemuGuestArch;
 }
 
 export function buildQemuArgv(template: VmTemplate, ctx: LaunchContext): string[] {
@@ -27,15 +35,16 @@ export function buildQemuArgv(template: VmTemplate, ctx: LaunchContext): string[
     ...template.networking,
   };
   const accel = ctx.accelerator;
+  const arch = ctx.arch ?? "x86_64";
   const args: string[] = [
     "-name",
     `locus-${ctx.vmId}`,
     "-machine",
-    machineType(template.os, hw.enableSecureBoot),
+    qemuMachineType(arch, template.os, hw.enableSecureBoot),
     "-accel",
     accel,
     "-cpu",
-    cpuType(template.os, accel),
+    qemuCpuType(arch, template.os, accel),
     "-smp",
     String(hw.cpuCores),
     "-m",
@@ -58,9 +67,9 @@ export function buildQemuArgv(template: VmTemplate, ctx: LaunchContext): string[
   args.push("-vnc", `127.0.0.1:${net.vncDisplay}`);
   if (hw.display === "spice") {
     args.push("-spice", `addr=127.0.0.1,port=${spicePort(net.vncDisplay)},disable-ticketing=on`);
-    args.push("-device", "qxl-vga");
+    args.push("-device", qemuDisplayDevice(arch, true));
   } else {
-    args.push("-device", "virtio-vga");
+    args.push("-device", qemuDisplayDevice(arch, false));
   }
   // -nodefaults drops QEMU's USB tablet. VNC/SPICE need an absolute pointer
   // (and a keyboard) — PS/2 alone is unreliable on Windows guests and WHPX.
@@ -95,7 +104,7 @@ export function buildQemuArgv(template: VmTemplate, ctx: LaunchContext): string[
     );
   }
 
-  if (needsUefi(template.os, template.hardware)) {
+  if (needsUefi(template.os, template.hardware) || arch === "aarch64") {
     if (!ctx.ovmfCodePath || !ctx.ovmfVarsCopyPath) {
       throw new Error("This guest requires OVMF firmware (code + vars)");
     }
@@ -118,27 +127,12 @@ export function buildQemuArgv(template: VmTemplate, ctx: LaunchContext): string[
       "-tpmdev",
       "emulator,id=tpm0,chardev=chrtpm",
       "-device",
-      "tpm-tis,tpmdev=tpm0",
+      qemuTpmDevice(arch),
     );
   }
 
   args.push("-nodefaults");
   return args;
-}
-
-function machineType(os: GuestOs, secureBoot: boolean): string {
-  if (os === "windows-11" || secureBoot) {
-    return "q35,smm=on";
-  }
-  return "q35";
-}
-
-function cpuType(os: GuestOs, accel: Accelerator): string {
-  if (isWindows(os)) {
-    const base = accel === "tcg" ? "qemu64" : "host";
-    return `${base},hv-relaxed,hv-vapic,hv-spinlocks=0x1fff,hv-time`;
-  }
-  return accel === "tcg" ? "qemu64" : "host";
 }
 
 function netdev(os: GuestOs, net: VmNetworking): string {

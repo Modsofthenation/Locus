@@ -122,6 +122,24 @@ describe("buildQemuArgv", () => {
     expect(argv.join(" ")).toContain("-m 4096");
   });
 
+  it("uses virt + virtio-gpu for aarch64 Linux guests", () => {
+    const argv = buildQemuArgv(ubuntuTemplate(), {
+      vmId: "abc",
+      diskPath: "/data/disk.qcow2",
+      seedDir: "/data/cidata",
+      qmpPort: 7100,
+      serialPort: 7101,
+      accelerator: "hvf",
+      arch: "aarch64",
+      ovmfCodePath: "/opt/homebrew/share/qemu/edk2-aarch64-code.fd",
+      ovmfVarsCopyPath: "/data/OVMF_VARS.fd",
+    });
+    expect(argv[argv.indexOf("-machine") + 1]).toBe("virt,gic-version=max");
+    expect(argv[argv.indexOf("-cpu") + 1]).toBe("host");
+    expect(argv).toContain("virtio-gpu-pci");
+    expect(argv.join(" ")).toContain("edk2-aarch64-code.fd");
+  });
+
   it("attaches a seed ISO instead of 9p when virtfs is unavailable", () => {
     const argv = buildQemuArgv(ubuntuTemplate(), {
       vmId: "abc",

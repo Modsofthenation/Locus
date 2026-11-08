@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DesignEmpty } from "./DesignEmpty";
 import { api } from "@/lib/api";
 import { Store, initialState, type Action } from "@/state/store";
+import { selectValue, setSelectValue } from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -205,7 +206,7 @@ describe("DesignEmpty", () => {
     render();
     expect(host.querySelector(".empty.design-start")).toBeTruthy();
     expect(host.querySelector(".eyebrow")).toBeNull();
-    expect(host.querySelector(".design-start-hero h2")?.textContent).toBe("What should we design?");
+    expect(host.querySelector(".empty-hero h2")?.textContent).toBe("What should we design?");
     expect(host.querySelector("[data-testid='locus-mascot']")?.getAttribute("data-pose")).toBe(
       "idle",
     );
@@ -454,12 +455,10 @@ describe("DesignEmpty", () => {
     act(() => {
       (host.querySelector('[aria-label="Look"]') as HTMLElement).click();
     });
-    const select = host.querySelector("[aria-label='Design system']") as HTMLSelectElement;
     act(() => {
-      select.value = second.id;
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Design system", second.id);
     });
-    expect(select.value).toBe(second.id);
+    expect(selectValue(host, "Design system")).toBe(second.id);
     await act(async () => {
       root.render(
         <Store.Provider
@@ -478,9 +477,7 @@ describe("DesignEmpty", () => {
     act(() => {
       (host.querySelector('[aria-label="Look"]') as HTMLElement).click();
     });
-    expect((host.querySelector("[aria-label='Design system']") as HTMLSelectElement).value).toBe(
-      second.id,
-    );
+    expect(selectValue(host, "Design system")).toBe(second.id);
   });
 
   it("surfaces kit starting points next to Landing / Dashboard", async () => {

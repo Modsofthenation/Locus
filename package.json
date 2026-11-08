@@ -1,6 +1,6 @@
 {
   "name": "locus",
-  "version": "0.16.1",
+  "version": "0.17.0",
   "private": true,
   "description": "Local AI coding agents that run in Ubuntu, Debian, Omarchy, and Windows VMs or Linux Docker containers on your machine",
   "repository": {
@@ -35,6 +35,8 @@
     "build": "npm run build --workspaces --if-present",
     "lint": "eslint .",
     "test": "npm run test --workspaces --if-present && node --test scripts/*.test.mjs",
+    "test:visual": "npm run test:visual --workspace=@locus/desktop",
+    "capture:readme": "npm run capture:readme --workspace=@locus/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "images": "docker build -t locus/agent:0.1 images/agent",
     "format:check": "prettier --check \"**/*.{ts,tsx,mjs,cjs,json,css}\"",

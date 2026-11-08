@@ -1,8 +1,8 @@
 {
   "name": "@locus/worker",
-  "version": "0.16.1",
+  "version": "0.17.0",
   "private": true,
-  "description": "LAN/cloud worker that runs Docker or Host guests for a Locus control plane",
+  "description": "LAN/cloud worker that runs Docker, Host, and QEMU guests for a Locus control plane",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

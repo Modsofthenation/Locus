@@ -4,6 +4,8 @@ import { useDeferredCollapse } from "@/lib/useDeferredCollapse";
 import { api } from "@/lib/api";
 import { useWorkspaceFullscreen } from "@/lib/useWorkspaceFullscreen";
 import { IconChevron, IconFolder, IconPanelRight, IconPlus } from "@/components/layout/Icons";
+import { MenuItem, OverflowMenu } from "@/components/layout/OverflowMenu";
+import { Select } from "@/components/layout/Select";
 import { AgentCanvasPane, useAgentCanvasFocus, useAgentCanvasOpen } from "./AgentCanvasPane";
 import { WorkspaceEditor } from "./WorkspaceEditor";
 import { WorkspaceFullscreenButton } from "./WorkspaceFullscreenButton";
@@ -189,15 +191,12 @@ export function HostWorkspace(props: { embedded?: boolean } = {}) {
           </button>
           <button
             type="button"
-            className={`btn small ghost ${showingBrowser ? "on" : ""}`}
-            aria-pressed={showingBrowser}
-            title="Isolated Chrome the agent drives (not your real profile)"
-            onClick={() => {
-              setView((current) => (current === "browser" ? "files" : "browser"));
-              setPreviewOn(false);
-            }}
+            className={`btn small ghost ${termCollapsed ? "" : "on"}`}
+            aria-pressed={!termCollapsed}
+            title="Terminal"
+            onClick={() => setTermCollapsed((current) => !current)}
           >
-            Browser
+            Terminal
           </button>
           {session?.agentCanvases?.length ? (
             <button
@@ -213,49 +212,55 @@ export function HostWorkspace(props: { embedded?: boolean } = {}) {
               Canvas
             </button>
           ) : null}
-          <button
-            type="button"
-            className={`btn small ghost ${termCollapsed ? "" : "on"}`}
-            aria-pressed={!termCollapsed}
-            title="Terminal"
-            onClick={() => setTermCollapsed((current) => !current)}
+          <OverflowMenu
+            className="host-workspace-more"
+            title="More"
+            align="right"
+            toggleClassName="btn small ghost"
           >
-            Terminal
-          </button>
-          <button
-            type="button"
-            className="btn small ghost"
-            title="Hide preview, browser, and terminal"
-            onClick={() => {
-              setView("files");
-              setPreviewOn(false);
-              setTermCollapsed(true);
-            }}
-          >
-            Focus editor
-          </button>
-          <button
-            type="button"
-            className={`btn small ghost ${previewOn ? "on" : ""}`}
-            aria-pressed={previewOn}
-            title="Preview"
-            disabled={!active}
-            onClick={() => {
-              setView("files");
-              setPreviewOn((on) => !on);
-            }}
-          >
-            Preview{active ? ` :${active.port}` : ""}
-          </button>
+            <MenuItem
+              active={showingBrowser}
+              onClick={() => {
+                setView((current) => (current === "browser" ? "files" : "browser"));
+                setPreviewOn(false);
+              }}
+            >
+              Browser
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                setView("files");
+                setPreviewOn(false);
+                setTermCollapsed(true);
+              }}
+            >
+              Focus editor
+            </MenuItem>
+            <MenuItem
+              active={previewOn}
+              disabled={!active}
+              onClick={() => {
+                setView("files");
+                setPreviewOn((on) => !on);
+              }}
+            >
+              Preview{active ? ` :${active.port}` : ""}
+            </MenuItem>
+          </OverflowMenu>
         </div>
         <div className="vm-toolbar-actions">
           {showingPreview && preview.ports.length > 1 ? (
-            <select
+            <Select
               className="preview-port"
-              aria-label="Preview port"
-              value={active?.port}
-              onChange={(e) => {
-                const port = Number(e.target.value);
+              compact
+              ariaLabel="Preview port"
+              value={String(active?.port ?? "")}
+              options={preview.ports.map((port) => ({
+                value: String(port),
+                label: `:${port}`,
+              }))}
+              onChange={(value) => {
+                const port = Number(value);
                 if (!sessionId || !Number.isInteger(port)) return;
                 void api
                   .patchSession(sessionId, { preview: { port, path: active?.path } })
@@ -263,13 +268,7 @@ export function HostWorkspace(props: { embedded?: boolean } = {}) {
                     dispatch({ type: "session", session: updated });
                   });
               }}
-            >
-              {preview.ports.map((port) => (
-                <option key={port} value={port}>
-                  :{port}
-                </option>
-              ))}
-            </select>
+            />
           ) : null}
           <WorkspaceFullscreenButton
             isFullscreen={filesFs.isFullscreen}

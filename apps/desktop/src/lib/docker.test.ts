@@ -53,10 +53,10 @@ describe("confirmStopContainers", () => {
     vi.restoreAllMocks();
   });
 
-  it("lists names and linked agents", () => {
+  it("lists names and linked agents", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     expect(
-      confirmStopContainers([
+      await confirmStopContainers([
         row({ id: "a", name: "web", state: "running" }),
         row({
           id: "b",
@@ -72,9 +72,9 @@ describe("confirmStopContainers", () => {
     expect(confirm.mock.calls[0]?.[0]).toMatch(/locus-1 is the Fix login agent/);
   });
 
-  it("returns false when there is nothing to stop", () => {
+  it("returns false when there is nothing to stop", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
-    expect(confirmStopContainers([])).toBe(false);
+    expect(await confirmStopContainers([])).toBe(false);
     expect(confirm).not.toHaveBeenCalled();
   });
 });
@@ -84,17 +84,20 @@ describe("confirmDockerContainerAction", () => {
     vi.restoreAllMocks();
   });
 
-  it("names the container and linked agent", () => {
+  it("names the container and linked agent", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     expect(
-      confirmDockerContainerAction(
+      await confirmDockerContainerAction(
         "stop",
         row({ id: "b", name: "locus-1", state: "running", sessionTitle: "Fix login", locus: true }),
       ),
     ).toBe(true);
     expect(confirm.mock.calls[0]?.[0]).toMatch(/Stop locus-1\? This is the Fix login agent/);
     expect(
-      confirmDockerContainerAction("restart", row({ id: "a", name: "web", state: "running" })),
+      await confirmDockerContainerAction(
+        "restart",
+        row({ id: "a", name: "web", state: "running" }),
+      ),
     ).toBe(true);
     expect(confirm.mock.calls[1]?.[0]).toMatch(/Restart web\?/);
   });
@@ -105,9 +108,11 @@ describe("confirmRestartContainers", () => {
     vi.restoreAllMocks();
   });
 
-  it("lists names before restarting", () => {
+  it("lists names before restarting", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
-    expect(confirmRestartContainers([row({ id: "a", name: "web", state: "running" })])).toBe(true);
+    expect(await confirmRestartContainers([row({ id: "a", name: "web", state: "running" })])).toBe(
+      true,
+    );
     expect(confirm.mock.calls[0]?.[0]).toMatch(/Restart 1 container/);
     expect(confirm.mock.calls[0]?.[0]).toMatch(/web/);
   });

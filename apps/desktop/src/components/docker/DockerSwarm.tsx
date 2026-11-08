@@ -8,9 +8,11 @@ import {
   type DockerSwarmTask,
 } from "@locus/shared";
 import { api } from "@/lib/api";
+import { askPrompt } from "@/lib/dialog";
 import { countDockerLogLevels, formatLogTime, parseDockerLogs } from "@/lib/docker";
 import { useStore } from "@/state/store";
-import { Mascot } from "@/components/layout/Mascot";
+import { EmptyHero } from "@/components/layout/EmptyHero";
+import { ErrorBanner } from "@/components/layout/Skeleton";
 import { SearchField } from "@/components/layout/SearchField";
 
 type SwarmTab = "logs" | "tasks";
@@ -116,10 +118,10 @@ export function DockerSwarmPane() {
   async function scaleService(row: DockerSwarmService) {
     if (busy || row.mode.toLowerCase() === "global") return;
     const current = Number.parseInt(row.replicas.split("/")[1] ?? row.replicas, 10);
-    const raw = window.prompt(
-      `Replicas for ${row.name}`,
-      String(Number.isFinite(current) ? current : 1),
-    );
+    const raw = await askPrompt({
+      title: `Replicas for ${row.name}`,
+      value: String(Number.isFinite(current) ? current : 1),
+    });
     if (raw == null) return;
     const replicas = Number.parseInt(raw, 10);
     if (!Number.isFinite(replicas) || replicas < 0) {
@@ -142,18 +144,13 @@ export function DockerSwarmPane() {
     return (
       <div className="empty">
         <div className="empty-card">
-          <div className="empty-hero">
-            <Mascot pose="rest" size={76} />
-            <div>
-              <p className="eyebrow">Docker Swarm</p>
-              <h2>Swarm inactive</h2>
-            </div>
-          </div>
-          <p>
-            This Docker engine is not in Swarm mode. Initialize a swarm with the Docker CLI, or
-            point <code>DOCKER_HOST</code> at a manager. This is the local engine — not Locus Swarm
-            teams, and not the Portainer integration.
-          </p>
+          <EmptyHero
+            pose="rest"
+            size={76}
+            eyebrow="Docker Swarm"
+            title="Swarm inactive"
+            lead="This Docker engine is not in Swarm mode. Initialize a swarm with the Docker CLI, or point DOCKER_HOST at a manager. This is the local engine — not Locus Swarm teams, and not the Portainer integration."
+          />
           <div className="empty-actions">
             <button className="btn" onClick={() => void refresh().catch(() => undefined)}>
               Refresh
@@ -173,18 +170,17 @@ export function DockerSwarmPane() {
     return (
       <div className="empty">
         <div className="empty-card">
-          <div className="empty-hero">
-            <Mascot pose="rest" size={76} />
-            <div>
-              <p className="eyebrow">Docker Swarm</p>
-              <h2>{manager ? "Pick a service" : "Worker node"}</h2>
-            </div>
-          </div>
-          <p>
-            {manager
-              ? "Select a service or node in the sidebar. Scale waits for a confirm. Agents can call docker_swarm on this engine."
-              : "This engine is a Swarm worker. Connect Locus to a manager to list services."}
-          </p>
+          <EmptyHero
+            pose="rest"
+            size={76}
+            eyebrow="Docker Swarm"
+            title={manager ? "Pick a service" : "Worker node"}
+            lead={
+              manager
+                ? "Select a service or node in the sidebar. Scale waits for a confirm. Agents can call docker_swarm on this engine."
+                : "This engine is a Swarm worker. Connect Locus to a manager to list services."
+            }
+          />
         </div>
       </div>
     );
@@ -239,7 +235,7 @@ export function DockerSwarmPane() {
           <dd>{service.replicas}</dd>
         </div>
       </dl>
-      {error ? <p className="docker-error">{error}</p> : null}
+      {error ? <ErrorBanner message={error} /> : null}
       <div className="docker-tabs" role="tablist" aria-label="Service views">
         {(["logs", "tasks"] as const).map((id) => (
           <button
@@ -330,7 +326,7 @@ function SwarmNodeDetail({ node, error }: { node: DockerSwarmNode; error: string
           <dd>{node.managerStatus || "—"}</dd>
         </div>
       </dl>
-      {error ? <p className="docker-error">{error}</p> : null}
+      {error ? <ErrorBanner message={error} /> : null}
       {node.engineVersion ? (
         <p className="hint" style={{ padding: "0 18px" }}>
           Engine {node.engineVersion}

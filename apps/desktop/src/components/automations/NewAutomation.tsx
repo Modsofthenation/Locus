@@ -11,7 +11,6 @@ import type {
   NetworkJail,
 } from "@locus/shared";
 import {
-  AUTONOMY_TIERS,
   DEFAULT_DOCKER_IMAGE,
   DEFAULT_WEBHOOK_PROMPT,
   MAX_AUTOMATION_CHATS,
@@ -20,11 +19,10 @@ import {
   buildAutomationSchedule,
   automationStarterById,
   computeNextRunAt,
-  formatAutonomy,
   formatClockTime,
   formatLocalTimezone,
-  formatNetworkJail,
   formatNextFire,
+  isNetworkJail,
   parseClockTime,
   SCHEDULE_WEEKDAYS,
   isClockSchedule,
@@ -72,7 +70,13 @@ import {
 import { HostFolderField } from "@/components/workspace/HostFolderField";
 import { EnvironmentPicker } from "@/components/settings/EnvironmentPicker";
 import { ConfirmModal } from "@/components/layout/ConfirmModal";
-import { useDialogFocus } from "@/lib/useDialogFocus";
+import { FormTabs, Select } from "@/components/layout/Select";
+import {
+  AUTONOMY_SELECT_OPTIONS,
+  JAIL_SELECT_OPTIONS,
+  OVERLAP_SELECT_OPTIONS,
+} from "@/lib/formOptions";
+import { Modal } from "@/components/layout/Modal";
 
 export function NewAutomationModal() {
   const { state, dispatch } = useStore();
@@ -172,7 +176,7 @@ export function NewAutomationModal() {
   const [confirmStarterId, setConfirmStarterId] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const [advancedTab, setAdvancedTab] = useState<"runtime" | "agent" | "notify">("runtime");
 
   const osTemplates = useMemo(() => templates.filter((t) => t.os === os), [templates, os]);
   const provider = providers.find((p) => p.id === providerId);
@@ -341,7 +345,6 @@ export function NewAutomationModal() {
   const requestCloseRef = useRef(requestClose);
   requestCloseRef.current = requestClose;
   const onDialogClose = useCallback(() => requestCloseRef.current(), []);
-  useDialogFocus(state.newAutomationOpen, onDialogClose, dialogRef);
 
   if (!state.newAutomationOpen) return null;
 
@@ -363,7 +366,9 @@ export function NewAutomationModal() {
     setError(null);
     const parsed = parsedRepo;
     if ((kind === "forge" || kind === "pull_request") && !parsed) {
-      setError("Attach a GitHub, GitLab, or Bitbucket repository to run on git events");
+      setError(
+        "Attach a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps repository to run on git events",
+      );
       return;
     }
     if (kind === "webhook" && !name.trim()) {
@@ -390,7 +395,7 @@ export function NewAutomationModal() {
       return;
     }
     if (repo.trim() && !parsed) {
-      setError("Enter a GitHub, GitLab, or Bitbucket URL");
+      setError("Enter a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps URL");
       return;
     }
     const repoValue = parsed
@@ -518,326 +523,333 @@ export function NewAutomationModal() {
   }
 
   return (
-    <div className="modal-backdrop" onClick={requestClose}>
-      <div
-        className="modal auto-modal"
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="new-automation-title"
-        onClick={(e) => e.stopPropagation()}
-        onInput={() => setDirty(true)}
-        onChange={() => setDirty(true)}
-      >
-        <h2 id="new-automation-title">{editing ? "Edit automation" : "New automation"}</h2>
-        {!editing ? (
-          <p className="modal-lead">
-            When an event fires, run a prompt on a guest and keep the history.
+    <Modal
+      titleId="new-automation-title"
+      className="auto-modal"
+      onClose={onDialogClose}
+      onInput={() => setDirty(true)}
+      onChange={() => setDirty(true)}
+    >
+      <h2 id="new-automation-title">{editing ? "Edit automation" : "New automation"}</h2>
+      {!editing ? (
+        <p className="modal-lead">
+          When an event fires, run a prompt on a guest and keep the history.
+        </p>
+      ) : null}
+      {!editing ? (
+        <div className="auto-modal-starters" data-testid="auto-modal-starters">
+          <p className="hint">
+            Start from a template, or duplicate an existing job from the detail pane.
           </p>
-        ) : null}
-        {!editing ? (
-          <div className="auto-modal-starters" data-testid="auto-modal-starters">
-            <p className="hint">
-              Start from a template, or duplicate an existing job from the detail pane.
+          <div className="recipe-grid pills" role="group" aria-label="Automation starters">
+            {AUTOMATION_STARTERS.map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                className={`os-card${state.automationStarterId === row.id ? " active" : ""}`}
+                title={row.blurb}
+                onClick={() => {
+                  const current = automationStarterById(state.automationStarterId);
+                  const untouched =
+                    (!name.trim() && !prompt.trim()) ||
+                    (current != null && name === current.name && prompt === current.prompt);
+                  if (!untouched && state.automationStarterId !== row.id) {
+                    setConfirmStarterId(row.id);
+                    return;
+                  }
+                  dispatch({ type: "newAutomation", open: true, starterId: row.id });
+                }}
+              >
+                <h3>{row.title}</h3>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <section className="auto-form-section" data-testid="auto-when">
+        <h3>When</h3>
+        <div
+          className="auto-trigger-grid"
+          role="radiogroup"
+          aria-label="Trigger"
+          data-testid="auto-trigger-family"
+        >
+          {AUTOMATION_TRIGGER_FAMILIES.map((row) => {
+            const selected = automationTriggerFamily(kind) === row.id;
+            return (
+              <button
+                key={row.id}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                className={`auto-trigger-card${selected ? " active" : ""}`}
+                onClick={() => {
+                  setDirty(true);
+                  setKind(defaultKindForTriggerFamily(row.id, kind));
+                }}
+              >
+                <strong>{row.title}</strong>
+                <span className="hint">{row.blurb}</span>
+              </button>
+            );
+          })}
+        </div>
+        {isClockScheduleKind(kind) ? (
+          <div className="grid-2">
+            <div className="field">
+              <label>Schedule</label>
+              <Select
+                ariaLabel="Schedule"
+                value={kind}
+                options={CLOCK_SCHEDULE_KINDS.map((row) => ({
+                  value: row,
+                  label:
+                    row === "interval"
+                      ? "Every N minutes"
+                      : row === "adaptive"
+                        ? "Adaptive (by time of day)"
+                        : row === "daily"
+                          ? "Daily"
+                          : row === "weekly"
+                            ? "Weekly"
+                            : "Cron",
+                }))}
+                onChange={(value) => setKind(value as AutomationSchedule["kind"])}
+              />
+            </div>
+            {kind === "interval" ? (
+              <div className="field">
+                <label>Minutes</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={everyMinutes}
+                  onChange={(e) => setEveryMinutes(Number(e.target.value))}
+                />
+              </div>
+            ) : kind === "adaptive" ? (
+              <p className="hint" style={{ margin: 0, alignSelf: "center" }}>
+                Faster inside a daily window, slower the rest of the day.
+              </p>
+            ) : kind === "cron" ? (
+              <div className="field">
+                <label>Expression</label>
+                <input
+                  value={cronExpr}
+                  onChange={(e) => setCronExpr(e.target.value)}
+                  placeholder="0 9 * * 1"
+                />
+              </div>
+            ) : (
+              <div className="field">
+                <label>Time</label>
+                <input type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+              </div>
+            )}
+          </div>
+        ) : kind === "forge" ? (
+          <p className="hint">Webhook plus polling for a new commit. Attach a repo below.</p>
+        ) : kind === "pull_request" ? (
+          <p className="hint">Webhook plus polling for a new pull request. Attach a repo below.</p>
+        ) : (
+          <p className="hint">
+            POST /api/hooks with X-Locus-Secret or a Slack signing secret. No git repo required.
+          </p>
+        )}
+        {kind === "daily" || kind === "weekly" || kind === "adaptive" || kind === "cron" ? (
+          <div className="field">
+            <label>Timezone</label>
+            <input
+              aria-label="Timezone"
+              value={timeZone}
+              onChange={(e) => setTimeZone(e.target.value)}
+              placeholder="America/Los_Angeles"
+            />
+            <p className="hint" data-testid="auto-tz-hint">
+              Clock fires use this IANA zone. This machine is {formatLocalTimezone()}.
             </p>
-            <div className="recipe-grid pills" role="group" aria-label="Automation starters">
-              {AUTOMATION_STARTERS.map((row) => (
-                <button
-                  key={row.id}
-                  type="button"
-                  className={`os-card${state.automationStarterId === row.id ? " active" : ""}`}
-                  title={row.blurb}
-                  onClick={() => {
-                    const current = automationStarterById(state.automationStarterId);
-                    const untouched =
-                      (!name.trim() && !prompt.trim()) ||
-                      (current != null && name === current.name && prompt === current.prompt);
-                    if (!untouched && state.automationStarterId !== row.id) {
-                      setConfirmStarterId(row.id);
-                      return;
-                    }
-                    dispatch({ type: "newAutomation", open: true, starterId: row.id });
-                  }}
-                >
-                  <h3>{row.title}</h3>
-                </button>
+          </div>
+        ) : null}
+        {kind === "adaptive" ? (
+          <div className="field">
+            <label>Days</label>
+            <div className="auto-schedule-fields" role="group" aria-label="Weekdays">
+              {SCHEDULE_WEEKDAYS.map((day, index) => (
+                <label key={day} className="hint check">
+                  <input
+                    type="checkbox"
+                    checked={!weekdays.length || weekdays.includes(index)}
+                    onChange={(e) => {
+                      const current = weekdays.length
+                        ? weekdays
+                        : SCHEDULE_WEEKDAYS.map((_, i) => i);
+                      setWeekdays(
+                        e.target.checked
+                          ? [...new Set([...current, index])]
+                          : current.filter((value) => value !== index),
+                      );
+                    }}
+                  />
+                  {day.slice(0, 3)}
+                </label>
               ))}
             </div>
+            <p className="hint">All checked means every day. Uncheck a day to skip it.</p>
           </div>
         ) : null}
-        <section className="auto-form-section" data-testid="auto-when">
-          <h3>When</h3>
-          <div
-            className="auto-trigger-grid"
-            role="radiogroup"
-            aria-label="Trigger"
-            data-testid="auto-trigger-family"
-          >
-            {AUTOMATION_TRIGGER_FAMILIES.map((row) => {
-              const selected = automationTriggerFamily(kind) === row.id;
-              return (
-                <button
-                  key={row.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  className={`auto-trigger-card${selected ? " active" : ""}`}
-                  onClick={() => {
-                    setDirty(true);
-                    setKind(defaultKindForTriggerFamily(row.id, kind));
-                  }}
-                >
-                  <strong>{row.title}</strong>
-                  <span className="hint">{row.blurb}</span>
-                </button>
-              );
-            })}
-          </div>
-          {isClockScheduleKind(kind) ? (
-            <div className="grid-2">
-              <div className="field">
-                <label>Schedule</label>
-                <select
-                  value={kind}
-                  onChange={(e) => setKind(e.target.value as AutomationSchedule["kind"])}
-                >
-                  {CLOCK_SCHEDULE_KINDS.map((row) => (
-                    <option key={row} value={row}>
-                      {row === "interval"
-                        ? "Every N minutes"
-                        : row === "adaptive"
-                          ? "Adaptive (by time of day)"
-                          : row === "daily"
-                            ? "Daily"
-                            : row === "weekly"
-                              ? "Weekly"
-                              : "Cron"}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {kind === "interval" ? (
-                <div className="field">
-                  <label>Minutes</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={everyMinutes}
-                    onChange={(e) => setEveryMinutes(Number(e.target.value))}
-                  />
-                </div>
-              ) : kind === "adaptive" ? (
-                <p className="hint" style={{ margin: 0, alignSelf: "center" }}>
-                  Faster inside a daily window, slower the rest of the day.
-                </p>
-              ) : kind === "cron" ? (
-                <div className="field">
-                  <label>Expression</label>
-                  <input
-                    value={cronExpr}
-                    onChange={(e) => setCronExpr(e.target.value)}
-                    placeholder="0 9 * * 1"
-                  />
-                </div>
-              ) : (
-                <div className="field">
-                  <label>Time</label>
-                  <input type="time" value={time} onChange={(e) => setTime(e.target.value)} />
-                </div>
-              )}
-            </div>
-          ) : kind === "forge" ? (
-            <p className="hint">Webhook plus polling for a new commit. Attach a repo below.</p>
-          ) : kind === "pull_request" ? (
-            <p className="hint">
-              Webhook plus polling for a new pull request. Attach a repo below.
-            </p>
-          ) : (
-            <p className="hint">
-              POST /api/hooks with X-Locus-Secret or a Slack signing secret. No git repo required.
-            </p>
-          )}
-          {kind === "daily" || kind === "weekly" || kind === "adaptive" || kind === "cron" ? (
-            <div className="field">
-              <label>Timezone</label>
-              <input
-                aria-label="Timezone"
-                value={timeZone}
-                onChange={(e) => setTimeZone(e.target.value)}
-                placeholder="America/Los_Angeles"
-              />
-              <p className="hint" data-testid="auto-tz-hint">
-                Clock fires use this IANA zone. This machine is {formatLocalTimezone()}.
-              </p>
-            </div>
-          ) : null}
-          {kind === "adaptive" ? (
-            <div className="field">
-              <label>Days</label>
-              <div className="auto-schedule-fields" role="group" aria-label="Weekdays">
-                {SCHEDULE_WEEKDAYS.map((day, index) => (
-                  <label key={day} className="hint check">
-                    <input
-                      type="checkbox"
-                      checked={!weekdays.length || weekdays.includes(index)}
-                      onChange={(e) => {
-                        const current = weekdays.length
-                          ? weekdays
-                          : SCHEDULE_WEEKDAYS.map((_, i) => i);
-                        setWeekdays(
-                          e.target.checked
-                            ? [...new Set([...current, index])]
-                            : current.filter((value) => value !== index),
-                        );
-                      }}
-                    />
-                    {day.slice(0, 3)}
-                  </label>
-                ))}
-              </div>
-              <p className="hint">All checked means every day. Uncheck a day to skip it.</p>
-            </div>
-          ) : null}
-          {(() => {
-            try {
-              const sched = schedule();
-              if (validateSchedule(sched)) return null;
-              if (sched.kind === "webhook") {
-                return (
-                  <p className="hint" data-testid="auto-next-fire-preview">
-                    Fires on each accepted webhook POST.
-                  </p>
-                );
-              }
-              if (!isClockSchedule(sched)) return null;
-              const nextAt = computeNextRunAt(sched).toISOString();
-              const label = formatNextFire({
-                enabled: true,
-                schedule: sched,
-                nextRunAt: nextAt,
-              });
-              if (!label) return null;
+        {(() => {
+          try {
+            const sched = schedule();
+            if (validateSchedule(sched)) return null;
+            if (sched.kind === "webhook") {
               return (
                 <p className="hint" data-testid="auto-next-fire-preview">
-                  Next fire ≈{" "}
-                  {new Date(label).toLocaleString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  Fires on each accepted webhook POST.
                 </p>
               );
-            } catch {
-              return null;
             }
-          })()}
-          {kind === "adaptive" && (
-            <>
-              <div className="grid-2">
-                <div className="field">
-                  <label>From</label>
-                  <input
-                    type="time"
-                    value={windowStart}
-                    onChange={(e) => setWindowStart(e.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label>To</label>
-                  <input
-                    type="time"
-                    value={windowEnd}
-                    onChange={(e) => setWindowEnd(e.target.value)}
-                  />
-                </div>
+            if (!isClockSchedule(sched)) return null;
+            const nextAt = computeNextRunAt(sched).toISOString();
+            const label = formatNextFire({
+              enabled: true,
+              schedule: sched,
+              nextRunAt: nextAt,
+            });
+            if (!label) return null;
+            return (
+              <p className="hint" data-testid="auto-next-fire-preview">
+                Next fire ≈{" "}
+                {new Date(label).toLocaleString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </p>
+            );
+          } catch {
+            return null;
+          }
+        })()}
+        {kind === "adaptive" && (
+          <>
+            <div className="grid-2">
+              <div className="field">
+                <label>From</label>
+                <input
+                  type="time"
+                  value={windowStart}
+                  onChange={(e) => setWindowStart(e.target.value)}
+                />
               </div>
-              <div className="grid-2">
-                <div className="field">
-                  <label>Minutes during window</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={everyMinutes}
-                    onChange={(e) => setEveryMinutes(Number(e.target.value))}
-                  />
-                </div>
-                <div className="field">
-                  <label>Minutes otherwise</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={otherwiseEveryMinutes}
-                    onChange={(e) => setOtherwiseEveryMinutes(Number(e.target.value))}
-                  />
-                </div>
+              <div className="field">
+                <label>To</label>
+                <input
+                  type="time"
+                  value={windowEnd}
+                  onChange={(e) => setWindowEnd(e.target.value)}
+                />
               </div>
-            </>
-          )}
-          {kind === "weekly" && (
-            <div className="field">
-              <label>Weekday</label>
-              <select value={weekday} onChange={(e) => setWeekday(Number(e.target.value))}>
-                {SCHEDULE_WEEKDAYS.map((day, i) => (
-                  <option key={day} value={i}>
-                    {day}
-                  </option>
-                ))}
-              </select>
             </div>
-          )}
-        </section>
-        <section className="auto-form-section" data-testid="auto-then">
-          <h3>Then</h3>
+            <div className="grid-2">
+              <div className="field">
+                <label>Minutes during window</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={everyMinutes}
+                  onChange={(e) => setEveryMinutes(Number(e.target.value))}
+                />
+              </div>
+              <div className="field">
+                <label>Minutes otherwise</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={otherwiseEveryMinutes}
+                  onChange={(e) => setOtherwiseEveryMinutes(Number(e.target.value))}
+                />
+              </div>
+            </div>
+          </>
+        )}
+        {kind === "weekly" && (
           <div className="field">
-            <label>Name</label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Nightly tests"
+            <label>Weekday</label>
+            <Select
+              ariaLabel="Weekday"
+              value={String(weekday)}
+              options={SCHEDULE_WEEKDAYS.map((day, i) => ({
+                value: String(i),
+                label: day,
+              }))}
+              onChange={(value) => setWeekday(Number(value))}
             />
           </div>
-          <div className="field">
-            <label>Prompt</label>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder={
-                kind === "webhook" ? DEFAULT_WEBHOOK_PROMPT : "What should the agent do each run?"
-              }
-              rows={6}
-            />
-          </div>
-        </section>
-        <RepoField
-          repos={state.repos}
-          repoId={repoId}
-          url={repo}
-          onRepoId={setRepoId}
-          onUrl={setRepo}
-          onRef={setRef}
+        )}
+      </section>
+      <section className="auto-form-section" data-testid="auto-then">
+        <h3>Then</h3>
+        <div className="field">
+          <label>Name</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Nightly tests"
+          />
+        </div>
+        <div className="field">
+          <label>Prompt</label>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder={
+              kind === "webhook" ? DEFAULT_WEBHOOK_PROMPT : "What should the agent do each run?"
+            }
+            rows={6}
+          />
+        </div>
+      </section>
+      <RepoField
+        repos={state.repos}
+        repoId={repoId}
+        url={repo}
+        onRepoId={setRepoId}
+        onUrl={setRepo}
+        onRef={setRef}
+      />
+      {parsedRepo || repo.trim() || repoId ? (
+        <div className="field">
+          <label>Git ref (optional)</label>
+          <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="main" />
+        </div>
+      ) : null}
+      <ModelPicker
+        providers={providers}
+        providerId={providerId}
+        model={model}
+        onChange={(next) => {
+          setProviderId(next.providerId);
+          setModel(next.model);
+        }}
+      />
+      <details className="advanced">
+        <summary>More options</summary>
+        <p className="hint">
+          Named environment, placement, runtime, OS, hardware, jail, spend, autonomy, notify, MCP,
+          and reuse. When, Then, repo, and model stay above.
+        </p>
+        <FormTabs
+          ariaLabel="More options"
+          value={advancedTab}
+          onChange={setAdvancedTab}
+          tabs={[
+            { id: "runtime", label: "Runtime" },
+            { id: "agent", label: "Agent" },
+            { id: "notify", label: "Notify" },
+          ]}
         />
-        {parsedRepo || repo.trim() || repoId ? (
-          <div className="field">
-            <label>Git ref (optional)</label>
-            <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="main" />
-          </div>
-        ) : null}
-        <ModelPicker
-          providers={providers}
-          providerId={providerId}
-          model={model}
-          onChange={(next) => {
-            setProviderId(next.providerId);
-            setModel(next.model);
-          }}
-        />
-        <details className="advanced">
-          <summary>More options</summary>
-          <p className="hint">
-            Named environment, placement, runtime, OS, hardware, jail, spend, autonomy, notify, MCP,
-            and reuse. When, Then, repo, and model stay above.
-          </p>
+        <div hidden={advancedTab !== "runtime"}>
           <EnvironmentPicker
             value={namedEnvId}
             noneLabel="None — pick runtime below"
@@ -860,12 +872,10 @@ export function NewAutomationModal() {
             value={backendId}
             onChange={(id) => {
               setBackendId(id);
-              if (id && runtime === "vm") setRuntime("docker");
             }}
           />
           <RuntimeToggle
             value={runtime}
-            runtimes={backendId ? ["docker", "host"] : undefined}
             disabledRuntimes={
               state.config?.managedPolicy?.active &&
               state.config.managedPolicy.locked.includes("hostAutomations")
@@ -874,7 +884,6 @@ export function NewAutomationModal() {
             }
             onChange={(next) => {
               setRuntime(next);
-              if (next === "vm") setBackendId("");
               const nextOs =
                 next !== "vm" && (os === "windows-11" || os === "windows-10") ? "ubuntu" : os;
               if (nextOs !== os) setOs(nextOs);
@@ -889,7 +898,7 @@ export function NewAutomationModal() {
           />
           <p className="hint">
             {backendId
-              ? `${runtime === "host" ? "The host workspace" : "The container"} runs on ${selectedWorker ? workerWhereLabel(selectedWorker) : "the worker"}. Chat and keys stay on this machine.${
+              ? `${runtime === "host" ? "The host workspace" : runtime === "vm" ? "The VM" : "The container"} runs on ${selectedWorker ? workerWhereLabel(selectedWorker) : "the worker"}. Chat and keys stay on this machine.${
                   selectedWorker && workerIsMetered(selectedWorker)
                     ? " Stop destroys the guest. Idle TTL applies on the metered VM."
                     : ""
@@ -921,13 +930,12 @@ export function NewAutomationModal() {
           {runtime === "host" ? null : (
             <div className="field">
               <label>Template</label>
-              <select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-                {osTemplates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
+              <Select
+                ariaLabel="Template"
+                value={templateId}
+                options={osTemplates.map((t) => ({ value: t.id, label: t.name }))}
+                onChange={setTemplateId}
+              />
             </div>
           )}
           {runtime === "vm" ? (
@@ -953,37 +961,41 @@ export function NewAutomationModal() {
               <label>
                 {runtime === "docker" ? "Workspace image (optional)" : "Golden image (optional)"}
               </label>
-              <select value={imageId} onChange={(e) => setImageId(e.target.value)}>
-                <option value="">
-                  {runtime === "docker" ? "Empty /workspace" : "Fresh disk from ISO / cloud image"}
-                </option>
-                {images
-                  .filter((img) =>
-                    runtime === "docker"
-                      ? img.runtime === "docker"
-                      : img.os === os && img.runtime !== "docker",
-                  )
-                  .map((img) => (
-                    <option key={img.id} value={img.id}>
-                      {img.name}
-                    </option>
-                  ))}
-              </select>
+              <Select
+                ariaLabel={runtime === "docker" ? "Workspace image" : "Golden image"}
+                value={imageId}
+                options={[
+                  {
+                    value: "",
+                    label:
+                      runtime === "docker"
+                        ? "Empty /workspace"
+                        : "Fresh disk from ISO / cloud image",
+                  },
+                  ...images
+                    .filter((img) =>
+                      runtime === "docker"
+                        ? img.runtime === "docker"
+                        : img.os === os && img.runtime !== "docker",
+                    )
+                    .map((img) => ({ value: img.id, label: img.name })),
+                ]}
+                onChange={setImageId}
+              />
             </div>
           )}
           {runtime === "host" ? null : (
             <div className="field">
               <label>Jail</label>
-              <select
-                aria-label="Jail"
+              <Select
+                ariaLabel="Jail"
                 value={network}
                 disabled={Boolean(policyForcedJail(state.config?.managedPolicy))}
-                onChange={(e) => setNetwork(e.target.value as NetworkJail)}
-              >
-                <option value="open">{formatNetworkJail("open")}</option>
-                <option value="restricted">{formatNetworkJail("restricted")}</option>
-                <option value="none">{formatNetworkJail("none")}</option>
-              </select>
+                options={JAIL_SELECT_OPTIONS}
+                onChange={(value) => {
+                  if (isNetworkJail(value)) setNetwork(value);
+                }}
+              />
               <p className="hint">
                 Adaptive and webhook jobs reuse this jail on the named machine.
               </p>
@@ -1001,6 +1013,8 @@ export function NewAutomationModal() {
                 : "Start the VM for each run"}
             </label>
           )}
+        </div>
+        <div hidden={advancedTab !== "agent"}>
           <label className="hint check">
             <input
               type="checkbox"
@@ -1014,27 +1028,24 @@ export function NewAutomationModal() {
           {parseProductMode(state.config?.productMode) === "swarm" ? (
             <div className="field">
               <label htmlFor="routine-owner">Owning teammate</label>
-              <select
+              <Select
                 id="routine-owner"
-                aria-label="Owning teammate"
+                ariaLabel="Owning teammate"
                 value={ownerSessionId}
-                onChange={(e) => setOwnerSessionId(e.target.value)}
-              >
-                <option value="">Unassigned</option>
-                {state.sessions
-                  .filter(
-                    (row) =>
-                      !row.archived &&
-                      sessionMatchesSurface(row, "swarm") &&
-                      !row.projectId &&
-                      !row.automationId,
-                  )
-                  .map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {sessionDisplayName(row)}
-                    </option>
-                  ))}
-              </select>
+                options={[
+                  { value: "", label: "Unassigned" },
+                  ...state.sessions
+                    .filter(
+                      (row) =>
+                        !row.archived &&
+                        sessionMatchesSurface(row, "swarm") &&
+                        !row.projectId &&
+                        !row.automationId,
+                    )
+                    .map((row) => ({ value: row.id, label: sessionDisplayName(row) })),
+                ]}
+                onChange={setOwnerSessionId}
+              />
               <p className="hint">Shown on that teammate&apos;s computer panel in Swarm.</p>
             </div>
           ) : null}
@@ -1055,42 +1066,16 @@ export function NewAutomationModal() {
             opens a new chat. Reuse keeps the full thread; memory keeps a distilled list. Do not use
             this for secrets.
           </p>
-          <NotifyFields
-            notifyWebhook={notifyWebhook}
-            notifyChannel={notifyChannel}
-            onWebhook={setNotifyWebhook}
-            onChannel={setNotifyChannel}
-          />
-          <McpAllowlistField
-            config={state.config ?? undefined}
-            value={allowedMcpTools}
-            onChange={setAllowedMcpTools}
-          />
-          {runtime === "host" ? null : (
-            <div className="field">
-              <label>Extra allow hosts</label>
-              <input
-                value={allowHosts}
-                onChange={(e) => setAllowHosts(e.target.value)}
-                placeholder="your-domain.atlassian.net, grafana.example.com, api.incident.io"
-              />
-              <p className="hint">Added to the restricted jail allowlist for this automation.</p>
-            </div>
-          )}
           <div className="grid-2 grid-spend">
             <div className="field">
               <label>Autonomy</label>
-              <select
+              <Select
+                ariaLabel="Autonomy"
                 value={autonomy}
                 disabled={!policyAllowsAutonomous(state.config?.managedPolicy)}
-                onChange={(e) => setAutonomy(parseAutonomyTier(e.target.value))}
-              >
-                {AUTONOMY_TIERS.map((tier) => (
-                  <option key={tier} value={tier}>
-                    {formatAutonomy(tier)}
-                  </option>
-                ))}
-              </select>
+                options={AUTONOMY_SELECT_OPTIONS}
+                onChange={(value) => setAutonomy(parseAutonomyTier(value))}
+              />
             </div>
             <div className="field">
               <label>Spend cap (USD)</label>
@@ -1120,15 +1105,12 @@ export function NewAutomationModal() {
           </div>
           <div className="field">
             <label>Overlap</label>
-            <select
-              aria-label="Overlap"
+            <Select
+              ariaLabel="Overlap"
               value={overlap}
-              onChange={(e) => setOverlap(e.target.value as "skip" | "coalesce" | "queue")}
-            >
-              <option value="skip">Skip if busy</option>
-              <option value="coalesce">Run latest when free</option>
-              <option value="queue">Queue one</option>
-            </select>
+              options={OVERLAP_SELECT_OPTIONS}
+              onChange={(value) => setOverlap(value as "skip" | "coalesce" | "queue")}
+            />
           </div>
           <div className="field">
             <label>Blackout dates</label>
@@ -1139,6 +1121,30 @@ export function NewAutomationModal() {
               onChange={(e) => setBlackout(e.target.value)}
             />
           </div>
+        </div>
+        <div hidden={advancedTab !== "notify"}>
+          <NotifyFields
+            notifyWebhook={notifyWebhook}
+            notifyChannel={notifyChannel}
+            onWebhook={setNotifyWebhook}
+            onChannel={setNotifyChannel}
+          />
+          <McpAllowlistField
+            config={state.config ?? undefined}
+            value={allowedMcpTools}
+            onChange={setAllowedMcpTools}
+          />
+          {runtime === "host" ? null : (
+            <div className="field">
+              <label>Extra allow hosts</label>
+              <input
+                value={allowHosts}
+                onChange={(e) => setAllowHosts(e.target.value)}
+                placeholder="your-domain.atlassian.net, grafana.example.com, api.incident.io"
+              />
+              <p className="hint">Added to the restricted jail allowlist for this automation.</p>
+            </div>
+          )}
           <div className="field">
             <label>Notify</label>
             <label className="hint check">
@@ -1166,58 +1172,54 @@ export function NewAutomationModal() {
               Needs you
             </label>
           </div>
-        </details>
-        {error && (
-          <p className="scrim-note" style={{ color: "var(--danger)" }}>
-            {error}
-          </p>
-        )}
-        <div className="modal-actions">
-          <button className="btn ghost" onClick={requestClose}>
-            Cancel
-          </button>
-          <button className="btn primary" disabled={busy} onClick={() => void submit()}>
-            {busy ? "Saving…" : editing ? "Save" : "Create automation"}
-          </button>
         </div>
-        {confirmHost ? (
-          <ConfirmModal
-            title="Create on the host?"
-            body="Host runtime has no VM or container. Treat this as a security exception."
-            confirmLabel="Create on host"
-            danger
-            testId="auto-host-confirm"
-            onCancel={() => setConfirmHost(false)}
-            onConfirm={() => void submit({ hostConfirmed: true })}
-          />
-        ) : null}
-        {confirmStarterId ? (
-          <ConfirmModal
-            title="Replace draft with starter?"
-            body="Your current name and prompt will be overwritten."
-            confirmLabel="Use starter"
-            testId="auto-starter-confirm"
-            onCancel={() => setConfirmStarterId(null)}
-            onConfirm={() => {
-              const id = confirmStarterId;
-              setConfirmStarterId(null);
-              dispatch({ type: "newAutomation", open: true, starterId: id });
-            }}
-          />
-        ) : null}
-        {confirmDiscard ? (
-          <ConfirmModal
-            title="Discard this draft?"
-            body="Unsaved name, prompt, and settings will be lost."
-            confirmLabel="Discard"
-            danger
-            testId="auto-discard-confirm"
-            onCancel={() => setConfirmDiscard(false)}
-            onConfirm={closeModal}
-          />
-        ) : null}
+      </details>
+      {error && <p className="scrim-note is-danger">{error}</p>}
+      <div className="modal-actions">
+        <button className="btn ghost" onClick={requestClose}>
+          Cancel
+        </button>
+        <button className="btn primary" disabled={busy} onClick={() => void submit()}>
+          {busy ? "Saving…" : editing ? "Save" : "Create automation"}
+        </button>
       </div>
-    </div>
+      {confirmHost ? (
+        <ConfirmModal
+          title="Create on the host?"
+          body="Host runtime has no VM or container. Treat this as a security exception."
+          confirmLabel="Create on host"
+          danger
+          testId="auto-host-confirm"
+          onCancel={() => setConfirmHost(false)}
+          onConfirm={() => void submit({ hostConfirmed: true })}
+        />
+      ) : null}
+      {confirmStarterId ? (
+        <ConfirmModal
+          title="Replace draft with starter?"
+          body="Your current name and prompt will be overwritten."
+          confirmLabel="Use starter"
+          testId="auto-starter-confirm"
+          onCancel={() => setConfirmStarterId(null)}
+          onConfirm={() => {
+            const id = confirmStarterId;
+            setConfirmStarterId(null);
+            dispatch({ type: "newAutomation", open: true, starterId: id });
+          }}
+        />
+      ) : null}
+      {confirmDiscard ? (
+        <ConfirmModal
+          title="Discard this draft?"
+          body="Unsaved name, prompt, and settings will be lost."
+          confirmLabel="Discard"
+          danger
+          testId="auto-discard-confirm"
+          onCancel={() => setConfirmDiscard(false)}
+          onConfirm={closeModal}
+        />
+      ) : null}
+    </Modal>
   );
 }
 

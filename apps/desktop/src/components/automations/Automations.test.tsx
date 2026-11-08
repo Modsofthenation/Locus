@@ -917,7 +917,9 @@ describe("AutomationsPane memory editor", () => {
       await Promise.resolve();
     });
     expect(alert).not.toHaveBeenCalled();
-    expect(host.querySelector(".auto-pane-error")?.textContent).toContain("clone blocked");
+    expect(host.querySelector("[data-testid='auto-pane-error']")?.textContent).toContain(
+      "clone blocked",
+    );
     alert.mockRestore();
   });
 

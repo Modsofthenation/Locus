@@ -3,6 +3,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import { BUILTIN_PROVIDERS, builtinProviderKey, type AiProvider } from "@locus/shared";
 import { CodexReasoningPicker, ModelPicker } from "./ModelPicker";
+import {
+  selectOptionLabels,
+  selectOptionValues,
+  selectValue,
+  setSelectValue,
+} from "@/lib/selectControl";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -40,9 +46,7 @@ describe("ModelPicker", () => {
       />,
     );
     expect(host.textContent).toMatch(/\$2 in · \$8 out \/1M/);
-    const fullOptions = [...host.querySelectorAll('select[aria-label="Model"] option')].map(
-      (o) => o.textContent,
-    );
+    const fullOptions = selectOptionLabels(host, "Model");
     expect(fullOptions).toEqual(
       expect.arrayContaining([expect.stringContaining("gpt-4.1 · $2 in · $8 out /1M")]),
     );
@@ -63,10 +67,9 @@ describe("ModelPicker", () => {
         onChange={() => undefined}
       />,
     );
-    const provider = host.querySelector('select[aria-label="Provider"]') as HTMLSelectElement;
-    const model = host.querySelector('select[aria-label="Model"]') as HTMLSelectElement;
-    expect(provider.selectedOptions[0]?.textContent).toBe("No provider");
-    expect(model.selectedOptions[0]?.textContent).toBe("No model");
+    expect(
+      host.querySelector("[aria-label='Model'] .model-picker-combined-label")?.textContent,
+    ).toBe("No provider");
   });
 
   it("does not add a placeholder when the selected provider is listed", () => {
@@ -79,9 +82,18 @@ describe("ModelPicker", () => {
         onChange={() => undefined}
       />,
     );
-    const provider = host.querySelector('select[aria-label="Provider"]') as HTMLSelectElement;
-    expect([...provider.options].some((o) => o.disabled)).toBe(false);
-    expect(provider.selectedOptions[0]?.value).toBe("openai");
+    expect(
+      host.querySelector("[aria-label='Model'] .model-picker-combined-label")?.textContent,
+    ).toBe("OpenAI · gpt-4.1");
+    act(() => {
+      host
+        .querySelector("[aria-label='Model']")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const disabled = [...host.querySelectorAll("[role='menuitem']")].some(
+      (el) => (el as HTMLButtonElement).disabled,
+    );
+    expect(disabled).toBe(false);
   });
 
   it("does not show Fast or thinking for OpenAI", () => {
@@ -100,8 +112,7 @@ describe("ModelPicker", () => {
   it("shows only the reasoning levels supported by the selected Codex model", () => {
     const codex = providers.find((p) => p.id === "codex-cli")!;
     render(<CodexReasoningPicker provider={codex} model="gpt-5.5" onChange={() => undefined} />);
-    const effort = host.querySelector('select[aria-label="Reasoning effort"]') as HTMLSelectElement;
-    expect([...effort.options].map((option) => option.value)).toEqual([
+    expect(selectOptionValues(host, "Reasoning effort")).toEqual([
       "",
       "low",
       "medium",
@@ -121,19 +132,16 @@ describe("ModelPicker", () => {
         onChange={(next) => changes.push(next)}
       />,
     );
-    const modelSelect = host.querySelector('select[aria-label="Model"]') as HTMLSelectElement;
-    expect([...modelSelect.options].map((opt) => opt.value)).toEqual([
+    expect(selectOptionValues(host, "Model")).toEqual([
       "composer-2",
       "auto",
       "claude-sonnet-4-5",
       "gpt-5",
     ]);
     expect(host.querySelector('[aria-label="Thinking"]')).toBeNull();
-    const fast = host.querySelector('select[aria-label="Fast"]') as HTMLSelectElement;
-    expect(fast.value).toBe("off");
+    expect(selectValue(host, "Fast")).toBe("off");
     act(() => {
-      fast.value = "fast";
-      fast.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Fast", "fast");
     });
     expect(changes).toEqual([{ providerId: "cursor-cli", model: "composer-2-fast" }]);
   });
@@ -149,15 +157,9 @@ describe("ModelPicker", () => {
       />,
     );
     expect(host.querySelector('[aria-label="Fast"]')).toBeNull();
-    const thinking = host.querySelector('select[aria-label="Thinking"]') as HTMLSelectElement;
-    expect([...thinking.options].map((opt) => opt.textContent)).toEqual([
-      "Off",
-      "Thinking",
-      "High",
-    ]);
+    expect(selectOptionLabels(host, "Thinking")).toEqual(["Off", "Thinking", "High"]);
     act(() => {
-      thinking.value = "thinking";
-      thinking.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Thinking", "thinking");
     });
     expect(changes.at(-1)).toEqual({
       providerId: "cursor-cli",
@@ -174,8 +176,7 @@ describe("ModelPicker", () => {
         />,
       );
     });
-    const gptThinking = host.querySelector('select[aria-label="Thinking"]') as HTMLSelectElement;
-    expect([...gptThinking.options].map((opt) => opt.textContent)).toEqual([
+    expect(selectOptionLabels(host, "Thinking")).toEqual([
       "None",
       "Low",
       "Medium",
@@ -183,8 +184,7 @@ describe("ModelPicker", () => {
       "Extra-high",
     ]);
     act(() => {
-      gptThinking.value = "xhigh";
-      gptThinking.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Thinking", "xhigh");
     });
     expect(changes.at(-1)).toEqual({ providerId: "cursor-cli", model: "gpt-5-xhigh" });
 
@@ -198,10 +198,8 @@ describe("ModelPicker", () => {
         />,
       );
     });
-    const fast = host.querySelector('select[aria-label="Fast"]') as HTMLSelectElement;
     act(() => {
-      fast.value = "fast";
-      fast.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Fast", "fast");
     });
     expect(changes.at(-1)).toEqual({ providerId: "cursor-cli", model: "gpt-5-xhigh-fast" });
   });
@@ -225,21 +223,12 @@ describe("ModelPicker", () => {
         onChange={(next) => changes.push(next)}
       />,
     );
-    const modelSelect = host.querySelector('select[aria-label="Model"]') as HTMLSelectElement;
-    expect(modelSelect.value).toBe("cursor-grok-4.6");
-    const thinking = host.querySelector('select[aria-label="Thinking"]') as HTMLSelectElement;
-    expect([...thinking.options].map((opt) => opt.textContent)).toEqual([
-      "Low",
-      "Medium",
-      "High",
-      "Extra-high",
-    ]);
-    expect(thinking.value).toBe("high");
-    const fast = host.querySelector('select[aria-label="Fast"]') as HTMLSelectElement;
-    expect(fast.value).toBe("off");
+    expect(selectValue(host, "Model")).toBe("cursor-grok-4.6");
+    expect(selectOptionLabels(host, "Thinking")).toEqual(["Low", "Medium", "High", "Extra-high"]);
+    expect(selectValue(host, "Thinking")).toBe("high");
+    expect(selectValue(host, "Fast")).toBe("off");
     act(() => {
-      thinking.value = "low";
-      thinking.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Thinking", "low");
     });
     expect(changes.at(-1)).toEqual({ providerId: "cursor-cli", model: "cursor-grok-4.6-low" });
     act(() => {
@@ -252,10 +241,8 @@ describe("ModelPicker", () => {
         />,
       );
     });
-    const fastOn = host.querySelector('select[aria-label="Fast"]') as HTMLSelectElement;
     act(() => {
-      fastOn.value = "fast";
-      fastOn.dispatchEvent(new Event("change", { bubbles: true }));
+      setSelectValue(host, "Fast", "fast");
     });
     expect(changes.at(-1)).toEqual({
       providerId: "cursor-cli",
@@ -279,9 +266,17 @@ describe("ModelPicker", () => {
         onChange={(next) => changes.push(next)}
       />,
     );
-    const modelSelect = host.querySelector('select[aria-label="Model"]') as HTMLSelectElement;
-    expect(modelSelect.value).toBe("composer-2");
-    expect([...modelSelect.options].map((opt) => opt.value)).toEqual(["composer-2", "auto"]);
+    expect(host.querySelector(".model-picker-combined-label")?.textContent).toMatch(/composer-2/);
+    act(() => {
+      host
+        .querySelector("[aria-label='Model']")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const modelItems = [...host.querySelectorAll(".model-picker-combined [role='menuitem']")].map(
+      (el) => el.textContent,
+    );
+    expect(modelItems).toEqual(expect.arrayContaining(["composer-2", "auto"]));
+    expect(modelItems).not.toContain("composer-2-fast");
     act(() => {
       (host.querySelector('[aria-label="Model options"]') as HTMLElement).click();
     });
@@ -374,7 +369,7 @@ describe("ModelPicker", () => {
     );
     expect(host.querySelector('[aria-label="Model options"]')).toBeNull();
     expect(host.querySelector(".model-picker-more")).toBeNull();
-    expect(host.querySelector(".menu-pop")).toBeNull();
+    expect(host.querySelector(".model-picker-combined")).toBeTruthy();
   });
 
   it("opens compact model options above the composer footer", () => {
@@ -409,16 +404,21 @@ describe("ModelPicker", () => {
         onChange={() => undefined}
       />,
     );
-    const modelSelect = host.querySelector('select[aria-label="Model"]') as HTMLSelectElement;
-    expect(modelSelect?.value).toBe("claude-sonnet-4-5");
-    expect([...modelSelect.options].map((opt) => opt.textContent)).toEqual([
-      "claude-sonnet-4-5",
-      "claude-opus-4-5",
-      "claude-haiku-4-5",
-    ]);
+    expect(host.querySelector(".model-picker-combined-label")?.textContent).toBe(
+      "Anthropic · claude-sonnet-4-5",
+    );
+    act(() => {
+      host
+        .querySelector("[aria-label='Model']")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(
+      [...host.querySelectorAll(".model-picker-combined [role='menuitem']")].map(
+        (el) => el.textContent,
+      ),
+    ).toEqual(expect.arrayContaining(["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"]));
     expect(host.querySelector(".model-cost-chip")).toBeNull();
     expect(host.querySelector('[aria-label="Model options"]')).toBeNull();
-    expect(host.querySelector("summary")).toBeNull();
     expect(host.querySelector(".model-cost-table")).toBeNull();
     expect(host.textContent).not.toMatch(/Compare providers/);
   });
