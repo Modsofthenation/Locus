@@ -472,9 +472,7 @@ describe("CodebasePane", () => {
     expect(host.querySelector("[aria-label='Modsofthenation/Locus']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Modsofthenation/docs-site']")).toBeNull();
     act(() => {
-      (
-        host.querySelector("[aria-label='Modsofthenation/Locus']") as HTMLInputElement
-      ).click();
+      (host.querySelector("[aria-label='Modsofthenation/Locus']") as HTMLInputElement).click();
     });
     await act(async () => {
       [...host.querySelectorAll("button")]
