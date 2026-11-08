@@ -1762,7 +1762,7 @@ describe("Sidebar", () => {
       updatedAt: "2020-01-01T00:00:00.000Z",
     };
     render({ ...initialState, section: "codebase", selectedRepoId: "r3", repos: [repo] });
-    expect(host.querySelector(".repo-item .title-text")?.textContent).toBe("local-agents");
+    expect(host.querySelector(".repo-item .title-text")?.textContent).toBe("Locus");
     expect(host.querySelector(".repo-item .meta")?.textContent).toBe(
       "Modsofthenation/Locus · main",
     );

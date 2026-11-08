@@ -270,7 +270,7 @@ describe("parseRepoUrl", () => {
   it("shortens repo display names to the repo segment", () => {
     expect(shortRepoName("https://github.com/acme/app.git")).toBe("app");
     expect(shortRepoName("git@bitbucket.org:acme/app.git")).toBe("app");
-    expect(shortRepoName("https://github.com/Modsofthenation/Locus")).toBe("local-agents");
+    expect(shortRepoName("https://github.com/Modsofthenation/Locus")).toBe("Locus");
     // No owner segment to strip: fall back to the trailing path segment.
     expect(shortRepoName("local-agents")).toBe("local-agents");
     expect(shortRepoName("", "fallback")).toBe("fallback");
