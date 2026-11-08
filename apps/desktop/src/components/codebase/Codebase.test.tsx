@@ -466,7 +466,7 @@ describe("CodebasePane", () => {
     const search = host.querySelector("[aria-label='Search repositories']") as HTMLInputElement;
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(search, "local");
+      setter?.call(search, "locus");
       search.dispatchEvent(new Event("input", { bubbles: true }));
     });
     expect(host.querySelector("[aria-label='Modsofthenation/Locus']")).toBeTruthy();

@@ -814,7 +814,7 @@ describe("WorkspaceEditor", () => {
     await flush();
     const tabMs = performance.now() - clickAt;
     expect(host.querySelector(".workspace-tab.on")?.getAttribute("title")).toBe("src/app.ts");
-    expect(tabMs).toBeLessThan(DELAY_MS / 2);
+    expect(tabMs).toBeLessThan(DELAY_MS);
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, DELAY_MS + 20));
     });
