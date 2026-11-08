@@ -38,7 +38,11 @@ async function setup(now = () => new Date("2026-08-17T12:00:00.000Z"), chatEngin
 
 let cleanup: string[] = [];
 afterEach(async () => {
-  await Promise.all(cleanup.map((d) => rm(d, { recursive: true, force: true })));
+  await Promise.all(
+    cleanup.map((d) =>
+      rm(d, { recursive: true, force: true, maxRetries: 8, retryDelay: 50 }).catch(() => undefined),
+    ),
+  );
   cleanup = [];
 });
 
