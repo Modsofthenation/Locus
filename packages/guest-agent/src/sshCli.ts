@@ -18,12 +18,29 @@ export function sshCliEnv(env: NodeJS.ProcessEnv | undefined): Record<string, st
   return extra;
 }
 
-export function sshRemoteCommand(req: {
-  command: string;
-  args?: string[];
-  cwd?: string;
-  env?: NodeJS.ProcessEnv;
-}): string {
+export function powershellQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+export function sshRemoteCommand(
+  req: {
+    command: string;
+    args?: string[];
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+  },
+  shell: "posix" | "powershell" = "posix",
+): string {
+  if (shell === "powershell") {
+    const parts = [req.command, ...(req.args ?? [])].map(powershellQuote);
+    const env = Object.entries(sshCliEnv(req.env))
+      .map(([key, value]) => `$env:${key}=${powershellQuote(value)};`)
+      .join(" ");
+    const run = `${env}${env ? " " : ""}& ${parts.join(" ")}`;
+    const cwd = req.cwd?.trim();
+    const body = cwd ? `Set-Location ${powershellQuote(cwd)}; ${run}` : run;
+    return `powershell -NoProfile -NonInteractive -Command ${powershellQuote(body)}`;
+  }
   const cmd = [req.command, ...(req.args ?? [])].map(posixShellQuote).join(" ");
   const env = Object.entries(sshCliEnv(req.env))
     .map(([key, value]) => `${key}=${posixShellQuote(value)}`)
@@ -67,14 +84,14 @@ export function spawnCliOverSsh(
     env?: NodeJS.ProcessEnv;
     signal?: AbortSignal;
   },
-  extra: { reverseForwards?: SshCliForward[] } = {},
+  extra: { reverseForwards?: SshCliForward[]; shell?: "posix" | "powershell" } = {},
 ): SshCliHandle {
   const forwards: string[] = [];
   for (const fwd of extra.reverseForwards ?? []) {
     const host = fwd.host?.trim() || "127.0.0.1";
     forwards.push("-R", `${fwd.listenPort}:${host}:${fwd.hostPort}`);
   }
-  const argv = sshArgv(target, sshRemoteCommand(req), forwards);
+  const argv = sshArgv(target, sshRemoteCommand(req, extra.shell ?? "posix"), forwards);
   const child = spawn(argv[0]!, argv.slice(1), {
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,

@@ -33,6 +33,7 @@ describe("ops routing", () => {
     expect(looksLikeOpsPrompt("list docker swarm services")).toBe(true);
     expect(isOpsProgressTool("docker_swarm")).toBe(true);
     expect(isWorkspaceSearchTool("grep")).toBe(true);
+    expect(isWorkspaceSearchTool("search")).toBe(true);
     expect(isWorkspaceSearchTool("exec")).toBe(true);
     expect(isOpsProgressTool("grafana_query")).toBe(true);
     expect(isOpsProgressTool("mcp_call")).toBe(true);

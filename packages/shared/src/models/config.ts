@@ -122,6 +122,12 @@ export interface LocusConfig {
   skills?: AgentSkill[];
   /** LAN (or later cloud) machines running locus-worker. */
   workers?: WorkerBackend[];
+  /** Stable id this control plane sends as `X-Locus-Plane`. */
+  workerPlaneId?: string;
+  /** UI locale. Default `en`. */
+  locale?: string;
+  /** Guided first Host task after setup. */
+  setupFirstTask?: "pending" | "done" | "dismissed";
   /** Named guest presets (golden + jail + recipe + spend + Where). */
   namedEnvironments?: NamedEnvironment[];
   /** Opt-in Android / phone remote. Token is vaulted. */

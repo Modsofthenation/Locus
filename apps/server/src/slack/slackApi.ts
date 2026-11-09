@@ -665,6 +665,7 @@ export class SlackApi {
       gif?: { url: string; title?: string };
       as?: SlackPostAs;
       replyBroadcast?: boolean;
+      blocks?: unknown[];
     },
   ): Promise<SlackMessage> {
     const as = parseSlackPostAs(input.as);
@@ -710,6 +711,7 @@ export class SlackApi {
     };
     if (input.threadTs) payload.thread_ts = input.threadTs;
     if (input.threadTs && input.replyBroadcast) payload.reply_broadcast = true;
+    if (input.blocks?.length) payload.blocks = input.blocks;
     if (gif) {
       payload.blocks = [
         {

@@ -101,7 +101,7 @@ import {
   workerComputeUsd,
   sessionComputeMs,
   workerImageAllowed,
-  workerKind,
+  workerProvisionsCompute,
   workerPickSize,
   runtimeNeedsGuest,
   toolsForRuntime,
@@ -996,9 +996,9 @@ export class SessionService {
     const config = await this.store.loadConfig();
     const backend = (config.workers ?? []).find((row) => row.id === session.backendId);
     if (!backend) throw new Error("Worker was removed from Settings → Workers");
-    if (workerKind(backend) === "fargate") {
+    if (workerProvisionsCompute(backend)) {
       const handle = session.remoteGuestId ? this.compute.get(session.remoteGuestId) : undefined;
-      if (!handle?.url) throw new Error("Fargate task is not provisioned");
+      if (!handle?.url) throw new Error("Compute worker is not provisioned");
       const row = {
         ...backend,
         url: handle.url,
@@ -1013,14 +1013,14 @@ export class SessionService {
         existing.backend.token === row.token &&
         existing.backend.fingerprint === row.fingerprint
       ) {
-        return existing;
+        return this.withPlane(existing, config.workerPlaneId);
       }
       const client = new WorkerClient(
         row,
         this.fetchFn === fetch ? undefined : (input, init) => this.fetchFn(input, init),
       );
       this.workers.set(cacheKey, client);
-      return client;
+      return this.withPlane(client, config.workerPlaneId);
     }
     if (!backend.token?.trim()) throw new Error("Add a worker token in Settings → Workers");
     if (backend.url.startsWith("https:") && !backend.fingerprint) {
@@ -1033,14 +1033,56 @@ export class SessionService {
       existing.backend.token === backend.token &&
       existing.backend.fingerprint === backend.fingerprint
     ) {
-      return existing;
+      return this.withPlane(existing, config.workerPlaneId);
     }
     const client = new WorkerClient(
       backend,
       this.fetchFn === fetch ? undefined : (input, init) => this.fetchFn(input, init),
     );
     this.workers.set(backend.id, client);
+    return this.withPlane(client, config.workerPlaneId);
+  }
+
+  private withPlane(client: WorkerClient, planeId?: string): WorkerClient {
+    client.planeId = planeId;
     return client;
+  }
+
+  pipeWorkerDisplay(vmId: string, ws: import("ws").WebSocket): boolean {
+    const client = [...this.workers.values()].find((row) => row.get(vmId));
+    if (!client) return false;
+    void this.store
+      .loadConfig()
+      .then((config) => {
+        this.withPlane(client, config.workerPlaneId);
+        return client.openDisplaySocket(vmId, (raw) => {
+          if (ws.readyState === 1) ws.send(raw);
+        });
+      })
+      .then((remote) => {
+        ws.on("message", (data) => {
+          if (remote.readyState === 1) remote.send(data);
+        });
+        const close = () => {
+          try {
+            remote.close();
+          } catch {
+            /* already closed */
+          }
+        };
+        ws.on("close", close);
+        ws.on("error", close);
+        remote.on("close", () => {
+          if (ws.readyState === 1) ws.close();
+        });
+        remote.on("error", () => {
+          if (ws.readyState === 1) ws.close(1011, "display unreachable");
+        });
+      })
+      .catch(() => {
+        if (ws.readyState === 1) ws.close(1011, "no display");
+      });
+    return true;
   }
 
   startWorkerReaper(intervalMs = 30_000): void {
@@ -1664,7 +1706,7 @@ export class SessionService {
     const config = await this.store.loadConfig();
     const backend = (config.workers ?? []).find((row) => row.id === session.backendId);
     if (!backend) throw new Error("Worker was removed from Settings → Workers");
-    const fargate = workerKind(backend) === "fargate";
+    const fargate = workerProvisionsCompute(backend);
     if (!session.vmId) {
       if (!workerImageAllowed(backend, dockerImage)) {
         throw new Error(`Worker ${backend.name} does not allow image ${dockerImage}`);
@@ -1745,6 +1787,7 @@ export class SessionService {
               ? forgeProviderAllowlist({ ...config, extraHosts: session.allowHosts })
               : undefined,
           env: Object.keys(guestEnv).length ? guestEnv : undefined,
+          planeId: config.workerPlaneId,
         });
         if (seed?.path) await client.uploadTree(vm.id, "workspace-seed", seed.path);
         if (share) await client.uploadTree(vm.id, "host-share", share);
@@ -1777,7 +1820,7 @@ export class SessionService {
     const config = await this.store.loadConfig();
     const backend = (config.workers ?? []).find((row) => row.id === session.backendId);
     if (!backend) throw new Error("Worker was removed from Settings → Workers");
-    if (workerKind(backend) === "fargate") {
+    if (workerProvisionsCompute(backend)) {
       session = await this.ensureFargateHandle(session, backend);
     }
     const client = await this.requireWorker(session);
@@ -1890,7 +1933,7 @@ export class SessionService {
     if (!backend) throw new Error("Worker was removed from Settings → Workers");
     const template = config.templates.find((row) => row.id === session.templateId);
     if (!template) throw new Error("Template missing");
-    if (workerKind(backend) === "fargate") {
+    if (workerProvisionsCompute(backend)) {
       session = await this.ensureFargateHandle(session, backend);
     }
     const client = await this.requireWorker(session);
@@ -1909,6 +1952,22 @@ export class SessionService {
         }
       }
       const hardware = session.hardware ?? template.hardware;
+      const seed = session.imageId
+        ? (await this.store.loadImages()).find((i) => i.id === session.imageId)
+        : undefined;
+      if (session.imageId && !seed) throw new Error("Golden image not found");
+      if (seed && imageRuntime(seed) !== "vm") {
+        throw new Error("That golden image is a container workspace, not a VM disk");
+      }
+      let imagePath = seed?.path;
+      if (seed?.path && session.imageId) {
+        const remote = await client.hasGoldenDisk(session.imageId);
+        if (remote?.path) imagePath = remote.path;
+        else {
+          const uploaded = await client.uploadGoldenDisk(session.imageId, seed.path);
+          imagePath = uploaded.path;
+        }
+      }
       vm = await client.create({
         sessionId,
         name: session.title,
@@ -1918,6 +1977,8 @@ export class SessionService {
         runtime: "vm",
         template: { ...template, hardware },
         network: session.network ?? defaultNetworkJail(session.imageId),
+        imagePath,
+        planeId: config.workerPlaneId,
       });
     }
     this.attachWorkerGuest(session, client, vm);
@@ -5072,19 +5133,23 @@ export class SessionService {
       startedAt,
       finishedAt: ev.status === "completed" ? now() : undefined,
     };
+    let inserted = false;
     await this.store.mutateSession(sessionId, (current) => {
       const msg = current.messages.find((message) => message.id === replyId);
       if (!msg) return;
       const existing = (msg.toolCalls ?? []).find((item) => item.id === ev.id);
       if (existing) {
-        existing.name = canonical.name as ComputerUseToolName;
-        existing.arguments = persistedArgs;
+        if (canonical.name !== "tool" || existing.name === "tool") {
+          existing.name = canonical.name as ComputerUseToolName;
+        }
+        existing.arguments = { ...existing.arguments, ...persistedArgs };
         if (persistedResult != null) existing.result = persistedResult;
         if (ev.status === "completed") {
           existing.finishedAt = now();
           existing.error = failed ? persistedResult : undefined;
         }
       } else {
+        inserted = true;
         msg.toolCalls = [...(msg.toolCalls ?? []), call];
       }
     });
@@ -5094,17 +5159,19 @@ export class SessionService {
       ?.toolCalls?.find((item) => item.id === ev.id);
     if (live) this.hub.broadcast({ type: "tool.updated", sessionId, toolCall: live });
     this.hub.broadcast({ type: "session.updated", session });
-    await this.traces.write({
-      t: now(),
-      kind: ev.status === "completed" ? "tool.result" : "tool.call",
-      sessionId,
-      turnId,
-      round,
-      name: canonical.name,
-      detail: ev.status === "completed" && ev.result ? clipTraceDetail(ev.result) : ev.status,
-      args: redactedTraceArgs(canonical.arguments ?? {}),
-      ok: cursorCliToolCallOk(ev.status, ev.result),
-    });
+    if (inserted || ev.status === "completed") {
+      await this.traces.write({
+        t: now(),
+        kind: ev.status === "completed" ? "tool.result" : "tool.call",
+        sessionId,
+        turnId,
+        round,
+        name: live?.name ?? canonical.name,
+        detail: ev.status === "completed" && ev.result ? clipTraceDetail(ev.result) : ev.status,
+        args: redactedTraceArgs(live?.arguments ?? canonical.arguments ?? {}),
+        ok: cursorCliToolCallOk(ev.status, ev.result),
+      });
+    }
     if (ev.status === "completed" && isCursorCreatePlanTool(canonical.name)) {
       await this.applyCursorCreatePlan(sessionId, replyId, canonical.arguments);
     }
@@ -5557,6 +5624,19 @@ export class SessionService {
       }
       abort.addEventListener("abort", onAbort);
       this.approvals.set(key, done);
+      void this.require(sessionId)
+        .then((session) => {
+          let toolName = "";
+          for (const message of session.messages) {
+            const call = message.toolCalls?.find((item) => item.id === toolCallId);
+            if (call) {
+              toolName = call.name;
+              break;
+            }
+          }
+          this.plane.onSlackApproval?.(sessionId, toolName, toolCallId);
+        })
+        .catch(() => undefined);
       void this.store.loadConfig().then((config) => {
         if (!this.approvals.has(key)) return;
         const ms = approvalTimeoutMs(config.advanced.approvalTimeoutMs);
@@ -7131,7 +7211,7 @@ export class SessionService {
     if (!isCliGitTool(name) || !signal || signal.aborted) {
       return {
         ok: false,
-        output: "Locus Git tools require an active Codex coding turn on this host.",
+        output: "Locus Git tools require an active CLI coding turn on this host.",
       };
     }
     const session = await this.require(sessionId);
@@ -7191,7 +7271,7 @@ export class SessionService {
         return finish({ ok: false, output: `Git operation ${decision}.` });
     }
     if (signal.aborted || this.cliGitTurns.get(sessionId) !== signal) {
-      return finish({ ok: false, output: "Codex turn has ended." });
+      return finish({ ok: false, output: "CLI turn has ended." });
     }
     try {
       return await finish(await this.executeTool(sessionId, { name, args }));

@@ -385,7 +385,7 @@ describe("design recipes", () => {
 
 describe("first-task samples", () => {
   it("ships one local workspace prompt, not a repo tour", () => {
-    expect(FIRST_TASKS).toHaveLength(1);
+    expect(FIRST_TASKS).toHaveLength(2);
     expect(FIRST_TASKS[0]?.title).toMatch(/hello\.txt/);
     expect(FIRST_TASKS[0]?.prompt).toMatch(/\/workspace\/hello\.txt/);
     expect(FIRST_TASKS[0]?.prompt).toMatch(/Do not clone/);

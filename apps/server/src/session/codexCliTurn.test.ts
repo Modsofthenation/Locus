@@ -320,6 +320,85 @@ describe("codex CLI chat loop", () => {
     });
   });
 
+  it("does not flag Needs you after tests plus a delete-only Codex cleanup", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-codex-verify-cleanup-"));
+    cleanup.push(dir);
+    const store = new JsonStore(dir);
+    await store.init();
+    const config = await store.loadConfig();
+    const codex = config.providers.find((provider) => provider.kind === "codex-cli")!;
+    codex.enabled = true;
+    await store.saveConfig(config);
+    const sessions = new SessionService(store, new MockHypervisor(dir), new Hub());
+    sessions.codexCliSpawner = linesSpawner(
+      [],
+      [
+        JSON.stringify({ type: "thread.started", thread_id: "cx-verify" }),
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "patch-1",
+            type: "file_change",
+            changes: [{ path: "src/add.ts", kind: "update" }],
+            status: "completed",
+          },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "cmd-1",
+            type: "command_execution",
+            command: "/bin/bash -lc 'npm run test --ignore-scripts -- --testPathPattern=add'",
+            aggregated_output: "6 suites passed\n78 tests passed",
+            exit_code: 0,
+            status: "completed",
+          },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "patch-2",
+            type: "file_change",
+            changes: [{ path: "src/react-dom-shim.js", kind: "delete" }],
+            status: "completed",
+          },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: { id: "msg-1", type: "agent_message", text: "Tests passed; shim removed." },
+        }),
+        JSON.stringify({ type: "turn.completed", usage: { input_tokens: 8, output_tokens: 4 } }),
+      ],
+    );
+
+    const created = await sessions.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      runtime: "host",
+      providerId: codex.id,
+      model: "gpt-5.6-sol",
+      startVm: false,
+    });
+    await sessions.sendChat(created.id, "Fix the frontend tests");
+    const fresh = await waitFor(sessions, created.id);
+    expect(fresh?.needsHuman).toBeUndefined();
+    expect(
+      fresh?.messages.some((message) =>
+        message.toolCalls?.some(
+          (call) =>
+            call.name === "apply_patch" &&
+            Array.isArray(call.arguments?.changes) &&
+            call.arguments.changes.some(
+              (row) =>
+                row &&
+                typeof row === "object" &&
+                (row as { path?: string; kind?: string }).kind === "delete",
+            ),
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it("creates a VM runtime session for Codex CLI", async () => {
     const dir = await mkdtemp(join(tmpdir(), "locus-codex-vm-"));
     cleanup.push(dir);

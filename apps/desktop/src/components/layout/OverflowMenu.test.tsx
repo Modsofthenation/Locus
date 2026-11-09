@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MenuItem,
   OverflowMenu,
@@ -186,6 +186,35 @@ describe("fixedContainingOrigin", () => {
       parent.remove();
     }
   });
+
+  it("does not treat container-type alone as a fixed containing block", () => {
+    const parent = document.createElement("div");
+    const child = document.createElement("span");
+    parent.appendChild(child);
+    document.body.appendChild(parent);
+    const orig = window.getComputedStyle;
+    window.getComputedStyle = ((el: Element) => {
+      if (el === parent) {
+        return {
+          transform: "none",
+          filter: "none",
+          perspective: "none",
+          backdropFilter: "none",
+          contain: "none",
+          containerType: "inline-size",
+          willChange: "auto",
+          getPropertyValue: (name: string) => (name === "container-type" ? "inline-size" : "none"),
+        } as unknown as CSSStyleDeclaration;
+      }
+      return orig.call(window, el);
+    }) as typeof getComputedStyle;
+    try {
+      expect(fixedContainingOrigin(child)).toMatchObject({ top: 0, left: 0 });
+    } finally {
+      window.getComputedStyle = orig;
+      parent.remove();
+    }
+  });
 });
 
 describe("OverflowMenu CSS", () => {
@@ -194,11 +223,15 @@ describe("OverflowMenu CSS", () => {
     expect(css).toMatch(
       /\.menu\.up \.menu-pop:not\(\.placed\) \{[\s\S]*?bottom:\s*calc\(100% \+ 6px\)/,
     );
+    expect(css).toMatch(/\.menu-pop:not\(\.placed\) \{\s*visibility:\s*hidden/);
     expect(css).toMatch(/\.menu\.right \.menu-pop:not\(\.placed\) \{[\s\S]*?right:\s*0/);
     expect(css).toMatch(/\.menu \.menu-pop\.placed \{[\s\S]*?position:\s*fixed/);
     expect(css).toMatch(/\.menu \.menu-pop\.placed \{[\s\S]*?inset:\s*auto/);
     expect(css).toMatch(/\.menu \.menu-pop\.placed \{[\s\S]*?width:\s*max-content/);
     expect(css).toMatch(/\.model-picker-more \.menu-pop \{[\s\S]*?min-width:\s*168px/);
+    expect(css).toMatch(
+      /\.model-picker-combined \.menu-pop:not\(\.placed\),[\s\S]*?bottom:\s*calc\(100% \+ 6px\)/,
+    );
     expect(css).toMatch(
       /\.model-picker-more \.menu-pop:not\(\.placed\) \{[\s\S]*?bottom:\s*calc\(100% \+ 6px\)/,
     );
@@ -265,6 +298,38 @@ describe("OverflowMenu", () => {
     clickTrigger();
     expect(details.open).toBe(true);
     expect(host.textContent).toContain("Unlink");
+  });
+
+  it("opens an upward pop in place and focuses without scrolling", () => {
+    const origFocus = HTMLElement.prototype.focus;
+    let placedAtItemFocus = false;
+    const focus = vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (
+      this: HTMLElement,
+      options?: FocusOptions,
+    ) {
+      if (this.getAttribute("role") === "menuitem") {
+        placedAtItemFocus = Boolean(this.closest(".menu-pop")?.classList.contains("placed"));
+      }
+      return origFocus.call(this, options);
+    });
+    render(
+      <OverflowMenu title="Model" align="left" prefer="up">
+        <MenuItem active>Composer</MenuItem>
+        <MenuItem>Other</MenuItem>
+      </OverflowMenu>,
+    );
+    try {
+      clickTrigger();
+      const details = host.querySelector("details.menu") as HTMLDetailsElement;
+      const menu = host.querySelector(".menu-pop") as HTMLElement;
+      expect(details.open).toBe(true);
+      expect(details.className).toContain("up");
+      expect(menu.className).toContain("placed");
+      expect(placedAtItemFocus).toBe(true);
+      expect(focus.mock.calls.some((call) => call[0]?.preventScroll === true)).toBe(true);
+    } finally {
+      focus.mockRestore();
+    }
   });
 
   it("stays open after a pointer press in a flex toolbar and parent rerender", () => {

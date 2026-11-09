@@ -989,6 +989,13 @@ export const FIRST_TASKS: FirstTask[] = [
     prompt:
       "List the files in /workspace, then write /workspace/hello.txt with a one-line greeting. Stay in /workspace. Do not clone a repository.",
   },
+  {
+    id: "workspace-readme",
+    title: "Write a short README for this folder",
+    blurb: "Describe what is in /workspace in README.md.",
+    prompt:
+      "Look at /workspace, then write /workspace/README.md with a three-sentence summary of what is there. Stay in /workspace. Do not clone a repository.",
+  },
 ];
 
 export function agentSessionCount(sessions: readonly { kind?: SessionKind }[]): number {

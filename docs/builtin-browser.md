@@ -4,7 +4,7 @@ Goal: a **shared Chromium** in the agent workspace — the agent drives it, you 
 
 Related: [SECURITY.md](../SECURITY.md) (loopback, network jail, untrusted web), [agent-backends.md](agent-backends.md) (where the guest and its Chromium run), `CdpChromiumDriver` in `packages/guest-agent/src/chromium.ts`, `DockerWorkspace` in `apps/desktop/src/components/docker/DockerWorkspace.tsx`, takeover / handback in `apps/server/src/session/sessions.ts`.
 
-This is an implementation plan. Do not ship the pane until PR 1 lands.
+The live pane ships for Docker (local and worker). Worker screencast, tabs, operator input, and Preview HTTP already tunnel over the pinned worker HTTPS connection. VM desktops use the separate noVNC display (worker VNC is WSS-proxied).
 
 ## Why
 

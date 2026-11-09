@@ -3,6 +3,8 @@ import {
   CODING_LOOP_HABIT,
   CODING_SEARCH_WANDER_ROUNDS,
   isCodingMutateTool,
+  isDeleteOnlyCodingMutate,
+  isScratchCodingMutate,
   isCodingVerifyCall,
   foldCodingVerifyFlags,
   wroteAgentCanvas,
@@ -28,10 +30,26 @@ describe("coding loop walls", () => {
     expect(isCodingMutateTool("file_read")).toBe(false);
     expect(looksLikeVerifyCommand("npm test")).toBe(true);
     expect(looksLikeVerifyCommand("pnpm test -- src/add.test.ts")).toBe(true);
+    expect(
+      looksLikeVerifyCommand(
+        "/bin/bash -lc 'npm run test --ignore-scripts -- --testPathPattern=Template'",
+      ),
+    ).toBe(true);
     expect(looksLikeVerifyCommand("pytest -q")).toBe(true);
+    expect(
+      looksLikeVerifyCommand("docker exec web python3 ./manage.py test shop.tests.test_models"),
+    ).toBe(true);
+    expect(looksLikeVerifyCommand("python3 -m pytest -q")).toBe(true);
+    expect(looksLikeVerifyCommand("python3 -m flake8 src/store.py")).toBe(true);
     expect(looksLikeVerifyCommand("rg FAIL src")).toBe(false);
     expect(isCodingVerifyCall("exec", { command: "npm test" })).toBe(true);
     expect(isCodingVerifyCall("Shell", { command: "npm test" })).toBe(true);
+    expect(
+      isCodingVerifyCall("tool", {
+        command: "docker exec web python3 ./manage.py test shop.tests.test_models",
+      }),
+    ).toBe(true);
+    expect(isCodingVerifyCall("tool", { path: "README.md" })).toBe(false);
     expect(isCodingVerifyCall("git_push")).toBe(true);
     expect(isCodingVerifyCall("exec", { command: "rg boom" })).toBe(false);
     expect(
@@ -46,8 +64,68 @@ describe("coding loop walls", () => {
         verified: true,
       }),
     ).toEqual({ mutated: true, verified: false });
+    expect(
+      foldCodingVerifyFlags(
+        [
+          {
+            name: "apply_patch",
+            arguments: { changes: [{ path: "src/react-dom-shim.js", kind: "delete" }] },
+          },
+        ],
+        { mutated: true, verified: true },
+      ),
+    ).toEqual({ mutated: true, verified: true });
+    expect(
+      isDeleteOnlyCodingMutate({
+        name: "apply_patch",
+        arguments: { changes: [{ path: "src/react-dom-shim.js", kind: "delete" }] },
+      }),
+    ).toBe(true);
+    expect(
+      isDeleteOnlyCodingMutate({
+        name: "apply_patch",
+        arguments: { value: [{ path: "src/react-dom-shim.js", kind: "delete" }] },
+      }),
+    ).toBe(true);
+    expect(
+      isDeleteOnlyCodingMutate({
+        name: "apply_patch",
+        arguments: { changes: [{ path: "src/add.ts", kind: "update" }] },
+      }),
+    ).toBe(false);
+    expect(
+      isDeleteOnlyCodingMutate({
+        name: "apply_patch",
+        arguments: { patch: "*** Delete File: src/react-dom-shim.js\n" },
+      }),
+    ).toBe(true);
+    expect(
+      isScratchCodingMutate({
+        name: "apply_patch",
+        arguments: { path: "/tmp/pr-body.md", text: "## Summary\n" },
+      }),
+    ).toBe(true);
+    expect(
+      isScratchCodingMutate({
+        name: "apply_patch",
+        arguments: { path: "src/store.py", oldStr: "a", newStr: "b" },
+      }),
+    ).toBe(false);
+    expect(
+      foldCodingVerifyFlags([
+        { name: "apply_patch", arguments: { path: "src/store.py" } },
+        {
+          name: "exec",
+          arguments: {
+            command: "docker exec web python3 ./manage.py test shop.tests.test_models",
+          },
+        },
+        { name: "apply_patch", arguments: { path: "/tmp/pr-body.md", text: "body" } },
+      ]),
+    ).toEqual({ mutated: true, verified: true });
     expect(isWorkspaceSearchTool("grep")).toBe(true);
     expect(isWorkspaceSearchTool("Grep")).toBe(true);
+    expect(isWorkspaceSearchTool("search")).toBe(true);
     expect(isWorkspaceSearchTool("exec")).toBe(true);
     expect(isWorkspaceSearchTool("exec", { command: "cat src/a.ts" })).toBe(true);
     expect(isWorkspaceSearchTool("exec", { command: "npm test" })).toBe(false);
@@ -143,6 +221,27 @@ describe("coding loop walls", () => {
         },
       ]),
     ).toBe(true);
+    expect(
+      codingTurnNeedsHuman([
+        { role: "user", content: "fix add" },
+        {
+          role: "assistant",
+          toolCalls: [
+            { name: "apply_patch", arguments: { path: "src/add.ts" } },
+            {
+              name: "exec",
+              arguments: {
+                command: "/bin/bash -lc 'npm run test --ignore-scripts -- --testPathPattern=add'",
+              },
+            },
+            {
+              name: "apply_patch",
+              arguments: { changes: [{ path: "src/react-dom-shim.js", kind: "delete" }] },
+            },
+          ],
+        },
+      ]),
+    ).toBeUndefined();
   });
 
   it("does not ship a coding turn whose last tests failed", () => {

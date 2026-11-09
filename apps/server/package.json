@@ -1,6 +1,6 @@
 {
   "name": "@locus/server",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "private": true,
   "description": "Locus control plane — loopback Hono API, WebSocket hub, and session services",
   "type": "module",

@@ -273,14 +273,17 @@ describe("workspace index", () => {
     await writeFile(join(root, "root.ts"), "export function rootFn() {}\n");
     await execFileAsync("git", ["add", "."], { cwd: root });
     await execFileAsync("git", ["commit", "-m", "root"], { cwd: root });
-    await mkdir(join(root, "siq8", "src"), { recursive: true });
-    await writeFile(join(root, "siq8", "src", "app.ts"), "export function nestedFn() {}\n");
-    await execFileAsync("git", ["init"], { cwd: join(root, "siq8") });
+    await mkdir(join(root, "nested", "src"), { recursive: true });
+    await writeFile(join(root, "nested", "src", "app.ts"), "export function nestedFn() {}\n");
+    await execFileAsync("git", ["init"], { cwd: join(root, "nested") });
     await mkdir(join(root, ".cache"), { recursive: true });
     await writeFile(join(root, ".cache", "noise.ts"), "export function leaked() {}\n");
     const built = await buildWorkspaceIndex(root);
-    expect(built.map.files.map((file) => file.path).sort()).toEqual(["root.ts", "siq8/src/app.ts"]);
-    expect(built.map.files.find((file) => file.path === "siq8/src/app.ts")?.symbols).toContain(
+    expect(built.map.files.map((file) => file.path).sort()).toEqual([
+      "nested/src/app.ts",
+      "root.ts",
+    ]);
+    expect(built.map.files.find((file) => file.path === "nested/src/app.ts")?.symbols).toContain(
       "nestedFn",
     );
   });

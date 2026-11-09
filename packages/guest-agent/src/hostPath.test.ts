@@ -6,7 +6,11 @@ import { lexicalHostPath, resolveReadPath, resolveWritePath } from "./hostPath.j
 
 let cleanup: string[] = [];
 afterEach(async () => {
-  await Promise.all(cleanup.map((d) => rm(d, { recursive: true, force: true })));
+  await Promise.all(
+    cleanup.map((d) =>
+      rm(d, { recursive: true, force: true, maxRetries: 8, retryDelay: 50 }).catch(() => undefined),
+    ),
+  );
   cleanup = [];
 });
 

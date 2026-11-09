@@ -29,6 +29,10 @@ Some Codex CLI/model combinations fail to register a dynamically configured MCP 
 The native shell is sandboxed and does not inherit Locus forge credentials. Do not retry failed shell pushes, remove sandbox proxies, inspect credential stores, or create replacement Locus sessions to publish changes. If a Locus Git tool fails, report its specific error and address that cause. Do not claim a push or PR succeeded without its tool result.
 If shell tests fail with spawn EPERM, report that validation limit; the Locus push/PR test gate runs on the host and must pass before publishing.`;
 
+export const KIRO_GIT_MCP_INSTRUCTIONS = `Locus Git:
+The locus MCP server for this turn exposes git_status, git_diff, git_log, git_branch, git_commit, git_fetch, git_push, and git_pr. Use those for Git and pull requests so Locus can apply saved forge credentials and its test gate. Do not git push, create the PR with gh/glab, or curl GitHub/GitLab/Bitbucket with tokens from the environment.
+If a native locus MCP call is unavailable, POST tools/call JSON-RPC to LOCUS_GIT_MCP_URL. For example: curl -fsS -X POST "$LOCUS_GIT_MCP_URL" -H "content-type: application/json" --data '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git_status","arguments":{}}}'. Replace only the tool name and arguments. Do not claim a push or PR succeeded without that tool result.`;
+
 export const CLI_CANVAS_MCP_INSTRUCTIONS = `Locus canvas MCP:
 The locus_git MCP server for this turn includes playwright against the live operator canvas. After a write, call playwright (click, then screenshot). Do not npm i Playwright or write spec files. If a native MCP call is unavailable, unregistered, or "not a function", POST tools/call JSON-RPC to LOCUS_GIT_MCP_URL with name "playwright". Git tools on the same server still go through Locus gates.`;
 
@@ -39,4 +43,10 @@ export function codexMcpPrompt(kind: "git" | "canvas" | "review"): string {
   if (kind === "canvas") return `${CLI_CANVAS_MCP_INSTRUCTIONS}\n\n${CLI_GIT_INSTRUCTIONS}`;
   if (kind === "review") return CLI_REVIEW_MCP_INSTRUCTIONS;
   return CLI_GIT_INSTRUCTIONS;
+}
+
+export function kiroMcpPrompt(kind: "git" | "canvas" | "review"): string {
+  if (kind === "canvas") return `${CLI_CANVAS_MCP_INSTRUCTIONS}\n\n${KIRO_GIT_MCP_INSTRUCTIONS}`;
+  if (kind === "review") return CLI_REVIEW_MCP_INSTRUCTIONS;
+  return KIRO_GIT_MCP_INSTRUCTIONS;
 }

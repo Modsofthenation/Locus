@@ -15,6 +15,7 @@ import {
   workerPickSize,
   workerWhereLabel,
   workerHourlyUsd,
+  workerProvisionsCompute,
   computeUsdForMs,
   sessionComputeMs,
   DEFAULT_WORKER_IDLE_TTL_MS,
@@ -219,6 +220,41 @@ describe("worker backends", () => {
         allowedSizes: [],
       }),
     ).toMatch(/size allowlist/);
+  });
+
+  it("parses Azure and GCP workers without a paste URL", () => {
+    const azure = parseWorkerBackend({
+      id: "az-1",
+      name: "aci",
+      kind: "azure",
+      token: "secret",
+      tenantId: "ten",
+      clientId: "app",
+      subscriptionId: "sub",
+      resourceGroup: "rg",
+      containerGroup: "locus",
+      region: "eastus",
+      allowedImages: ["locus/agent"],
+      allowedSizes: ["0.25-0.5"],
+    });
+    expect(azure).toMatchObject({ id: "az-1", kind: "azure", url: "" });
+    expect(workerProvisionsCompute(azure!)).toBe(true);
+    expect(workerIsMetered(azure!)).toBe(true);
+    expect(workerWhereLabel(azure!)).toBe("aci · azure");
+    const gcp = parseWorkerBackend({
+      id: "g-1",
+      name: "gce",
+      kind: "gcp",
+      token: "ya29.token",
+      project: "proj",
+      zone: "us-central1-a",
+      instanceTemplate: "locus-worker",
+      allowedImages: ["locus/agent"],
+      allowedSizes: ["0.25-0.5"],
+    });
+    expect(gcp).toMatchObject({ id: "g-1", kind: "gcp", url: "" });
+    expect(workerProvisionsCompute(gcp!)).toBe(true);
+    expect(workerWhereLabel(gcp!)).toBe("gce · gcp");
   });
 
   it("rejects a fargate worker without an access key id", () => {

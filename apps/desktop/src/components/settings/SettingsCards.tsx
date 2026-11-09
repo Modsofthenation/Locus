@@ -47,6 +47,7 @@ import {
   workerDestroyOnStop,
   workerIsMetered,
   workerKind,
+  workerProvisionsCompute,
   type AgentSkill,
   type AiProvider,
   type GitForgeAccount,
@@ -1202,6 +1203,8 @@ export function parseEnvLines(text: string): Record<string, string> {
 
 export function workerKindLabel(kind: ReturnType<typeof workerKind>): string {
   if (kind === "fargate") return "Fargate";
+  if (kind === "azure") return "Azure";
+  if (kind === "gcp") return "GCP";
   if (kind === "cloud") return "Cloud VM";
   return "LAN";
 }
@@ -1209,6 +1212,12 @@ export function workerKindLabel(kind: ReturnType<typeof workerKind>): string {
 export function workerWhereHint(row: WorkerBackend): string {
   if (workerKind(row) === "fargate") {
     return [row.region, row.cluster].filter(Boolean).join(" · ") || "AWS";
+  }
+  if (workerKind(row) === "azure") {
+    return [row.region, row.resourceGroup].filter(Boolean).join(" · ") || "Azure";
+  }
+  if (workerKind(row) === "gcp") {
+    return [row.zone, row.project].filter(Boolean).join(" · ") || "GCP";
   }
   try {
     return new URL(row.url).host;
@@ -1471,7 +1480,7 @@ export function WorkerCard({
               <label>Name</label>
               <input value={worker.name} onChange={(e) => onPatch({ name: e.target.value })} />
             </div>
-            {kind === "fargate" ? null : (
+            {workerProvisionsCompute(worker) ? null : (
               <div className="field">
                 <label>URL</label>
                 <input
@@ -1544,21 +1553,165 @@ export function WorkerCard({
               >
                 Fargate
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={kind === "azure"}
+                className={kind === "azure" ? "active" : ""}
+                onClick={() =>
+                  onPatch((row) => {
+                    const next = { ...row, kind: "azure" as const };
+                    if (next.idleTtlMs === 0) delete next.idleTtlMs;
+                    if (next.destroyOnStop === false) delete next.destroyOnStop;
+                    if (!next.allowedImages?.length) next.allowedImages = [DEFAULT_DOCKER_IMAGE];
+                    if (!next.allowedSizes?.length) next.allowedSizes = [DEFAULT_FARGATE_SIZE];
+                    return next;
+                  })
+                }
+              >
+                Azure
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={kind === "gcp"}
+                className={kind === "gcp" ? "active" : ""}
+                onClick={() =>
+                  onPatch((row) => {
+                    const next = { ...row, kind: "gcp" as const };
+                    if (next.idleTtlMs === 0) delete next.idleTtlMs;
+                    if (next.destroyOnStop === false) delete next.destroyOnStop;
+                    if (!next.allowedImages?.length) next.allowedImages = [DEFAULT_DOCKER_IMAGE];
+                    if (!next.allowedSizes?.length) next.allowedSizes = [DEFAULT_FARGATE_SIZE];
+                    return next;
+                  })
+                }
+              >
+                GCP
+              </button>
             </div>
           </div>
           <div className="field">
-            <label>{kind === "fargate" ? "Secret access key" : "Token"}</label>
+            <label>
+              {kind === "fargate"
+                ? "Secret access key"
+                : kind === "azure"
+                  ? "Client secret"
+                  : kind === "gcp"
+                    ? "Access token"
+                    : "Token"}
+            </label>
             <input
               type="password"
               autoComplete="off"
               value={worker.token ?? ""}
               placeholder={
-                kind === "fargate" ? "AWS secret access key" : "Printed once when the worker starts"
+                kind === "fargate"
+                  ? "AWS secret access key"
+                  : kind === "azure"
+                    ? "Azure AD client secret"
+                    : kind === "gcp"
+                      ? "GCP OAuth access token"
+                      : "Printed once when the worker starts"
               }
               onChange={(e) => onPatch({ token: e.target.value })}
             />
           </div>
-          {kind === "fargate" ? (
+          {kind === "azure" ? (
+            <>
+              <div className="grid-2">
+                <div className="field">
+                  <label>Tenant id</label>
+                  <input
+                    value={worker.tenantId ?? ""}
+                    spellCheck={false}
+                    onChange={(e) => onPatch({ tenantId: e.target.value.trim() || undefined })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Client id</label>
+                  <input
+                    value={worker.clientId ?? ""}
+                    spellCheck={false}
+                    onChange={(e) => onPatch({ clientId: e.target.value.trim() || undefined })}
+                  />
+                </div>
+              </div>
+              <div className="grid-2">
+                <div className="field">
+                  <label>Subscription</label>
+                  <input
+                    value={worker.subscriptionId ?? ""}
+                    spellCheck={false}
+                    onChange={(e) =>
+                      onPatch({ subscriptionId: e.target.value.trim() || undefined })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Resource group</label>
+                  <input
+                    value={worker.resourceGroup ?? ""}
+                    spellCheck={false}
+                    onChange={(e) => onPatch({ resourceGroup: e.target.value.trim() || undefined })}
+                  />
+                </div>
+              </div>
+              <div className="grid-2">
+                <div className="field">
+                  <label>Container group</label>
+                  <input
+                    value={worker.containerGroup ?? ""}
+                    spellCheck={false}
+                    onChange={(e) =>
+                      onPatch({ containerGroup: e.target.value.trim() || undefined })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Region</label>
+                  <input
+                    value={worker.region ?? ""}
+                    spellCheck={false}
+                    onChange={(e) => onPatch({ region: e.target.value.trim() || undefined })}
+                  />
+                </div>
+              </div>
+            </>
+          ) : kind === "gcp" ? (
+            <>
+              <div className="grid-2">
+                <div className="field">
+                  <label>Project</label>
+                  <input
+                    value={worker.project ?? ""}
+                    spellCheck={false}
+                    onChange={(e) => onPatch({ project: e.target.value.trim() || undefined })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Zone</label>
+                  <input
+                    value={worker.zone ?? ""}
+                    placeholder="us-central1-a"
+                    spellCheck={false}
+                    onChange={(e) => onPatch({ zone: e.target.value.trim() || undefined })}
+                  />
+                </div>
+              </div>
+              <div className="field">
+                <label>Instance template</label>
+                <input
+                  value={worker.instanceTemplate ?? ""}
+                  placeholder="projects/…/global/instanceTemplates/locus-worker"
+                  spellCheck={false}
+                  onChange={(e) =>
+                    onPatch({ instanceTemplate: e.target.value.trim() || undefined })
+                  }
+                />
+              </div>
+            </>
+          ) : kind === "fargate" ? (
             <>
               <div className="field">
                 <label>Access key ID</label>
@@ -1725,7 +1878,7 @@ export function WorkerCard({
               />
             </div>
           </div>
-          {kind === "fargate" ? null : (
+          {workerProvisionsCompute(worker) ? null : (
             <div className="field">
               <label>Hourly USD</label>
               <input
@@ -1774,7 +1927,7 @@ export function WorkerCard({
               }
             />
           </div>
-          {kind === "fargate" ? (
+          {workerProvisionsCompute(worker) ? (
             <div className="field">
               <label>Allowed sizes</label>
               <textarea
@@ -1814,7 +1967,7 @@ export function WorkerCard({
             Destroy guest on stop
           </label>
           <div className="row-actions">
-            {kind === "fargate" ? null : (
+            {workerProvisionsCompute(worker) ? null : (
               <button type="button" className="btn small" disabled={busy} onClick={onTest}>
                 Test connection
               </button>

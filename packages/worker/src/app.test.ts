@@ -592,4 +592,46 @@ console.log(JSON.stringify({ type: "turn.completed", usage: {} }));
     await client.execute(vm.id, { name: "exec", args: { command: "echo hi" } }, abort.signal);
     expect(seen).toBe(abort.signal);
   });
+
+  it("namespaces guests per control-plane header", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-worker-plane-"));
+    const engine = new MockDockerEngine(dir);
+    const app = createWorkerApp({ engine, token: "secret", name: "studio" });
+    const fetchFn: typeof fetch = async (input, init) =>
+      app.request(String(input).replace("http://127.0.0.1:7421", ""), init);
+    const a = new WorkerClient(
+      { id: "w1", name: "studio", url: "http://127.0.0.1:7421", token: "secret" },
+      fetchFn,
+    );
+    const b = new WorkerClient(
+      { id: "w1", name: "studio", url: "http://127.0.0.1:7421", token: "secret" },
+      fetchFn,
+    );
+    a.planeId = "plane-aaa";
+    b.planeId = "plane-bbb";
+    const first = await a.create({ sessionId: "s-a", name: "a", image: "locus/agent" });
+    expect(first.planeId).toBe("plane-aaa");
+    const listedA = await a.listGuests();
+    const listedB = await b.listGuests();
+    expect(listedA.map((row) => row.id)).toContain(first.id);
+    expect(listedB.map((row) => row.id)).not.toContain(first.id);
+    expect(await b.refresh(first.id)).toBeUndefined();
+  });
+
+  it("stores a golden VM disk on the worker", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-worker-disk-"));
+    const engine = new MockDockerEngine(dir);
+    const app = createWorkerApp({ engine, token: "secret", name: "studio", dataDir: dir });
+    const fetchFn: typeof fetch = async (input, init) =>
+      app.request(String(input).replace("http://127.0.0.1:7421", ""), init);
+    const client = new WorkerClient(
+      { id: "w1", name: "studio", url: "http://127.0.0.1:7421", token: "secret" },
+      fetchFn,
+    );
+    const disk = join(dir, "seed.qcow2");
+    await writeFile(disk, Buffer.from("qcow"));
+    const uploaded = await client.uploadGoldenDisk("img-12345", disk);
+    expect(uploaded.bytes).toBe(4);
+    expect(await client.hasGoldenDisk("img-12345")).toMatchObject({ bytes: 4 });
+  });
 });

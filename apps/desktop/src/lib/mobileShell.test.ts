@@ -22,6 +22,7 @@ import {
   sessionMetaLine,
   sessionNeedsYou,
   sessionShowsBrowser,
+  sessionShowsVnc,
   sessionStatusLabel,
   UI_SHELL_KEY,
 } from "./mobileShell";
@@ -179,6 +180,12 @@ describe("mobile session helpers", () => {
     expect(sessionShowsBrowser(session({ runtime: "docker", kind: "assets" }))).toBe(false);
   });
 
+  it("offers view-only VNC on QEMU guests with a vmId", () => {
+    expect(sessionShowsVnc(session({ runtime: "vm", vmId: "vm1" }))).toBe(true);
+    expect(sessionShowsVnc(session({ runtime: "vm" }))).toBe(false);
+    expect(sessionShowsVnc(session({ runtime: "docker", vmId: "c1" }))).toBe(false);
+  });
+
   it("collects pending approvals once per tool call", () => {
     const needed = call();
     const rows = pendingApprovals([
@@ -326,7 +333,10 @@ describe("bindMobileViewport", () => {
 });
 
 describe("phone shell CSS", () => {
-  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../index.css"), "utf8");
+  const css = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../styles/phone.css"),
+    "utf8",
+  );
 
   it("keeps the chat list from pushing the tab bar off screen", () => {
     expect(css).toMatch(

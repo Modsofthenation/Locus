@@ -68,6 +68,8 @@ export interface CreateContainerRequest {
   template?: VmTemplate;
   /** Worker QEMU: optional golden overlay path on the worker. */
   imagePath?: string;
+  /** Control-plane namespace on a shared worker. */
+  planeId?: string;
 }
 
 export type ImageBuildListener = (id: string, progress: ImageBuildProgress) => void;
@@ -233,6 +235,7 @@ function instanceFrom(req: CreateContainerRequest, id: string, dataDir: string):
     runtime: "docker",
     dockerImage: req.image,
     network: req.network,
+    planeId: req.planeId,
     createdAt: now(),
     updatedAt: now(),
   };

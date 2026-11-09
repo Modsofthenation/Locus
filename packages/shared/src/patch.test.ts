@@ -274,6 +274,13 @@ describe("patchTextFromTool", () => {
         new_string: "nope",
       }),
     ).toBeUndefined();
+    expect(
+      patchFilesFromTool("apply_patch", {
+        path: "src/store.py",
+        oldStr: "    value = items[0]",
+        newStr: "    value = items[-1]",
+      })[0]?.path,
+    ).toBe("src/store.py");
   });
 });
 

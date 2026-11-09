@@ -7,6 +7,9 @@ export type {
 } from "./types.js";
 export { MockComputeBackend } from "./mock.js";
 export { FargateComputeBackend } from "./fargate.js";
+export { AzureComputeBackend } from "./azure.js";
+export { GcpComputeBackend } from "./gcp.js";
+export { CompositeComputeBackend } from "./composite.js";
 export { computeTasksPath, loadComputeTaskRegistry } from "./registry.js";
 export type { ComputeTaskRecord, ComputeTaskRegistry } from "./registry.js";
 export {

@@ -1,4 +1,13 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { AgentCanvasPane, useAgentCanvasFocus } from "@/components/workspace/AgentCanvasPane";
 import {
   DEFAULT_DOCKER_IMAGE,
@@ -36,6 +45,7 @@ import {
   subagentStatusLabel,
   subagentViewMessages,
   showThoughtTraces,
+  t,
   themeOption,
   isFoldableToolActivity,
   toolActivityGroups,
@@ -78,6 +88,7 @@ import {
   sessionMetaLine,
   sessionNeedsYou,
   sessionShowsBrowser,
+  sessionShowsVnc,
   sessionStatusLabel,
   setUiShell,
   bindMobileViewport,
@@ -88,6 +99,20 @@ import { loadMobileAgentFilter, saveMobileAgentFilter } from "@/lib/sidebarPrefs
 import { MobileBoardList, MobileBoardView } from "@/components/board/MobileBoard";
 import { MobileProjectList } from "@/components/projects/MobileProject";
 import { APP_VERSION } from "@/lib/appInfo";
+import { chatFindHits } from "@/lib/chatFind";
+
+const SettingsPane = lazy(async () => ({
+  default: (await import("@/components/settings/Settings")).Settings,
+}));
+const NewAutomationModal = lazy(async () => ({
+  default: (await import("@/components/automations/NewAutomation")).NewAutomationModal,
+}));
+const SessionSwitcher = lazy(async () => ({
+  default: (await import("@/components/layout/SessionSwitcher")).SessionSwitcher,
+}));
+const VncPane = lazy(async () => ({
+  default: (await import("@/components/guest/VncPane")).VncPane,
+}));
 import { batchableApprovals, needsYouHumanItems, type NeedsYouItem } from "@/lib/needsYou";
 import { applyChatDensity, applyTheme } from "@/lib/theme";
 import { useStore } from "@/state/store";
@@ -362,6 +387,7 @@ export function MobileShell(props: { onShell: (shell: UiShell) => void }) {
   const [codePull, setCodePull] = useState<number | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [overlay, setOverlay] = useState<null | "settings" | "palette">(null);
   const sessions = mobileSessions(state.sessions);
   const designs = mobileDesigns(state.sessions);
   const games = mobileGames(state.sessions);
@@ -579,6 +605,9 @@ export function MobileShell(props: { onShell: (shell: UiShell) => void }) {
                 onOpenCanvas={(id) => setDesignId(id)}
                 onNewGame={() => setCompose("game")}
                 onNewAsset={() => setCompose("assets")}
+                onSettings={() => setOverlay("settings")}
+                onNewAutomation={() => dispatch({ type: "newAutomation", open: true })}
+                onPalette={() => setOverlay("palette")}
               />
             ) : null}
           </div>
@@ -624,6 +653,37 @@ export function MobileShell(props: { onShell: (shell: UiShell) => void }) {
           </nav>
         </>
       )}
+      {overlay === "settings" ? (
+        <div className="mobile-overlay" data-testid="mobile-settings">
+          <header className="mobile-top is-thread">
+            <button
+              type="button"
+              className="mobile-icon-btn mobile-back"
+              onClick={() => setOverlay(null)}
+            >
+              Back
+            </button>
+            <div className="mobile-top-title">
+              <h1>{t("phone.more.settings")}</h1>
+            </div>
+          </header>
+          <div className="mobile-overlay-body">
+            <Suspense fallback={<p className="hint">Loading…</p>}>
+              <SettingsPane />
+            </Suspense>
+          </div>
+        </div>
+      ) : null}
+      {overlay === "palette" ? (
+        <Suspense fallback={null}>
+          <SessionSwitcher startOpen onClosed={() => setOverlay(null)} />
+        </Suspense>
+      ) : null}
+      {state.newAutomationOpen ? (
+        <Suspense fallback={null}>
+          <NewAutomationModal />
+        </Suspense>
+      ) : null}
     </div>
   );
 }
@@ -918,6 +978,9 @@ function MobileMore(props: {
   onOpenCanvas: (sessionId: string) => void;
   onNewGame?: () => void;
   onNewAsset?: () => void;
+  onSettings?: () => void;
+  onNewAutomation?: () => void;
+  onPalette?: () => void;
 }) {
   const { state, dispatch } = useStore();
   const theme = state.config?.theme ?? "ember";
@@ -1346,14 +1409,29 @@ function MobileMore(props: {
           ))}
         </ul>
       </section>
+      <section className="mobile-settings-block" data-testid="mobile-phone-parity">
+        <h2>On this phone</h2>
+        <button type="button" className="mobile-setting-row" onClick={() => props.onSettings?.()}>
+          <span>{t("phone.more.settings")}</span>
+          <span className="mobile-setting-value">Providers · workers · about</span>
+        </button>
+        <button
+          type="button"
+          className="mobile-setting-row"
+          onClick={() => props.onNewAutomation?.()}
+        >
+          <span>{t("phone.more.automation")}</span>
+          <span className="mobile-setting-value">Schedule a job</span>
+        </button>
+        <button type="button" className="mobile-setting-row" onClick={() => props.onPalette?.()}>
+          <span>{t("phone.more.palette")}</span>
+          <span className="mobile-setting-value">Jump anywhere</span>
+        </button>
+      </section>
       <section className="mobile-cap-block">
         <h2>Stays on the desktop</h2>
         <ul className="mobile-tags is-muted">
-          {["Live VNC", "Settings", "New automation", "Command palette", "Find in chat"].map(
-            (label) => (
-              <li key={label}>{label}</li>
-            ),
-          )}
+          <li>{t("phone.desktopOnly")}</li>
         </ul>
       </section>
 
@@ -1503,6 +1581,9 @@ function MobileChat(props: { session: AgentSession; onBack: () => void }) {
   const [outbound, setOutbound] = useState<ChatMessage | null>(null);
   const [openSubagent, setOpenSubagent] = useState<SubagentLive | null>(null);
   const [browser, setBrowser] = useState(false);
+  const [vnc, setVnc] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
   const [pane, setPane] = useState<"chat" | "diff" | "files" | "canvas">("chat");
   const canvasFocus = useAgentCanvasFocus(session.id, session.agentCanvases);
   useEffect(() => {
@@ -1518,6 +1599,7 @@ function MobileChat(props: { session: AgentSession; onBack: () => void }) {
     productMode: state.config?.productMode,
   });
   const canWatchBrowser = sessionShowsBrowser(session);
+  const canWatchVnc = sessionShowsVnc(session);
   const pending = viewing ? [] : pendingApprovals([session]);
   const outboundVisible =
     viewing || !(outbound && !chatPromptLanded(session, outbound.content)) ? null : outbound;
@@ -1528,6 +1610,7 @@ function MobileChat(props: { session: AgentSession; onBack: () => void }) {
         ? [...session.messages, outboundVisible]
         : session.messages
   ).filter((row) => !isHiddenChatMessage(row));
+  const findHits = findOpen ? chatFindHits(messages, findQuery) : [];
   const newMarkerId = viewing ? undefined : visitMarkerId(state.chatNewVisit, session.id);
   const cloneStartId = viewing ? undefined : latestCloneStartMessageId(messages);
   const cloneProgressLive = state.cloneProgress[session.id];
@@ -1564,6 +1647,9 @@ function MobileChat(props: { session: AgentSession; onBack: () => void }) {
     setOutbound(null);
     setOpenSubagent(null);
     setBrowser(false);
+    setVnc(false);
+    setFindOpen(false);
+    setFindQuery("");
     setPane("chat");
   }, [session.id]);
 
@@ -1640,10 +1726,29 @@ function MobileChat(props: { session: AgentSession; onBack: () => void }) {
               className={`mobile-icon-btn${browser ? " on" : ""}`}
               aria-label={browser ? "Hide browser" : "Open browser"}
               aria-pressed={browser}
-              onClick={() => setBrowser((open) => !open)}
+              onClick={() => {
+                setVnc(false);
+                setBrowser((open) => !open);
+              }}
             >
               <IconGlobe />
               <span className="mobile-sr">{browser ? "Hide browser" : "Open browser"}</span>
+            </button>
+          ) : null}
+          {canWatchVnc && !viewing ? (
+            <button
+              type="button"
+              className={`mobile-icon-btn${vnc ? " on" : ""}`}
+              aria-label={vnc ? "Hide VM display" : t("phone.more.vnc")}
+              aria-pressed={vnc}
+              data-testid="mobile-vnc-toggle"
+              onClick={() => {
+                setBrowser(false);
+                setVnc((open) => !open);
+              }}
+            >
+              <IconGlobe />
+              <span className="mobile-sr">{vnc ? "Hide VM display" : t("phone.more.vnc")}</span>
             </button>
           ) : null}
           {turning && !viewing ? (
@@ -1661,6 +1766,14 @@ function MobileChat(props: { session: AgentSession; onBack: () => void }) {
             </button>
           ) : !viewing ? (
             <OverflowMenu label={<IconMore />} title="Thread" toggleClassName="mobile-icon-btn">
+              <MenuItem
+                onClick={() => {
+                  setFindOpen((open) => !open);
+                  if (findOpen) setFindQuery("");
+                }}
+              >
+                {t("phone.more.find")}
+              </MenuItem>
               <MenuItem
                 onClick={() => {
                   void api
@@ -1709,7 +1822,7 @@ function MobileChat(props: { session: AgentSession; onBack: () => void }) {
       </header>
       <nav
         className="mobile-chat-tabs"
-        hidden={browser || Boolean(viewing)}
+        hidden={browser || vnc || Boolean(viewing)}
         data-testid="mobile-chat-tabs"
       >
         <button
@@ -1760,6 +1873,29 @@ function MobileChat(props: { session: AgentSession; onBack: () => void }) {
           />
         </div>
       ) : null}
+      {vnc && session.vmId ? (
+        <div className="mobile-browser" data-testid="mobile-vnc">
+          <Suspense fallback={<p className="hint">Connecting…</p>}>
+            <VncPane vmId={session.vmId} viewOnly onFail={() => setVnc(false)} />
+          </Suspense>
+        </div>
+      ) : null}
+      {findOpen && !browser && !vnc && !viewing ? (
+        <div className="mobile-find-bar" data-testid="mobile-find">
+          <input
+            className="mobile-search-input"
+            type="search"
+            value={findQuery}
+            autoFocus
+            placeholder="Find in chat…"
+            aria-label={t("phone.more.find")}
+            onChange={(event) => setFindQuery(event.target.value)}
+          />
+          <span className="mobile-find-count">
+            {findQuery.trim() ? `${findHits.length} match${findHits.length === 1 ? "" : "es"}` : ""}
+          </span>
+        </div>
+      ) : null}
       {session.needsHuman?.trim() && !viewing && !browser ? (
         <div className="needs-you-banner" role="status">
           <span>Needs you — {session.needsHuman.trim()}</span>
@@ -1768,7 +1904,7 @@ function MobileChat(props: { session: AgentSession; onBack: () => void }) {
           </button>
         </div>
       ) : null}
-      <div className="mobile-thread" ref={thread} hidden={browser}>
+      <div className="mobile-thread" ref={thread} hidden={browser || vnc}>
         {!state.connected || error ? (
           <div className="mobile-banner" role="status">
             {error ?? "Reconnecting…"}

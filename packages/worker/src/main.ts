@@ -9,6 +9,7 @@ import type { GuestOs, VmInstance } from "@locus/shared";
 import { createWorkerApp } from "./app.js";
 import { WorkerBrowserHub } from "./browserHub.js";
 import { attachWorkerBrowser } from "./browserSockets.js";
+import { attachWorkerDisplay } from "./displaySockets.js";
 import { WorkerGuestHub } from "./guests.js";
 import { workerAddStdout } from "./advertise.js";
 import { loadOrCreateWorkerTls } from "./tls.js";
@@ -85,4 +86,8 @@ attachWorkerBrowser(server, {
   guests,
   browsers,
   lookupGuest,
+});
+attachWorkerDisplay(server, {
+  token,
+  lookupGuest: (id) => lookupGuest(id) ?? engine.get(id),
 });

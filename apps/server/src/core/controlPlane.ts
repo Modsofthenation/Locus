@@ -9,4 +9,5 @@ export type ControlPlane = {
   projects?: ProjectService;
   brain?: BrainService;
   workflows?: WorkflowService;
+  onSlackApproval?: (sessionId: string, toolName: string, callId: string) => void;
 };

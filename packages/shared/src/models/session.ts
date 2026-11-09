@@ -1118,8 +1118,12 @@ export function formatUsageHint(
     ? `${usage!.inputTokens.toLocaleString("en-US")} in · ${usage!.outputTokens.toLocaleString("en-US")} out`
     : undefined;
   const usd = hasTokens && usage ? estimateUsd(usage, rates) : undefined;
-  const vm =
-    typeof computeUsd === "number" && computeUsd > 0 ? `${formatUsd(computeUsd)} VM` : undefined;
+  const vmAmount = typeof computeUsd === "number" && computeUsd > 0 ? computeUsd : 0;
+  const vm = vmAmount > 0 ? `${formatUsd(vmAmount)} VM` : undefined;
+  if (usd != null && vmAmount > 0) {
+    const total = `${formatUsd(usd + vmAmount)} total (${formatUsd(usd)} LLM · ${vm})`;
+    return [tokens, total].filter(Boolean).join(" · ");
+  }
   const parts = [tokens, usd != null ? formatUsd(usd) : undefined, vm].filter(Boolean);
   return parts.length ? parts.join(" · ") : undefined;
 }

@@ -80,7 +80,8 @@ export async function pinnedHttpsWebSocket(
   opts: {
     headers?: Record<string, string>;
     fingerprint?: string;
-    onMessage?: (raw: string) => void;
+    binary?: boolean;
+    onMessage?: (raw: string | Buffer) => void;
   },
 ): Promise<WebSocket> {
   const parsed = new URL(url);
@@ -100,7 +101,13 @@ export async function pinnedHttpsWebSocket(
       headers: opts.headers,
     });
     if (opts.onMessage) {
-      ws.on("message", (raw) => opts.onMessage?.(String(raw)));
+      ws.on("message", (raw) => {
+        if (opts.binary) {
+          opts.onMessage?.(Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw)));
+          return;
+        }
+        opts.onMessage?.(String(raw));
+      });
     }
     const fail = (err: Error) => {
       if (done) return;

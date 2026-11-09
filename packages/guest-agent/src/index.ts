@@ -59,6 +59,7 @@ export {
   sshCliEnv,
   sshTargetFromInstance,
   posixShellQuote,
+  powershellQuote,
 } from "./sshCli.js";
 export type { SshCliForward, SshCliHandle } from "./sshCli.js";
 export { authenticatedCloneUrl, gitAuthHeader } from "./git.js";

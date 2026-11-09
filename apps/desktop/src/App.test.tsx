@@ -47,7 +47,7 @@ vi.mock("@/lib/api", () => ({
       connected: false,
       tabs: [],
     })),
-    checkUpdates: vi.fn(async () => ({ status: "unavailable", current: "0.17.0" })),
+    checkUpdates: vi.fn(async () => ({ status: "unavailable", current: "0.18.0" })),
     workersStatus: vi.fn(async () => []),
     tailscale: vi.fn(async () => ({
       installed: false,

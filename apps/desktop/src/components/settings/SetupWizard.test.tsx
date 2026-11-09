@@ -160,6 +160,9 @@ describe("SetupWizard", () => {
     expect(host.querySelector(".modal")).toBeNull();
     const prefs = loadLastAgent();
     expect(prefs.runtime).toBe("docker");
+    expect(api.saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ setupCompleted: true, setupFirstTask: "pending" }),
+    );
   });
 
   it("does not treat a missing Docker CLI as a mock engine you can continue through", () => {

@@ -11,6 +11,7 @@ export {
 export { WorkerGuestHub, isWorkerVmGuest } from "./guests.js";
 export { WorkerBrowserHub } from "./browserHub.js";
 export { attachWorkerBrowser } from "./browserSockets.js";
+export { attachWorkerDisplay, pipeVnc as pipeWorkerVnc } from "./displaySockets.js";
 export { WorkerBrowserDriver } from "./browserDriver.js";
 export {
   certFingerprint,

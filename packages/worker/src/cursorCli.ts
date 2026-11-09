@@ -141,7 +141,7 @@ export function spawnWorkerCursorCli(
 ): { stream: ReadableStream<Uint8Array>; kill: () => void } {
   const command = req.command.trim() || "agent";
   const args = workerCliArgs(command, req.args, workspace, req.gitMcpUrl);
-  const env = workerCliEnv(command, req.apiKey, workerGitMcpUrl(args));
+  const env = workerCliEnv(command, req.apiKey, workerGitMcpUrl(args) ?? req.gitMcpUrl);
   const resolved = resolveWindowsCliSpawn(command, args, { env });
   let child: ReturnType<typeof spawn>;
   try {

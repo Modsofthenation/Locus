@@ -44,8 +44,8 @@ describe("kiro cli adapter", () => {
     expect(argv.command).toBe("kiro-cli");
     expect(argv.cwd).toBe("/tmp/app");
     expect(argv.args.slice(0, 6)).toEqual([
-      "--v3",
       "chat",
+      "--v3",
       "--no-interactive",
       "--trust-all-tools",
       "--output-format",
@@ -69,6 +69,16 @@ describe("kiro cli adapter", () => {
     expect(argv.env.KIRO_API_KEY).toBe("kiro-secret");
   });
 
+  it("maps a session MCP URL onto LOCUS_GIT_MCP_URL", () => {
+    const argv = buildKiroCliArgv({
+      provider,
+      prompt: "open a PR",
+      workspace: "/tmp/app",
+      gitMcpUrl: "http://127.0.0.1:7420/mcp/sessions/s1",
+    });
+    expect(argv.env.LOCUS_GIT_MCP_URL).toBe("http://127.0.0.1:7420/mcp/sessions/s1");
+  });
+
   it("omits --model auto so V3 uses its default instead of a missing id", () => {
     const argv = buildKiroCliArgv({
       provider,
@@ -76,7 +86,7 @@ describe("kiro cli adapter", () => {
       workspace: "/tmp/app",
       model: "auto",
     });
-    expect(argv.args.slice(0, 3)).toEqual(["--v3", "chat", "--no-interactive"]);
+    expect(argv.args.slice(0, 3)).toEqual(["chat", "--v3", "--no-interactive"]);
     expect(argv.args).toContain("--output-format");
     expect(argv.args).toContain("stream-json");
     expect(argv.args).not.toContain("--model");
@@ -300,6 +310,46 @@ describe("kiro cli adapter", () => {
     expect(
       parseKiroCliEvents(
         JSON.stringify({
+          type: "tool_call",
+          toolCallId: "s1",
+          kind: "search",
+          status: "pending",
+          rawInput: { query: "UserProfile" },
+        }),
+      ),
+    ).toEqual([
+      {
+        type: "tool_call",
+        id: "s1",
+        name: "grep",
+        status: "running",
+        arguments: { query: "UserProfile" },
+      },
+    ]);
+    expect(
+      parseKiroCliEvents(
+        JSON.stringify({
+          type: "tool_call",
+          toolCallId: "g1",
+          status: "pending",
+          rawInput: {
+            name: "context-gatherer",
+            prompt: "Find the lookup helpers",
+          },
+        }),
+      ),
+    ).toEqual([
+      {
+        type: "tool_call",
+        id: "g1",
+        name: "context-gatherer",
+        status: "running",
+        arguments: { name: "context-gatherer", prompt: "Find the lookup helpers" },
+      },
+    ]);
+    expect(
+      parseKiroCliEvents(
+        JSON.stringify({
           type: "session_info_update",
           sessionId: "v3-sess",
           _meta: { kiro: { kind: "displayError", displayError: { message: "Token expired" } } },
@@ -317,6 +367,121 @@ describe("kiro cli adapter", () => {
         }),
       ),
     ).toEqual([]);
+  });
+
+  it("maps stream-json {type, data} envelopes so chat is not blank", () => {
+    expect(
+      parseKiroCliEvents(
+        JSON.stringify({
+          type: "runStarted",
+          data: { payloadSchema: "acp", acpProtocolVersion: 1, engine: "v2" },
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      parseKiroCliEvents(
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            sessionId: "sess_hello",
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "Hello from Kiro." },
+            },
+          },
+        }),
+      ),
+    ).toEqual([
+      { type: "session", sessionId: "sess_hello" },
+      { type: "text", text: "Hello from Kiro." },
+    ]);
+    expect(
+      parseKiroCliEvents(
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "agent_thought_chunk",
+              content: { type: "text", text: "thinking" },
+            },
+          },
+        }),
+      ),
+    ).toEqual([{ type: "reasoning", text: "thinking" }]);
+    expect(
+      parseKiroCliEvents(
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call",
+              toolCallId: "c1",
+              status: "pending",
+              rawInput: { path: "README.md" },
+              _meta: { kiro: { toolName: "fsRead" } },
+            },
+          },
+        }),
+      ),
+    ).toEqual([
+      {
+        type: "tool_call",
+        id: "c1",
+        name: "file_read",
+        status: "running",
+        arguments: { path: "README.md" },
+      },
+    ]);
+    expect(
+      parseKiroCliEvents(
+        JSON.stringify({
+          type: "metadata",
+          data: { sessionId: "sess_hello", contextUsagePercentage: 12 },
+        }),
+      ),
+    ).toEqual([{ type: "session", sessionId: "sess_hello" }]);
+    expect(
+      parseKiroCliEvents(
+        JSON.stringify({
+          type: "runFinished",
+          data: {
+            status: "success",
+            sessionId: "sess_hello",
+            finalText: "Hello from Kiro.",
+            finalTextTruncated: false,
+          },
+        }),
+      ),
+    ).toEqual([
+      { type: "session", sessionId: "sess_hello" },
+      {
+        type: "result",
+        status: "FINISHED",
+        text: "Hello from Kiro.",
+        durationMs: undefined,
+      },
+    ]);
+    expect(
+      parseKiroCliEvents(
+        JSON.stringify({
+          type: "runError",
+          data: { stage: "auth", message: "not logged in" },
+        }),
+      ),
+    ).toEqual([{ type: "error", message: "not logged in" }]);
+    expect(
+      parseKiroCliEvents(
+        JSON.stringify({
+          type: "runFinished",
+          status: "success",
+          sessionId: "flat-1",
+          finalText: "Hi",
+        }),
+      ),
+    ).toEqual([
+      { type: "session", sessionId: "flat-1" },
+      { type: "result", status: "FINISHED", text: "Hi", durationMs: undefined },
+    ]);
   });
 
   it("streams mapped events from a fake CLI", async () => {
@@ -448,6 +613,150 @@ describe("kiro cli adapter", () => {
       { type: "text", text: "Hel" },
       { type: "text", text: "lo" },
       { type: "done" },
+    ]);
+  });
+
+  it("streams envelope sessionUpdate text and runFinished instead of a blank turn", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-kiro-cli-envelope-"));
+    const events: Array<{ type: string; text?: string; sessionId?: string }> = [];
+    for await (const ev of streamKiroCli({
+      provider,
+      prompt: "Hi, what model are you?",
+      workspace: dir,
+      spawnFn: spawner([
+        JSON.stringify({
+          type: "runStarted",
+          data: { payloadSchema: "acp", acpProtocolVersion: 1, engine: "v3" },
+        }),
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            sessionId: "sess_model",
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "I am Auto, Kiro's default model." },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "metadata",
+          data: { sessionId: "sess_model" },
+        }),
+        JSON.stringify({
+          type: "runFinished",
+          data: {
+            status: "success",
+            sessionId: "sess_model",
+            finalText: "I am Auto, Kiro's default model.",
+          },
+        }),
+      ]),
+    })) {
+      events.push({
+        type: ev.type,
+        ...((ev.type === "text" || ev.type === "result") && ev.text ? { text: ev.text } : {}),
+        ...(ev.type === "session" ? { sessionId: ev.sessionId } : {}),
+      });
+    }
+    expect(events).toEqual([
+      { type: "session", sessionId: "sess_model" },
+      { type: "text", text: "I am Auto, Kiro's default model." },
+      { type: "session", sessionId: "sess_model" },
+      { type: "session", sessionId: "sess_model" },
+      { type: "result" },
+      { type: "done" },
+    ]);
+  });
+
+  it("uses runFinished.finalText when the stream had no message chunks", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-kiro-cli-final-text-"));
+    const events: Array<{ type: string; text?: string }> = [];
+    for await (const ev of streamKiroCli({
+      provider,
+      prompt: "Hello",
+      workspace: dir,
+      spawnFn: spawner([
+        JSON.stringify({
+          type: "runStarted",
+          data: { payloadSchema: "acp", acpProtocolVersion: 1, engine: "v2" },
+        }),
+        JSON.stringify({
+          type: "runFinished",
+          data: { status: "success", sessionId: "sess_final", finalText: "Hello" },
+        }),
+      ]),
+    })) {
+      events.push({
+        type: ev.type,
+        ...((ev.type === "text" || ev.type === "result") && ev.text ? { text: ev.text } : {}),
+      });
+    }
+    expect(events).toEqual([
+      { type: "session" },
+      { type: "result", text: "Hello" },
+      { type: "done" },
+    ]);
+  });
+
+  it("collapses V3 tool_call_update onto one running event and keeps the name", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-kiro-cli-dup-"));
+    const events: Array<{ status?: string; name?: string; id?: string }> = [];
+    for await (const ev of streamKiroCli({
+      provider,
+      prompt: "test",
+      workspace: dir,
+      spawnFn: spawner([
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call",
+              toolCallId: "e1",
+              kind: "execute",
+              status: "pending",
+              rawInput: { command: "python3 ./manage.py test shop.tests.test_models" },
+              _meta: { kiro: { toolName: "executeCommand" } },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "e1",
+              status: "in_progress",
+              rawInput: {
+                command: "python3 ./manage.py test shop.tests.test_models",
+                description: "Run Django tests",
+                run_in_background: false,
+              },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "e1",
+              status: "completed",
+              content: [{ type: "text", text: "OK" }],
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "runFinished",
+          data: { status: "success", sessionId: "sess-e1" },
+        }),
+      ]),
+    })) {
+      if (ev.type === "tool_call") events.push({ status: ev.status, name: ev.name, id: ev.id });
+    }
+    expect(events).toEqual([
+      { status: "running", name: "exec", id: "e1" },
+      { status: "running", name: "exec", id: "e1" },
+      { status: "completed", name: "exec", id: "e1" },
     ]);
   });
 

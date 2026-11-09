@@ -1,10 +1,11 @@
 {
   "name": "@locus/desktop",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "private": true,
   "author": "Locus contributors",
   "license": "MIT",
   "description": "Locus — local AI coding agents in real guest VMs",
+  "homepage": "https://github.com/Modsofthenation/Locus#readme",
   "desktopName": "locus",
   "type": "module",
   "main": "electron/main.cjs",
@@ -19,7 +20,8 @@
     "test:visual:update": "playwright test --update-snapshots",
     "capture:readme": "node ./scripts/capture-readme-screens.mjs",
     "electron": "electron .",
-    "dist": "npm run build && electron-builder --publish never"
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:linux:arm64": "npm run build && electron-builder --linux --arm64 --publish never"
   },
   "dependencies": {
     "@locus/shared": "*",
@@ -85,11 +87,21 @@
     ],
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "deb",
+        "rpm"
       ],
       "category": "Development",
       "maintainer": "Locus",
       "executableName": "locus"
+    },
+    "deb": {
+      "packageName": "locus",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "rpm": {
+      "packageName": "locus",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "mac": {
       "target": [

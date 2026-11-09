@@ -8,6 +8,20 @@ import { setUiShell } from "@/lib/mobileShell";
 import { Store, initialState, reducer, type UiState } from "@/state/store";
 import { selectOptionValues, selectValue, setSelectValue } from "@/lib/selectControl";
 
+vi.mock("@/components/settings/Settings", () => ({
+  Settings: () => <div data-testid="settings-stub">Settings body</div>,
+}));
+vi.mock("@/components/automations/NewAutomation", () => ({
+  NewAutomationModal: () => <div data-testid="new-automation-stub">New automation modal</div>,
+}));
+vi.mock("@/components/layout/SessionSwitcher", () => ({
+  SessionSwitcher: ({ startOpen }: { startOpen?: boolean }) =>
+    startOpen ? <div data-testid="palette-stub">Command palette</div> : null,
+}));
+vi.mock("@/components/guest/VncPane", () => ({
+  VncPane: () => <div data-testid="vnc-stub">VNC</div>,
+}));
+
 vi.mock("@/lib/api", () => ({
   api: {
     chat: vi.fn(async () => ({ ok: true })),
@@ -1357,7 +1371,10 @@ describe("MobileShell", () => {
     ).toContain("Promote");
     expect(
       [...host.querySelectorAll(".mobile-tags.is-muted li")].map((el) => el.textContent),
-    ).toEqual(["Live VNC", "Settings", "New automation", "Command palette", "Find in chat"]);
+    ).toEqual(["Live VNC control still needs the desktop."]);
+    expect(host.textContent).toContain("Settings");
+    expect(host.textContent).toContain("New automation");
+    expect(host.textContent).toContain("Command palette");
     const desktop = [...host.querySelectorAll("button")].find(
       (btn) => btn.textContent === "Desktop",
     );
@@ -2124,5 +2141,77 @@ describe("MobileShell", () => {
     });
     expect(host.querySelector("h1")?.textContent).toBe("Code");
     expect(host.querySelector("[data-testid='mobile-code']")).toBeTruthy();
+  });
+
+  it("opens Settings, new automation, and the command palette from More", async () => {
+    render();
+    const more = [...host.querySelectorAll<HTMLButtonElement>(".mobile-tab")].find((btn) =>
+      btn.textContent?.includes("More"),
+    );
+    act(() => {
+      more!.click();
+    });
+    const settings = [...host.querySelectorAll("button")].find((btn) =>
+      btn.textContent?.includes("Settings"),
+    );
+    await act(async () => {
+      settings!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(host.querySelector("[data-testid='mobile-settings']")).toBeTruthy();
+    act(() => {
+      host.querySelector<HTMLButtonElement>(".mobile-overlay .mobile-back")!.click();
+    });
+    const automation = [...host.querySelectorAll("button")].find((btn) =>
+      btn.textContent?.includes("New automation"),
+    );
+    await act(async () => {
+      automation!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(host.querySelector("[data-testid='new-automation-stub']")).toBeTruthy();
+    const palette = [...host.querySelectorAll("button")].find((btn) =>
+      btn.textContent?.includes("Command palette"),
+    );
+    await act(async () => {
+      palette!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(host.querySelector("[data-testid='palette-stub']")).toBeTruthy();
+  });
+
+  it("opens view-only VNC and find-in-chat on a VM thread", async () => {
+    render({
+      sessions: [session({ runtime: "vm", vmId: "vm-1" })],
+    });
+    act(() => {
+      host.querySelector<HTMLButtonElement>(".mobile-row")!.click();
+    });
+    expect(host.querySelector("[data-testid='mobile-vnc-toggle']")).toBeTruthy();
+    act(() => {
+      host.querySelector<HTMLButtonElement>("[data-testid='mobile-vnc-toggle']")!.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(host.querySelector("[data-testid='mobile-vnc']")).toBeTruthy();
+    act(() => {
+      host.querySelector<HTMLButtonElement>("[data-testid='mobile-vnc-toggle']")!.click();
+    });
+    const more = host.querySelector<HTMLButtonElement>("[title='Thread']");
+    act(() => {
+      more!.click();
+    });
+    const find = [...host.querySelectorAll("button")].find((btn) =>
+      btn.textContent?.includes("Find in chat"),
+    );
+    act(() => {
+      find!.click();
+    });
+    expect(host.querySelector("[data-testid='mobile-find']")).toBeTruthy();
   });
 });

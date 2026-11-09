@@ -123,6 +123,11 @@ export function sessionShowsBrowser(session: AgentSession): boolean {
   return sessionRuntime(session) === "docker" && !isCanvasSession(session);
 }
 
+/** QEMU guests expose a view-only VNC pane on the phone. Control stays on the desktop. */
+export function sessionShowsVnc(session: AgentSession): boolean {
+  return sessionRuntime(session) === "vm" && Boolean(session.vmId);
+}
+
 export function pendingApprovals(sessions: AgentSession[]): MobileApproval[] {
   const out: MobileApproval[] = [];
   const seen = new Set<string>();

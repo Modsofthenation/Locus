@@ -19,6 +19,7 @@ import {
   isWindows,
   lastUserMessage,
   LINUX_WORKSPACE,
+  WINDOWS_WORKSPACE,
   normalizeCodexCliModel,
   sessionRuntime,
   sessionWebSearch,
@@ -41,7 +42,7 @@ import {
   type CursorCloudEvent,
 } from "@locus/providers";
 import { workspaceReadinessNote } from "../core/hooks.js";
-import { codexMcpPrompt } from "../integrations/cliGitMcp.js";
+import { codexMcpPrompt, kiroMcpPrompt } from "../integrations/cliGitMcp.js";
 import {
   controlPlaneMcpSessionUrl,
   controlPlaneMcpUrl,
@@ -105,7 +106,10 @@ export type HostCliTurnPorts = {
   spawnOverSsh?: (
     target: SshTarget,
     req: CursorCliSpawnRequest,
-    extra?: { reverseForwards?: { listenPort: number; hostPort: number }[] },
+    extra?: {
+      reverseForwards?: { listenPort: number; hostPort: number }[];
+      shell?: "posix" | "powershell";
+    },
   ) => SshCliHandle;
   primeGameTurn: (sessionId: string, userText: string) => Promise<string>;
   snapshotStudioBaseline: (sessionId: string) => Promise<unknown>;
@@ -160,27 +164,27 @@ const LABELS: Record<
 > = {
   cursor: {
     missing: "Cursor CLI provider is not configured. Enable it in Settings → Providers.",
-    vm: "Cursor CLI on a VM needs a running Linux guest with SSH. Windows VMs are not supported — use Docker or Host, or Cursor Cloud.",
+    vm: "Cursor CLI on a VM needs a running guest with SSH.",
     workspace: "Cursor CLI needs a workspace folder on this machine.",
     worker:
       "Cursor CLI on a worker needs a running Docker, Host, or Linux VM guest. Start it first.",
   },
   claude: {
     missing: "Claude Code provider is not configured. Enable it in Settings → Providers.",
-    vm: "Claude Code on a VM needs a running Linux guest with SSH. Windows VMs are not supported — switch the runtime, then retry.",
+    vm: "Claude Code on a VM needs a running guest with SSH.",
     workspace: "Claude Code needs a workspace folder on this machine.",
     worker:
       "Claude Code on a worker needs a running Docker, Host, or Linux VM guest. Start it first.",
   },
   kiro: {
     missing: "Kiro CLI provider is not configured. Enable it in Settings → Providers.",
-    vm: "Kiro CLI on a VM needs a running Linux guest with SSH. Windows VMs are not supported — switch the runtime, then retry.",
+    vm: "Kiro CLI on a VM needs a running guest with SSH.",
     workspace: "Kiro CLI needs a workspace folder on this machine.",
     worker: "Kiro CLI on a worker needs a running Docker, Host, or Linux VM guest. Start it first.",
   },
   codex: {
     missing: "Codex CLI provider is not configured. Enable it in Settings → Providers.",
-    vm: "Codex CLI on a VM needs a running Linux guest with SSH. Windows VMs are not supported — switch the runtime, then retry.",
+    vm: "Codex CLI on a VM needs a running guest with SSH.",
     workspace: "Codex CLI needs a workspace folder on this machine.",
     worker:
       "Codex CLI on a worker needs a running Docker, Host, or Linux VM guest. Start it first.",
@@ -223,7 +227,7 @@ export async function runHostCliTurn(
   const worker = ports.isWorkerSession(session);
   const localVm = sessionRuntime(session) === "vm" && !worker;
   const ssh = localVm ? await ports.guestSsh?.(session) : undefined;
-  if (localVm && (!ssh || isWindows(session.os))) {
+  if (localVm && !ssh) {
     await ports.appendMessage(input.sessionId, {
       id: randomUUID(),
       role: "system",
@@ -235,7 +239,9 @@ export async function runHostCliTurn(
   const workspace = worker
     ? "/workspace"
     : localVm
-      ? LINUX_WORKSPACE
+      ? isWindows(session.os)
+        ? WINDOWS_WORKSPACE
+        : LINUX_WORKSPACE
       : ports.workspaceRoot(session);
   if (!workspace) {
     await ports.appendMessage(input.sessionId, {
@@ -323,8 +329,11 @@ export async function runHostCliTurn(
     spawnFn = (req) =>
       overSsh(
         ssh,
-        { ...req, cwd: LINUX_WORKSPACE },
-        { reverseForwards: [{ listenPort: mcpPort, hostPort: mcpPort }] },
+        { ...req, cwd: isWindows(session.os) ? WINDOWS_WORKSPACE : LINUX_WORKSPACE },
+        {
+          reverseForwards: [{ listenPort: mcpPort, hostPort: mcpPort }],
+          shell: isWindows(session.os) ? "powershell" : "posix",
+        },
       );
   } else {
     spawnFn =
@@ -339,7 +348,7 @@ export async function runHostCliTurn(
   const reviewing = isReviewSession(session);
   const mcpKind: CodexMcpKind = reviewing ? "review" : isCanvasSession(session) ? "canvas" : "git";
   const gitMcpUrl =
-    kind === "codex" && !input.planTurn
+    (kind === "codex" || kind === "kiro") && !input.planTurn
       ? controlPlaneMcpSessionUrl(session.id, config.advanced.bindPort)
       : undefined;
   let promptText =
@@ -433,7 +442,11 @@ export async function runHostCliTurn(
       worker,
     )}`;
     const cliPrompt =
-      kind === "codex" && gitMcpUrl ? `${codexMcpPrompt(mcpKind)}\n\n${promptText}` : promptText;
+      kind === "codex" && gitMcpUrl
+        ? `${codexMcpPrompt(mcpKind)}\n\n${promptText}`
+        : kind === "kiro" && gitMcpUrl
+          ? `${kiroMcpPrompt(mcpKind)}\n\n${promptText}`
+          : promptText;
     await ports.recordCursorCliContext(input.sessionId, cliPrompt);
     let sawText = false;
     let sawUsage = false;
@@ -441,7 +454,7 @@ export async function runHostCliTurn(
     ports.spawnAborts.set(input.sessionId, spawnAbort);
     const onTurnAbort = () => spawnAbort.abort();
     input.abort.signal.addEventListener("abort", onTurnAbort);
-    if (kind === "codex" && gitMcpUrl && mcpKind !== "review") {
+    if ((kind === "codex" || kind === "kiro") && gitMcpUrl && mcpKind !== "review") {
       ports.cliGitTurns.set(input.sessionId, spawnAbort.signal);
     }
     const resume =
@@ -511,13 +524,14 @@ export async function runHostCliTurn(
             : kind === "kiro"
               ? streamKiroCli({
                   provider,
-                  prompt: promptText,
+                  prompt: cliPrompt,
                   workspace,
                   model: current.model,
                   resume,
                   mode: input.planTurn ? "plan" : "agent",
                   webSearch: sessionWebSearch(current) && !input.planTurn,
                   review: reviewing,
+                  gitMcpUrl,
                   signal: spawnAbort.signal,
                   spawnFn,
                 })
@@ -583,7 +597,10 @@ export async function runHostCliTurn(
         await ports.appendDelta(input.sessionId, replyId, `\n\n${formatProviderError(err)}`);
       }
     } finally {
-      if (kind === "codex" && ports.cliGitTurns.get(input.sessionId) === spawnAbort.signal) {
+      if (
+        (kind === "codex" || kind === "kiro") &&
+        ports.cliGitTurns.get(input.sessionId) === spawnAbort.signal
+      ) {
         ports.cliGitTurns.delete(input.sessionId);
       }
       if (kind === "codex") spawnAbort.abort();
@@ -658,7 +675,7 @@ export async function runHostCliTurn(
       wroteCanvasThisTurn,
       calledPlaywrightThisTurn,
       messages: afterCli.messages,
-      traceNudges: kind === "cursor",
+      traceNudges: kind === "cursor" || kind === "kiro",
     });
     if (cont.stop) break;
     promptText = cont.prompt;

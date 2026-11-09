@@ -12,6 +12,7 @@ const desktopRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER_BUNDLE_BANNER =
   "import { createRequire as __locusCreateRequire } from 'node:module'; const require = __locusCreateRequire(import.meta.url);";
 const pkg = JSON.parse(readFileSync(join(desktopRoot, "package.json"), "utf8")) as {
+  homepage?: string;
   devDependencies?: { electron?: string };
   build?: {
     productName?: string;
@@ -19,7 +20,9 @@ const pkg = JSON.parse(readFileSync(join(desktopRoot, "package.json"), "utf8")) 
     executableName?: string;
     icon?: string;
     directories?: { output?: string; buildResources?: string };
-    linux?: { target?: string[]; executableName?: string };
+    linux?: { target?: string[]; executableName?: string; packageName?: string };
+    deb?: { artifactName?: string; packageName?: string };
+    rpm?: { artifactName?: string; packageName?: string };
     mac?: { target?: string[] };
     win?: { target?: string[] };
     extraResources?: Array<{ from?: string; to?: string }>;
@@ -50,8 +53,14 @@ describe("electron packaging", () => {
     expect(pkg.build?.executableName).toBe("locus");
     expect(pkg.build?.electronVersion).toBe("45.2.2");
     expect(pkg.devDependencies?.electron).toBe(pkg.build?.electronVersion);
-    expect(pkg.build?.linux?.target).toEqual(["AppImage"]);
+    expect(pkg.build?.linux?.target).toEqual(["AppImage", "deb", "rpm"]);
     expect(pkg.build?.linux?.executableName).toBe("locus");
+    expect(pkg.homepage).toMatch(/^https:\/\/github\.com\/Modsofthenation\/Locus/);
+    expect(pkg.build?.linux?.packageName).toBeUndefined();
+    expect(pkg.build?.deb?.packageName).toBe("locus");
+    expect(pkg.build?.rpm?.packageName).toBe("locus");
+    expect(pkg.build?.deb?.artifactName).toBe("${productName}-${version}-${arch}.${ext}");
+    expect(pkg.build?.rpm?.artifactName).toBe("${productName}-${version}-${arch}.${ext}");
     expect(pkg.build?.mac?.target).toEqual(["dmg"]);
     expect(pkg.build?.win?.target).toEqual(["nsis"]);
     expect(pkg.build?.directories?.output).toBe("dist-electron");
@@ -93,6 +102,19 @@ describe("electron packaging", () => {
         expect.objectContaining({ from: "../../apps/chrome-extension", to: "chrome-extension" }),
       ]),
     );
+  });
+
+  it("passes the electron-builder 26 configuration schema", () => {
+    const requireFromTest = createRequire(import.meta.url);
+    const schema = requireFromTest("app-builder-lib/scheme.json") as unknown;
+    const { validateSchema } = requireFromTest(
+      "app-builder-lib/out/util/config/schemaValidator.js",
+    ) as {
+      validateSchema: (schema: unknown, data: unknown, config?: { name?: string }) => void;
+    };
+    expect(() =>
+      validateSchema(schema, pkg.build, { name: "electron-builder 26.18.0" }),
+    ).not.toThrow();
   });
 
   it("spawns the bundled control plane when packaged", () => {
@@ -256,6 +278,13 @@ describe("electron packaging", () => {
       }
       expect(yml, file).toContain(`SHA256SUMS-${file.replace("dist-", "").replace(".yml", "")}`);
       expect(yml, file).toContain(artifact);
+      if (file === "dist-linux.yml") {
+        expect(yml, file).toContain("*.deb");
+        expect(yml, file).toContain("*.rpm");
+        expect(
+          readFileSync(join(desktopRoot, "../../scripts/release-checksums.mjs"), "utf8"),
+        ).toMatch(/AppImage\|deb\|rpm/);
+      }
       if (file === "dist-linux.yml" || file === "dist-macos.yml") {
         expect(yml, file).toContain("if: github.ref != 'refs/tags/v0.4.1'");
       }

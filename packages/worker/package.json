@@ -1,6 +1,6 @@
 {
   "name": "@locus/worker",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "private": true,
   "description": "LAN/cloud worker that runs Docker, Host, and QEMU guests for a Locus control plane",
   "type": "module",

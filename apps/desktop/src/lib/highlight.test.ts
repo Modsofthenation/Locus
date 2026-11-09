@@ -17,7 +17,7 @@ describe("highlightSource", () => {
     expect(languageFromPath("pkg/main.go")).toBe("go");
     expect(languageFromPath("Dockerfile")).toBe("docker");
     expect(languageFromPath("a.yml")).toBe("yaml");
-    expect(languageFromPath("siq8/mcp/tests/test_tool_forensics.py")).toBe("python");
+    expect(languageFromPath("app/mcp/tests/test_tool_forensics.py")).toBe("python");
     expect(resolveLanguage("tsx")).toBe("tsx");
     expect(languageFromPath("src/App.tsx")).toBe("tsx");
     expect(languageFromPath("src/App.jsx")).toBe("jsx");

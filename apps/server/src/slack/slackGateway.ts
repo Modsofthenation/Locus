@@ -1,4 +1,8 @@
 import {
+  formatSlackApprovalValue,
+  slackApprovalActionId,
+  slackCanApproveTool,
+  parseSlackApprovalValue,
   DEFAULT_DOCKER_IMAGE,
   formatSlackExcerpt,
   formatSlackRunPrompt,
@@ -230,6 +234,44 @@ export class SlackGateway {
     return allow?.length ? rows.filter((row) => allow.includes(row.channelId)) : rows;
   }
 
+  async notifyApproval(sessionId: string, toolName: string, callId: string): Promise<void> {
+    if (!slackCanApproveTool(toolName)) return;
+    const session = await this.sessions.get(sessionId);
+    if (!session) return;
+    const channelId = session.slack?.channelId;
+    if (!channelId) return;
+    const value = formatSlackApprovalValue(sessionId, callId);
+    await this.post(
+      channelId,
+      `Locus needs you: approve \`${toolName}\` in this thread. git_push still stays in Locus.`,
+      session.slack?.threadTs,
+      undefined,
+      "bot",
+      false,
+      [
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "Approve" },
+              action_id: slackApprovalActionId("approved"),
+              value,
+              style: "primary",
+            },
+            {
+              type: "button",
+              text: { type: "plain_text", text: "Deny" },
+              action_id: slackApprovalActionId("denied"),
+              value,
+              style: "danger",
+            },
+          ],
+        },
+      ],
+    );
+  }
+
   async post(
     channelId: string,
     text: string,
@@ -237,6 +279,7 @@ export class SlackGateway {
     gif?: { url: string; title?: string },
     as?: SlackPostAs,
     replyBroadcast?: boolean,
+    blocks?: unknown[],
   ): Promise<SlackMessage> {
     const account = await this.requireClient();
     this.assertChannelAllowed(account, channelId);
@@ -247,6 +290,7 @@ export class SlackGateway {
       gif,
       as,
       replyBroadcast: Boolean(threadTs && replyBroadcast),
+      blocks,
     });
     const teamId = account.teamId || "default";
     const cached = await this.cache.loadMessages(teamId, channelId);
@@ -520,6 +564,46 @@ export class SlackGateway {
         text,
         userId,
       });
+      return;
+    }
+    if (type === "block_actions") {
+      const action = (
+        payload.actions as Array<{ action_id?: string; value?: string }> | undefined
+      )?.[0];
+      const decision =
+        action?.action_id === slackApprovalActionId("approved")
+          ? "approved"
+          : action?.action_id === slackApprovalActionId("denied")
+            ? "denied"
+            : undefined;
+      const parsed = action?.value ? parseSlackApprovalValue(action.value) : undefined;
+      if (!decision || !parsed) return;
+      const session = await this.sessions.get(parsed.sessionId);
+      if (!session) return;
+      let toolName = "";
+      for (const message of session.messages) {
+        const call = message.toolCalls?.find((item) => item.id === parsed.callId);
+        if (call) {
+          toolName = call.name;
+          break;
+        }
+      }
+      if (!slackCanApproveTool(toolName)) {
+        const channelId = String(
+          (payload.channel as { id?: string } | undefined)?.id ?? session.slack?.channelId ?? "",
+        );
+        if (channelId) {
+          await this.post(
+            channelId,
+            "That tool cannot be approved from Slack. Open Locus for git_push and other forge writes.",
+            session.slack?.threadTs,
+            undefined,
+            "bot",
+          );
+        }
+        return;
+      }
+      await this.sessions.resolveApproval(parsed.sessionId, parsed.callId, decision);
       return;
     }
     if (type === "shortcut" || type === "message_action") {

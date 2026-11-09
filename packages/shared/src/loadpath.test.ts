@@ -307,12 +307,12 @@ describe("buildLoadPath", () => {
 describe("shortLoadPath", () => {
   it("uses the basename until two files share a name", () => {
     expect(
-      shortLoadPath("siq8/static/src/batch/item_form.tsx", ["siq8/static/src/batch/item_form.tsx"]),
+      shortLoadPath("app/static/src/batch/item_form.tsx", ["app/static/src/batch/item_form.tsx"]),
     ).toBe("item_form.tsx");
     expect(
-      shortLoadPath("siq8/static/src/batch/index.ts", [
-        "siq8/static/src/batch/index.ts",
-        "siq8/static/src/preview/index.ts",
+      shortLoadPath("app/static/src/batch/index.ts", [
+        "app/static/src/batch/index.ts",
+        "app/static/src/preview/index.ts",
       ]),
     ).toBe("batch/index.ts");
   });

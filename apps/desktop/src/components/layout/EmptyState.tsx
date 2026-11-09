@@ -17,6 +17,7 @@ import {
   sessionVision,
   setupHasRemainingTodos,
   showFirstTaskPills,
+  t,
   visibleRecipes,
   workerIsMetered,
   workerWhereLabel,
@@ -206,6 +207,17 @@ export function EmptyState() {
     clearRecipeExtras();
     setPrompt(task.prompt);
     setError(null);
+    if (state.config?.setupFirstTask === "pending") {
+      void api.saveConfig({ ...state.config, setupFirstTask: "done" }).then((saved) => {
+        dispatch({ type: "config", config: saved });
+      });
+    }
+  }
+
+  async function skipFirstTask() {
+    if (!state.config) return;
+    const saved = await api.saveConfig({ ...state.config, setupFirstTask: "dismissed" });
+    dispatch({ type: "config", config: saved });
   }
 
   function applyRecipe(recipe: AgentRecipe) {
@@ -518,6 +530,28 @@ export function EmptyState() {
         ) : null}
 
         <section className="launch" aria-label={hubMode ? "New teammate" : "New chat"}>
+          {state.config?.setupFirstTask === "pending" && hasProvider ? (
+            <div className="first-task-card" data-testid="first-task-card">
+              <h3>{t("empty.firstTask.title")}</h3>
+              <p>{t("empty.firstTask.body")}</p>
+              <div className="first-task-card-actions">
+                <button
+                  type="button"
+                  className="btn small primary"
+                  onClick={() => applyFirstTask(FIRST_TASKS[0]!)}
+                >
+                  {t("empty.firstTask.cta")}
+                </button>
+                <button
+                  type="button"
+                  className="btn small ghost"
+                  onClick={() => void skipFirstTask()}
+                >
+                  {t("onboarding.skip")}
+                </button>
+              </div>
+            </div>
+          ) : null}
           {setup ? (
             <FinishSetupChecklist
               setup={setup}

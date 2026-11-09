@@ -210,6 +210,51 @@ describe("codex cli adapter", () => {
         arguments: { command: "npm test" },
       },
     ]);
+    expect(
+      parseCodexCliEvents(
+        '{"type":"item.completed","item":{"id":"item_4","type":"file_change","changes":[{"path":"src/react-dom-shim.js","kind":"delete"}],"status":"completed"}}',
+      ),
+    ).toEqual([
+      {
+        type: "tool_call",
+        id: "item_4",
+        name: "apply_patch",
+        status: "completed",
+        arguments: {
+          changes: [{ path: "src/react-dom-shim.js", kind: "delete" }],
+          path: "src/react-dom-shim.js",
+        },
+        result: JSON.stringify(
+          {
+            changes: [{ path: "src/react-dom-shim.js", kind: "delete" }],
+            status: "completed",
+          },
+          null,
+          2,
+        ),
+      },
+    ]);
+    expect(
+      parseCodexCliEvents(
+        '{"type":"item.completed","item":{"type":"command_execution","id":"cmd-2","command":["/bin/bash","-lc","npm run test --ignore-scripts"],"aggregated_output":"ok","exit_code":0,"status":"completed"}}',
+      ),
+    ).toEqual([
+      {
+        type: "tool_call",
+        id: "cmd-2",
+        name: "exec",
+        status: "completed",
+        arguments: { command: "/bin/bash -lc npm run test --ignore-scripts" },
+        result: JSON.stringify(
+          {
+            output: "ok",
+            exit_code: 0,
+          },
+          null,
+          2,
+        ),
+      },
+    ]);
     expect(parseCodexCliEvents('{"type":"turn.failed","error":{"message":"failed"}}')).toEqual([
       { type: "error", message: "failed", terminal: true },
     ]);

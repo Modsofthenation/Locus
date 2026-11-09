@@ -2700,7 +2700,7 @@ describe("formatUsageHint", () => {
         { inputUsdPerMillion: 3, outputUsdPerMillion: 15 },
         0.12,
       ),
-    ).toBe("1,000,000 in · 500,000 out · $10.50 · $0.12 VM");
+    ).toBe("1,000,000 in · 500,000 out · $10.62 total ($10.50 LLM · $0.12 VM)");
   });
 });
 
