@@ -32,6 +32,10 @@ function styleCreatesFixedContainingBlock(style: CSSStyleDeclaration): boolean {
   return style.willChange.split(",").some((value) => FIXED_CB_WILL_CHANGE.has(value.trim()));
 }
 
+function focusMenuEl(el: HTMLElement | undefined | null): void {
+  el?.focus({ preventScroll: true });
+}
+
 /** Viewport-space origin of the containing block for `position: fixed` (window if none). */
 export function fixedContainingOrigin(
   el: Element | null,
@@ -166,13 +170,14 @@ export function OverflowMenu(props: {
   const popSize = useRef<{ width: number; height: number } | null>(null);
   const typeahead = useRef({ query: "", at: 0 });
   const pendingFocus = useRef<"first" | "last" | "active">("active");
+  const focusedOpen = useRef(false);
   const [open, setOpen] = useState(false);
   const [place, setPlace] = useState<{ up: boolean; top: number; left: number } | null>(null);
   const align = props.align === "left" ? "left" : props.align === "after" ? "after" : "right";
 
   const focusTrigger = useCallback(() => {
     const summary = root.current?.querySelector(":scope > summary");
-    if (summary instanceof HTMLElement) summary.focus();
+    if (summary instanceof HTMLElement) focusMenuEl(summary);
   }, []);
 
   const close = useCallback(() => {
@@ -191,7 +196,7 @@ export function OverflowMenu(props: {
   }
 
   const focusItem = useCallback((index: number) => {
-    menuItemButtons(pop.current)[index]?.focus();
+    focusMenuEl(menuItemButtons(pop.current)[index]);
   }, []);
 
   function openMenu(focus: "first" | "last" | "active" = "active") {
@@ -212,20 +217,6 @@ export function OverflowMenu(props: {
     summary.addEventListener("click", suppressNativeToggle, true);
     return () => summary.removeEventListener("click", suppressNativeToggle, true);
   }, []);
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    const list = items();
-    if (!list.length) return;
-    const active = list.findIndex(
-      (el) => el.getAttribute("aria-current") === "true" || el.classList.contains("active"),
-    );
-    const want = pendingFocus.current;
-    const index =
-      want === "last" ? list.length - 1 : want === "first" ? 0 : active >= 0 ? active : 0;
-    pendingFocus.current = "active";
-    list[index]?.focus();
-  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -334,6 +325,25 @@ export function OverflowMenu(props: {
     };
   }, [open, align, props.prefer, props.wide, props.children]);
 
+  useLayoutEffect(() => {
+    if (!open) {
+      focusedOpen.current = false;
+      return;
+    }
+    if (!place || focusedOpen.current) return;
+    const list = items();
+    if (!list.length) return;
+    const active = list.findIndex(
+      (el) => el.getAttribute("aria-current") === "true" || el.classList.contains("active"),
+    );
+    const want = pendingFocus.current;
+    const index =
+      want === "last" ? list.length - 1 : want === "first" ? 0 : active >= 0 ? active : 0;
+    pendingFocus.current = "active";
+    focusedOpen.current = true;
+    focusMenuEl(list[index]);
+  }, [open, place]);
+
   const popStyle: CSSProperties | undefined = place
     ? { top: place.top, left: place.left }
     : undefined;
@@ -342,7 +352,7 @@ export function OverflowMenu(props: {
     <MenuCloser.Provider value={close}>
       <details
         ref={root}
-        className={`menu ${align}${place?.up ? " up" : ""}${props.className ? ` ${props.className}` : ""}`}
+        className={`menu ${align}${place?.up || (!place && props.prefer === "up") ? " up" : ""}${props.className ? ` ${props.className}` : ""}`}
         open={open}
         data-value={props.dataValue}
         data-testid={props.testId}

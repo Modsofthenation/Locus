@@ -3948,7 +3948,7 @@ describe("WorkspaceEditor", () => {
       containers: [
         {
           id: "c1",
-          name: "siq8-dev_webpack.abc",
+          name: "app-dev_webpack.abc",
           image: "node:22",
           state: "running",
           status: "Up 2 hours",
@@ -3967,7 +3967,7 @@ describe("WorkspaceEditor", () => {
             containers: [
               {
                 id: "c1",
-                name: "siq8-dev_webpack.abc",
+                name: "app-dev_webpack.abc",
                 image: "node:22",
                 state: "running",
                 status: "Up 2 hours",
@@ -3985,12 +3985,12 @@ describe("WorkspaceEditor", () => {
     );
     await flush();
     expect(host.querySelector('[data-testid="docker-explorer"]')).toBeTruthy();
-    expect(host.querySelector(".docker-explorer-name")?.textContent).toBe("siq8-dev_webpack.abc");
+    expect(host.querySelector(".docker-explorer-name")?.textContent).toBe("app-dev_webpack.abc");
     await act(async () => {
       (host.querySelector(".docker-explorer-open") as HTMLButtonElement).click();
     });
     expect(host.querySelector(".workspace-docker-inspect")?.textContent).toMatch(
-      /siq8-dev_webpack\.abc/,
+      /app-dev_webpack\.abc/,
     );
     expect(host.querySelector(".workspace-docker-inspect-meta")?.textContent).toMatch(
       /abc123def456/,

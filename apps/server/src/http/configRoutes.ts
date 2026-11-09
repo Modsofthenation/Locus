@@ -1,9 +1,14 @@
+import { join } from "node:path";
 import type { Hono } from "hono";
 import { clearIntegrationCredentials, type LocusConfig } from "@locus/shared";
 import type { AutomationService } from "../automations/automations.js";
 import { mergeSecrets, redactConfig, redactVm } from "../core/redact.js";
 import { normalizeSavedConfig } from "../core/configSave.js";
-import { checkGithubRelease } from "../core/updates.js";
+import {
+  checkGithubRelease,
+  downloadAndVerifyUpdate,
+  openVerifiedUpdate,
+} from "../core/updates.js";
 import type { JsonStore } from "../core/store.js";
 import type { SessionService } from "../session/sessions.js";
 import type { HostCapabilities, Hypervisor } from "@locus/hypervisor";
@@ -114,5 +119,43 @@ export function registerConfigRoutes(
         fetchFn: opts.fetchFn,
       }),
     );
+  });
+
+  app.post("/api/updates/download", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      asset?: { name?: string; url?: string };
+      checksums?: { name?: string; url?: string };
+    };
+    if (!body.asset?.name || !body.asset.url || !body.checksums?.name || !body.checksums.url) {
+      return c.json({ error: "Asset and SHA256SUMS URLs are required" }, 400);
+    }
+    try {
+      const result = await downloadAndVerifyUpdate({
+        asset: { name: body.asset.name, url: body.asset.url },
+        checksums: { name: body.checksums.name, url: body.checksums.url },
+        destDir: join(opts.store.dataDir, "updates"),
+        fetchFn: opts.fetchFn,
+      });
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Download failed" }, 400);
+    }
+  });
+
+  app.post("/api/updates/open", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { path?: string };
+    const path = body.path?.trim() ?? "";
+    if (!path.startsWith(opts.store.dataDir)) {
+      return c.json({ error: "Installer path is not in the data directory" }, 400);
+    }
+    try {
+      openVerifiedUpdate(path);
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : "Could not open installer" },
+        400,
+      );
+    }
   });
 }

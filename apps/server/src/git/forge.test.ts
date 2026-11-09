@@ -550,18 +550,18 @@ describe("ForgeClient", () => {
 
   it("attaches Bitbucket unified diffs to PR files", async () => {
     const unified = [
-      "diff --git a/siq8/batch/assignment.py b/siq8/batch/assignment.py",
+      "diff --git a/app/batch/assignment.py b/app/batch/assignment.py",
       "index 111..222 100644",
-      "--- a/siq8/batch/assignment.py",
-      "+++ b/siq8/batch/assignment.py",
+      "--- a/app/batch/assignment.py",
+      "+++ b/app/batch/assignment.py",
       "@@ -1,1 +1,2 @@",
       " keep",
       "+appear",
-      "diff --git a/siq8/static/src/batch/batch.ts b/siq8/static/src/batch/batch.ts",
+      "diff --git a/app/static/src/batch/batch.ts b/app/static/src/batch/batch.ts",
       "new file mode 100644",
       "index 0000000..abc",
       "--- /dev/null",
-      "+++ b/siq8/static/src/batch/batch.ts",
+      "+++ b/app/static/src/batch/batch.ts",
       "@@ -0,0 +1,1 @@",
       "+export {}",
     ].join("\n");
@@ -583,10 +583,10 @@ describe("ForgeClient", () => {
           values: [
             {
               status: "modified",
-              old: { path: "siq8/batch/assignment.py" },
-              new: { path: "siq8/batch/assignment.py" },
+              old: { path: "app/batch/assignment.py" },
+              new: { path: "app/batch/assignment.py" },
             },
-            { status: "added", old: null, new: { path: "siq8/static/src/batch/batch.ts" } },
+            { status: "added", old: null, new: { path: "app/static/src/batch/batch.ts" } },
             { status: "modified", old: { path: "binary.bin" }, new: { path: "binary.bin" } },
           ],
         });
@@ -607,12 +607,12 @@ describe("ForgeClient", () => {
     );
     expect(pull.files).toHaveLength(3);
     expect(pull.files[0]).toMatchObject({
-      path: "siq8/batch/assignment.py",
+      path: "app/batch/assignment.py",
       status: "modified",
     });
     expect(pull.files[0]?.patch).toContain("+appear");
     expect(pull.files[1]).toMatchObject({
-      path: "siq8/static/src/batch/batch.ts",
+      path: "app/static/src/batch/batch.ts",
       status: "added",
     });
     expect(pull.files[1]?.patch).toContain("+export {}");

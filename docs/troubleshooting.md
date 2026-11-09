@@ -40,7 +40,15 @@ The composer queue holds 32 prompts (configurable in Settings → Advanced). Sen
 
 ## Image tag `locus/agent:0.1`
 
-The Docker image tag is independent of the app semver (`0.10.x`). Rebuild with `npm run images` after Dockerfile changes.
+The runtime tag stays `locus/agent:0.1` so existing guests keep working. `npm run images` also tags `locus/agent:0.18.0`. Rebuild after Dockerfile changes.
+
+## Worker VNC is blank
+
+Worker QEMU VNC listens on the worker loopback only. The laptop pane uses WSS `/v1/guests/:id/display`. If the pane fails, Test connection the worker (TLS pin), confirm the guest has a display, and check that the control plane can reach the worker over HTTPS. Phone VNC is view-only.
+
+## Slack Approve does nothing for git_push
+
+That is intentional. Slack buttons may approve `slack_post` / `slack_upload` only. Open Locus for forge writes.
 
 ## Windows opens a stack of terminal windows on each prompt
 

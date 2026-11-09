@@ -347,6 +347,22 @@ describe("EmptyState recipes", () => {
     );
   });
 
+  it("shows a guided first-task card after setup until skip or fill", async () => {
+    render(undefined, { config: { ...config, setupFirstTask: "pending" } });
+    expect(host.querySelector("[data-testid='first-task-card']")).toBeTruthy();
+    const fill = [...host.querySelectorAll("button")].find((btn) =>
+      btn.textContent?.includes("Fill the composer"),
+    );
+    await act(async () => {
+      fill!.click();
+      await Promise.resolve();
+    });
+    expect((host.querySelector("textarea") as HTMLTextAreaElement).value).toMatch(/hello\.txt/);
+    expect(api.saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ setupFirstTask: "done" }),
+    );
+  });
+
   it("hides the first-task pill after a couple of agent sessions", () => {
     render(undefined, { sessions: [created, { ...created, id: "s2" }] });
     expect(host.querySelector("[aria-label='Try a first task']")).toBeNull();

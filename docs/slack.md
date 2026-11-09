@@ -58,7 +58,7 @@ Empty state (same voice as Codebase): **Sign in with Slack** in Settings → Int
 7. **Catch me up, locally.** A per-channel digest of messages since the last catch-up (capped excerpt). The run stays on this machine; it does not `slack_post` unless you ask. History never leaves for Slack’s cloud.
 8. **Subscribe from the Slack pane.** Pin a channel or thread onto an agent from the conversation row (or the thread header). The row shows **Listening**. Same `subscribe` path as a coding chat — Locus does not post a “now listening” notice.
 9. **Cite and jump.** When a Slack message mentions a `/workspace/…` file, a GitHub/GitLab/Bitbucket PR URL, or a Locus session id, those become chips that open Files, Codebase, or the bound chat.
-10. Jump from the Locus agent chip to the Agents section. Approvals stay in Locus chat. Do not approve `git_push` from Slack in v1.
+10. Jump from the Locus agent chip to the Agents section. Slack action buttons may Approve / Deny `slack_post` and `slack_upload` only. Do not approve `git_push` from Slack.
 
 There is no @Locus bot to invite, mention, or DM. Teammates ask *you*; you run Locus. `/locus` is something **you** type.
 
@@ -311,7 +311,7 @@ Composer: Enter sends, Shift+Enter newline, no slash-menu of guest commands (tho
 
 Own messages: `user === status.userId` render as “You”. If `session.slack.lastPostTs` matches an agent-approved post, show an agent chip **in Locus only**.
 
-Markdown: Slack mrkdwn (`*bold*`, `<@U123>`, `<#C123>`) converted before `formatMarkdown`. Unknown tokens stay as text. Images/files: filename + Slack permalink in v1; no `files.upload` yet.
+Markdown: Slack mrkdwn (`*bold*`, `<@U123>`, `<#C123>`) converted before `formatMarkdown`. Unknown tokens stay as text. Images/files: `files.upload` (or the current files API) plus Slack permalinks; `slack_upload` waits for Approve / Deny (Slack buttons allowed for that tool).
 
 ## PR sequence
 
@@ -430,7 +430,7 @@ Do not rewrite these; extend them.
 - Hosting a Locus Slack app that all workspaces install (no Locus-operated OAuth).
 - Embedding Slack’s JS SDK in the renderer; all Slack HTTP stays on the server.
 - Feeding full channel history into the model (capped excerpt only).
-- Slack-based Approve / Deny, or mapping emoji to autonomy.
+- Mapping emoji to autonomy. Slack buttons already Approve / Deny `slack_post` / `slack_upload` only.
 - Status / tool-chip messages into the channel as the operator.
 - Replacing first-party `jira_*` / `grafana_*` with a generic “chat integrations” framework in this work.
 

@@ -37,13 +37,48 @@ export function isNewerVersion(latest: string, current: string): boolean {
 export function pickReleaseAsset(
   assets: ReleaseAsset[],
   platform: string,
+  arch: string = process.arch,
 ): ReleaseAsset | undefined {
-  const names = assets.filter((row) => row.name && row.url);
+  const names = assets.filter((row) => row.name && row.url && !/blockmap/i.test(row.name));
+  const preferArm = arch === "arm64";
+  const ranked = (rows: ReleaseAsset[]) => {
+    if (!rows.length) return undefined;
+    const arm = rows.filter((row) => /arm64|aarch64/i.test(row.name));
+    const rest = rows.filter((row) => !/arm64|aarch64/i.test(row.name));
+    return preferArm ? (arm[0] ?? rest[0]) : (rest[0] ?? arm[0]);
+  };
   if (platform === "darwin") {
-    return names.find((row) => /\.dmg$/i.test(row.name) && !/blockmap/i.test(row.name));
+    return ranked(names.filter((row) => /\.dmg$/i.test(row.name)));
   }
   if (platform === "win32") {
-    return names.find((row) => /\.exe$/i.test(row.name) && !/blockmap/i.test(row.name));
+    return ranked(names.filter((row) => /\.exe$/i.test(row.name)));
   }
-  return names.find((row) => /\.AppImage$/i.test(row.name));
+  return (
+    ranked(names.filter((row) => /\.AppImage$/i.test(row.name))) ??
+    ranked(names.filter((row) => /\.deb$/i.test(row.name))) ??
+    ranked(names.filter((row) => /\.rpm$/i.test(row.name)))
+  );
+}
+
+export function pickChecksumsAsset(
+  assets: ReleaseAsset[],
+  platform: string,
+): ReleaseAsset | undefined {
+  const names = assets.filter((row) => row.name && row.url);
+  const want =
+    platform === "darwin"
+      ? /^SHA256SUMS-macos$/i
+      : platform === "win32"
+        ? /^SHA256SUMS-windows$/i
+        : /^SHA256SUMS-linux$/i;
+  return names.find((row) => want.test(row.name));
+}
+
+export function checksumLineFor(sumFile: string, fileName: string): string | undefined {
+  for (const line of sumFile.split(/\r?\n/)) {
+    const match = /^([a-fA-F0-9]{64})\s+(\S+)$/.exec(line.trim());
+    const hex = match?.[1];
+    if (match && hex && match[2] === fileName) return hex.toLowerCase();
+  }
+  return undefined;
 }

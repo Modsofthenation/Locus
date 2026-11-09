@@ -123,8 +123,8 @@ describe("PatchCard", () => {
       <ToolPatch
         name="git_diff"
         result={[
-          "--- a/siq8/mcp/tests/test_tool_forensics.py",
-          "+++ b/siq8/mcp/tests/test_tool_forensics.py",
+          "--- a/app/mcp/tests/test_tool_forensics.py",
+          "+++ b/app/mcp/tests/test_tool_forensics.py",
           "@@ -0,0 +1,3 @@",
           "+class McpForensicsToolTests(TestCase):",
           "+    @classmethod",

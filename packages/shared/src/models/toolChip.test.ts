@@ -170,6 +170,8 @@ describe("tool chips", () => {
       name: "file_read",
       arguments: { path: "/workspace/index.html" },
     });
+    expect(canonicalToolCall("search", { query: "UserProfile" }).name).toBe("grep");
+    expect(canonicalToolCall("executeCommand", { command: "git status" }).name).toBe("exec");
     expect(
       canonicalToolCall("askQuestion", {
         title: "Ubuntu scope",
@@ -242,7 +244,7 @@ describe("tool activity labels", () => {
         command: "cd /workspace/local-agents && sed -n '1949,1985p' apps/server/src/app.ts",
       }),
     ).toBe("Read app.ts L1949-1985");
-    expect(toolActivityLabel("exec", { command: "git show develop:siq8/batch/test.py" })).toBe(
+    expect(toolActivityLabel("exec", { command: "git show develop:app/batch/test.py" })).toBe(
       "Read test.py",
     );
     expect(toolActivityLabel("exec", { commands: ["git show a", "git grep foo"] })).toBe(
@@ -268,6 +270,11 @@ describe("tool activity labels", () => {
     expect(toolActivityLabel("apply_patch", { path: "/workspace/src/app.ts" })).toBe(
       "Edited app.ts",
     );
+    expect(
+      toolActivityLabel("apply_patch", {
+        changes: [{ path: "src/react-dom-shim.js", kind: "delete" }],
+      }),
+    ).toBe("Edited react-dom-shim.js");
     expect(toolActivityLabel("window_focus", { title: "Firefox" })).toBe("Focused Firefox");
   });
 

@@ -51,9 +51,15 @@ import {
   requestWorkspaceTerminalNew,
 } from "@/components/workspace/WorkspaceTerminal";
 
-export function SessionSwitcher() {
+export function SessionSwitcher({
+  startOpen = false,
+  onClosed,
+}: {
+  startOpen?: boolean;
+  onClosed?: () => void;
+} = {}) {
   const { state, dispatch } = useStore();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -566,7 +572,14 @@ export function SessionSwitcher() {
 
   let lastGroup = "";
   return (
-    <Modal label="Command palette" className="switcher" onClose={() => setOpen(false)}>
+    <Modal
+      label="Command palette"
+      className="switcher"
+      onClose={() => {
+        setOpen(false);
+        onClosed?.();
+      }}
+    >
       <SearchField
         ref={input}
         wrapClassName="switcher-search"

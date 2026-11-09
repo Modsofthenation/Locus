@@ -6,6 +6,8 @@ import {
   compareVersions,
   isNewerVersion,
   parseVersionTag,
+  checksumLineFor,
+  pickChecksumsAsset,
   pickReleaseAsset,
 } from "./appRelease.js";
 
@@ -35,6 +37,29 @@ describe("app release helpers", () => {
     expect(pickReleaseAsset(assets, "linux")?.url).toBe("https://example/linux");
     expect(pickReleaseAsset(assets, "darwin")?.url).toBe("https://example/mac");
     expect(pickReleaseAsset(assets, "win32")?.url).toBe("https://example/win");
+    expect(
+      pickReleaseAsset(
+        [
+          { name: "Locus-arm64.AppImage", url: "https://example/arm" },
+          { name: "Locus.AppImage", url: "https://example/x64" },
+        ],
+        "linux",
+        "arm64",
+      )?.url,
+    ).toBe("https://example/arm");
+    expect(
+      pickChecksumsAsset(
+        [{ name: "SHA256SUMS-linux", url: "https://example/sums" }, ...assets],
+        "linux",
+      )?.url,
+    ).toBe("https://example/sums");
+    expect(checksumLineFor("abc123  Locus.AppImage\n", "Locus.AppImage")).toBeUndefined();
+    expect(
+      checksumLineFor(
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  Locus.AppImage\n",
+        "Locus.AppImage",
+      ),
+    ).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   });
 
   it("points at the public GitHub releases feed", () => {

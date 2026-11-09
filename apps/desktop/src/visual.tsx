@@ -30,6 +30,8 @@ import { showUndoNotice } from "@/lib/notice";
 import { applyTheme } from "@/lib/theme";
 import { Store, initialState, type Action, type UiState } from "@/state/store";
 import "./index.css";
+import "./styles/phone.css";
+import "./styles/swarm.css";
 import "./styles/ux.css";
 
 const SCREENS = [
@@ -124,7 +126,7 @@ function stubApi(): void {
   api.checkUpdates = async () =>
     ({
       status: "unavailable",
-      current: "0.17.0",
+      current: "0.18.0",
       message: "No GitHub release found yet.",
     }) as never;
 }

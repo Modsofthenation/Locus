@@ -2974,7 +2974,11 @@ describe("ChatPane", () => {
     expect(css).toMatch(/\[data-chat-density="comfortable"\][\s\S]*?--chat-font: 14\.5px;/);
     expect(css).toMatch(/\[data-chat-density="dense"\][\s\S]*?--chat-font: 12px;/);
     expect(css).toMatch(/\[data-chat-density="dense"\][\s\S]*?--chat-msg-gap: 8px;/);
-    expect(css).toMatch(/\.mobile-thread \{[\s\S]*?padding: var\(--chat-mobile-thread-pad\)/);
+    const phone = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../../styles/phone.css"),
+      "utf8",
+    );
+    expect(phone).toMatch(/\.mobile-thread \{[\s\S]*?padding: var\(--chat-mobile-thread-pad\)/);
   });
 
   it("lets developer thinking snippets fill the message column", () => {
@@ -3273,7 +3277,7 @@ describe("ChatPane", () => {
                 {
                   id: "c1",
                   name: "exec",
-                  arguments: { command: "git show develop:siq8/batch/test.py" },
+                  arguments: { command: "git show develop:app/batch/test.py" },
                   result: "ok",
                   startedAt: "2020-01-01T00:00:00.000Z",
                   finishedAt: "2020-01-01T00:00:01.000Z",
@@ -3290,7 +3294,7 @@ describe("ChatPane", () => {
                 {
                   id: "c1",
                   name: "exec",
-                  arguments: { command: "git show develop:siq8/batch/test.py" },
+                  arguments: { command: "git show develop:app/batch/test.py" },
                   result: "ok",
                   startedAt: "2020-01-01T00:00:00.000Z",
                   finishedAt: "2020-01-01T00:00:01.000Z",

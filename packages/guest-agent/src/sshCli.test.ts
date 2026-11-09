@@ -34,6 +34,22 @@ describe("ssh CLI spawn helpers", () => {
     ).toBe("CURSOR_API_KEY='secret' 'claude'");
   });
 
+  it("builds a PowerShell remote command for Windows guests", () => {
+    expect(
+      sshRemoteCommand(
+        {
+          command: "agent.exe",
+          args: ["-p", "hi"],
+          cwd: "C:\\Users\\locus\\workspace",
+          env: { CURSOR_API_KEY: "secret" },
+        },
+        "powershell",
+      ),
+    ).toBe(
+      "powershell -NoProfile -NonInteractive -Command 'Set-Location ''C:\\Users\\locus\\workspace''; $env:CURSOR_API_KEY=''secret''; & ''agent.exe'' ''-p'' ''hi'''",
+    );
+  });
+
   it("reads SSH from a VM instance", () => {
     expect(sshTargetFromInstance({})).toBeUndefined();
     expect(

@@ -6,13 +6,13 @@
 
 Locus is a desktop control plane for AI coding agents that run on hardware you own — a Docker container, a QEMU virtual machine, or a folder on disk. Chat on one side, the live guest on the other. Code, keys, sessions, and disks stay under `~/.locus`.
 
-This is **v0.17.0** (MIT). The API binds to loopback. Linux, macOS, and Windows. Bring any LLM provider you have a key for.
+This is **v0.18.0** (MIT). The API binds to loopback. Linux, macOS, and Windows. Bring any LLM provider you have a key for.
 
 ## Install
 
 Download the latest [GitHub Release](https://github.com/Modsofthenation/Locus/releases). Each `v*` tag attaches:
 
-- Linux AppImage
+- Linux AppImage, deb, and rpm
 - macOS dmg (signed when `CSC_LINK` is set on the repo; otherwise unsigned — right-click → Open the first time)
 - Windows NSIS installer (unsigned builds show SmartScreen)
 - Per-platform checksums (`SHA256SUMS-linux`, `SHA256SUMS-macos`, `SHA256SUMS-windows`)
@@ -38,7 +38,7 @@ You describe a task. Locus runs the agent in a guest you own. Review diffs, stee
 
 The runtime is chosen per agent and stays fixed. New agents default to Docker when the engine is present, otherwise Host.
 
-**Where** defaults to this machine. Docker, VM, and Host are shapes of a guest; placement is which computer runs it. Other LAN machines running `npm run dev:worker` can host **Docker, Host, or QEMU VM** agents — paste the printed `locus-worker:add` line in Settings → Workers (or `locus config workers add`), then New agent → Where. Worker VMs resolve cloud images from `LOCUS_WORKER_HOME/media`; live VNC stays on the worker localhost in v1 (screenshots and tools still work). Locus does not scan the LAN. Each app only lists workers it registered. Two apps can share one worker, or run isolated workers on the same host with different `LOCUS_WORKER_PORT` and `LOCUS_WORKER_HOME` — [docs/agent-backends.md](docs/agent-backends.md#multiple-locus-apps-one-worker-host). Cursor Cloud is a provider that skips the guest, not a placement.
+**Where** defaults to this machine. Docker, VM, and Host are shapes of a guest; placement is which computer runs it. Other LAN machines running `npm run dev:worker` can host **Docker, Host, or QEMU VM** agents — paste the printed `locus-worker:add` line in Settings → Workers (or `locus config workers add`), then New agent → Where. Worker VMs resolve cloud images from `LOCUS_WORKER_HOME/media`; live VNC is proxied to the laptop over pinned WSS (the worker still binds VNC to localhost). Golden VM disks upload to the worker once. Azure and GCP workers use the same recorded-HTTP placement as Fargate. Locus does not scan the LAN. Each app only lists workers it registered. Two apps can share one worker, or run isolated workers on the same host with different `LOCUS_WORKER_PORT` and `LOCUS_WORKER_HOME` — [docs/agent-backends.md](docs/agent-backends.md#multiple-locus-apps-one-worker-host). Cursor Cloud is a provider that skips the guest, not a placement.
 
 ## Tour
 
@@ -210,7 +210,7 @@ Git includes **Sign in with GitHub** / **Sign in with GitLab** / **Sign in with 
 
 Settings → Phone mints a LAN pairing token (QR on that tab). Settings → Workers lists LAN / Cloud VM / Fargate hosts. Settings → Environments lists named boxes saved from New agent or Automations. Settings → Notifications toggles desktop alerts and quiet hours. Settings → Appearance filters themes and sets editor font size, format on save, and the minimap. Settings → Advanced **Tailscale Funnel** exposes **only** `/api/hooks` (never the whole control plane) so GitHub can reach forge webhooks; `locus config funnel enable|disable`.
 
-Integrations: Slack, Grafana, Jira, Confluence, Linear, Miro, Figma, incident.io, AWS IAM, Portainer, Kubernetes, Sentry, Gmail, Google Calendar, Google Drive, and agent-authored HTTP plugins. Settings → About is **0.17.0**.
+Integrations: Slack, Grafana, Jira, Confluence, Linear, Miro, Figma, incident.io, AWS IAM, Portainer, Kubernetes, Sentry, Gmail, Google Calendar, Google Drive, and agent-authored HTTP plugins. Settings → About is **0.18.0**.
 
 <table>
 <tr>
@@ -303,7 +303,7 @@ Developer / Swarm in the sidebar switches the product shell. Developer keeps the
 
 **CLI.** `npx locus` / `npm run locus --` is a loopback client for the same control plane: agents, design, games, assets, IDE, projects, Codebase, Brain, Slack, Grafana, Docker, automations, workflows, Settings, phone remote, and Funnel. `locus serve` starts the server when the app is not running. `locus project keep` leaves that control plane up after the desktop quits. `locus workflow` imports and runs Agent Loop Builder graphs. `locus brain setup` writes personal editor hooks that send a redacted transcript tail to the local brain. Live VNC and canvas clicking stay in the desktop. Guide: [docs/cli.md](docs/cli.md).
 
-**App.** Ninety-seven themes (Ember default). Settings → About is **0.17.0**. Electron packages (Linux AppImage, macOS dmg, Windows NSIS), or `npm run dev` in the browser. **Ctrl/Cmd+K** command palette. **Ctrl/Cmd+N** new agent, new automation, or (on Design, Games, Assets) the empty composer. **Ctrl/Cmd+F** find in chat. **Ctrl/Cmd+,** settings.
+**App.** Ninety-seven themes (Ember default). Settings → About is **0.18.0**. Electron packages (Linux AppImage, macOS dmg, Windows NSIS), or `npm run dev` in the browser. **Ctrl/Cmd+K** command palette. **Ctrl/Cmd+N** new agent, new automation, or (on Design, Games, Assets) the empty composer. **Ctrl/Cmd+F** find in chat. **Ctrl/Cmd+,** settings.
 
 ## Security model
 

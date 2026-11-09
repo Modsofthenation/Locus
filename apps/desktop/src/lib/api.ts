@@ -767,8 +767,22 @@ export const api = {
       notes?: string;
       htmlUrl?: string;
       asset?: { name: string; url: string };
+      checksums?: { name: string; url: string };
       message?: string;
     }>(`/api/updates?current=${encodeURIComponent(current)}`),
+  downloadUpdate: (
+    asset: { name: string; url: string },
+    checksums: { name: string; url: string },
+  ) =>
+    json<{ path: string; sha256: string; verified: true }>("/api/updates/download", {
+      method: "POST",
+      body: JSON.stringify({ asset, checksums }),
+    }),
+  openUpdate: (path: string) =>
+    json<{ ok: true }>("/api/updates/open", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    }),
   testProvider: (id: string, patch: { apiKey?: string; baseUrl?: string } = {}) =>
     json<{
       ok: boolean;

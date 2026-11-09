@@ -34,6 +34,7 @@ export interface DisplaySource {
         ssh?: { host: string; port: number; username: string; identityFile?: string };
       }
     | undefined;
+  connectRemote?: (id: string, ws: WebSocket) => boolean | Promise<boolean>;
 }
 
 export type PtyFactory = (ssh: {
@@ -422,11 +423,19 @@ export function attachSockets(opts: {
 
 export function bindDisplay(ws: WebSocket, vmId: string, displays: DisplaySource): void {
   const endpoint = displays.get(vmId)?.display;
-  if (!endpoint?.host || !endpoint.port || !isLoopback(endpoint.host)) {
-    ws.close(1011, "no display");
+  if (endpoint?.host && endpoint.port && isLoopback(endpoint.host)) {
+    pipeVnc(ws, endpoint.host, endpoint.port);
     return;
   }
-  pipeVnc(ws, endpoint.host, endpoint.port);
+  const remote = displays.connectRemote?.(vmId, ws);
+  if (remote === true) return;
+  if (remote && typeof (remote as Promise<boolean>).then === "function") {
+    void Promise.resolve(remote).then((ok) => {
+      if (!ok && ws.readyState === WebSocket.OPEN) ws.close(1011, "no display");
+    });
+    return;
+  }
+  ws.close(1011, "no display");
 }
 
 export function bindBrowser(

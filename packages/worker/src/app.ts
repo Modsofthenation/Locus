@@ -8,6 +8,7 @@ import {
   isGuestReady,
   isWindows,
   LINUX_WORKSPACE,
+  WINDOWS_WORKSPACE,
   parsePreviewPort,
   WORKER_PROTOCOL,
   type WorkerHealth,
@@ -48,6 +49,9 @@ import {
   deleteWorkerWorkspacePath,
 } from "./workspaceFs.js";
 import { resolveWorkerHostDir } from "./hostDir.js";
+import { planeFromHeaders, planeFromRecord } from "./plane.js";
+import { saveWorkerGoldenDisk, safeWorkerImageId, workerGoldenDiskInfo } from "./goldenDisk.js";
+import { guestVisibleToPlane } from "@locus/shared";
 
 export interface WorkerAppOptions {
   engine: DockerEngine;
@@ -77,13 +81,27 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   guests.setLiveDocker(Boolean(opts.engine.liveEngine));
   guests.setLiveQemu(Boolean(opts.hypervisor?.liveEngine));
   const hostGuests = opts.hostGuests ?? new Map<string, VmInstance>();
-  const getGuest = (id: string) =>
+  const lookupGuest = (id: string) =>
     hostGuests.get(id) ?? opts.engine.get(id) ?? opts.hypervisor?.get(id);
   const listGuests = () => [
     ...hostGuests.values(),
     ...opts.engine.list(),
     ...(opts.hypervisor?.list() ?? []),
   ];
+  const getGuest = (c: import("hono").Context, id: string) => {
+    const vm = lookupGuest(id);
+    if (!vm || !guestVisibleToPlane(vm, planeFromHeaders(c.req))) return undefined;
+    return vm;
+  };
+  const stampPlane = <T extends VmInstance>(
+    vm: T,
+    c: import("hono").Context,
+    body?: { planeId?: unknown },
+  ): T => {
+    const plane = planeFromHeaders(c.req) ?? planeFromRecord(body);
+    if (plane) vm.planeId = plane;
+    return vm;
+  };
   const app = new Hono();
   const jailProxies = new Map<string, AllowlistProxy>();
   const cliMcpPending = new Map<
@@ -158,6 +176,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
           createdAt: now,
           updatedAt: now,
         };
+        stampPlane(vm, c, body);
         hostGuests.set(vm.id, vm);
         return c.json(vm, 201);
       } catch (err) {
@@ -178,6 +197,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
           imagePath: body.imagePath,
         });
         vm.runtime = "vm";
+        stampPlane(vm, c, body);
         return c.json(vm, 201);
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : "Failed" }, 400);
@@ -209,7 +229,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
         req.proxyPort = proxy.port;
         req.proxyAuth = proxyAuth;
       }
-      const vm = await opts.engine.create(req);
+      const vm = stampPlane(await opts.engine.create(req), c, body);
       if (proxy) jailProxies.set(vm.id, proxy);
       return c.json(vm, 201);
     } catch (err) {
@@ -218,16 +238,20 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
     }
   });
 
-  app.get("/v1/guests", (c) => c.json(listGuests()));
+  app.get("/v1/guests", (c) => {
+    const plane = planeFromHeaders(c.req);
+    return c.json(listGuests().filter((vm) => guestVisibleToPlane(vm, plane)));
+  });
 
   app.get("/v1/guests/:id", (c) => {
-    const vm = getGuest(c.req.param("id"));
+    const vm = getGuest(c, c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
     return c.json(vm);
   });
 
   app.post("/v1/guests/:id/start", async (c) => {
     const id = c.req.param("id");
+    if (!getGuest(c, id)) return c.json({ error: "Not found" }, 404);
     const host = hostGuests.get(id);
     if (host) {
       host.status = "running";
@@ -250,6 +274,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
 
   app.post("/v1/guests/:id/stop", async (c) => {
     const id = c.req.param("id");
+    if (!getGuest(c, id)) return c.json({ error: "Not found" }, 404);
     const host = hostGuests.get(id);
     if (host) {
       host.status = "stopped";
@@ -267,7 +292,8 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   app.delete("/v1/guests/:id", async (c) => {
     const id = c.req.param("id");
     try {
-      const vm = getGuest(id);
+      const vm = getGuest(c, id);
+      if (!vm) return c.json({ error: "Not found" }, 404);
       guests.drop(id);
       jailProxies.get(id)?.close();
       jailProxies.delete(id);
@@ -301,7 +327,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
 
   app.get("/v1/guests/:id/logs", (c) => {
     const id = c.req.param("id");
-    if (!getGuest(id)) return c.json({ error: "Not found" }, 404);
+    if (!getGuest(c, id)) return c.json({ error: "Not found" }, 404);
     const host = hostGuests.get(id);
     if (host) return c.json({ logs: "" });
     if (opts.hypervisor?.get(id)) return c.json({ logs: opts.hypervisor.logs(id) });
@@ -310,7 +336,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
 
   app.post("/v1/guests/:id/tools", async (c) => {
     const id = c.req.param("id");
-    const vm = getGuest(id);
+    const vm = getGuest(c, id);
     if (!vm) return c.json({ error: "Not found" }, 404);
     const body = (await c.req.json()) as { name?: string; args?: Record<string, unknown> };
     if (!body.name) return c.json({ error: "Tool name is required" }, 400);
@@ -327,14 +353,14 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
 
   app.get("/v1/guests/:id/ports", async (c) => {
     const id = c.req.param("id");
-    if (!getGuest(id)) return c.json({ error: "Not found" }, 404);
+    if (!getGuest(c, id)) return c.json({ error: "Not found" }, 404);
     const ports = opts.engine.listListeningPorts ? await opts.engine.listListeningPorts(id) : [];
     return c.json({ ports });
   });
 
   app.post("/v1/guests/:id/ports", async (c) => {
     const id = c.req.param("id");
-    if (!getGuest(id)) return c.json({ error: "Not found" }, 404);
+    if (!getGuest(c, id)) return c.json({ error: "Not found" }, 404);
     const body = (await c.req.json().catch(() => ({}))) as { ports?: unknown };
     const ports = Array.isArray(body.ports)
       ? body.ports.map((row) => parsePreviewPort(row)).filter((row): row is number => !!row)
@@ -347,7 +373,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   });
 
   app.get("/v1/guests/:id/workspace", async (c) => {
-    const vm = getGuest(c.req.param("id"));
+    const vm = getGuest(c, c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
     if (isWorkerVmGuest(vm)) {
       try {
@@ -365,7 +391,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   });
 
   app.get("/v1/guests/:id/workspace/file", async (c) => {
-    const vm = getGuest(c.req.param("id"));
+    const vm = getGuest(c, c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
     if (isWorkerVmGuest(vm)) {
       try {
@@ -388,7 +414,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   });
 
   app.get("/v1/guests/:id/workspace/raw", async (c) => {
-    const vm = getGuest(c.req.param("id"));
+    const vm = getGuest(c, c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
     if (isWorkerVmGuest(vm)) {
       return c.json({ error: "Raw workspace bytes are not served for VM guests" }, 400);
@@ -409,7 +435,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   });
 
   app.put("/v1/guests/:id/workspace/file", async (c) => {
-    const vm = getGuest(c.req.param("id"));
+    const vm = getGuest(c, c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
     if (isWorkerVmGuest(vm)) {
       const body = (await c.req.json().catch(() => ({}))) as {
@@ -443,7 +469,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   });
 
   app.post("/v1/guests/:id/workspace/mkdir", async (c) => {
-    const vm = getGuest(c.req.param("id"));
+    const vm = getGuest(c, c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
     if (isWorkerVmGuest(vm)) {
       const body = (await c.req.json().catch(() => ({}))) as { path?: string };
@@ -471,7 +497,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   });
 
   app.delete("/v1/guests/:id/workspace/file", async (c) => {
-    const vm = getGuest(c.req.param("id"));
+    const vm = getGuest(c, c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
     if (isWorkerVmGuest(vm)) {
       try {
@@ -514,7 +540,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   };
 
   app.put("/v1/guests/:id/workspace-seed", async (c) => {
-    const vm = getGuest(c.req.param("id"));
+    const vm = getGuest(c, c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
     if (isWorkerVmGuest(vm)) {
       return c.json({ error: "VM golden disks stay on the worker media folder" }, 400);
@@ -523,7 +549,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   });
 
   app.get("/v1/guests/:id/workspace.tgz", async (c) => {
-    const vm = getGuest(c.req.param("id"));
+    const vm = getGuest(c, c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
     if (isWorkerVmGuest(vm)) {
       return c.json({ error: "VM workspace is inside the guest, not a host folder" }, 400);
@@ -543,7 +569,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   });
 
   app.put("/v1/guests/:id/host-share", async (c) => {
-    const vm = getGuest(c.req.param("id"));
+    const vm = getGuest(c, c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
     const sessionId = safeWorkerSessionId(vm.sessionId);
     if (!opts.dataDir || !sessionId) {
@@ -557,7 +583,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
     const port = c.req.param("port") ?? "";
     const parsed = parsePreviewPort(Number(port));
     if (!parsed) return c.json({ error: "Invalid preview port" }, 400);
-    if (!getGuest(id)) return c.json({ error: "Not found" }, 404);
+    if (!getGuest(c, id)) return c.json({ error: "Not found" }, 404);
     const url = new URL(c.req.url);
     const body =
       c.req.method === "GET" || c.req.method === "HEAD"
@@ -577,15 +603,35 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   app.all("/v1/guests/:id/preview/:port", proxyPreview);
   app.all("/v1/guests/:id/preview/:port/*", proxyPreview);
 
+  app.get("/v1/images/:imageId", async (c) => {
+    const imageId = safeWorkerImageId(c.req.param("imageId"));
+    if (!imageId || !opts.dataDir) return c.json({ error: "Not found" }, 404);
+    const info = await workerGoldenDiskInfo(opts.dataDir, imageId);
+    if (!info) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true, ...info });
+  });
+
+  app.put("/v1/images/:imageId", async (c) => {
+    const imageId = safeWorkerImageId(c.req.param("imageId"));
+    if (!imageId || !opts.dataDir) return c.json({ error: "Invalid image id" }, 400);
+    try {
+      const saved = await saveWorkerGoldenDisk(opts.dataDir, imageId, c.req.raw.body);
+      return c.json({ ok: true, ...saved });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Failed" }, 400);
+    }
+  });
+
   app.post("/v1/guests/:id/cursor-cli", async (c) => {
-    const vm = getGuest(c.req.param("id"));
+    const vm = getGuest(c, c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
     const vmGuest = isWorkerVmGuest(vm);
-    if (vmGuest && isWindows(vm.os)) {
-      return c.json({ error: "CLI providers on a Windows worker VM are not supported" }, 400);
-    }
     if (vmGuest && !vm.ssh) return c.json({ error: "VM has no SSH" }, 400);
-    const workspace = vmGuest ? LINUX_WORKSPACE : vm.diskPath?.trim();
+    const workspace = vmGuest
+      ? isWindows(vm.os)
+        ? WINDOWS_WORKSPACE
+        : LINUX_WORKSPACE
+      : vm.diskPath?.trim();
     if (!workspace) return c.json({ error: "No workspace on this worker guest" }, 404);
     const sessionId = vm.sessionId?.trim();
     if (!sessionId) return c.json({ error: "No session on this worker guest" }, 404);
@@ -842,27 +888,39 @@ async function spawnVmWorkerCursorCli(input: {
 }): Promise<{ stream: ReadableStream<Uint8Array>; kill: () => void }> {
   const ssh = sshTargetFromInstance(input.vm);
   if (!ssh) throw new Error("VM has no SSH");
-  const args = workerCliArgs(input.command, input.args, LINUX_WORKSPACE, input.gitMcpUrl);
+  const windows = isWindows(input.vm.os);
+  const workspace = windows ? WINDOWS_WORKSPACE : LINUX_WORKSPACE;
+  const args = workerCliArgs(input.command, input.args, workspace, input.gitMcpUrl);
   const env = workerCliEnv(input.command, input.apiKey, workerGitMcpUrl(args) ?? input.gitMcpUrl);
   const mcpJson = `${JSON.stringify({ mcpServers: { locus: { url: input.gitMcpUrl } } }, null, 2)}\n`;
   const claudeJson = `${JSON.stringify({ mcpServers: { locus: { type: "http", url: input.gitMcpUrl } } }, null, 2)}\n`;
   const kiroJson = `${JSON.stringify({ mcpServers: { locus: { url: input.gitMcpUrl, autoApprove: ["*"] } } }, null, 2)}\n`;
+  const cursorMcp = windows
+    ? `${WINDOWS_WORKSPACE}\\.cursor\\mcp.json`
+    : `${LINUX_WORKSPACE}/.cursor/mcp.json`;
+  const claudeMcp = windows ? `${WINDOWS_WORKSPACE}\\.mcp.json` : `${LINUX_WORKSPACE}/.mcp.json`;
+  const kiroMcp = windows
+    ? `${WINDOWS_WORKSPACE}\\.kiro\\settings\\mcp.json`
+    : `${LINUX_WORKSPACE}/.kiro/settings/mcp.json`;
   await input.guests.execute({
     name: "file_write",
-    args: { path: `${LINUX_WORKSPACE}/.cursor/mcp.json`, content: mcpJson },
+    args: { path: cursorMcp, content: mcpJson },
   });
   await input.guests.execute({
     name: "file_write",
-    args: { path: `${LINUX_WORKSPACE}/.mcp.json`, content: claudeJson },
+    args: { path: claudeMcp, content: claudeJson },
   });
   await input.guests.execute({
     name: "file_write",
-    args: { path: `${LINUX_WORKSPACE}/.kiro/settings/mcp.json`, content: kiroJson },
+    args: { path: kiroMcp, content: kiroJson },
   });
   const handle = spawnCliOverSsh(
     ssh,
-    { command: input.command, args, cwd: LINUX_WORKSPACE, env, signal: input.signal },
-    { reverseForwards: [{ listenPort: input.mcpPort, hostPort: input.mcpPort }] },
+    { command: input.command, args, cwd: workspace, env, signal: input.signal },
+    {
+      reverseForwards: [{ listenPort: input.mcpPort, hostPort: input.mcpPort }],
+      shell: windows ? "powershell" : "posix",
+    },
   );
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({

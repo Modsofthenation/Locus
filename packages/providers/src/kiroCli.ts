@@ -31,6 +31,11 @@ const CLI_TOOL_NAMES: Record<string, string> = {
   Grep: "grep",
   grep: "grep",
   grep_search: "grep",
+  search: "grep",
+  codebaseSearch: "grep",
+  codebase_search: "grep",
+  semanticSearch: "grep",
+  fsSearch: "grep",
   Glob: "glob",
   glob: "glob",
   glob_search: "glob",
@@ -97,18 +102,20 @@ export function buildKiroCliArgv(input: {
   workspace: string;
   model?: string;
   resume?: string;
+  /** Session-scoped Locus Git bridge; credentials remain in the control plane. */
+  gitMcpUrl?: string;
   env?: NodeJS.ProcessEnv;
 }): KiroCliArgv {
   const env = input.env ?? process.env;
   const { command, prefixArgs } = resolveKiroCliCommand(input.provider, env);
-  // `--v3` is a global harness flag (`kiro-cli --v3 chat …`). Putting it after
-  // `chat` is accepted on some builds and ignored on others. Do not pass
+  // `--v3` / `--agent-engine` belong on `kiro-cli chat`, not the root launcher
+  // (`kiro-cli --v3 chat` can swallow `chat` as a flag value). Do not pass
   // `--require-mcp-startup`: Locus MCP is POST JSON-RPC and Kiro V3 may wait
   // 30s then exit with no stream-json after KAS boots.
   const args = [
     ...prefixArgs,
-    "--v3",
     "chat",
+    "--v3",
     "--no-interactive",
     "--trust-all-tools",
     "--output-format",
@@ -121,6 +128,7 @@ export function buildKiroCliArgv(input: {
   if (resume) args.push("--resume-id", resume);
   args.push(input.prompt);
   const apiKey = input.provider.apiKey?.trim();
+  const gitMcpUrl = input.gitMcpUrl?.trim();
   return {
     command,
     args,
@@ -128,6 +136,7 @@ export function buildKiroCliArgv(input: {
     env: {
       ...env,
       ...(apiKey && !apiKey.includes("•") ? { KIRO_API_KEY: apiKey } : {}),
+      ...(gitMcpUrl ? { LOCUS_GIT_MCP_URL: gitMcpUrl } : {}),
     },
   };
 }
@@ -165,6 +174,8 @@ function parseKiroCliEventsRaw(line: string): ParsedKiroCliEvent[] {
   if (typeof row.jsonrpc === "string" || typeof row.method === "string") {
     return parseAcpRow(row);
   }
+  const envelope = parseStreamJsonEnvelope(row);
+  if (envelope) return envelope;
   const type = rowKind(row);
   if (type === "streamevent" || type === "contentblockdelta") {
     return parseStreamEvent(row);
@@ -250,6 +261,65 @@ function isV3SessionUpdate(type: string): boolean {
   );
 }
 
+function isStreamJsonEnvelopeType(type: string): boolean {
+  return (
+    type === "runstarted" ||
+    type === "sessionupdate" ||
+    type === "metadata" ||
+    type === "runfinished" ||
+    type === "runerror"
+  );
+}
+
+/** Headless `--output-format stream-json` (kiro-cli 2.21.4+) wraps ACP events. */
+function parseStreamJsonEnvelope(row: Record<string, unknown>): ParsedKiroCliEvent[] | undefined {
+  const type = rowKind(row);
+  if (!isStreamJsonEnvelopeType(type)) return undefined;
+  const data = asRecord(row.data) ?? asRecord(row.payload) ?? row;
+  const sessionId = sessionIdFromRow(data) || sessionIdFromRow(row);
+  const sessionEvent: ParsedKiroCliEvent[] = sessionId ? [{ type: "session", sessionId }] : [];
+  if (type === "runstarted") return sessionEvent;
+  if (type === "sessionupdate") {
+    const update = asRecord(data.update) ?? data;
+    return parseSessionUpdate(update, sessionId);
+  }
+  if (type === "metadata") {
+    const usage = readUsage(data) ?? readUsage(row);
+    return usage ? [...sessionEvent, { type: "usage", ...usage }] : sessionEvent;
+  }
+  if (type === "runerror") {
+    const stage = typeof data.stage === "string" ? data.stage.trim() : "";
+    const message =
+      (typeof data.message === "string" && data.message.trim()) ||
+      (stage && `Kiro CLI run error (${stage})`) ||
+      "Kiro CLI run error";
+    return [...sessionEvent, { type: "error", message }];
+  }
+  const statusRaw = typeof data.status === "string" ? data.status.trim().toLowerCase() : "";
+  const text =
+    (typeof data.finalText === "string" && data.finalText) ||
+    (typeof data.text === "string" && data.text) ||
+    (typeof data.result === "string" && data.result) ||
+    undefined;
+  if (statusRaw && statusRaw !== "success" && statusRaw !== "ok" && statusRaw !== "finished") {
+    return [
+      ...sessionEvent,
+      { type: "error", message: text?.trim() || `Kiro CLI finished with status ${data.status}` },
+    ];
+  }
+  const usage = readUsage(data) ?? readUsage(row);
+  return [
+    ...sessionEvent,
+    {
+      type: "result",
+      status: "FINISHED",
+      text,
+      durationMs: num(data.turnDurationMs) ?? num(data.duration_ms) ?? num(data.durationMs),
+      ...(usage ? { usage } : {}),
+    },
+  ];
+}
+
 function parseAcpRow(row: Record<string, unknown>): ParsedKiroCliEvent[] {
   const method = typeof row.method === "string" ? row.method : "";
   const params = asRecord(row.params);
@@ -329,10 +399,7 @@ function parseV3ToolCall(
       statusRaw !== "pending" &&
       statusRaw !== "inprogress" &&
       statusRaw !== "running");
-  const name =
-    (typeof update.kind === "string" && update.kind) ||
-    (typeof update.name === "string" && update.name) ||
-    "tool";
+  const name = kiroToolName(update);
   const id =
     (typeof update.toolCallId === "string" && update.toolCallId) ||
     (typeof update.tool_call_id === "string" && update.tool_call_id) ||
@@ -348,6 +415,26 @@ function parseV3ToolCall(
       ? { result: stringifyResult(update.content ?? update.result ?? update.output) }
       : {}),
   };
+}
+
+function kiroToolName(update: Record<string, unknown>): string {
+  const meta = asRecord(asRecord(update._meta)?.kiro) ?? asRecord(update._meta);
+  const raw = asRecord(update.rawInput) ?? asRecord(update.input) ?? asRecord(update.arguments);
+  const fromMeta = typeof meta?.toolName === "string" ? meta.toolName.trim() : "";
+  const fromUpdate =
+    (typeof update.name === "string" && update.name.trim()) ||
+    (typeof update.kind === "string" && update.kind.trim()) ||
+    "";
+  // Subagents such as context-gatherer put the tool id on rawInput.name.
+  const fromRaw =
+    raw &&
+    typeof raw.name === "string" &&
+    raw.name.trim() &&
+    typeof raw.path !== "string" &&
+    typeof raw.command !== "string"
+      ? raw.name.trim()
+      : "";
+  return fromMeta || fromUpdate || fromRaw || "tool";
 }
 
 function parseSessionInfoUpdate(update: Record<string, unknown>): ParsedKiroCliEvent[] {
@@ -530,6 +617,7 @@ export async function* streamKiroCli(input: {
   mode?: "agent" | "plan";
   webSearch?: boolean;
   review?: boolean;
+  gitMcpUrl?: string;
   signal?: AbortSignal;
   spawnFn?: KiroCliSpawner;
 }): AsyncGenerator<KiroCliEvent> {
@@ -555,9 +643,12 @@ export async function* streamKiroCli(input: {
   const publish = (event: ParsedKiroCliEvent): KiroCliEvent | undefined => {
     if (event.type === "tool_call" && event.id) {
       streamedTools = true;
-      if (event.status === "running" && event.name && event.name !== "tool") {
+      if (event.name && event.name !== "tool") {
         toolNames.set(event.id, event.name);
-      } else if (event.status === "completed") {
+      } else {
+        event.name = toolNames.get(event.id) ?? event.name;
+      }
+      if (event.status === "completed") {
         event.name = toolNames.get(event.id) ?? event.name;
       }
     }

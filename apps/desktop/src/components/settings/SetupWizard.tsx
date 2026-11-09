@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Modal } from "@/components/layout/Modal";
 import type { AiProvider, LocusConfig } from "@locus/shared";
-import { DEFAULT_DOCKER_IMAGE, hasUsableKey, isLocalOpenAiBase } from "@locus/shared";
+import { DEFAULT_DOCKER_IMAGE, hasUsableKey, isLocalOpenAiBase, t } from "@locus/shared";
 import { api } from "@/lib/api";
 import { loadLastAgent, pickProvider, saveLastAgent } from "@/lib/lastAgent";
 import { useStore } from "@/state/store";
@@ -110,7 +110,12 @@ export function SetupWizard() {
     setBusy("save");
     setError(null);
     try {
-      await persist({ ...current, setupCompleted: true, productMode });
+      await persist({
+        ...current,
+        setupCompleted: true,
+        productMode,
+        setupFirstTask: current.setupFirstTask ?? "pending",
+      });
       dispatch({ type: "setupOpen", open: false });
       if (complete) {
         const last = loadLastAgent();
@@ -152,6 +157,7 @@ export function SetupWizard() {
             Detected {hostLabel}. Add a provider key, then start chatting on this machine. Docker
             and QEMU are optional if you want a container or a full guest desktop later.
           </p>
+          <p className="hint">{t("setup.firstTask.hint")}</p>
         </div>
       </div>
       <ol className="setup-list">

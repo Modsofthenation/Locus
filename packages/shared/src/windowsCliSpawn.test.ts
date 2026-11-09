@@ -110,6 +110,21 @@ describe("resolveWindowsCliSpawn", () => {
     ).toEqual({ command: "C:\\bin\\agent.exe", args: ["-p"] });
   });
 
+  it("wraps the resolved target in conhost --headless when present", () => {
+    const conhost = "C:\\Windows\\System32\\conhost.exe";
+    const target = resolveWindowsCliSpawn("C:\\bin\\agent.exe", ["-p"], {
+      platform: "win32",
+      env: { SystemRoot: "C:\\Windows" },
+      exists: existsSet(["C:\\bin\\agent.exe", conhost]),
+      listDirs: () => [],
+    });
+    expect(target).toEqual({
+      command: conhost,
+      args: ["--headless", "C:\\bin\\agent.exe", "-p"],
+      windowsVerbatimArguments: false,
+    });
+  });
+
   it("launches a .ps1 via powershell.exe -File when unwrap is impossible", () => {
     const ps1 = `${INSTALL}\\cursor-agent.ps1`;
     const target = resolveWindowsCliSpawn(ps1, ["models"], {

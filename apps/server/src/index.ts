@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { getRequestListener } from "@hono/node-server";
@@ -8,7 +9,13 @@ import {
   type DockerEngine,
   type Hypervisor,
 } from "@locus/hypervisor";
-import { computeTasksPath, FargateComputeBackend } from "@locus/compute";
+import {
+  AzureComputeBackend,
+  CompositeComputeBackend,
+  FargateComputeBackend,
+  GcpComputeBackend,
+  computeTasksPath,
+} from "@locus/compute";
 import { loadOrCreateWorkerTls } from "@locus/worker";
 import { createApp } from "./app.js";
 import { defaultDataDir } from "./defaults.js";
@@ -80,7 +87,11 @@ const sessions = new SessionService(
   undefined,
   guests,
   docker,
-  new FargateComputeBackend(fetch, undefined, computeTasksPath(dataDir)),
+  new CompositeComputeBackend(
+    new FargateComputeBackend(fetch, undefined, computeTasksPath(dataDir)),
+    new AzureComputeBackend(fetch, undefined, join(dataDir, "compute-azure.json")),
+    new GcpComputeBackend(fetch, undefined, join(dataDir, "compute-gcp.json")),
+  ),
   plane,
 );
 sessions.chromeExtension.setToken(
@@ -105,6 +116,9 @@ plane.brain = brain;
 const workflows = new WorkflowService(dataDir, sessions);
 plane.workflows = workflows;
 const slack = new SlackGateway(store, sessions, hub, fetch, slackSocketConnect, brain);
+plane.onSlackApproval = (sessionId, toolName, callId) => {
+  void slack.notifyApproval(sessionId, toolName, callId).catch(() => undefined);
+};
 brain.setCorpusCollectors([slackCorpusCollector(store, slack), jiraCorpusCollector(store)]);
 const subscriptions = new SubscriptionService(store, sessions, { slack, hub, repos, projects });
 let liveConfig = config;
@@ -177,6 +191,7 @@ const socketOpts = {
   hub,
   displays: {
     get: (id: string) => hypervisor.get(id),
+    connectRemote: (id: string, ws: import("ws").WebSocket) => sessions.pipeWorkerDisplay(id, ws),
   },
   onCommand: handleCommand,
   phoneRemote: () => liveConfig.phoneRemote,

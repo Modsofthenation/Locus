@@ -2,7 +2,7 @@
 
 Goal: pick **where** a guest runs without moving the Locus control plane off this machine.
 
-First slice (this tree): spin up Docker agents from the laptop onto **other machines running `locus-worker`** — a LAN box, a cloud VM you created, or a Fargate task whose definition already runs that binary. Placement stays `local` | `worker`. Cloud paste-URL is `WorkerBackend.kind === "cloud"`. Native Fargate is `kind === "fargate"` (size allowlist, recorded HTTP to ECS, no AWS SDK). Azure / GCP adapters are not in this slice.
+First slice (this tree): spin up Docker agents from the laptop onto **other machines running `locus-worker`** — a LAN box, a cloud VM you created, or a Fargate / Azure / GCP worker whose definition already runs that binary. Placement stays `local` | `worker`. Cloud paste-URL is `WorkerBackend.kind === "cloud"`. Native Fargate is `kind === "fargate"` (size allowlist, recorded HTTP to ECS, no AWS SDK). Azure (`kind: azure`) and GCP (`kind: gcp`) reuse the same recorded-HTTP seam.
 
 Related: [SECURITY.md](../SECURITY.md) (loopback control plane), [builtin-browser.md](builtin-browser.md) (live guest Chromium pane, including LAN/cloud workers), `SessionService` in `apps/server/src/session/sessions.ts`, `@locus/worker` in `packages/worker`, `@locus/compute` in `packages/compute`.
 
@@ -36,7 +36,7 @@ POST /api/sessions
     cursorCloud? skip bootGuest
     else bootGuest()
       placement worker → WorkerClient HTTPS → locus-worker Docker, Host, **or QEMU**
-        fargate: ComputeBackend.quote/provision (RunTask) then WorkerClient
+        fargate/azure/gcp: ComputeBackend.quote/provision then WorkerClient
         stop: destroy guest (default) unless LAN destroyOnStop=false
         fargate stop: destroy guest, then StopTask
         idle reaper: destroy guest after idleTtlMs (cloud/fargate cannot disable)
@@ -51,7 +51,7 @@ POST /api/sessions
     checkBudget(llm usd + worker compute usd, time, rounds, tokens, subagents)
 ```
 
-`runAgentLoop` does not grow `if (aws)` branches. Remote tools are HTTP `POST /v1/guests/:id/tools`. The composer usage hint shows token USD and `$n VM` when compute USD is accruing (operator hourly rate, or the Fargate quote locked at provision).
+`runAgentLoop` does not grow `if (aws)` branches. Remote tools are HTTP `POST /v1/guests/:id/tools`. The composer usage hint shows token USD, `$n VM`, and a combined total when both LLM and compute USD are accruing (operator hourly rate, or the Fargate/Azure/GCP quote locked at provision).
 
 ## Operator flow (LAN or cloud VM)
 
@@ -59,7 +59,7 @@ POST /api/sessions
 2. On the laptop: paste that line in Settings → Workers (or `locus config workers add '<line>'`). Add tests the token, pins the cert, and lists the host. New agent **Where** shows live / unreachable. Locus does not scan the LAN. Mark **Cloud VM** when the host is metered (forces destroy-on-stop, default idle TTL 15 minutes, max concurrent 1, requires hourly USD and an image allowlist). Mark **Fargate** when ECS should RunTask an allowed size (region, task definition, size allowlist, image allowlist; no paste URL; hourly USD comes from the dated list-price quote). Save remaining fields (kind, allowlists) if you need them.
 3. New agent → **Where** → that worker. Runtime is Docker, Host, or VM. For VMs, place the cloud image in `~/.locus-worker/media` (or `LOCUS_WORKER_HOME/media`) on the worker.
 
-Tokens live in the vault, not `config.json`. The control plane bind host stays loopback. Fargate talks to ECS with signed `fetch` (recorded JSON fixtures). There is no AWS/Azure/GCP SDK in `package.json`.
+Tokens live in the vault, not `config.json`. The control plane bind host stays loopback. Fargate talks to ECS with signed `fetch` (recorded JSON fixtures). Azure uses ARM + client-credentials; GCP uses a Bearer access token against Compute Engine. There is no AWS/Azure/GCP SDK in `package.json`.
 
 ## Multiple Locus apps, one worker host
 
@@ -74,7 +74,7 @@ One process, default port. Register the same URL and token in each app:
 1. On the host: `npm run dev:worker` (`https://0.0.0.0:7421`, token in `~/.locus-worker/token`).
 2. On each Locus app: Settings → Workers → that URL and token → Test connection.
 
-Fine when the apps may share Docker guests. The worker is not multi-tenant: `GET /v1/guests` returns every guest on that process. Anyone with the token can start or destroy any of them. When a concurrent-guest cap is set (cloud default 1), create lists every live guest on that process, so the other app’s guests count against the cap and can appear in this app’s machine list. Settings → Advanced → **Reset all data** then tries to destroy those cached guests.
+Fine when the apps may share Docker guests. Each Locus app stamps an `X-Locus-Plane` id so `GET /v1/guests` (and mutate/display) only returns that plane’s guests. Legacy guests without a plane id stay visible. Anyone with the token can still mint another plane id; isolated workers remain the strong tenancy boundary. When a concurrent-guest cap is set (cloud default 1), create lists live guests **on this plane**. Settings → Advanced → **Reset all data** then tries to destroy those cached guests.
 
 ### 2. Isolated workers on the same machine
 
@@ -110,14 +110,14 @@ There is no “this worker belongs only to app X” setting. Isolation is a diff
 
 ## Native Fargate
 
-`@locus/compute` quotes dated Fargate Linux/x86 US-East-1 list prices (`2026-08`) and POSTs `RunTask` / `DescribeTasks` / `StopTask` to `ecs.{region}.amazonaws.com`, or to the worker **ECS endpoint** when set (PrivateLink or API Gateway; path kept; execute-api hosts sign as `execute-api`). Empty `allowedSizes` cannot provision. Known sizes: `0.25-0.5`, `0.5-1`, `1-2`, `2-4`. The handle is `https://<publicIPv4 or privateIPv4>:7421` after `DescribeTasks` returns an ENI address (no loopback fallback), plus a generated `LOCUS_WORKER_TOKEN` injected as a container env override. Existing `WorkerClient` then creates the Docker guest on that worker. Operator registers a task definition that already runs `locus-worker` and pastes the ARN. Locus does not create VPCs, NAT gateways, or GPU nodes. Destroying a Docker guest does not stop a paste-URL VM; Fargate session stop does `StopTask`. Azure / GCP adapters are not in this slice.
+`@locus/compute` quotes dated Fargate Linux/x86 US-East-1 list prices (`2026-08`) and POSTs `RunTask` / `DescribeTasks` / `StopTask` to `ecs.{region}.amazonaws.com`, or to the worker **ECS endpoint** when set (PrivateLink or API Gateway; path kept; execute-api hosts sign as `execute-api`). Empty `allowedSizes` cannot provision. Known sizes: `0.25-0.5`, `0.5-1`, `1-2`, `2-4`. The handle is `https://<publicIPv4 or privateIPv4>:7421` after `DescribeTasks` returns an ENI address (no loopback fallback), plus a generated `LOCUS_WORKER_TOKEN` injected as a container env override. Existing `WorkerClient` then creates the Docker guest on that worker. Operator registers a task definition that already runs `locus-worker` and pastes the ARN. Locus does not create VPCs, NAT gateways, or GPU nodes. Destroying a Docker guest does not stop a paste-URL VM; Fargate session stop does `StopTask`. Azure Container Instances (`kind: azure`) and GCP Compute Engine (`kind: gcp`) follow the same quote → provision → WorkerClient path with recorded `fetch` (no SDKs).
 
 ## v1 limits
 
 - HTTPS with a self-signed cert (fingerprint pin). Set `LOCUS_WORKER_TLS_CERT` / `LOCUS_WORKER_TLS_KEY` for your own cert.
 - Restricted jail: the allowlist CONNECT proxy listens on the worker (not the laptop). Bind is `0.0.0.0` on a random port so `host.docker.internal` from the guest can reach it; do not publish that port.
-- Docker golden-image seed and host share upload over worker HTTPS (`PUT /v1/guests/:id/workspace-seed` and `PUT /v1/guests/:id/host-share`). VM golden disks stay on the worker; laptop qcow2 is not uploaded.
-- Worker QEMU display (VNC/SPICE) binds 127.0.0.1 on the worker. The laptop does not proxy live VNC in v1; screenshots, guest tools, and CLI-over-SSH still work.
+- Docker golden-image seed and host share upload over worker HTTPS (`PUT /v1/guests/:id/workspace-seed` and `PUT /v1/guests/:id/host-share`). VM golden disks upload once to `PUT /v1/images/:id` (8 GiB cap) and live under the worker data dir.
+- Worker QEMU VNC stays bound to the worker loopback; the laptop noVNC pane reaches it through pinned WSS `/v1/guests/:id/display`. Docker Preview and the live Chromium pane already used worker HTTP tunnels.
 - Design sessions use worker Files + Preview (canvas is `/workspace/index.html`).
 - code-server / IDE tunnels stay on this machine. Preview is the guest HTTP port (or static `index.html`) proxied through the worker.
 - Worker Files reads the worker host bind-mount (`docker-workspaces/`), not a laptop copy.

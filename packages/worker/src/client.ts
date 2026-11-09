@@ -1,4 +1,5 @@
 import type { GuestOs, VmInstance, WorkerBackend } from "@locus/shared";
+import { WORKER_PLANE_HEADER } from "@locus/shared";
 import type { CreateContainerRequest } from "@locus/hypervisor";
 import type { ChromiumDriver, GuestRuntime, ToolRequest, ToolResult } from "@locus/guest-agent";
 import { isWorkerHealth, parseWorkerFingerprint } from "@locus/shared";
@@ -11,6 +12,7 @@ const HEALTH_TIMEOUT_MS = 8_000;
 
 export class WorkerClient {
   readonly kind = "docker" as const;
+  planeId?: string;
   private cache = new Map<string, VmInstance>();
   private resolvedFingerprint?: string;
   private observedFingerprint?: string;
@@ -38,6 +40,7 @@ export class WorkerClient {
     return {
       authorization: `Bearer ${this.backend.token ?? ""}`,
       "content-type": "application/json",
+      ...(this.planeId ? { [WORKER_PLANE_HEADER]: this.planeId } : {}),
     };
   }
 
@@ -211,6 +214,45 @@ export class WorkerClient {
     );
   }
 
+  async hasGoldenDisk(imageId: string): Promise<{ path: string; bytes: number } | undefined> {
+    try {
+      const body = await this.json<{ path?: string; bytes?: number }>(
+        "GET",
+        `/v1/images/${encodeURIComponent(imageId)}`,
+      );
+      if (typeof body.path === "string" && body.path && typeof body.bytes === "number") {
+        return { path: body.path, bytes: body.bytes };
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+
+  async uploadGoldenDisk(
+    imageId: string,
+    filePath: string,
+  ): Promise<{ path: string; bytes: number }> {
+    const { readFile } = await import("node:fs/promises");
+    const buf = await readFile(filePath);
+    const res = await this.request(this.url(`/v1/images/${encodeURIComponent(imageId)}`), {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${this.backend.token ?? ""}`,
+        "content-type": "application/octet-stream",
+        ...(this.planeId ? { [WORKER_PLANE_HEADER]: this.planeId } : {}),
+      },
+      body: buf,
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      path?: string;
+      bytes?: number;
+    };
+    if (!res.ok) throw new Error(data.error || `Worker golden disk upload failed (${res.status})`);
+    return { path: data.path ?? "", bytes: data.bytes ?? buf.length };
+  }
+
   async uploadTree(id: string, kind: "workspace-seed" | "host-share", dir: string): Promise<void> {
     const archive = await packDirectory(dir);
     const res = await this.request(this.url(this.guestPath(id, `/${kind}`)), {
@@ -346,6 +388,22 @@ export class WorkerClient {
     return new WorkerBrowserDriver(this, id);
   }
 
+  async openDisplaySocket(
+    id: string,
+    onMessage: (raw: Buffer | string) => void,
+  ): Promise<WebSocket> {
+    const path = this.guestPath(id, "/display");
+    const wsUrl = this.url(path)
+      .replace(/^https:/, "wss:")
+      .replace(/^http:/, "ws:");
+    return pinnedHttpsWebSocket(wsUrl, {
+      headers: this.headers(),
+      fingerprint: this.pin(),
+      binary: true,
+      onMessage,
+    });
+  }
+
   async openBrowserSocket(id: string, onMessage: (raw: string) => void): Promise<WebSocket> {
     if (this.wsConnect) return this.wsConnect(id, onMessage);
     const path = this.guestPath(id, "/browser");
@@ -355,7 +413,7 @@ export class WorkerClient {
     return pinnedHttpsWebSocket(wsUrl, {
       headers: this.headers(),
       fingerprint: this.pin(),
-      onMessage,
+      onMessage: (raw) => onMessage(String(raw)),
     });
   }
 
@@ -364,6 +422,7 @@ export class WorkerClient {
       ...vm,
       backendId: this.backend.id,
       diskPath: "",
+      display: vm.display ? { ...vm.display, host: "" } : undefined,
     });
   }
 

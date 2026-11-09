@@ -39,6 +39,9 @@ describe("workerCliEnv", () => {
     expect(
       workerCliEnv("codex", "key", "http://127.0.0.1:17420/mcp/sessions/s1").LOCUS_GIT_MCP_URL,
     ).toBe("http://127.0.0.1:17420/mcp/sessions/s1");
+    expect(
+      workerCliEnv("kiro-cli", "key", "http://127.0.0.1:17420/mcp/sessions/s1").LOCUS_GIT_MCP_URL,
+    ).toBe("http://127.0.0.1:17420/mcp/sessions/s1");
     expect(workerCliEnv("codex", "key").LOCUS_GIT_MCP_URL).toBeUndefined();
   });
 

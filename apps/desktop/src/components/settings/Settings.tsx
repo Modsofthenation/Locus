@@ -188,9 +188,14 @@ export function Settings() {
     notes?: string;
     htmlUrl?: string;
     asset?: { name: string; url: string };
+    checksums?: { name: string; url: string };
     message?: string;
   } | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateDownload, setUpdateDownload] = useState<{
+    path: string;
+    sha256: string;
+  } | null>(null);
   const [find, setFind] = useState("");
   useEffect(() => {
     const pending = takePendingSettingsQuery();
@@ -959,6 +964,7 @@ export function Settings() {
     try {
       const result = await api.checkUpdates(APP_VERSION);
       setUpdate(result);
+      setUpdateDownload(null);
     } catch (err) {
       setUpdate({
         status: "unavailable",
@@ -2754,12 +2760,53 @@ export function Settings() {
                       Download {update.asset.name}
                     </a>
                   ) : null}
+                  {update.asset && update.checksums ? (
+                    <BusyButton
+                      type="button"
+                      className="btn small"
+                      busy={updateBusy}
+                      busyLabel="Verifying…"
+                      onClick={() => {
+                        void (async () => {
+                          setUpdateBusy(true);
+                          try {
+                            const result = await api.downloadUpdate(
+                              update.asset!,
+                              update.checksums!,
+                            );
+                            setUpdateDownload(result);
+                          } catch (err) {
+                            setUpdate({
+                              ...update,
+                              message: err instanceof Error ? err.message : "Download failed",
+                            });
+                          } finally {
+                            setUpdateBusy(false);
+                          }
+                        })();
+                      }}
+                    >
+                      Download and verify
+                    </BusyButton>
+                  ) : null}
                   {update.htmlUrl ? (
                     <a href={update.htmlUrl} target="_blank" rel="noreferrer">
                       Open release notes
                     </a>
                   ) : null}
                 </div>
+              ) : null}
+              {updateDownload ? (
+                <p className="hint">
+                  Verified {updateDownload.sha256.slice(0, 12)}… Saved to {updateDownload.path}.
+                  <button
+                    type="button"
+                    className="btn small"
+                    onClick={() => void api.openUpdate(updateDownload.path)}
+                  >
+                    Open installer
+                  </button>
+                </p>
               ) : null}
             </div>
             <p className="hint">

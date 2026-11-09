@@ -24,6 +24,9 @@ import {
   parsePullListCache,
   parsePullListState,
   parseWorkerBackends,
+  parseWorkerPlaneId,
+  createWorkerPlaneId,
+  parseLocale,
   parseNamedEnvironments,
   parseDesktopNotifyPrefs,
   editorFontSize,
@@ -238,7 +241,9 @@ export class JsonStore {
       const vault = await readVaultFile(this.dataDir, key);
       const result = vault ? applySecrets(merged, vault) : merged;
       const withPolicy = withTokenHygiene(await configWithManagedPolicy(result, this.dataDir));
-      if (hasExtractableSecrets(merged)) await this.saveConfig(withPolicy);
+      if (hasExtractableSecrets(merged) || !parseWorkerPlaneId(raw.workerPlaneId)) {
+        await this.saveConfig(withPolicy);
+      }
       if (this.configSave) await this.configSave;
       if (this.configCache) return structuredClone(this.configCache);
       if (this.configEpoch !== epoch) return this.loadConfig();
@@ -284,6 +289,14 @@ export class JsonStore {
       integrations: parseIntegrationAccounts(raw.integrations),
       integrationPlugins: normalizePlugins(raw.integrationPlugins),
       workers: parseWorkerBackends(raw.workers),
+      workerPlaneId: parseWorkerPlaneId(raw.workerPlaneId) ?? createWorkerPlaneId(),
+      locale: parseLocale(raw.locale),
+      setupFirstTask:
+        raw.setupFirstTask === "pending" ||
+        raw.setupFirstTask === "done" ||
+        raw.setupFirstTask === "dismissed"
+          ? raw.setupFirstTask
+          : undefined,
       namedEnvironments: parseNamedEnvironments(raw.namedEnvironments),
       setupCompleted: Boolean(raw.setupCompleted),
       editorFontSize: editorFontSize(raw.editorFontSize),

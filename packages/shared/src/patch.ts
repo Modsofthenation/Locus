@@ -378,8 +378,8 @@ function collectReplaces(args: Record<string, unknown>): { oldText: string; newT
     }
   }
   push(
-    args.oldText ?? args.old_string ?? args.old_str,
-    args.newText ?? args.new_string ?? args.new_str,
+    args.oldText ?? args.old_string ?? args.old_str ?? args.oldStr,
+    args.newText ?? args.new_string ?? args.new_str ?? args.newStr,
   );
   return out;
 }

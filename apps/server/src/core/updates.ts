@@ -1,7 +1,13 @@
+import { createHash } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { spawn } from "node:child_process";
 import {
   LOCUS_RELEASES_API_URL,
   LOCUS_RELEASES_URL,
+  checksumLineFor,
   isNewerVersion,
+  pickChecksumsAsset,
   pickReleaseAsset,
   type ReleaseAsset,
 } from "@locus/shared";
@@ -16,6 +22,7 @@ export interface AppUpdate {
   notes?: string;
   htmlUrl?: string;
   asset?: ReleaseAsset;
+  checksums?: ReleaseAsset;
   message?: string;
 }
 
@@ -60,7 +67,37 @@ export function githubReleaseToUpdate(
     notes,
     htmlUrl,
     asset: pickReleaseAsset(assets, platform),
+    checksums: pickChecksumsAsset(assets, platform),
   };
+}
+
+export async function downloadAndVerifyUpdate(opts: {
+  asset: ReleaseAsset;
+  checksums: ReleaseAsset;
+  destDir: string;
+  fetchFn?: typeof fetch;
+}): Promise<{ path: string; sha256: string; verified: true }> {
+  const fetchFn = opts.fetchFn ?? fetch;
+  const sumsRes = await fetchFn(opts.checksums.url);
+  if (!sumsRes.ok) throw new Error(`Could not download ${opts.checksums.name}`);
+  const sums = await sumsRes.text();
+  const expected = checksumLineFor(sums, opts.asset.name);
+  if (!expected) throw new Error(`${opts.asset.name} is not in ${opts.checksums.name}`);
+  const fileRes = await fetchFn(opts.asset.url);
+  if (!fileRes.ok) throw new Error(`Could not download ${opts.asset.name}`);
+  const buf = Buffer.from(await fileRes.arrayBuffer());
+  const sha256 = createHash("sha256").update(buf).digest("hex");
+  if (sha256 !== expected) throw new Error("SHA-256 did not match SHA256SUMS");
+  await mkdir(opts.destDir, { recursive: true, mode: 0o700 });
+  const dest = join(opts.destDir, opts.asset.name);
+  await writeFile(dest, buf, { mode: 0o700 });
+  return { path: dest, sha256, verified: true };
+}
+
+export function openVerifiedUpdate(path: string, platform = process.platform): void {
+  const cmd = platform === "darwin" ? "open" : platform === "win32" ? path : "xdg-open";
+  const args = platform === "win32" ? [] : [path];
+  spawn(cmd, args, { detached: true, stdio: "ignore", windowsHide: true }).unref();
 }
 
 export async function checkGithubRelease(opts: {

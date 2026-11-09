@@ -10,7 +10,11 @@ import {
   STICK_BOTTOM_PX,
 } from "./threadScroll";
 
-const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../index.css"), "utf8");
+const dir = dirname(fileURLToPath(import.meta.url));
+const css = [
+  readFileSync(join(dir, "../index.css"), "utf8"),
+  readFileSync(join(dir, "../styles/phone.css"), "utf8"),
+].join("\n");
 
 describe("isStuckToBottom", () => {
   it("treats a small gap as stuck and a larger gap as pinned", () => {

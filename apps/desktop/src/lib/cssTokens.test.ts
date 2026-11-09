@@ -4,7 +4,11 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const src = join(dirname(fileURLToPath(import.meta.url)), "..");
-const css = readFileSync(join(src, "index.css"), "utf8");
+const css = [
+  readFileSync(join(src, "index.css"), "utf8"),
+  readFileSync(join(src, "styles/phone.css"), "utf8"),
+  readFileSync(join(src, "styles/swarm.css"), "utf8"),
+].join("\n");
 
 function definedTokens(): Set<string> {
   const names = new Set<string>();
@@ -36,6 +40,20 @@ describe("css tokens", () => {
       const body = css.slice(start, css.indexOf("}", start));
       expect(body, selector).not.toMatch(/outline:\s*none/);
     }
+  });
+
+  it("keeps the composer subagent chip as short as neighboring head chips", () => {
+    const wrapperStart = css.indexOf(".composer-head .subagent-select {");
+    expect(wrapperStart).toBeGreaterThan(-1);
+    const wrapper = css.slice(wrapperStart, css.indexOf("}", wrapperStart));
+    expect(wrapper).not.toMatch(/padding:/);
+    expect(wrapper).not.toMatch(/min-height:/);
+    expect(css).toMatch(
+      /\.composer-head \.ui-select\.compact\.subagent-select \.ui-select-toggle \{[\s\S]*?min-height:\s*0/,
+    );
+    expect(css).toMatch(
+      /\.composer-head \.ui-select\.compact\.subagent-select \.ui-select-toggle \{[\s\S]*?padding:\s*var\(--space-0-5\) var\(--space-2\)/,
+    );
   });
 
   it("draws font weights from the scale so they match the loaded Outfit weights", () => {

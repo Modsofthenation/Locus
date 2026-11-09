@@ -38,7 +38,29 @@ export function resolveWindowsCliSpawn(
   const exists = opts.exists ?? existsSync;
   const listDirs = opts.listDirs ?? defaultListDirs;
   const resolved = resolveWin32CommandPath(command, env, exists) ?? command;
-  return spawnTargetForResolved(resolved, args, env, exists, listDirs);
+  const target = spawnTargetForResolved(resolved, args, env, exists, listDirs);
+  return wrapHiddenConsoleSpawn(target, { platform, env, exists });
+}
+
+/** Hide the CLI process tree by giving it a headless console children can inherit. */
+export function wrapHiddenConsoleSpawn(
+  target: WindowsCliSpawnTarget,
+  opts: Pick<WindowsCliSpawnOpts, "platform" | "env" | "exists"> = {},
+): WindowsCliSpawnTarget {
+  const platform = opts.platform ?? process.platform;
+  if (platform !== "win32") return target;
+  if (/(^|[\\/])conhost\.exe$/i.test(target.command)) return target;
+  const env = opts.env ?? {};
+  const exists = opts.exists ?? existsSync;
+  const root = env.SystemRoot || env.windir || "C:\\Windows";
+  const conhost = win32.join(root, "System32", "conhost.exe");
+  if (!exists(conhost)) return target;
+  return {
+    command: conhost,
+    args: ["--headless", target.command, ...target.args],
+    windowsVerbatimArguments: false,
+    envPatch: target.envPatch,
+  };
 }
 
 export function quoteWindowsCmdArg(value: string): string {

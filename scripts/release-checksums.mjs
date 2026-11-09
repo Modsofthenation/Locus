@@ -7,7 +7,9 @@ const outName = process.argv[3] ?? "SHA256SUMS";
 if (outName.includes("/") || outName.includes("\\") || outName === "." || outName === "..") {
   throw new Error("checksum filename must be a basename");
 }
-const files = (await readdir(dir)).filter((name) => /\.(AppImage|dmg|exe|zip)$/i.test(name)).sort();
+const files = (await readdir(dir))
+  .filter((name) => /\.(AppImage|deb|rpm|dmg|exe|zip)$/i.test(name))
+  .sort();
 const lines = [];
 for (const file of files) {
   const buf = await readFile(join(dir, file));

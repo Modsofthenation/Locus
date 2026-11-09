@@ -4,22 +4,22 @@ import { parseDockerImage } from "./vm.js";
 import { DEFAULT_WORKER_PORT } from "./placement.js";
 import { parseWorkerAllowedSizes } from "./fargate.js";
 
-export type WorkerKind = "lan" | "cloud" | "fargate";
+export type WorkerKind = "lan" | "cloud" | "fargate" | "azure" | "gcp";
 
-export const WORKER_KINDS: WorkerKind[] = ["lan", "cloud", "fargate"];
+export const WORKER_KINDS: WorkerKind[] = ["lan", "cloud", "fargate", "azure", "gcp"];
 export const DEFAULT_WORKER_IDLE_TTL_MS = 15 * 60 * 1000;
 
-/** A LAN box, paste-URL cloud VM, or Fargate task running `locus-worker`. */
+/** A LAN box, paste-URL cloud VM, or a provisioned Fargate / Azure / GCP worker. */
 export interface WorkerBackend {
   id: string;
   name: string;
-  /** Required for LAN/cloud. Fargate fills this after provision. */
+  /** Required for LAN/cloud. Provisioned kinds fill this after create. */
   url: string;
-  /** Vaulted. Worker token, or Fargate secret access key. */
+  /** Vaulted. Worker token, Fargate secret, Azure client secret, or GCP access token. */
   token?: string;
   /** SHA-256 of the worker TLS cert (`sha256:` + hex). Not a secret. */
   fingerprint?: string;
-  /** Default `lan`. Cloud VMs and Fargate get idle TTL + concurrent cap. */
+  /** Default `lan`. Cloud VMs and provisioned kinds get idle TTL + concurrent cap. */
   kind?: WorkerKind;
   /** Destroy the Docker guest on Stop. Default true. */
   destroyOnStop?: boolean;
@@ -33,7 +33,7 @@ export interface WorkerBackend {
   allowedImages?: string[];
   /** Fargate vCPU-GB pairs. Empty cannot provision. */
   allowedSizes?: string[];
-  /** AWS region for Fargate. */
+  /** AWS region for Fargate, Azure location, or GCP region. */
   region?: string;
   /** ECS cluster. Default `locus`. */
   cluster?: string;
@@ -45,6 +45,26 @@ export interface WorkerBackend {
   accessKeyId?: string;
   /** Optional ECS endpoint (PrivateLink or API Gateway). Empty uses `ecs.{region}.amazonaws.com`. */
   ecsUrl?: string;
+  /** Azure AD tenant id. */
+  tenantId?: string;
+  /** Azure AD application (client) id. */
+  clientId?: string;
+  /** Azure subscription id. */
+  subscriptionId?: string;
+  /** Azure resource group. */
+  resourceGroup?: string;
+  /** Existing Azure Container Instances group name. */
+  containerGroup?: string;
+  /** Optional ARM endpoint (PrivateLink). Empty uses `management.azure.com`. */
+  armUrl?: string;
+  /** GCP project id. */
+  project?: string;
+  /** GCP zone (for example `us-central1-a`). */
+  zone?: string;
+  /** Existing Compute Engine instance template that already runs locus-worker. */
+  instanceTemplate?: string;
+  /** Optional Compute Engine endpoint. Empty uses `compute.googleapis.com`. */
+  gcpUrl?: string;
 }
 
 export function parseWorkerBackends(raw: unknown): WorkerBackend[] {
@@ -62,11 +82,10 @@ export function parseWorkerBackend(raw: unknown): WorkerBackend | undefined {
   const value = raw as Record<string, unknown>;
   const id = typeof value.id === "string" ? value.id.trim() : "";
   const name = typeof value.name === "string" ? value.name.trim() : "";
-  const kind: WorkerKind | undefined =
-    value.kind === "fargate" ? "fargate" : value.kind === "cloud" ? "cloud" : undefined;
+  const kind = parseWorkerKind(value.kind);
   const url = normalizeWorkerUrl(typeof value.url === "string" ? value.url : "") ?? "";
   if (!id || !name) return undefined;
-  if (kind !== "fargate" && !url) return undefined;
+  if (!workerProvisionsCompute({ kind }) && !url) return undefined;
   const token =
     typeof value.token === "string" && value.token.trim() ? value.token.trim() : undefined;
   const fingerprint = parseWorkerFingerprint(
@@ -107,6 +126,10 @@ export function parseWorkerBackend(raw: unknown): WorkerBackend | undefined {
       : undefined;
   const ecsUrl =
     typeof value.ecsUrl === "string" && value.ecsUrl.trim() ? value.ecsUrl.trim() : undefined;
+  const optional = (key: string): string | undefined => {
+    const raw = value[key];
+    return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+  };
   return {
     id,
     name,
@@ -126,6 +149,16 @@ export function parseWorkerBackend(raw: unknown): WorkerBackend | undefined {
     ...(subnet ? { subnet } : {}),
     ...(accessKeyId ? { accessKeyId } : {}),
     ...(ecsUrl ? { ecsUrl } : {}),
+    ...(optional("tenantId") ? { tenantId: optional("tenantId") } : {}),
+    ...(optional("clientId") ? { clientId: optional("clientId") } : {}),
+    ...(optional("subscriptionId") ? { subscriptionId: optional("subscriptionId") } : {}),
+    ...(optional("resourceGroup") ? { resourceGroup: optional("resourceGroup") } : {}),
+    ...(optional("containerGroup") ? { containerGroup: optional("containerGroup") } : {}),
+    ...(optional("armUrl") ? { armUrl: optional("armUrl") } : {}),
+    ...(optional("project") ? { project: optional("project") } : {}),
+    ...(optional("zone") ? { zone: optional("zone") } : {}),
+    ...(optional("instanceTemplate") ? { instanceTemplate: optional("instanceTemplate") } : {}),
+    ...(optional("gcpUrl") ? { gcpUrl: optional("gcpUrl") } : {}),
   };
 }
 
@@ -169,16 +202,25 @@ export function parseWorkerFingerprint(raw: string | undefined): string | undefi
   return `sha256:${hex}`;
 }
 
-export function workerKind(backend: { kind?: WorkerKind }): WorkerKind {
-  if (backend.kind === "fargate") return "fargate";
-  if (backend.kind === "cloud") return "cloud";
-  return "lan";
+export function parseWorkerKind(raw: unknown): WorkerKind | undefined {
+  if (raw === "fargate" || raw === "cloud" || raw === "azure" || raw === "gcp") return raw;
+  return undefined;
 }
 
-/** Cloud VM (paste URL) or Fargate: idle TTL, destroy-on-stop, guest cap. */
+export function workerKind(backend: { kind?: WorkerKind }): WorkerKind {
+  return parseWorkerKind(backend.kind) ?? "lan";
+}
+
+/** Cloud VM (paste URL) or a provisioned Fargate / Azure / GCP worker. */
 export function workerIsMetered(backend: { kind?: WorkerKind }): boolean {
   const kind = workerKind(backend);
-  return kind === "cloud" || kind === "fargate";
+  return kind === "cloud" || workerProvisionsCompute(backend);
+}
+
+/** Fargate, Azure, and GCP: Locus starts a worker VM, then talks to it over HTTPS. */
+export function workerProvisionsCompute(backend: { kind?: WorkerKind }): boolean {
+  const kind = workerKind(backend);
+  return kind === "fargate" || kind === "azure" || kind === "gcp";
 }
 
 export function workerDestroyOnStop(backend: { destroyOnStop?: boolean }): boolean {
@@ -206,6 +248,8 @@ export function workerMaxConcurrent(backend: {
 export function workerWhereLabel(backend: WorkerBackend): string {
   const kind = workerKind(backend);
   if (kind === "fargate") return `${backend.name} · fargate`;
+  if (kind === "azure") return `${backend.name} · azure`;
+  if (kind === "gcp") return `${backend.name} · gcp`;
   if (kind === "cloud") return `${backend.name} · cloud`;
   return backend.name;
 }
@@ -264,7 +308,7 @@ export function workerAllowedSizes(backend: {
   allowedSizes?: string[];
 }): string[] | undefined {
   if (backend.allowedSizes !== undefined) return backend.allowedSizes;
-  return workerKind(backend) === "fargate" ? [] : undefined;
+  return workerProvisionsCompute(backend) ? [] : undefined;
 }
 
 export function workerSizeAllowed(
@@ -282,7 +326,9 @@ export function workerPickSize(
 ): string {
   const list = workerAllowedSizes(backend) ?? [];
   if (!list.length) {
-    throw new Error("Fargate workers need a size allowlist so a runaway agent cannot pick 4 vCPU");
+    throw new Error(
+      "Provisioned workers need a size allowlist so a runaway agent cannot pick 4 vCPU",
+    );
   }
   if (requested) {
     if (!list.includes(requested)) throw new Error(`Size ${requested} is not on the allowlist`);
@@ -305,7 +351,7 @@ export function workerImageAllowed(
 export function workerBackendError(backend: WorkerBackend): string | undefined {
   if (!backend.name.trim()) return "Worker name is required";
   const kind = workerKind(backend);
-  if (kind !== "fargate") {
+  if (!workerProvisionsCompute(backend)) {
     const url = normalizeWorkerUrl(backend.url);
     if (!url) return "Worker URL must be http or https";
     try {
@@ -344,7 +390,29 @@ export function workerBackendError(backend: WorkerBackend): string | undefined {
   if (kind === "fargate" && !workerAllowedSizes(backend)?.length) {
     return "Fargate workers need a size allowlist so a runaway agent cannot pick 4 vCPU";
   }
-  const ecsError = awsEndpointUrlError(backend.ecsUrl, "ECS endpoint");
+  if (kind === "azure") {
+    if (!backend.tenantId?.trim()) return "Azure workers need a tenant id";
+    if (!backend.clientId?.trim()) return "Azure workers need a client id";
+    if (!backend.subscriptionId?.trim()) return "Azure workers need a subscription id";
+    if (!backend.resourceGroup?.trim()) return "Azure workers need a resource group";
+    if (!backend.containerGroup?.trim()) return "Azure workers need a container group name";
+    if (!backend.region?.trim()) return "Azure workers need a region";
+    if (!workerAllowedSizes(backend)?.length) {
+      return "Azure workers need a size allowlist so a runaway agent cannot pick 4 vCPU";
+    }
+  }
+  if (kind === "gcp") {
+    if (!backend.project?.trim()) return "GCP workers need a project id";
+    if (!backend.zone?.trim()) return "GCP workers need a zone";
+    if (!backend.instanceTemplate?.trim()) {
+      return "GCP workers need an instance template that already runs locus-worker";
+    }
+    if (!workerAllowedSizes(backend)?.length) {
+      return "GCP workers need a size allowlist so a runaway agent cannot pick 4 vCPU";
+    }
+  }
+  const ecsError =
+    kind === "fargate" ? awsEndpointUrlError(backend.ecsUrl, "ECS endpoint") : undefined;
   if (ecsError) return ecsError;
   return undefined;
 }

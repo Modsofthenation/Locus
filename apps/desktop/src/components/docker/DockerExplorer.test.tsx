@@ -23,7 +23,7 @@ vi.mock("@/lib/api", () => ({
 
 const web: DockerContainer = {
   id: "c1",
-  name: "siq8-dev_webpack.abc",
+  name: "app-dev_webpack.abc",
   image: "node:22",
   state: "running",
   status: "Up 2 hours",
@@ -34,7 +34,7 @@ const web: DockerContainer = {
 
 const db: DockerContainer = {
   id: "c2",
-  name: "siq8-dev_nginx.xyz",
+  name: "app-dev_nginx.xyz",
   image: "nginx:alpine",
   state: "exited",
   status: "Exited (0) 3 minutes ago",
@@ -105,21 +105,21 @@ describe("DockerExplorer", () => {
     expect(host.querySelector('[data-testid="docker-explorer"]')).toBeTruthy();
     expect(host.querySelector(".docker-explorer-head")?.getAttribute("aria-expanded")).toBe("true");
     expect(host.querySelector(".docker-explorer-count")?.textContent).toBe("2");
-    expect(host.querySelector(".docker-explorer-name")?.textContent).toBe("siq8-dev_webpack.abc");
+    expect(host.querySelector(".docker-explorer-name")?.textContent).toBe("app-dev_webpack.abc");
     expect(host.querySelector(".dot.running")).toBeTruthy();
     await act(async () => {
       (host.querySelector(".docker-explorer-open") as HTMLButtonElement).click();
     });
     expect(inspected.map((row) => row.id)).toEqual(["c1"]);
     await act(async () => {
-      (host.querySelector('[aria-label="Stop siq8-dev_webpack.abc"]') as HTMLButtonElement).click();
+      (host.querySelector('[aria-label="Stop app-dev_webpack.abc"]') as HTMLButtonElement).click();
       await Promise.resolve();
       await Promise.resolve();
     });
     expect(api.dockerContainerAction).toHaveBeenCalledWith("c1", "stop");
     await act(async () => {
       (
-        host.querySelector('[aria-label="Restart siq8-dev_webpack.abc"]') as HTMLButtonElement
+        host.querySelector('[aria-label="Restart app-dev_webpack.abc"]') as HTMLButtonElement
       ).click();
       await Promise.resolve();
       await Promise.resolve();
@@ -130,9 +130,7 @@ describe("DockerExplorer", () => {
   it("starts a stopped container without a confirm", async () => {
     render();
     await flush();
-    const start = host.querySelector(
-      '[aria-label="Start siq8-dev_nginx.xyz"]',
-    ) as HTMLButtonElement;
+    const start = host.querySelector('[aria-label="Start app-dev_nginx.xyz"]') as HTMLButtonElement;
     expect(start).toBeTruthy();
     await act(async () => {
       start.click();
@@ -157,7 +155,7 @@ describe("DockerExplorer", () => {
     await act(async () => {
       (document.querySelector('.workspace-ctx [role="menuitem"]') as HTMLButtonElement).click();
     });
-    expect(inspected.map((row) => row.name)).toEqual(["siq8-dev_webpack.abc"]);
+    expect(inspected.map((row) => row.name)).toEqual(["app-dev_webpack.abc"]);
     expect(document.querySelector(".workspace-ctx")).toBeNull();
   });
 

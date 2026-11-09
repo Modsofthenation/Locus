@@ -30,6 +30,19 @@ function strArg(args: Record<string, unknown>, key: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function fileChangePath(args: Record<string, unknown>): string {
+  const buckets = [args.changes, args.value];
+  for (const value of buckets) {
+    if (!Array.isArray(value)) continue;
+    for (const item of value) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const path = strArg(item as Record<string, unknown>, "path");
+      if (path) return path;
+    }
+  }
+  return "";
+}
+
 /** Map Cursor/Claude aliases onto Locus catalog names for chips, activity, and execution. */
 export function canonicalToolName(name: string): string {
   if (name === "read" || name === "Read" || name === "read_file") return "file_read";
@@ -64,8 +77,16 @@ export function canonicalToolName(name: string): string {
   ) {
     return "exec";
   }
-  if (name === "Grep") return "grep";
+  if (name === "Grep" || name === "search" || name === "codebase_search") return "grep";
   if (name === "Glob") return "glob";
+  if (
+    name === "execute" ||
+    name === "executeCommand" ||
+    name === "execute_command" ||
+    name === "execute_bash"
+  ) {
+    return "exec";
+  }
   if (name === "LS" || name === "ls") return "file_list";
   if (name === "WriteCanvas" || name === "write_canvas") return "canvas_write";
   if (name === "ReadCanvas" || name === "read_canvas") return "canvas_read";
@@ -81,7 +102,8 @@ export function toolArgsForChip(args: Record<string, unknown>): Record<string, u
     const target =
       strArg(next, "target_file") ||
       strArg(next, "relative_workspace_path") ||
-      strArg(next, "file_path");
+      strArg(next, "file_path") ||
+      fileChangePath(next);
     if (target) next = { ...next, path: target };
   }
   if (typeof next.content !== "string") {

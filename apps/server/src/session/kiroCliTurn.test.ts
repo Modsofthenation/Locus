@@ -34,11 +34,11 @@ async function waitFor(
 }
 
 function linesSpawner(
-  captured: Array<{ args: string[]; cwd: string }>,
+  captured: Array<{ args: string[]; cwd: string; env?: NodeJS.ProcessEnv }>,
   lines: string[],
 ): KiroCliSpawner {
   return (req) => {
-    captured.push({ args: req.args, cwd: req.cwd });
+    captured.push({ args: req.args, cwd: req.cwd, env: req.env });
     return {
       lines: (async function* () {
         for (const line of lines) yield line;
@@ -60,7 +60,7 @@ describe("kiro cli chat loop", () => {
     await store.saveConfig(config);
     const hypervisor = new MockHypervisor(dir);
     const sessions = new SessionService(store, hypervisor, new Hub());
-    const captured: Array<{ args: string[]; cwd: string }> = [];
+    const captured: Array<{ args: string[]; cwd: string; env?: NodeJS.ProcessEnv }> = [];
     sessions.fetchFn = async () => {
       throw new Error("Kiro CLI must not call chat completions");
     };
@@ -100,7 +100,7 @@ describe("kiro cli chat loop", () => {
     expect(assistant?.content).toContain("Updated README.md.");
     expect(assistant?.toolCalls?.some((call) => call.name === "file_read")).toBe(true);
     expect(captured[0]?.cwd).toContain("host-workspaces");
-    expect(captured[0]?.args.slice(0, 3)).toEqual(["--v3", "chat", "--no-interactive"]);
+    expect(captured[0]?.args.slice(0, 3)).toEqual(["chat", "--v3", "--no-interactive"]);
     expect(captured[0]?.args).toEqual(
       expect.arrayContaining([
         "--v3",
@@ -109,9 +109,11 @@ describe("kiro cli chat loop", () => {
         "--trust-all-tools",
         "--output-format",
         "stream-json",
-        "Add a README",
       ]),
     );
+    expect(captured[0]?.args.at(-1)).toContain("Add a README");
+    expect(captured[0]?.args.at(-1)).toContain("git_pr");
+    expect(captured[0]?.env?.LOCUS_GIT_MCP_URL).toMatch(new RegExp(`/mcp/sessions/${created.id}$`));
     expect(captured[0]?.args).not.toContain("--require-mcp-startup");
     expect(captured[0]?.args).not.toContain("--resume-id");
     expect(captured[0]?.args).not.toContain("--model");
@@ -143,6 +145,91 @@ describe("kiro cli chat loop", () => {
         session.status !== "running",
     );
     expect(captured[1]?.args).toEqual(expect.arrayContaining(["--resume-id", "kiro-sess-1"]));
+  });
+
+  it("records one exec chip when V3 emits tool_call then tool_call_update", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-kiro-cli-dup-"));
+    cleanup.push(dir);
+    const store = new JsonStore(dir);
+    await store.init();
+    const config = await store.loadConfig();
+    const kiro = config.providers.find((p) => p.kind === "kiro-cli")!;
+    kiro.enabled = true;
+    await store.saveConfig(config);
+    const sessions = new SessionService(store, new MockHypervisor(dir), new Hub());
+    sessions.fetchFn = async () => {
+      throw new Error("Kiro CLI must not call chat completions");
+    };
+    sessions.kiroCliSpawner = linesSpawner(
+      [],
+      [
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            sessionId: "kiro-dup",
+            update: {
+              sessionUpdate: "tool_call",
+              toolCallId: "e1",
+              kind: "execute",
+              status: "pending",
+              rawInput: { command: "python3 ./manage.py test shop.tests.test_models" },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "e1",
+              status: "in_progress",
+              rawInput: {
+                command: "python3 ./manage.py test shop.tests.test_models",
+                description: "Run Django tests",
+              },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "e1",
+              status: "completed",
+              content: [{ type: "text", text: "OK" }],
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "agent_message_chunk",
+          content: { type: "text", text: "Tests passed." },
+        }),
+        JSON.stringify({
+          type: "runFinished",
+          data: { status: "success", sessionId: "kiro-dup", finalText: "Tests passed." },
+        }),
+      ],
+    );
+    const created = await sessions.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      runtime: "host",
+      providerId: kiro.id,
+      model: "auto",
+      startVm: false,
+    });
+    await sessions.sendChat(created.id, "run the tests");
+    const fresh = await waitFor(sessions, created.id, (session) =>
+      Boolean(session.status !== "running" && session.messages.some((m) => m.role === "assistant")),
+    );
+    const assistant = fresh?.messages.find((m) => m.role === "assistant");
+    expect(assistant?.toolCalls?.map((call) => call.name)).toEqual(["exec"]);
+    expect(assistant?.toolCalls?.[0]?.arguments).toMatchObject({
+      command: "python3 ./manage.py test shop.tests.test_models",
+      description: "Run Django tests",
+    });
+    expect(assistant?.content).toContain("Tests passed.");
   });
 
   it("shows native Kiro stream-json text in chat instead of a blank turn", async () => {
@@ -185,6 +272,71 @@ describe("kiro cli chat loop", () => {
     );
     expect(fresh?.messages.find((m) => m.role === "assistant")?.content).toContain("Hello");
     expect(fresh?.kiroCli).toEqual({ sessionId: "kiro-native-hello" });
+  });
+
+  it("shows stream-json envelope text in chat instead of a blank turn", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-kiro-envelope-chat-"));
+    cleanup.push(dir);
+    const store = new JsonStore(dir);
+    await store.init();
+    const config = await store.loadConfig();
+    const kiro = config.providers.find((p) => p.kind === "kiro-cli")!;
+    kiro.enabled = true;
+    await store.saveConfig(config);
+    const sessions = new SessionService(store, new MockHypervisor(dir), new Hub());
+    sessions.fetchFn = async () => {
+      throw new Error("Kiro CLI must not call chat completions");
+    };
+    sessions.kiroCliSpawner = linesSpawner(
+      [],
+      [
+        JSON.stringify({
+          type: "runStarted",
+          data: { payloadSchema: "acp", acpProtocolVersion: 1, engine: "v3" },
+        }),
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            sessionId: "sess_envelope",
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "Hello from Kiro." },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "runFinished",
+          data: {
+            status: "success",
+            sessionId: "sess_envelope",
+            finalText: "Hello from Kiro.",
+          },
+        }),
+      ],
+    );
+    const created = await sessions.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      runtime: "host",
+      providerId: kiro.id,
+      model: "auto",
+      startVm: false,
+    });
+    await sessions.sendChat(created.id, "Hi, what model are you?");
+    const fresh = await waitFor(sessions, created.id, (session) =>
+      Boolean(
+        session.messages.some(
+          (m) => m.role === "assistant" && m.content.includes("Hello from Kiro."),
+        ),
+      ),
+    );
+    expect(fresh?.messages.find((m) => m.role === "assistant")?.content).toContain(
+      "Hello from Kiro.",
+    );
+    expect(fresh?.kiroCli).toEqual({ sessionId: "sess_envelope" });
+    expect(fresh?.messages.find((m) => m.role === "assistant")?.content).not.toMatch(
+      /finished without a reply/,
+    );
   });
 
   it("shows V3 agent_message_chunk text in chat", async () => {

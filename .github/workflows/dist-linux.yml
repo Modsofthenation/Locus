@@ -68,9 +68,11 @@ jobs:
         run: node scripts/release-checksums.mjs apps/desktop/dist-electron SHA256SUMS-linux
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: locus-linux-appimage
+          name: locus-linux
           path: |
             apps/desktop/dist-electron/*.AppImage
+            apps/desktop/dist-electron/*.deb
+            apps/desktop/dist-electron/*.rpm
             apps/desktop/dist-electron/SHA256SUMS-linux
           if-no-files-found: error
           retention-days: 30
@@ -80,6 +82,8 @@ jobs:
         with:
           files: |
             apps/desktop/dist-electron/*.AppImage
+            apps/desktop/dist-electron/*.deb
+            apps/desktop/dist-electron/*.rpm
             apps/desktop/dist-electron/SHA256SUMS-linux
           generate_release_notes: true
           # Only this job generates notes. macOS/Windows attach files with

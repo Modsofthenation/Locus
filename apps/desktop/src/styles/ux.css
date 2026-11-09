@@ -540,3 +540,50 @@ mark {
     grid-template-columns: minmax(0, 1fr) auto 28px;
   }
 }
+
+.first-task-card {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+}
+.first-task-card h3 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-md);
+}
+.first-task-card p {
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-sm);
+  color: var(--muted);
+}
+.first-task-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.mobile-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.mobile-overlay-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.mobile-find-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.mobile-find-count {
+  flex-shrink: 0;
+  font-size: var(--type-sm);
+  color: var(--muted);
+}

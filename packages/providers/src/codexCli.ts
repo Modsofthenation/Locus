@@ -302,10 +302,7 @@ function codexToolCall(
   const name = codexToolName(itemType, item);
   if (!name) return undefined;
   const id = stringValue(item.id) ?? stringValue(item.call_id) ?? `${itemType}:${name}`;
-  const argumentsValue =
-    itemType === "command_execution"
-      ? { command: stringValue(item.command) ?? "" }
-      : asObject(parseMaybeJson(item.arguments ?? item.input ?? item.params ?? item.changes));
+  const argumentsValue = codexToolArguments(itemType, item);
   const result = completed ? codexToolResult(item) : undefined;
   return {
     type: "tool_call",
@@ -328,14 +325,65 @@ function codexToolName(itemType: string, item: Record<string, unknown>): string 
   return undefined;
 }
 
+function codexToolArguments(
+  itemType: string,
+  item: Record<string, unknown>,
+): Record<string, unknown> {
+  if (itemType === "command_execution") {
+    return { command: commandValue(item.command) };
+  }
+  if (itemType === "file_change") {
+    const changes = normalizeCodexFileChanges(item.changes);
+    const path = changes[0]?.path;
+    return {
+      changes,
+      ...(path ? { path } : {}),
+    };
+  }
+  return asObject(parseMaybeJson(item.arguments ?? item.input ?? item.params ?? item.changes));
+}
+
+function normalizeCodexFileChanges(
+  value: unknown,
+): Array<{ path: string; kind: "add" | "update" | "delete" }> {
+  if (!Array.isArray(value)) return [];
+  const out: Array<{ path: string; kind: "add" | "update" | "delete" }> = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const rec = item as Record<string, unknown>;
+    const path = stringValue(rec.path);
+    const kind = stringValue(rec.kind)?.toLowerCase();
+    if (!path || (kind !== "add" && kind !== "update" && kind !== "delete")) continue;
+    out.push({ path, kind });
+  }
+  return out;
+}
+
+function commandValue(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .map((item) => item.trim())
+      .join(" ");
+  }
+  return "";
+}
+
 function codexToolResult(item: Record<string, unknown>): string | undefined {
-  const value =
-    item.type === "command_execution"
-      ? {
-          output: item.aggregated_output ?? item.output,
-          exit_code: item.exit_code ?? item.exitCode,
-        }
-      : (item.result ?? item.output ?? item.error);
+  if (item.type === "command_execution") {
+    return stringify({
+      output: item.aggregated_output ?? item.output,
+      exit_code: item.exit_code ?? item.exitCode,
+    });
+  }
+  if (item.type === "file_change") {
+    return stringify({
+      changes: normalizeCodexFileChanges(item.changes),
+      status: stringValue(item.status) ?? "completed",
+    });
+  }
+  const value = item.result ?? item.output ?? item.error;
   if (value == null) return undefined;
   if (typeof value === "string") return value;
   return stringify(value);

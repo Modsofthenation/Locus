@@ -2,7 +2,15 @@ import { useEffect, useRef } from "react";
 import type RFB from "@novnc/novnc";
 import { displayWsUrl } from "@/lib/api";
 
-export function VncPane({ vmId, onFail }: { vmId: string; onFail: () => void }) {
+export function VncPane({
+  vmId,
+  onFail,
+  viewOnly = false,
+}: {
+  vmId: string;
+  onFail: () => void;
+  viewOnly?: boolean;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const fail = useRef(onFail);
   fail.current = onFail;
@@ -27,6 +35,7 @@ export function VncPane({ vmId, onFail }: { vmId: string; onFail: () => void }) 
       rfb = session;
       session.scaleViewport = true;
       session.clipViewport = true;
+      session.viewOnly = viewOnly;
       session.background =
         getComputedStyle(document.documentElement).getPropertyValue("--desktop").trim() ||
         "#0b0d12";
@@ -50,7 +59,7 @@ export function VncPane({ vmId, onFail }: { vmId: string; onFail: () => void }) 
         /* already torn down */
       }
     };
-  }, [vmId]);
+  }, [vmId, viewOnly]);
 
   return <div ref={host} className="vnc-surface" />;
 }

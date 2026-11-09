@@ -7,6 +7,7 @@ import {
   imageBuildStartProgress,
   isLocusAgentImage,
   LOCUS_AGENT_IMAGE,
+  LOCUS_AGENT_IMAGE_VERSION,
   parseDockerBuildProgress,
   type ImageBuildProgress,
 } from "@locus/shared";
@@ -59,7 +60,15 @@ export async function ensureLocusAgentImage(
   };
   const built = await runner.exec(
     dockerBin,
-    ["build", "--progress=plain", "-t", LOCUS_AGENT_IMAGE, context],
+    [
+      "build",
+      "--progress=plain",
+      "-t",
+      LOCUS_AGENT_IMAGE,
+      "-t",
+      `locus/agent:${LOCUS_AGENT_IMAGE_VERSION}`,
+      context,
+    ],
     { onOutput: emitChunk },
   );
   if (!streamed) {
