@@ -120,6 +120,52 @@ describe("AutomationService", () => {
     ctx.hypervisor.shutdown();
   });
 
+  it("saves, clears, and runs a job whose linked repo was removed", async () => {
+    const ctx = await setup();
+    cleanup.push(ctx.dir);
+    const config = await ctx.store.loadConfig();
+    const template = config.templates.find((t) => t.os === "ubuntu")!;
+    const provider = config.providers[0]!;
+    const checkout = { forge: "github" as const, url: "https://github.com/acme/app.git" };
+    const stamp = "2026-08-17T12:00:00.000Z";
+    await ctx.store.saveRepos([
+      { id: "repo-1", name: "acme/app", checkout, createdAt: stamp, updatedAt: stamp },
+    ]);
+    const created = await ctx.automations.create({
+      name: "Linked job",
+      prompt: "check the repo",
+      os: "ubuntu",
+      templateId: template.id,
+      providerId: provider.id,
+      model: provider.defaultModel,
+      schedule: { kind: "daily", hour: 9, minute: 0 },
+      repoId: "repo-1",
+    });
+    expect(created.repoId).toBe("repo-1");
+
+    await ctx.store.deleteRepo("repo-1");
+
+    // Runs still start, using the stored checkout URL.
+    const run = await ctx.automations.execute(created.id, "manual");
+    expect(run.error).toBeUndefined();
+    expect(run.status).toBe("succeeded");
+
+    // Saving with the stale repoId echoed back (old clients) drops it instead of throwing.
+    const echoed = await ctx.automations.patch(created.id, {
+      name: "Linked job 2",
+      repo: checkout,
+      repoId: "repo-1",
+    });
+    expect(echoed.repoId).toBeUndefined();
+    expect(echoed.repo?.url).toBe(checkout.url);
+
+    // Clearing the repo with no repoId in the patch clears it.
+    const cleared = await ctx.automations.patch(created.id, { repo: null });
+    expect(cleared.repo).toBeUndefined();
+    expect(cleared.repoId).toBeUndefined();
+    ctx.hypervisor.shutdown();
+  });
+
   it("refuses Run now while paused", async () => {
     const ctx = await setup();
     cleanup.push(ctx.dir);

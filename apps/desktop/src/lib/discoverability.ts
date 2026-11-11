@@ -69,7 +69,7 @@ export const SECTION_FEATURE_HINTS: Partial<Record<UiSection, FeatureHint>> = {
   automations: {
     id: "automations-webhook",
     text: "Trigger from a schedule, git push, pull request, or webhook.",
-    actionLabel: "New automation",
+    actionLabel: "New job",
     action: { kind: "new-automation" },
   },
   project: {
@@ -192,7 +192,7 @@ export function capabilityTodos(input: {
   return [
     {
       id: "automation",
-      label: "Create an automation",
+      label: "Create a job",
       done: (input.automations?.length ?? 0) > 0,
       action: { kind: "new-automation" },
     },
@@ -284,8 +284,8 @@ export function featurePaletteItems(): PaletteItem[] {
     },
     {
       id: "feature:webhooks",
-      title: "Webhook automations",
-      hint: "Automations · event jobs",
+      title: "Webhook jobs",
+      hint: "Jobs · event triggers",
       keywords: "webhook cron schedule forge-push pull-request automation",
     },
     {

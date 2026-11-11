@@ -402,10 +402,10 @@ import type { Hub } from "../core/hub.js";
 import { ForgeClient } from "../git/forge.js";
 import {
   executeEarlyControlPlaneTool,
-  executeForgeControlPlaneTool,
   executeLateControlPlaneTool,
   type ControlPlaneToolPorts,
 } from "./controlPlaneTools.js";
+import { executeSessionForgeTool } from "./sessionForgeTools.js";
 import { GuestBoot } from "./guestBoot.js";
 import { SessionPreview } from "./sessionPreview.js";
 import { continueAfterCliRound, type CliTurnContinuePorts } from "./cliTurnContinue.js";
@@ -7621,7 +7621,7 @@ export class SessionService {
       const indexed = await this.tryIndexedGrep(session, req, config, fenceHostile);
       if (indexed) return indexed;
     }
-    const forge = await executeForgeControlPlaneTool(
+    const forge = await executeSessionForgeTool(
       {
         forge: this.forge,
         attachPull: (id, pull) => this.attachPull(id, pull),

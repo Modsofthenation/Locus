@@ -129,6 +129,11 @@ describe("applyTheme", () => {
     expect(document.documentElement.dataset.themeGradient).toBe("");
     expect(document.documentElement.style.colorScheme).toBe("light");
 
+    expect(applyTheme("console")).toBe("console");
+    expect(document.documentElement.dataset.theme).toBe("console");
+    expect(document.documentElement.style.colorScheme).toBe("dark");
+    expect(document.documentElement.dataset.themeGradient).toBeUndefined();
+
     expect(applyTheme("not-a-theme")).toBe("ember");
     expect(document.documentElement.dataset.theme).toBe("ember");
     expect(document.documentElement.dataset.chatScene).toBeUndefined();
@@ -145,6 +150,14 @@ describe("applyTheme", () => {
     for (const opt of THEME_OPTIONS.filter((t) => t.gradient)) {
       expect(css).toMatch(new RegExp(`\\[data-theme="${opt.id}"\\][\\s\\S]*?--wash:`));
     }
+  });
+
+  it("styles console as a terminal window", () => {
+    expect(css).toMatch(/\[data-theme="console"\][\s\S]*?IBM Plex Mono/);
+    expect(css).toContain('html[data-theme="console"] #root::before');
+    expect(css).toContain("locus \\2014 tty");
+    expect(css).toMatch(/html\[data-theme="console"\]::after[\s\S]*?repeating-linear-gradient/);
+    expect(css).toContain('.theme-preview[data-theme="console"] .theme-preview-chrome em::before');
   });
 
   it("wires photo themes to a chat-pane scene image", () => {

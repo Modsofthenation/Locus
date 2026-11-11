@@ -21,7 +21,7 @@ export function runtimeNeedsGuest(runtime: AgentRuntime): boolean {
 /** Compat tag. `npm run images` also tags `locus/agent:<app version>`. */
 export const LOCUS_AGENT_IMAGE_TAG = "0.1";
 export const LOCUS_AGENT_IMAGE = `locus/agent:${LOCUS_AGENT_IMAGE_TAG}`;
-export const LOCUS_AGENT_IMAGE_VERSION = "0.18.0";
+export const LOCUS_AGENT_IMAGE_VERSION = "0.19.0";
 export const DEFAULT_DOCKER_IMAGE = "locus/agent";
 /** In-guest code-server bind. Host reaches it through a loopback docker-exec tunnel, never a published port. */
 export const LOCUS_CODE_SERVER_PORT = 3999;
@@ -167,6 +167,19 @@ export function isGuestReady(status?: string): boolean {
 
 export function isGuestStarting(status?: string): boolean {
   return status === "creating" || status === "booting" || status === "installing";
+}
+
+/** Chat/composer wait: Guest still booting, or Session provisioning without a ready Machine. */
+export function isChatWaitingForGuest(input: {
+  viewing?: unknown;
+  vmStatus?: string;
+  sessionStatus?: string;
+}): boolean {
+  if (input.viewing) return false;
+  return (
+    isGuestStarting(input.vmStatus) ||
+    (input.sessionStatus === "provisioning" && !isGuestReady(input.vmStatus))
+  );
 }
 
 export type DisplayProtocol = "vnc" | "spice";

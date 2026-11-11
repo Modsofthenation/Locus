@@ -10,6 +10,8 @@ import {
   boxCenter,
   describeCdpError,
   formatAccessibilitySnapshot,
+  dispatchBrowserTool,
+  isBrowserToolRequest,
   isBrowserUrl,
   listenCdpTunnel,
   normalizeSnapshotRef,
@@ -45,6 +47,26 @@ describe("browser URL helpers", () => {
     expect(isBrowserUrl(" http://127.0.0.1:3000/ ")).toBe(true);
     expect(isBrowserUrl("curl https://example.com")).toBe(false);
     expect(isBrowserUrl("https://example.com && rm")).toBe(false);
+  });
+
+  it("dispatches browser tools and URL exec onto ChromiumDriver", async () => {
+    expect(isBrowserToolRequest({ name: "browser_tabs", args: {} })).toBe(true);
+    expect(isBrowserToolRequest({ name: "exec", args: { command: "https://example.com" } })).toBe(
+      true,
+    );
+    expect(isBrowserToolRequest({ name: "exec", args: { command: "ls" } })).toBe(false);
+    const navigated: string[] = [];
+    await dispatchBrowserTool(
+      { name: "exec", args: { command: "https://example.com" } },
+      {
+        handle: async () => ({ ok: false, output: "nope" }),
+        navigate: async (url) => {
+          navigated.push(url);
+          return { ok: true, output: url };
+        },
+      },
+    );
+    expect(navigated).toEqual(["https://example.com"]);
   });
 
   it("rewrites CDP websocket hosts onto the loopback tunnel", () => {

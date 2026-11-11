@@ -16,6 +16,8 @@ import {
   automationSpendLabel,
   sortAutomationsByPriority,
   spendChipTitle,
+  isDockerDownError,
+  plainJobError,
 } from "./automations";
 import type { AgentSession, Automation, AutomationRun, LocusConfig } from "@locus/shared";
 
@@ -334,5 +336,28 @@ describe("automation list helpers", () => {
         },
       ]),
     ).toBe(true);
+  });
+});
+
+describe("plainJobError", () => {
+  it("maps Docker socket errors to one plain sentence and keeps the raw text", () => {
+    const raw =
+      "failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct";
+    expect(plainJobError(raw)).toEqual({
+      summary: "Docker isn't running — switch to Host or start Docker",
+      detail: raw,
+      cause: "docker",
+    });
+    expect(
+      isDockerDownError(
+        "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves unknown errors alone", () => {
+    expect(plainJobError("boom")).toBeNull();
+    expect(plainJobError(undefined)).toBeNull();
+    expect(isDockerDownError("Docker image not found")).toBe(false);
   });
 });

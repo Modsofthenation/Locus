@@ -126,4 +126,37 @@ describe("DockerInventory", () => {
     expect(ctx.starts).toEqual([]);
     expect(ctx.stops).toEqual([]);
   });
+  it("reports the daemon as available on the mock engine", async () => {
+    const { inventory } = await setup();
+    await expect(inventory.status()).resolves.toEqual({ kind: "mock", available: true });
+  });
+
+  it("reports a live engine whose daemon does not answer as unavailable", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-docker-inv-down-"));
+    cleanup.push(dir);
+    const down = Object.assign(new MockDockerEngine(dir), {
+      available: async () => false,
+    });
+    Object.defineProperty(down, "kind", { value: "docker" });
+    const inventory = new DockerInventory({
+      docker: down,
+      listSessions: async () => [],
+      startAgentMachine: async () => undefined,
+      stopAgentMachine: async () => undefined,
+    });
+    await expect(inventory.status()).resolves.toEqual({ kind: "docker", available: false });
+    const throwing = Object.assign(new MockDockerEngine(dir), {
+      available: async (): Promise<boolean> => {
+        throw new Error("failed to connect to the docker API at unix:///var/run/docker.sock");
+      },
+    });
+    Object.defineProperty(throwing, "kind", { value: "docker" });
+    const inventory2 = new DockerInventory({
+      docker: throwing,
+      listSessions: async () => [],
+      startAgentMachine: async () => undefined,
+      stopAgentMachine: async () => undefined,
+    });
+    await expect(inventory2.status()).resolves.toEqual({ kind: "docker", available: false });
+  });
 });

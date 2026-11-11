@@ -37,6 +37,7 @@ import {
   type LocusConfig,
 } from "@locus/shared";
 import { validateTemplate as validateVmTemplate } from "@locus/hypervisor";
+import { mergeSecrets } from "./redact.js";
 
 export type ConfigSaveResult = { ok: true; config: LocusConfig } | { ok: false; error: string };
 
@@ -53,6 +54,17 @@ export function providerBaseUrlError(provider: {
   )
     return undefined;
   return invalidHttpUrl(provider.baseUrl, `${provider.name} base URL`);
+}
+
+/** Merge incoming Settings with stored secrets, lock managed policy, then normalize. */
+export function prepareSavedConfig(
+  current: LocusConfig,
+  body: LocusConfig,
+  dataDir: string,
+): ConfigSaveResult {
+  const merged = mergeSecrets(current, body);
+  merged.managedPolicy = current.managedPolicy;
+  return normalizeSavedConfig(merged, body.theme, dataDir);
 }
 
 /** Validate and normalize a merged Settings payload. One interface for PUT /api/config. */

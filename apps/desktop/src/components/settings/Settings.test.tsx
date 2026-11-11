@@ -75,7 +75,7 @@ vi.mock("@/lib/api", () => ({
     rotateChromeExtension: vi.fn(),
     checkUpdates: vi.fn(async () => ({
       status: "unavailable",
-      current: "0.18.0",
+      current: "0.19.0",
       message: "No GitHub release found yet. Check for updates works after a v* tag is published.",
     })),
     refreshCursorCli: vi.fn(async () => ({ changed: false, models: [] })),
@@ -215,6 +215,13 @@ describe("Settings", () => {
     });
   }
 
+  async function expandFirstProvider() {
+    const summary = host!.querySelector(".provider-card-summary") as HTMLButtonElement;
+    await act(async () => {
+      summary.click();
+    });
+  }
+
   function navButton(label: string) {
     return [...host!.querySelectorAll(".settings-nav button")].find(
       (el) => el.querySelector(".settings-nav-label")?.textContent === label,
@@ -253,7 +260,19 @@ describe("Settings", () => {
   it("revokes every integration token from Integrations", async () => {
     vi.mocked(api.revokeAllIntegrations).mockResolvedValue({ ok: true, config });
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
-    await render();
+    await render({
+      ...config,
+      integrations: [
+        {
+          id: "jira1",
+          kind: "jira",
+          name: "Jira",
+          enabled: true,
+          baseUrl: "https://acme.atlassian.net",
+          token: "••••••••",
+        },
+      ],
+    });
     const integrations = navButton("Integrations");
     await act(async () => {
       integrations!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -321,6 +340,8 @@ describe("Settings", () => {
     await render();
     const page = host!.querySelector(".settings-page");
     expect(page).toBeTruthy();
+    expect(host!.textContent).not.toContain("Base URL");
+    await expandFirstProvider();
     expect(host!.textContent).toContain("Base URL");
     expect(host!.querySelector(".settings-nav-group")?.textContent).toBe("Models");
     expect([...host!.querySelectorAll(".settings-nav-group")].map((el) => el.textContent)).toEqual([
@@ -365,11 +386,9 @@ describe("Settings", () => {
       "ember",
     );
     expect(host!.querySelector("[data-testid='theme-preview']")?.textContent).toContain(
-      "What should we talk about?",
+      "What should the agent do?",
     );
-    expect(host!.querySelector("[data-testid='theme-preview']")?.textContent).toContain(
-      "Start chat",
-    );
+    expect(host!.querySelector("[data-testid='theme-preview']")?.textContent).toContain("Send");
     expect(host!.textContent).toContain("Night City");
     expect(host!.textContent).toContain("Syntax");
     expect(host!.textContent).toContain("Linen");
@@ -409,7 +428,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("Omarchy 4");
     expect(host!.textContent).toContain("1 of 2 ready");
     expect(host!.textContent).toContain("ubuntu.img");
-    expect(host!.textContent).toContain("no image set - won't start");
+    expect(host!.textContent).toContain("Needs an image");
     expect(host!.textContent).toContain("Fetch");
     expect(host!.textContent).toContain("Add machine");
     expect(host!.querySelectorAll(".machine-row")).toHaveLength(2);
@@ -460,7 +479,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("golden image + jail + recipe + spend cap + Where");
     expect(host!.textContent).toContain("No named environments yet");
     expect(host!.textContent).toContain("Save from New agent");
-    expect(host!.textContent).toContain("Open Automations");
+    expect(host!.textContent).toContain("Open Jobs");
 
     await act(async () => {
       navButton("MCP")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -499,8 +518,8 @@ describe("Settings", () => {
     }
     const preview = host!.querySelector("[data-testid='theme-preview']");
     expect(preview?.getAttribute("data-theme")).toBe("ember");
-    expect(preview?.textContent).toContain("What should we talk about?");
-    expect(preview?.textContent).toContain("Start chat");
+    expect(preview?.textContent).toContain("What should the agent do?");
+    expect(preview?.textContent).toContain("Send");
     expect(css).toMatch(/\.theme-preview \{[\s\S]*?background:\s*var\(--bg\)/);
     const nord = [...host!.querySelectorAll(".theme-card")].find(
       (el) => el.querySelector("h3")?.textContent === "Nord",
@@ -682,17 +701,16 @@ describe("Settings", () => {
       navButton("Appearance")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     const font = host!.querySelector("#editor-font-size") as HTMLInputElement;
-    const format = [...host!.querySelectorAll("label")]
-      .find((el) => el.textContent?.includes("Format on save"))
-      ?.querySelector("input") as HTMLInputElement;
+    const format = host!.querySelector(
+      "[data-testid='appearance-format-on-save']",
+    ) as HTMLButtonElement;
     const prefs = host!.querySelector(".appearance-editor-prefs");
     const filters = host!.querySelector(".theme-filters");
     expect(font.value).toBe("12");
-    expect(format.checked).toBe(true);
-    const minimap = [...host!.querySelectorAll("label")]
-      .find((el) => el.textContent?.includes("Editor minimap"))
-      ?.querySelector("input") as HTMLInputElement;
-    expect(minimap.checked).toBe(true);
+    expect(format.getAttribute("role")).toBe("switch");
+    expect(format.getAttribute("aria-checked")).toBe("true");
+    const minimap = host!.querySelector("[data-testid='appearance-minimap']") as HTMLButtonElement;
+    expect(minimap.getAttribute("aria-checked")).toBe("true");
     expect(prefs).toBeTruthy();
     expect(filters).toBeTruthy();
     expect(
@@ -739,7 +757,9 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("Agent turns");
     expect(host!.textContent).toContain("Needs you");
     expect(host!.textContent).toContain("Slack Activity");
-    expect(host!.textContent).toContain("Automations");
+    expect(
+      host!.querySelector("[data-testid='notify-automations']")?.getAttribute("aria-label"),
+    ).toBe("Jobs");
     expect(host!.textContent).toContain("Quiet hours");
     expect(host!.querySelector("[data-testid='notify-quiet-start']")).toBeNull();
     const agents = host!.querySelector("[data-testid='notify-agents']") as HTMLButtonElement;
@@ -1110,6 +1130,158 @@ describe("Settings", () => {
     open.mockRestore();
   });
 
+  it("leads dense pages with one sentence and a closed How this works disclosure", async () => {
+    await render();
+    for (const [label, id] of [
+      ["MCP", "mcp-how"],
+      ["Workers", "workers-how"],
+      ["Git", "git-how"],
+      ["Integrations", "integrations-how"],
+      ["Phone", "phone-how"],
+    ] as const) {
+      await act(async () => {
+        navButton(label)!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      const how = host!.querySelector(`[data-testid='${id}']`);
+      expect(how, label).toBeTruthy();
+      expect(how!.querySelector(".settings-how-lead")?.textContent?.length).toBeGreaterThan(0);
+      const details = how!.querySelector("details") as HTMLDetailsElement;
+      expect(details.querySelector("summary")?.textContent).toBe("How this works");
+      expect(details.open).toBe(false);
+    }
+  });
+
+  it("names Work tools, hides Revoke until a token exists, and marks connected kinds", async () => {
+    await render({
+      ...config,
+      integrations: [
+        {
+          id: "jira1",
+          kind: "jira",
+          name: "Jira",
+          enabled: true,
+          baseUrl: "https://acme.atlassian.net",
+        },
+      ],
+    });
+    await act(async () => {
+      navButton("Integrations")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect([...host!.querySelectorAll("h3")].map((el) => el.textContent)).toContain("Work tools");
+    expect(host!.querySelector("[data-testid='revoke-all-tokens']")).toBeNull();
+    expect(host!.querySelector(".integration-catalog-card.connected")).toBeNull();
+    host!.remove();
+    act(() => root!.unmount());
+
+    await render({
+      ...config,
+      integrations: [
+        {
+          id: "jira1",
+          kind: "jira",
+          name: "Jira",
+          enabled: true,
+          baseUrl: "https://acme.atlassian.net",
+          token: "••••••••",
+        },
+      ],
+    });
+    await act(async () => {
+      navButton("Integrations")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(host!.querySelector("[data-testid='revoke-all-tokens']")).toBeTruthy();
+    const connected = host!.querySelector(".integration-catalog-card.connected");
+    expect(connected?.textContent).toContain("Jira");
+    expect(connected?.textContent).toContain("Connected");
+  });
+
+  it("shows only Sign in and Use a token for a signed-out GitHub account", async () => {
+    await render({
+      ...config,
+      forges: [{ id: "gh1", kind: "github", name: "GitHub", apiBaseUrl: "https://api.github.com" }],
+    });
+    await act(async () => {
+      navButton("Git")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const card = host!.querySelector(".git-account.open")!;
+    const actions = [...card.querySelectorAll(".git-account-actions button")].map(
+      (el) => el.textContent,
+    );
+    expect(actions).toEqual(["Sign in with GitHub", "Use a token"]);
+    expect(card.querySelector("input[type='password'][placeholder='Personal access token']")).toBe(
+      null,
+    );
+    const advanced = card.querySelector("details.git-account-advanced") as HTMLDetailsElement;
+    expect(advanced.open).toBe(false);
+    expect(advanced.textContent).toContain("OAuth client ID");
+    expect(advanced.textContent).toContain("SSH key path");
+    expect(advanced.querySelector(".git-account-remove")).toBeTruthy();
+    await act(async () => {
+      [...card.querySelectorAll("button")].find((el) => el.textContent === "Use a token")!.click();
+    });
+    expect(card.querySelector("input[placeholder='Personal access token']")).toBeTruthy();
+  });
+
+  it("groups providers into Enabled and Available with a filter", async () => {
+    const extra = Array.from({ length: 7 }, (_, i) => ({
+      id: `x${i}`,
+      name: i === 0 ? "Anthropic" : `Vendor ${i}`,
+      kind: "openai-compatible" as const,
+      baseUrl: "https://example.com/v1",
+      models: [],
+      defaultModel: "",
+      enabled: false,
+      extraHeaders: {},
+    }));
+    await render({ ...config, providers: [config.providers[0]!, ...extra] });
+    expect(host!.querySelectorAll(".provider-card.open")).toHaveLength(0);
+    const enabled = host!.querySelector("[data-testid='provider-group-enabled']");
+    const available = host!.querySelector("[data-testid='provider-group-available']");
+    expect(enabled?.querySelectorAll(".provider-card")).toHaveLength(1);
+    expect(available?.querySelectorAll(".provider-card")).toHaveLength(7);
+    const filter = host!.querySelector("input[aria-label='Filter providers']") as HTMLInputElement;
+    expect(filter).toBeTruthy();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(filter, "anthr");
+      filter.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(host!.querySelectorAll(".provider-card")).toHaveLength(1);
+    expect(host!.querySelector(".provider-card")?.textContent).toContain("Anthropic");
+    expect(host!.querySelector("[data-testid='provider-group-enabled']")).toBeNull();
+  });
+
+  it("shows a neutral Needs an image state with one Set up action on Machines", async () => {
+    await render();
+    await act(async () => {
+      navButton("Machines")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(host!.querySelector(".machine-row-status.missing")).toBeNull();
+    const notReady = [...host!.querySelectorAll(".machine-row")].filter((row) =>
+      row.textContent?.includes("Needs an image"),
+    );
+    expect(notReady.length).toBeGreaterThan(0);
+    for (const row of notReady) {
+      expect(row.querySelectorAll(".machine-row-setup")).toHaveLength(1);
+      expect(row.querySelector(".machine-dot.pending")).toBeTruthy();
+    }
+  });
+
+  it("uses switches for Brain options under Advanced", async () => {
+    await render();
+    await act(async () => {
+      navButton("Advanced")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const brain = host!.querySelector("#settings-advanced-brain")!;
+    expect(brain.querySelector("input[type='checkbox']")).toBeNull();
+    const auto = brain.querySelector("[data-testid='brain-autoIndex']");
+    expect(auto?.getAttribute("role")).toBe("switch");
+    expect(auto?.getAttribute("aria-checked")).toBe("true");
+    expect(
+      brain.querySelector("[data-testid='brain-slackCorpus']")?.getAttribute("aria-checked"),
+    ).toBe("false");
+  });
+
   it("offers GitHub, GitLab, and Bitbucket SSO sign-in on the Git tab", async () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     vi.mocked(api.startForgeOauth).mockResolvedValue({
@@ -1282,7 +1454,7 @@ describe("Settings", () => {
     await act(async () => {
       phone!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(host!.textContent).toContain("Enable phone remote");
+    expect(host!.textContent).toContain("Phone remote");
     expect(host!.textContent).toContain("Android");
     expect(host!.textContent).toContain("Do not Funnel port 7420");
     expect(host!.textContent).toContain("Pairing applies immediately");
@@ -1362,9 +1534,10 @@ describe("Settings", () => {
     await act(async () => {
       phone!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(host!.textContent).toContain("Enable phone remote");
-    const toggle = host!.querySelector('[data-testid="phone-enabled"]') as HTMLInputElement | null;
-    expect(toggle?.checked).toBe(true);
+    expect(host!.textContent).toContain("Phone remote");
+    const toggle = host!.querySelector('[data-testid="phone-enabled"]') as HTMLButtonElement | null;
+    expect(toggle?.getAttribute("role")).toBe("switch");
+    expect(toggle?.getAttribute("aria-checked")).toBe("true");
     await act(async () => {
       toggle!.click();
       await Promise.resolve();
@@ -1393,7 +1566,7 @@ describe("Settings", () => {
     await act(async () => {
       chrome!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(host!.textContent).toContain("Enable Chrome extension");
+    expect(host!.textContent).toContain("Chrome extension");
     expect(host!.textContent).toContain("Load unpacked");
     expect(host!.querySelector('[data-testid="chrome-token"]')?.textContent).toContain("AABB");
     expect(host!.querySelector('[data-testid="chrome-install-dir"]')?.textContent).toContain(
@@ -1559,7 +1732,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("Guest boot timeout (ms)");
     expect(host!.textContent).toContain("Approval timeout (ms)");
     expect(host!.textContent).toContain("Prompt queue depth");
-    expect(host!.textContent).toContain("Automation chats to keep");
+    expect(host!.textContent).toContain("Job chats to keep");
     expect(host!.textContent).toContain("Danger zone");
     expect(host!.textContent).toContain("/tmp");
     expect(host!.textContent).toContain("Autonomy");
@@ -1585,7 +1758,7 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("Guest boot timeout (ms)");
     expect(host!.textContent).toContain("Approval timeout (ms)");
     expect(host!.textContent).toContain("Prompt queue depth");
-    expect(host!.textContent).toContain("Automation chats to keep");
+    expect(host!.textContent).toContain("Job chats to keep");
   });
 
   it("shows the QEMU install command as a copyable block beside a secondary button", async () => {
@@ -1705,7 +1878,8 @@ describe("Settings", () => {
     expect(host!.querySelector(".settings-nav-count")?.textContent).toBe("2");
     const cards = host!.querySelectorAll(".provider-card");
     expect(cards).toHaveLength(2);
-    expect(cards[0]!.classList.contains("open")).toBe(true);
+    // Cards stay collapsed until clicked.
+    expect(cards[0]!.classList.contains("open")).toBe(false);
     expect(cards[1]!.classList.contains("open")).toBe(false);
     expect(cards[1]!.querySelector("input")).toBeNull();
     await act(async () => {
@@ -1717,10 +1891,19 @@ describe("Settings", () => {
         (el) => (el as HTMLInputElement).value === "https://api.anthropic.com",
       ),
     ).toBe(true);
+    expect(
+      host!
+        .querySelector("[data-testid='provider-group-enabled']")
+        ?.querySelectorAll(".provider-card"),
+    ).toHaveLength(2);
+    expect(host!.querySelector("[data-testid='provider-group-available']")).toBeNull();
     await act(async () => {
       (cards[1]!.querySelector('[role="switch"]') as HTMLButtonElement).click();
     });
-    expect(cards[1]!.querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("false");
+    // Turning a provider off moves it to the Available group.
+    const available = host!.querySelector("[data-testid='provider-group-available']");
+    expect(available?.textContent).toContain("Anthropic");
+    expect(available?.querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("false");
     expect(host!.textContent).toContain("1 of 2 providers enabled");
     await act(async () => {
       [...host!.querySelectorAll("button")]
@@ -1763,7 +1946,7 @@ describe("Settings", () => {
     expect(rows[0]!.querySelector("input")).toBeTruthy();
     expect(rows[1]!.querySelector("input")).toBeNull();
     expect(host!.textContent).toContain("4 c · 4096 MB · 40 GB");
-    expect(host!.textContent).toContain("licensed ISO required");
+    expect(host!.textContent).toContain("Needs a licensed ISO");
     expect(host!.textContent).toContain("Host mock");
     expect(host!.textContent).toContain("OVMF");
     expect(host!.textContent).toContain("swtpm");
@@ -1819,6 +2002,7 @@ describe("Settings", () => {
         },
       ],
     });
+    await expandFirstProvider();
     expect(host!.textContent).toContain("openrouter.ai/keys");
     expect(host!.textContent).toContain("anthropic/claude-sonnet-4.5");
   });
@@ -1839,6 +2023,7 @@ describe("Settings", () => {
         },
       ],
     });
+    await expandFirstProvider();
     expect(host!.textContent).toContain("CLI binary");
     expect(host!.textContent).toContain("agent -p");
     expect(host!.textContent).toContain("cursor.com/install");
@@ -1871,6 +2056,7 @@ describe("Settings", () => {
         },
       ],
     });
+    await expandFirstProvider();
     expect(host!.textContent).toContain("CLI binary");
     expect(host!.textContent).toContain("claude -p");
     expect(host!.textContent).toContain("code.claude.com");
@@ -1895,6 +2081,7 @@ describe("Settings", () => {
         },
       ],
     });
+    await expandFirstProvider();
     expect(host!.textContent).toContain("CLI binary");
     expect(host!.textContent).toContain("kiro-cli chat --no-interactive");
     expect(host!.textContent).toContain("cli.kiro.dev");

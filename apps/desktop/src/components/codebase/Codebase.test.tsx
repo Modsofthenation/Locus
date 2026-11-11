@@ -285,6 +285,37 @@ if (typeof globalThis.PointerEvent !== "function") {
   globalThis.PointerEvent = PointerEventPolyfill as typeof PointerEvent;
 }
 
+/** Config with one GitHub token, so Import from Git is the primary empty-state path. */
+const tokenedConfig = {
+  theme: "ember",
+  providers: [],
+  templates: [],
+  hardwareProfiles: [],
+  forges: [
+    {
+      id: "gh1",
+      kind: "github" as const,
+      name: "GitHub",
+      apiBaseUrl: "https://api.github.com",
+      token: "ghp_test",
+    },
+  ],
+  advanced: {
+    dataDir: "/tmp",
+    qemuBinary: "qemu-system-x86_64",
+    swtpmBinary: "swtpm",
+    ovmfCodePath: "",
+    ovmfVarsPath: "",
+    maxConcurrentVms: 4,
+    defaultAcceleratorAuto: true,
+    logLevel: "info" as const,
+    bindHost: "127.0.0.1",
+    bindPort: 7420,
+    openBrowserOnStart: true,
+    hostSharePath: "",
+  },
+} as NonNullable<typeof initialState.config>;
+
 const repo: LinkedRepo = {
   id: "r1",
   name: "acme/app",
@@ -447,7 +478,7 @@ describe("CodebasePane", () => {
     });
     vi.mocked(api.linkRepo).mockResolvedValue(created);
     const actions: Action[] = [];
-    render({ ...initialState, section: "codebase" }, (action) => {
+    render({ ...initialState, section: "codebase", config: tokenedConfig }, (action) => {
       actions.push(action);
     });
     const importBtn = [...host.querySelectorAll("button")].find(
@@ -499,7 +530,7 @@ describe("CodebasePane", () => {
     vi.mocked(api.importRepos).mockImplementationOnce(
       () => new Promise(() => undefined) as Promise<never>,
     );
-    render();
+    render({ ...initialState, section: "codebase", config: tokenedConfig });
     await act(async () => {
       [...host.querySelectorAll("button")]
         .find((btn) => btn.textContent === "Import from Git")!
@@ -564,7 +595,33 @@ describe("CodebasePane", () => {
     expect(host.textContent).not.toContain("Add a GitHub token");
   });
 
-  it("opens Settings → Git from the pull-request token notice", () => {
+  it("leads with the URL field when no forge is connected and Import once one is", () => {
+    render();
+    const cards = [...host.querySelectorAll(".codebase-start-card h3")].map((h) => h.textContent);
+    expect(cards).toEqual(["Paste a URL", "Import from Git"]);
+    expect(host.querySelector(".codebase-start-card .btn.primary")?.textContent).toBe("Link");
+    expect(
+      [...host.querySelectorAll("button")].some((btn) => btn.textContent === "Import from Git"),
+    ).toBe(false);
+    act(() => root.unmount());
+    host.remove();
+    render({ ...initialState, section: "codebase", config: tokenedConfig });
+    const tokenedCards = [...host.querySelectorAll(".codebase-start-card h3")].map(
+      (h) => h.textContent,
+    );
+    expect(tokenedCards).toEqual(["Import from Git", "Paste a URL"]);
+    expect(host.querySelectorAll(".codebase-start-card .btn.primary")).toHaveLength(1);
+    expect(host.querySelector(".codebase-start-card .btn.primary")?.textContent).toBe(
+      "Import from Git",
+    );
+  });
+
+  it("says in place when pull requests need a token, with one banner at the top", async () => {
+    vi.mocked(api.repoPulls).mockRejectedValueOnce(
+      new Error(
+        "GitHub needs a token to read this repo. It may be private — add a token in Settings → Git.",
+      ),
+    );
     const actions: Action[] = [];
     render(
       {
@@ -577,16 +634,62 @@ describe("CodebasePane", () => {
         actions.push(action);
       },
     );
-    expect(host.textContent).toContain("add a GitHub token in Settings → Git");
-    const open = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Open Git settings",
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(host.querySelectorAll(".error-row")).toHaveLength(1);
+    expect(host.querySelector(".notice-row")).toBeNull();
+    expect(host.querySelector("[data-testid='pr-inbox-blocked']")?.textContent).toContain(
+      "Can't load pull requests — add a token.",
     );
-    expect(open).toBeTruthy();
+    expect(host.textContent).not.toContain("No open pull requests");
+    expect(host.querySelector(".repo-stat-note")?.textContent).toBe("Needs a token");
+    const add = [...host.querySelectorAll("button")].find(
+      (btn) => btn.textContent === "Add a token",
+    );
     act(() => {
-      open!.click();
+      add!.click();
     });
     expect(actions).toContainEqual({ type: "settings", open: true });
     expect(actions).toContainEqual({ type: "settingsTab", tab: "git" });
+  });
+
+  it("says when the anonymous rate limit blocks pull requests", async () => {
+    vi.mocked(api.repoPulls).mockRejectedValueOnce(
+      new Error(
+        "GitHub rate limit reached for reads without a token. Add a token in Settings → Git, or try again later.",
+      ),
+    );
+    render({ ...initialState, section: "codebase", repos: [repo], selectedRepoId: "r1" });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(host.querySelector("[data-testid='pr-inbox-blocked']")?.textContent).toMatch(
+      /limit for reads without a token is used up/,
+    );
+    expect(host.querySelector(".repo-stat-note")?.textContent).toBe("Rate limited");
+  });
+
+  it("links the forge page from the header and shows a fetched default branch", () => {
+    render({ ...initialState, section: "codebase", repos: [repo], selectedRepoId: "r1" });
+    const link = host.querySelector(".codebase-head a.forge-link") as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("https://github.com/acme/app");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(host.querySelector(".repo-url")?.getAttribute("title")).toBe(repo.checkout.url);
+    expect(host.querySelector(".meta-grid")?.textContent).toContain("Default branchmain");
+  });
+
+  it("says the default branch is not fetched yet instead of unset", () => {
+    render({
+      ...initialState,
+      section: "codebase",
+      repos: [{ ...repo, checkout: { ...repo.checkout, ref: undefined } }],
+      selectedRepoId: "r1",
+    });
+    expect(host.querySelector(".meta-grid")?.textContent).toContain("Not fetched yet");
+    expect(host.textContent).not.toContain("unset");
   });
 
   it("shows a forge JSON dump as an error banner with Git settings", async () => {

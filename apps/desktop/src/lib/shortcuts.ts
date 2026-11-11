@@ -10,7 +10,7 @@ export const SHORTCUTS: Shortcut[] = [
   {
     id: "new",
     keys: "Ctrl/Cmd+N",
-    action: "New agent, workspace, automation, design, game, asset, board, or project",
+    action: "New agent, workspace, job, design, game, asset, board, or project",
   },
   { id: "palette", keys: "Ctrl/Cmd+K", action: "Command palette" },
   { id: "inline-ai", keys: "Ctrl/Cmd+Shift+K", action: "Inline AI in the files editor" },
@@ -21,6 +21,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "settings", keys: "Ctrl/Cmd+,", action: "Settings" },
   { id: "find", keys: "Ctrl/Cmd+F", action: "Find in chat or the open file" },
   { id: "jump-agent", keys: "Ctrl/Cmd+1–9", action: "Jump to agent" },
+  { id: "jump-section", keys: "Alt+1–9", action: "Jump to sidebar section" },
   { id: "goto-def", keys: "F12", action: "Go to definition" },
   { id: "goto-type", keys: "Alt+F12", action: "Go to type definition" },
   { id: "quick-fix", keys: "Ctrl/Cmd+.", action: "Quick Fix" },
@@ -92,6 +93,14 @@ export function matchModDigit(
   event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">,
 ): string | null {
   if (!isModKey(event) || event.shiftKey || event.altKey) return null;
+  return /^[1-9]$/.test(event.key) ? event.key : null;
+}
+
+/** Alt+1–9, without Ctrl/Cmd/Shift — used for the icon rail. */
+export function matchAltDigit(
+  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">,
+): string | null {
+  if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return null;
   return /^[1-9]$/.test(event.key) ? event.key : null;
 }
 

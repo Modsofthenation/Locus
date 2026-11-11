@@ -96,6 +96,8 @@ import {
   type UiShell,
 } from "@/lib/mobileShell";
 import { loadMobileAgentFilter, saveMobileAgentFilter } from "@/lib/sidebarPrefs";
+import { buildInboxRows, inboxKindLabel, type InboxRow } from "@/lib/inboxList";
+import { rememberBrainInbox } from "@/lib/brainViewPrefs";
 import { MobileBoardList, MobileBoardView } from "@/components/board/MobileBoard";
 import { MobileProjectList } from "@/components/projects/MobileProject";
 import { APP_VERSION } from "@/lib/appInfo";
@@ -388,11 +390,19 @@ export function MobileShell(props: { onShell: (shell: UiShell) => void }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [overlay, setOverlay] = useState<null | "settings" | "palette">(null);
+  const [inboxBoardId, setInboxBoardId] = useState<string | null>(null);
   const sessions = mobileSessions(state.sessions);
   const designs = mobileDesigns(state.sessions);
   const games = mobileGames(state.sessions);
   const assets = mobileAssets(state.sessions);
   const inbox = pendingApprovals(state.sessions);
+  const extraInbox = buildInboxRows({
+    sessions: state.sessions,
+    boards: state.boards,
+    brain: state.brain,
+    automations: state.automations,
+    runs: state.runs,
+  }).filter((row) => row.kind === "board" || row.kind === "brain" || row.kind === "automation");
   const open = sessions.find((row) => row.id === openId);
   const designOpen = [...designs, ...games, ...assets].find((row) => row.id === designId);
   const codeRepo = state.repos.find((row) => row.id === codeRepoId);
@@ -418,6 +428,29 @@ export function MobileShell(props: { onShell: (shell: UiShell) => void }) {
     dispatch({ type: "select", id });
   }
 
+  function goDesktop() {
+    setUiShell("desktop");
+    props.onShell("desktop");
+  }
+
+  function openExtraInbox(row: InboxRow) {
+    if (row.boardId) {
+      setInboxBoardId(row.boardId);
+      dispatch({ type: "selectBoard", id: row.boardId, objectId: row.objectId });
+      return;
+    }
+    if (row.kind === "brain") {
+      rememberBrainInbox();
+      dispatch({ type: "section", section: "brain" });
+      goDesktop();
+      return;
+    }
+    if (row.automationId) {
+      dispatch({ type: "selectAutomation", id: row.automationId });
+      goDesktop();
+    }
+  }
+
   function back() {
     setOpenId(null);
     setCompose(null);
@@ -434,13 +467,27 @@ export function MobileShell(props: { onShell: (shell: UiShell) => void }) {
   }
 
   const chatting =
-    Boolean(open) || Boolean(compose) || slackOpen || Boolean(designOpen) || pullOpen;
+    Boolean(open) ||
+    Boolean(compose) ||
+    slackOpen ||
+    Boolean(designOpen) ||
+    pullOpen ||
+    Boolean(inboxBoardId);
   const query = searchOpen ? search : "";
 
   return (
     <div className={`mobile-shell${chatting ? " is-chat" : ""}`} data-testid="mobile-shell">
       {open ? (
         <MobileChat session={open} onBack={back} />
+      ) : inboxBoardId ? (
+        <MobileBoardView
+          boardId={inboxBoardId}
+          onBack={() => setInboxBoardId(null)}
+          onOpenAgent={(id) => {
+            setInboxBoardId(null);
+            openChat(id, true);
+          }}
+        />
       ) : designOpen ? (
         <MobileDesignCanvas
           session={designOpen}
@@ -583,9 +630,11 @@ export function MobileShell(props: { onShell: (shell: UiShell) => void }) {
             {tab === "inbox" ? (
               <MobileInbox
                 items={inbox}
+                extra={extraInbox}
                 designs={designs}
                 repos={state.repos}
                 onOpen={(id) => openChat(id, true)}
+                onExtra={openExtraInbox}
                 onDesign={(id) => {
                   setDesignId(id);
                   setDesignComment(true);
@@ -822,9 +871,11 @@ function MobileChatList(props: {
 
 function MobileInbox(props: {
   items: ReturnType<typeof pendingApprovals>;
+  extra: InboxRow[];
   designs: AgentSession[];
   repos: { id: string; name: string; openPullCount?: number }[];
   onOpen: (id: string) => void;
+  onExtra: (row: InboxRow) => void;
   onDesign: (id: string) => void;
   onRepo: (id: string) => void;
 }) {
@@ -836,7 +887,11 @@ function MobileInbox(props: {
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
   const empty =
-    !props.items.length && !humanGates.length && !props.designs.length && !reviewRepos.length;
+    !props.items.length &&
+    !humanGates.length &&
+    !props.designs.length &&
+    !reviewRepos.length &&
+    !props.extra.length;
 
   async function decideAll(decision: "approved" | "denied") {
     if (batchBusy || batchable.length < 2) return;
@@ -942,6 +997,25 @@ function MobileInbox(props: {
                   <span className="mobile-row-main">
                     <span className="mobile-row-title">{row.title}</span>
                     <span className="mobile-row-sub">Pin an element, then send a change</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {props.extra.length ? (
+        <section className="mobile-inbox-section">
+          <h2 className="mobile-pr-heading">Also waiting</h2>
+          <ul className="mobile-list">
+            {props.extra.map((row) => (
+              <li key={row.key}>
+                <button type="button" className="mobile-row" onClick={() => props.onExtra(row)}>
+                  <span className="mobile-row-main">
+                    <span className="mobile-row-title">{row.title}</span>
+                    <span className="mobile-row-sub">
+                      {inboxKindLabel(row.kind)} · {row.detail}
+                    </span>
                   </span>
                 </button>
               </li>
@@ -1155,7 +1229,7 @@ function MobileMore(props: {
           />
         </label>
         <label className="mobile-setting-row">
-          <span>Automations</span>
+          <span>Jobs</span>
           <button
             type="button"
             className={`settings-switch ${state.config?.notifyAutomations !== false ? "on" : ""}`}
@@ -1168,7 +1242,7 @@ function MobileMore(props: {
         </label>
         {state.config?.notifyAutomations !== false ? (
           <label className="mobile-setting-row">
-            <span>Automation failures only</span>
+            <span>Job failures only</span>
             <button
               type="button"
               className={`settings-switch ${state.config?.notifyAutomationsFailedOnly ? "on" : ""}`}
@@ -1341,7 +1415,7 @@ function MobileMore(props: {
       </section>
 
       <section className="mobile-settings-block" data-testid="mobile-automations">
-        <h2>Automations</h2>
+        <h2>Jobs</h2>
         {state.automations.length ? (
           state.automations.map((row) => (
             <div key={row.id} className="mobile-setting-row">
@@ -1360,7 +1434,7 @@ function MobileMore(props: {
             </div>
           ))
         ) : (
-          <p className="mobile-row-mono">No automations yet.</p>
+          <p className="mobile-row-mono">No jobs yet.</p>
         )}
       </section>
 

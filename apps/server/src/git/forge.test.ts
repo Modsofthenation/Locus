@@ -1005,3 +1005,107 @@ describe("forge adapter factories", () => {
     expect(createGitlabForgeAdapter(fetchFn).setFileViewed).toBeUndefined();
   });
 });
+
+describe("ForgeClient tokenless reads", () => {
+  const anon = (kind: GitForgeAccount["kind"] = "github") =>
+    account({ id: `anon-${kind}`, kind, token: undefined });
+
+  it("lists public GitHub pulls over REST with no authorization header and no GraphQL", async () => {
+    const calls: Array<{ url: string; auth: string | null }> = [];
+    const forge = clientFor((url, init) => {
+      calls.push({ url, auth: new Headers(init?.headers).get("authorization") });
+      if (url.includes("/repos/honojs/hono/pulls?state=open")) {
+        return json([
+          {
+            number: 7,
+            title: "Add router",
+            html_url: "https://github.com/honojs/hono/pull/7",
+            state: "open",
+            head: { ref: "feat", sha: "abc" },
+            base: { ref: "main" },
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        ]);
+      }
+      return json({ message: "Not Found" }, 404);
+    });
+    const rows = await forge.listPulls(anon(), "honojs", "hono", "open");
+    expect(rows.map((row) => row.number)).toEqual([7]);
+    expect(calls.some((row) => row.url.endsWith("/graphql"))).toBe(false);
+    expect(calls.every((row) => row.auth === null)).toBe(true);
+  });
+
+  it("lists public GitHub issues and branches without a token", async () => {
+    const forge = clientFor((url) => {
+      if (url.includes("/repos/honojs/hono/issues?")) {
+        return json([
+          {
+            number: 3,
+            title: "Bug",
+            html_url: "https://github.com/honojs/hono/issues/3",
+            state: "open",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        ]);
+      }
+      if (url.includes("/repos/honojs/hono/branches")) return json([{ name: "main" }]);
+      if (url.endsWith("/repos/honojs/hono")) return json({ default_branch: "main" });
+      return json({ message: "Not Found" }, 404);
+    });
+    const issues = await forge.listIssues(anon(), "honojs", "hono", "open");
+    expect(issues.map((row) => row.number)).toEqual([3]);
+    const branches = await forge.listBranches(anon(), "honojs", "hono");
+    expect(branches.defaultBranch).toBe("main");
+  });
+
+  it("says a token is needed when a tokenless read gets 401, 403 or 404", async () => {
+    for (const status of [401, 403, 404]) {
+      const forge = clientFor(() => json({ message: "Not Found" }, status));
+      await expect(forge.listPulls(anon(), "acme", "private", "open")).rejects.toMatchObject({
+        name: "ForgeAccessError",
+        problem: "needs_token",
+        message: expect.stringContaining("GitHub needs a token to read this repo"),
+      });
+    }
+  });
+
+  it("distinguishes the anonymous rate limit from a missing token", async () => {
+    const limited = clientFor(
+      () =>
+        new Response(JSON.stringify({ message: "API rate limit exceeded for 1.2.3.4." }), {
+          status: 403,
+          headers: { "x-ratelimit-remaining": "0" },
+        }),
+    );
+    await expect(limited.listIssues(anon(), "honojs", "hono", "open")).rejects.toMatchObject({
+      problem: "rate_limited",
+      message: expect.stringContaining("rate limit reached"),
+    });
+    const tooMany = clientFor(() => json({ message: "slow down" }, 429));
+    await expect(tooMany.listPulls(anon(), "honojs", "hono", "open")).rejects.toMatchObject({
+      problem: "rate_limited",
+    });
+  });
+
+  it("keeps the raw error when a tokened read fails", async () => {
+    const forge = clientFor(() => json({ message: "Bad credentials" }, 401));
+    await expect(
+      forge.listIssues(account({ id: "gh", kind: "github", token: "tok" }), "a", "b", "open"),
+    ).rejects.toThrow("Bad credentials");
+  });
+
+  it("sends no private-token header to GitLab or bearer to Bitbucket without a token", async () => {
+    const headers: Headers[] = [];
+    const forge = clientFor((_url, init) => {
+      headers.push(new Headers(init?.headers));
+      return json([]);
+    });
+    await forge.listPulls(anon("gitlab"), "acme", "svc", "open").catch(() => undefined);
+    await forge.listPulls(anon("bitbucket"), "acme", "mobile", "open").catch(() => undefined);
+    expect(headers.length).toBeGreaterThan(1);
+    for (const row of headers) {
+      expect(row.get("private-token")).toBeNull();
+      expect(row.get("authorization")).toBeNull();
+    }
+  });
+});

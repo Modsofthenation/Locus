@@ -18,14 +18,11 @@ import {
   canClearChat,
   CLEAR_CHAT_CONFIRM,
   clusterChatThread,
-  configuredGuestOsOptions,
   formatUsageHint,
-  guestLabel,
   workerComputeUsd,
   isCanvasSession,
   isGameSession,
-  isGuestReady,
-  isGuestStarting,
+  isChatWaitingForGuest,
   isHiddenChatMessage,
   isHumanDriving,
   isWaitingOnGuestStart,
@@ -248,10 +245,11 @@ export function ChatPane() {
   const queue = pendingPromptQueue(session?.queue, lastUserMessage(storedMessages)?.content);
   const vm = state.vms.find((v) => v.id === session?.vmId);
   const turning = viewing ? viewing.status === "running" : busy || session?.status === "running";
-  const waitingGuest =
-    !viewing &&
-    (isGuestStarting(vm?.status) ||
-      (session?.status === "provisioning" && !isGuestReady(vm?.status)));
+  const waitingGuest = isChatWaitingForGuest({
+    viewing,
+    vmStatus: vm?.status,
+    sessionStatus: session?.status,
+  });
   const waitingStartNote = Boolean(!viewing && session && isWaitingOnGuestStart(messages));
   draftRef.current = { text, files };
   const turnDiffs = useMemo(
@@ -985,6 +983,19 @@ export function ChatPane() {
         : (localWaitLabel ?? "Agent is working")
       : null;
 
+  const composerMeta = [
+    recording ? "Recording · /record to save" : null,
+    planning ? "Plan mode" : null,
+    waitingBuild ? IMAGE_BUILD_WAIT_STATUS : null,
+    waitingGuest && !waitingBuild ? `Guest starting · ${vm?.status} · you can still chat` : null,
+    waitingClone ? CLONE_WAIT_STATUS : null,
+    composerWorking,
+    queue.length ? `${queue.length} queued` : null,
+    usageHint,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <section className="chat" id="chat-pane" tabIndex={-1}>
       {state.setup && !state.setup.hasProvider ? (
@@ -1349,55 +1360,11 @@ export function ChatPane() {
               />
             ) : null}
             <div className="composer-shell">
-              <div className="composer-head">
-                {isCanvasSession(session) || swarmMode ? null : (
-                  <SubagentPicker
-                    compact
-                    value={sessionDefaultSubagent(session)}
-                    onChange={(defaultSubagent) => {
-                      void api
-                        .patchSession(session.id, { defaultSubagent })
-                        .then((updated) => dispatch({ type: "session", session: updated }))
-                        .catch(() => undefined);
-                    }}
-                  />
-                )}
-                {swarmMode ? null : (
-                  <ContextMeter
-                    session={session}
-                    kind={provider?.kind}
-                    baseUrl={provider?.baseUrl}
-                    canClear={canClearChat(session)}
-                    onClear={() => void clearChat()}
-                  />
-                )}
-                {swarmMode || !state.brain || state.brain.empty ? null : (
-                  <button
-                    type="button"
-                    className="brain-composer-chip"
-                    title="Open Brain"
-                    onClick={() => dispatch({ type: "section", section: "brain" })}
-                  >
-                    Brain · {state.brain.nodeCount} claims
-                  </button>
-                )}
-                <span className="composer-meta">
-                  {[
-                    recording ? "Recording · /record to save" : null,
-                    planning ? "Plan mode" : null,
-                    waitingBuild ? IMAGE_BUILD_WAIT_STATUS : null,
-                    waitingGuest && !waitingBuild
-                      ? `Guest starting · ${vm?.status} · you can still chat`
-                      : null,
-                    waitingClone ? CLONE_WAIT_STATUS : null,
-                    composerWorking,
-                    queue.length ? `${queue.length} queued` : null,
-                    usageHint,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
-              </div>
+              {composerMeta ? (
+                <div className="composer-head">
+                  <span className="composer-meta">{composerMeta}</span>
+                </div>
+              ) : null}
               {canLinkAssetSessions(session.kind) && session.assetRefs?.length ? (
                 <div className="linked-assets" data-testid="linked-assets">
                   {session.assetRefs.map((row) => (
@@ -1440,9 +1407,7 @@ export function ChatPane() {
                             ? "Describe a change, or click Comment on the canvas…"
                             : swarmMode
                               ? "Message the team…"
-                              : sessionRuntime(session) === "host"
-                                ? "Message the agent…  @game / @asset / @agent to reuse other chats"
-                                : "Message the agent…"
+                              : "Message the agent…"
                 }
                 onChange={(value) => {
                   setText(value);
@@ -1682,6 +1647,37 @@ export function ChatPane() {
                     <p className="composer-overflow-hint">Type / for more</p>
                   </OverflowMenu>
                 </div>
+                {isCanvasSession(session) || swarmMode ? null : (
+                  <SubagentPicker
+                    compact
+                    value={sessionDefaultSubagent(session)}
+                    onChange={(defaultSubagent) => {
+                      void api
+                        .patchSession(session.id, { defaultSubagent })
+                        .then((updated) => dispatch({ type: "session", session: updated }))
+                        .catch(() => undefined);
+                    }}
+                  />
+                )}
+                {swarmMode ? null : (
+                  <ContextMeter
+                    session={session}
+                    kind={provider?.kind}
+                    baseUrl={provider?.baseUrl}
+                    canClear={canClearChat(session)}
+                    onClear={() => void clearChat()}
+                  />
+                )}
+                {swarmMode || !state.brain || state.brain.empty ? null : (
+                  <button
+                    type="button"
+                    className="brain-composer-chip"
+                    title="Open Brain"
+                    onClick={() => dispatch({ type: "section", section: "brain" })}
+                  >
+                    Brain · {state.brain.nodeCount} claims
+                  </button>
+                )}
                 <div className="composer-actions">
                   <ModelPicker
                     compact
@@ -1754,13 +1750,6 @@ export function ChatPane() {
             <p className="composer-steer-hint">
               Send steers this turn. Queue waits until it finishes.
             </p>
-          ) : null}
-          {hostChat ? (
-            <p className="chat-runtime-badge">This machine</p>
-          ) : docker ? (
-            <p className="chat-runtime-badge">{session.dockerImage ?? "Docker"}</p>
-          ) : configuredGuestOsOptions(state.config?.templates).length <= 1 ? (
-            <p className="chat-runtime-badge">{guestLabel(session.os)}</p>
           ) : null}
         </div>
       )}

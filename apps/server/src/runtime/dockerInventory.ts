@@ -3,6 +3,7 @@ import type {
   DockerContainer,
   DockerContainerAction,
   DockerContainerStats,
+  DockerDaemonStatus,
   DockerHostContainer,
   DockerSwarmService,
   DockerSwarmServiceDetail,
@@ -39,6 +40,15 @@ export class DockerInventory {
 
   kind(): DockerEngine["kind"] {
     return this.ports.docker.kind;
+  }
+
+  /** Ping the daemon so callers can say "Docker isn't running" before a run fails on the socket. */
+  async status(): Promise<DockerDaemonStatus> {
+    const engine = this.ports.docker as DockerEngine & { available?: () => Promise<boolean> };
+    const kind = engine.kind;
+    if (kind === "mock" || !engine.available) return { kind, available: true };
+    const available = await engine.available().catch(() => false);
+    return { kind, available };
   }
 
   async list(): Promise<DockerContainer[]> {

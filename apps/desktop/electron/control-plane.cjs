@@ -27,10 +27,12 @@ function controlPlaneNeedsRespawn(input) {
  * What to do at desktop launch when port 7420 may already be taken.
  * Health without UI is the AppImage "Locus UI is not on this port" case:
  * restart a desktop-owned plane so it can pick up the bundled UI; leave a
- * `locus serve` process alone.
+ * `locus serve` process alone. A desktop-owned plane kept alive from a
+ * different build is restarted too, so server and UI match the new install.
  */
 function controlPlaneStartAction(input) {
   if (!input) return "start";
+  if (input.healthUp && input.owned && input.stale) return "restart";
   if (input.healthUp && input.uiUp) return "adopt";
   if (input.healthUp && input.owned) return "restart";
   if (input.healthUp) return "leave";

@@ -43,8 +43,9 @@ import {
   promptEnvironmentName,
   promptGoldenName,
 } from "@/lib/goldenName";
-import { useStore } from "@/state/store";
+import { openSettings, useStore } from "@/state/store";
 import { formatWhen } from "@/components/automations/Automations";
+import { reportJobError, setJobNotice, startJobRun } from "@/components/automations/jobRun";
 import { IconMore, IconPause, IconPlay, IconPanelRight, IconStop } from "./Icons";
 import { MenuItem, MenuLabel, MenuSep, OverflowMenu } from "./OverflowMenu";
 import { ReplayModal } from "@/components/chat/ReplayModal";
@@ -53,18 +54,14 @@ import { WorkersModal } from "@/components/settings/WorkersModal";
 import { TraceModal } from "@/components/chat/TraceModal";
 import { ExpandableLog } from "@/components/chat/ExpandableLog";
 import { PersonaAvatar } from "@/components/layout/PersonaAvatar";
+import { composerModelLabel } from "@/components/settings/ModelPicker";
 
 export function Topbar() {
   const { state, dispatch } = useStore();
   const [workers, setWorkers] = useState(false);
   const [trace, setTrace] = useState(false);
   const [dockerBusy, setDockerBusy] = useState<string | null>(null);
-  const [autoActionError, setAutoActionError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setAutoActionError(null);
-  }, [state.selectedAutomationId, state.section]);
-
+  const [runStarting, setRunStarting] = useState(false);
   function duplicateSession(sessionId: string) {
     void api
       .fork(sessionId)
@@ -119,16 +116,9 @@ export function Topbar() {
           <div className="topbar-title">
             <h2>
               {item?.name ??
-                (parseProductMode(state.config?.productMode) === "swarm"
-                  ? "Routines"
-                  : "Automations")}
+                (parseProductMode(state.config?.productMode) === "swarm" ? "Routines" : "Jobs")}
             </h2>
             {nextLine ? <p className="topbar-kicker">{nextLine}</p> : null}
-            {autoActionError ? (
-              <p className="error topbar-auto-error" data-testid="auto-topbar-error">
-                {autoActionError}
-              </p>
-            ) : null}
           </div>
         </div>
         {item ? (
@@ -137,7 +127,7 @@ export function Topbar() {
               type="button"
               className="btn small"
               onClick={() => {
-                setAutoActionError(null);
+                setJobNotice(null);
                 const nextEnabled = !item.enabled;
                 dispatch({
                   type: "automation",
@@ -151,9 +141,7 @@ export function Topbar() {
                   .patchAutomation(item.id, { enabled: nextEnabled })
                   .catch((err: unknown) => {
                     dispatch({ type: "automation", automation: item });
-                    setAutoActionError(
-                      err instanceof Error ? err.message : "Could not update automation",
-                    );
+                    reportJobError(item.id, err, "Could not update job");
                   });
               }}
             >
@@ -171,9 +159,9 @@ export function Topbar() {
                 className="btn small danger"
                 data-testid="auto-topbar-stop"
                 onClick={() => {
-                  setAutoActionError(null);
+                  setJobNotice(null);
                   if (!live) {
-                    setAutoActionError("No live run to stop");
+                    reportJobError(item.id, null, "No live run to stop");
                     return;
                   }
                   const prior = live;
@@ -193,9 +181,7 @@ export function Topbar() {
                     })
                     .catch((err: unknown) => {
                       dispatch({ type: "run", run: prior });
-                      setAutoActionError(
-                        err instanceof Error ? err.message : "Could not stop the run",
-                      );
+                      reportJobError(item.id, err, "Could not stop the run");
                     });
                 }}
               >
@@ -205,22 +191,15 @@ export function Topbar() {
               <button
                 type="button"
                 className="btn small primary"
-                disabled={!item.enabled}
+                data-testid="auto-topbar-run-now"
+                disabled={!item.enabled || runStarting}
+                title={item.enabled ? "Start a new manual run" : "Paused"}
                 onClick={() => {
-                  setAutoActionError(null);
-                  void api
-                    .runAutomation(item.id)
-                    .then((run) => {
-                      dispatch({ type: "run", run });
-                    })
-                    .catch((err: unknown) => {
-                      setAutoActionError(
-                        err instanceof Error ? err.message : "Could not start a run",
-                      );
-                    });
+                  setRunStarting(true);
+                  void startJobRun(item, dispatch).finally(() => setRunStarting(false));
                 }}
               >
-                <IconPlay /> Run now
+                <IconPlay /> {runStarting ? "Starting…" : "Run now"}
               </button>
             )}
           </div>
@@ -252,16 +231,19 @@ export function Topbar() {
   }
 
   if (state.section === "brain") {
-    const kicker = state.brain
-      ? `${state.brain.nodeCount} nodes · ${state.brain.memoryCount} memories`
-      : "Shared across agents";
+    // Node/memory counts live in the list header; the topbar names the surface.
     return (
       <header className="topbar">
         <div className="topbar-main">
           <div className="topbar-title">
-            <h2>{state.brain?.title ?? "Brain"}</h2>
-            {kicker ? <p className="topbar-kicker">{kicker}</p> : null}
+            <h2>{state.brain?.title || "Brain"}</h2>
+            <p className="topbar-kicker">Shared across agents</p>
           </div>
+        </div>
+        <div className="topbar-actions">
+          <OverflowMenu label={<IconMore />} title="Brain menu" toggleClassName="btn icon ghost">
+            <MenuItem onClick={() => openSettings(dispatch, "advanced")}>Brain settings…</MenuItem>
+          </OverflowMenu>
         </div>
       </header>
     );
@@ -299,12 +281,12 @@ export function Topbar() {
           ? `${node.status} · ${node.availability}`
           : state.dockerSwarm
             ? `${state.dockerSwarm.services.length} services · ${state.dockerSwarm.nodes.length} nodes`
-            : "";
+            : "Services";
       return (
         <header className="topbar">
           <div className="topbar-main">
             <div className="topbar-title">
-              <h2>{service?.name ?? node?.hostname ?? "Docker Swarm"}</h2>
+              <h2>{service?.name ?? node?.hostname ?? "Docker"}</h2>
               {kicker ? <p className="topbar-kicker">{kicker}</p> : null}
             </div>
           </div>
@@ -663,7 +645,13 @@ export function Topbar() {
               onClick={() => dispatch({ type: "sessionSettings", open: true })}
               title={`${kindLabel} settings`}
             >
-              {[session.model, live.caption].filter(Boolean).join(" · ")}
+              {[
+                composerModelLabel(state.config?.providers ?? [], session.providerId, session.model)
+                  .label,
+                live.caption,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
               {session.pinned ? " · pinned" : ""}
               {session.archived ? " · archived" : ""}
             </button>
@@ -671,6 +659,7 @@ export function Topbar() {
         </div>
         <div className="topbar-actions">
           {session.error && <ExpandableLog compact danger text={session.error} />}
+          <PanelToggle label="Canvas" />
           {vm && (vm.status === "running" || vm.status === "ready" || vm.status === "paused") ? (
             <div className="control-cluster">
               {vm.status === "paused" ? (
@@ -726,18 +715,20 @@ export function Topbar() {
             >
               <IconStop /> Stop
             </button>
-          ) : (
+          ) : (sessionRuntime(session) === "host" && !session.backendId) ||
+            session.status === "running" ||
+            session.status === "provisioning" ? null : (
             <button
               type="button"
-              className="btn small primary"
-              title="Start"
+              className="btn small"
+              title="Start the preview container"
               onClick={() =>
                 void api
                   .startVm(session.id)
                   .catch((err: unknown) => showErrorNotice(err, "Could not start"))
               }
             >
-              <IconPlay /> Start
+              <IconPlay /> Start preview
             </button>
           )}
           <OverflowMenu
@@ -820,7 +811,9 @@ export function Topbar() {
             <MenuItem
               danger
               onClick={() => {
-                void deleteSessionWithUndo(session, dispatch, askConfirm);
+                void deleteSessionWithUndo(session, dispatch, askConfirm, {
+                  open: state.selectedId === session.id,
+                });
               }}
             >
               Delete
@@ -864,7 +857,7 @@ export function Topbar() {
     ? [session.persona?.hubRole, live.caption].filter(Boolean).join(" · ")
     : [
         hostChat ? "Host" : docker ? (session.dockerImage ?? "Docker") : guestLabel(session.os),
-        session.model,
+        composerModelLabel(state.config?.providers ?? [], session.providerId, session.model).label,
         live.caption,
       ]
         .filter(Boolean)
@@ -932,7 +925,9 @@ export function Topbar() {
               <IconPanelRight />
             </button>
           </Tooltip>
-        ) : null}
+        ) : state.section === "ide" ? null : (
+          <PanelToggle label={hostChat ? "Files" : docker ? "Container" : "Desktop"} />
+        )}
         {hubMode || hostChat ? null : vm &&
           (vm.status === "running" || vm.status === "ready" || vm.status === "paused") ? (
           <>
@@ -1093,7 +1088,7 @@ export function Topbar() {
             <MenuItem
               onClick={() => dispatch({ type: "selectAutomation", id: session.automationId! })}
             >
-              {automation ? `Automation · ${automation.name}` : "Open automation"}
+              {automation ? `Job · ${automation.name}` : "Open job"}
             </MenuItem>
           )}
           <MenuItem onClick={() => void api.patchSession(session.id, { pinned: !session.pinned })}>
@@ -1182,7 +1177,9 @@ export function Topbar() {
           <MenuItem
             danger
             onClick={() => {
-              void deleteSessionWithUndo(session, dispatch, askConfirm);
+              void deleteSessionWithUndo(session, dispatch, askConfirm, {
+                open: state.selectedId === session.id,
+              });
             }}
           >
             Delete
@@ -1201,6 +1198,26 @@ export function Topbar() {
       ) : null}
       {workers ? <WorkersModal session={session} onClose={() => setWorkers(false)} /> : null}
     </header>
+  );
+}
+
+/** Labelled show/hide for the side panel (Files, Canvas, guest) beside the chat. */
+function PanelToggle({ label }: { label: string }) {
+  const { state, dispatch } = useStore();
+  const open = !state.vmCollapsed;
+  return (
+    <Tooltip label={open ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}>
+      <button
+        type="button"
+        className={`btn small ghost topbar-panel-toggle${open ? " on" : ""}`}
+        aria-pressed={open}
+        aria-controls="files-pane"
+        data-testid="topbar-panel-toggle"
+        onClick={() => dispatch({ type: "toggleVmPane" })}
+      >
+        <IconPanelRight /> {label}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -1311,6 +1328,7 @@ function SessionTitle({ id, title }: { id: string; title: string }) {
     <input
       className="session-title"
       value={value}
+      title={value}
       aria-label="Session title"
       onChange={(e) => setValue(e.target.value)}
       onBlur={() => void commit()}

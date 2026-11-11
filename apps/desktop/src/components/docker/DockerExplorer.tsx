@@ -14,9 +14,12 @@ import { IconChevron, IconPlay, IconRefresh, IconStop } from "@/components/layou
 
 export function DockerExplorer({
   selectedId,
+  sessionId,
   onInspect,
 }: {
   selectedId?: string | null;
+  /** Only list containers this session started; the section hides when there are none. */
+  sessionId?: string;
   onInspect: (container: DockerContainer) => void;
 }) {
   const { state, dispatch } = useStore();
@@ -92,7 +95,11 @@ export function DockerExplorer({
     setMenu({ x: event.clientX, y: event.clientY, row });
   }
 
-  const rows = state.containers;
+  const rows = sessionId
+    ? state.containers.filter((row) => row.sessionId === sessionId)
+    : state.containers;
+
+  if (sessionId && rows.length === 0) return null;
 
   return (
     <section className="docker-explorer" data-testid="docker-explorer" aria-label="Docker">

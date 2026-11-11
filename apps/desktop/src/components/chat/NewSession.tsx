@@ -386,7 +386,7 @@ export function NewSessionModal() {
           onChange={(e) => setPrompt(e.target.value)}
           placeholder={
             runtime === "host"
-              ? "What should we talk about? Sent as the first message."
+              ? "Describe the task. Sent as the first message."
               : runtime === "docker"
                 ? "What should this container do? Sent as the first message after the container starts."
                 : "What should this machine do? Sent as the first message after the VM starts."

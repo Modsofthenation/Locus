@@ -445,10 +445,13 @@ export function ForgeAccountCard({
   onRemove: () => void;
 }) {
   const tokenRef = useRef<HTMLInputElement>(null);
+  const [tokenOpen, setTokenOpen] = useState(false);
   const status = forgeAccountStatus(f);
   const handle = forgeAccountHandle(f);
   const sso = forgeSupportsSso(f.kind);
   const scopes = forgeOauthScopes(f.kind).split(/\s+/).filter(Boolean).join(" · ");
+  /** PAT-only forges always need the field; SSO forges show it on demand or once set. */
+  const showToken = !sso || tokenOpen || Boolean(f.token);
   const signInLabel = oauthBusy
     ? "Starting…"
     : oauthPending && !oauthError
@@ -502,16 +505,22 @@ export function ForgeAccountCard({
                 Cancel
               </button>
             ) : null}
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                tokenRef.current?.focus();
-                tokenRef.current?.select();
-              }}
-            >
-              Replace token
-            </button>
+            {sso ? (
+              <button
+                type="button"
+                className="btn"
+                aria-expanded={showToken}
+                onClick={() => {
+                  setTokenOpen(true);
+                  requestAnimationFrame(() => {
+                    tokenRef.current?.focus();
+                    tokenRef.current?.select();
+                  });
+                }}
+              >
+                {f.token ? "Replace token" : "Use a token"}
+              </button>
+            ) : null}
             {sso && f.authMethod === "oauth" && f.token ? (
               <button
                 type="button"
@@ -522,88 +531,98 @@ export function ForgeAccountCard({
                 Disconnect
               </button>
             ) : null}
-            <button type="button" className="btn danger git-account-remove" onClick={onRemove}>
-              Remove
-            </button>
           </div>
-          <div className="grid-2">
-            <div className="field">
-              <label>Display name</label>
+          {showToken ? (
+            <div className="field git-account-token">
+              <label htmlFor={`forge-token-${f.id}`}>Token</label>
               <input
-                value={f.name}
-                onChange={(e) => {
-                  onPatch({ name: e.target.value });
-                }}
-              />
-            </div>
-            <div className="field">
-              <label>API URL</label>
-              <input
-                value={f.apiBaseUrl}
-                spellCheck={false}
-                onChange={(e) => {
-                  onPatch({ apiBaseUrl: e.target.value });
-                }}
-              />
-            </div>
-            {sso ? (
-              <>
-                <div className="field">
-                  <label>OAuth client ID</label>
-                  <input
-                    value={f.oauthClientId ?? ""}
-                    spellCheck={false}
-                    placeholder="Optional"
-                    onChange={(e) => {
-                      onPatch({ oauthClientId: e.target.value });
-                    }}
-                  />
-                </div>
-                <div className="field">
-                  <label>OAuth client secret</label>
-                  <input
-                    type="password"
-                    value={f.oauthClientSecret ?? ""}
-                    placeholder="Optional"
-                    onChange={(e) => {
-                      onPatch({ oauthClientSecret: e.target.value });
-                    }}
-                  />
-                </div>
-              </>
-            ) : null}
-            <div className="field">
-              <label>Token</label>
-              <input
+                id={`forge-token-${f.id}`}
                 ref={tokenRef}
                 type="password"
-                placeholder="Token"
+                placeholder="Personal access token"
                 value={f.token ?? ""}
                 onChange={(e) => {
                   onPatch({ token: e.target.value });
                 }}
               />
             </div>
-            <div className="field">
-              <label>SSH key path</label>
-              <input
-                value={f.sshKeyPath ?? ""}
-                placeholder="Not required when a token is set"
-                onChange={(e) => {
-                  onPatch({ sshKeyPath: e.target.value });
-                }}
-              />
-            </div>
-          </div>
-          {sso ? (
-            <p className="hint">
-              {f.kind === "github"
-                ? `Create a GitHub OAuth App with Device Flow enabled. Callback ${oauthCallback}.`
-                : f.kind === "gitlab"
-                  ? `Create a GitLab OAuth application (confidential) with callback ${oauthCallback} and the api scope.`
-                  : `Create a Bitbucket OAuth consumer with callback ${oauthCallback}.`}
-            </p>
           ) : null}
+          <details className="advanced git-account-advanced">
+            <summary>Advanced</summary>
+            <div className="grid-2">
+              <div className="field">
+                <label>Display name</label>
+                <input
+                  value={f.name}
+                  onChange={(e) => {
+                    onPatch({ name: e.target.value });
+                  }}
+                />
+              </div>
+              <div className="field">
+                <label>API URL</label>
+                <input
+                  value={f.apiBaseUrl}
+                  spellCheck={false}
+                  onChange={(e) => {
+                    onPatch({ apiBaseUrl: e.target.value });
+                  }}
+                />
+              </div>
+              {sso ? (
+                <>
+                  <div className="field">
+                    <label>OAuth client ID</label>
+                    <input
+                      value={f.oauthClientId ?? ""}
+                      spellCheck={false}
+                      placeholder="Optional"
+                      onChange={(e) => {
+                        onPatch({ oauthClientId: e.target.value });
+                      }}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>OAuth client secret</label>
+                    <input
+                      type="password"
+                      value={f.oauthClientSecret ?? ""}
+                      placeholder="Optional"
+                      onChange={(e) => {
+                        onPatch({ oauthClientSecret: e.target.value });
+                      }}
+                    />
+                  </div>
+                </>
+              ) : null}
+              <div className="field">
+                <label>SSH key path</label>
+                <input
+                  value={f.sshKeyPath ?? ""}
+                  placeholder="Not required when a token is set"
+                  onChange={(e) => {
+                    onPatch({ sshKeyPath: e.target.value });
+                  }}
+                />
+              </div>
+            </div>
+            {sso ? (
+              <p className="hint">
+                {f.kind === "github"
+                  ? `Create a GitHub OAuth App with Device Flow enabled. Callback ${oauthCallback}.`
+                  : f.kind === "gitlab"
+                    ? `Create a GitLab OAuth application (confidential) with callback ${oauthCallback} and the api scope.`
+                    : `Create a Bitbucket OAuth consumer with callback ${oauthCallback}.`}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              className="btn small danger ghost git-account-remove"
+              onClick={onRemove}
+            >
+              Remove account
+            </button>
+          </details>
           {oauthPending && oauthUserCode && !oauthError ? (
             <p className="hint">
               Enter <span className="oauth-user-code">{oauthUserCode}</span> at{" "}
@@ -753,8 +772,8 @@ export function machineReady(template: { isoPath: string }): boolean {
 
 export function machineStatusLabel(template: { os: GuestOs; isoPath: string }): string {
   if (machineReady(template)) return machineImageName(template.isoPath);
-  if (isWindows(template.os)) return "licensed ISO required";
-  return "no image set - won't start";
+  if (isWindows(template.os)) return "Needs a licensed ISO";
+  return "Needs an image";
 }
 
 function machineHint(template: VmTemplate): string {
@@ -932,25 +951,36 @@ export function MachineCard({
   const { cpuCores, memoryMb, diskSizeGb } = template.hardware;
   return (
     <div className={`machine-row ${expanded ? "open" : ""}`}>
-      <button
-        type="button"
-        className="machine-row-head"
-        aria-expanded={expanded}
-        onClick={onToggleExpand}
-      >
-        <span className={`machine-dot ${ready ? "ready" : ""}`} />
-        <span className="machine-row-copy">
-          <strong>{template.name}</strong>
-          <span
-            className={`machine-row-status ${ready || isWindows(template.os) ? "" : "missing"}`}
-          >
-            {status}
+      <div className="machine-row-line">
+        <button
+          type="button"
+          className="machine-row-head"
+          aria-expanded={expanded}
+          onClick={onToggleExpand}
+        >
+          <span className={`machine-dot ${ready ? "ready" : "pending"}`} />
+          <span className="machine-row-copy">
+            <strong>{template.name}</strong>
+            <span className="machine-row-status">{status}</span>
           </span>
-        </span>
-        <span className="machine-row-specs">
-          {cpuCores} c · {memoryMb} MB · {diskSizeGb} GB
-        </span>
-      </button>
+          <span className="machine-row-specs">
+            {cpuCores} c · {memoryMb} MB · {diskSizeGb} GB
+          </span>
+        </button>
+        {!ready ? (
+          <button
+            type="button"
+            className="btn small machine-row-setup"
+            disabled={fetchingOs}
+            onClick={() => {
+              if (!expanded) onToggleExpand();
+              if (isLinux(template.os)) onFetch();
+            }}
+          >
+            {fetchingOs ? "Setting up…" : "Set up"}
+          </button>
+        ) : null}
+      </div>
       {expanded ? (
         <div className="machine-row-body">
           {!isBuiltinTemplate(template.id) ? (
@@ -1261,6 +1291,11 @@ export function integrationStatusLabel(row: IntegrationAccount): string {
     return row.token?.trim() ? "Connected" : "Connected (proxy)";
   }
   return row.token?.trim() ? "Connected" : "Not connected";
+}
+
+export function integrationConnected(row: IntegrationAccount): boolean {
+  const status = integrationStatusLabel(row);
+  return status !== "Off" && status !== "Not connected";
 }
 
 export function McpServerCard({
@@ -2074,7 +2109,7 @@ export function IntegrationCard({
   onRemove: () => void;
 }) {
   const status = integrationStatusLabel(account);
-  const connected = status !== "Off" && status !== "Not connected";
+  const connected = integrationConnected(account);
   return (
     <div className={`provider-card ${expanded ? "open" : ""} ${connected ? "on" : ""}`}>
       <div className="provider-card-head">

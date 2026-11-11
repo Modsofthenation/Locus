@@ -14,6 +14,8 @@ import { setSettingsDirty } from "@/lib/settingsLeave";
 import { Store, initialState, reducer, type UiState } from "@/state/store";
 import { AUTOMATION_SIDEBAR_PREFS_KEY } from "@/lib/automationPrefs";
 import { SWARM_ROSTER_PREFS_KEY } from "@/lib/swarmRosterPrefs";
+import { SIDEBAR_PREFS_KEY } from "@/lib/sidebarPrefs";
+import { setSelectValue } from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -85,6 +87,19 @@ vi.mock("@/lib/api", () => ({
       updatedAt: "2026-08-17T12:00:00.000Z",
     })),
     deleteAutomation: vi.fn(async () => undefined),
+    resolveApproval: vi.fn(async (id: string) => ({
+      id,
+      title: "Build the agent",
+      os: "ubuntu",
+      templateId: "ubuntu-24.04",
+      providerId: "p",
+      model: "grok-4",
+      status: "idle",
+      vmId: "v1",
+      messages: [],
+      createdAt: "2020-01-01T00:00:00.000Z",
+      updatedAt: "2020-01-01T00:00:00.000Z",
+    })),
     patchSession: vi.fn(async (id: string, patch: { subscriptions?: unknown }) => ({
       id,
       title: "Build the agent",
@@ -130,6 +145,7 @@ describe("Sidebar", () => {
     window.localStorage.removeItem(LAST_SLACK_SIDEBAR_GROUPS_KEY);
     window.localStorage.removeItem(AUTOMATION_SIDEBAR_PREFS_KEY);
     window.localStorage.removeItem(SWARM_ROSTER_PREFS_KEY);
+    window.localStorage.removeItem(SIDEBAR_PREFS_KEY);
     vi.restoreAllMocks();
     setSettingsDirty(false);
     dismissNotice();
@@ -138,6 +154,7 @@ describe("Sidebar", () => {
   function render(state: UiState) {
     window.localStorage.removeItem(AUTOMATION_SIDEBAR_PREFS_KEY);
     window.localStorage.removeItem(SWARM_ROSTER_PREFS_KEY);
+    window.localStorage.removeItem(SIDEBAR_PREFS_KEY);
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
@@ -153,16 +170,37 @@ describe("Sidebar", () => {
     });
   }
 
+  /** Like render, but dispatches go through the real reducer. */
+  function renderLive(initial: UiState) {
+    window.localStorage.removeItem(SIDEBAR_PREFS_KEY);
+    function Harness() {
+      const [state, dispatch] = useReducer(reducer, initial);
+      return (
+        <Store.Provider value={{ state, dispatch }}>
+          <div className={state.collapsed ? "app collapsed" : "app"}>
+            <Sidebar />
+          </div>
+        </Store.Provider>
+      );
+    }
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root.render(<Harness />);
+    });
+  }
+
   it("keeps section names on the icon rail and in the brand subtitle", () => {
     render({ ...initialState, sessions: [session] });
     const labels = [...host.querySelectorAll(".side-rail-nav > button")].map((el) =>
       el.getAttribute("aria-label"),
     );
-    expect(labels).toEqual(["Agents", "Design", "IDE", "Codebase", "Automations"]);
+    expect(labels).toEqual(["Inbox", "Agents", "Design", "IDE", "Codebase", "Jobs"]);
     expect(host.querySelector(".rail-more")).toBeTruthy();
     expect(host.querySelector(".rail-more summary")?.getAttribute("aria-label")).toBe("More");
     expect(host.querySelector(".side-rail-nav .rail-sep")?.getAttribute("role")).toBe("separator");
-    expect(host.querySelector(".brand p")?.textContent).toBe("Agents");
+    expect(host.querySelector(".brand p")?.textContent).toBe("1 agent");
     expect(host.querySelector(".brand-mark [data-testid='locus-mascot']")).toBeNull();
     expect(host.querySelector(".brand-actions [data-testid='product-mode-toggle']")).toBeNull();
     expect(
@@ -177,7 +215,15 @@ describe("Sidebar", () => {
     expect(host.querySelector(".search-wrap kbd")).toBeNull();
     expect(
       [...host.querySelectorAll(".side-rail-nav .rail-label")].map((el) => el.textContent),
-    ).toEqual(["Agents", "Design", "IDE", "Codebase", "Automations", "More"]);
+    ).toEqual(["Inbox", "Agents", "Design", "IDE", "Codebase", "Jobs", "More"]);
+    expect(
+      host.querySelector(".side-rail-nav button[aria-label='Jobs'] .rail-label")?.textContent,
+    ).toBe("Jobs");
+    expect(host.querySelector("[data-testid='sidebar-inbox']")).toBeTruthy();
+    expect(host.querySelector(".sidebar-gutter")?.getAttribute("aria-label")).toBe(
+      "Resize sidebar",
+    );
+    expect(host.querySelector("[aria-label='Session filter']")).toBeTruthy();
   });
 
   it("lists Games, Assets, Board, and Docker in the More menu", () => {
@@ -198,6 +244,31 @@ describe("Sidebar", () => {
       "Grafana",
       "Docker",
     ]);
+    const pins = [...host.querySelectorAll(".rail-more [data-menu-pin]")];
+    expect(pins).toHaveLength(8);
+    expect(pins[0]?.getAttribute("aria-label")).toBe("Pin Games to rail");
+    expect(pins[0]?.getAttribute("aria-pressed")).toBe("false");
+    // One row per surface: the pin toggle sits in the same row as its item.
+    expect(pins[0]?.closest(".menu-row")?.textContent).toBe("Games");
+  });
+
+  it("moves between a More row and its pin toggle with the arrow keys", () => {
+    render({ ...initialState, sessions: [session] });
+    act(() => {
+      (host.querySelector(".rail-more summary") as HTMLElement | null)?.click();
+    });
+    const games = [...host.querySelectorAll<HTMLElement>(".rail-more [role='menuitem']")].find(
+      (el) => el.textContent === "Games",
+    )!;
+    act(() => games.focus());
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Pin Games to rail");
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(document.activeElement?.textContent).toBe("Assets");
   });
 
   it("fits full rail labels and wraps the mode toggle below the brand when narrow", () => {
@@ -277,7 +348,7 @@ describe("Sidebar", () => {
         },
       },
     });
-    expect(host.querySelector(".brand p")?.textContent).toBe("Settings");
+    expect(host.querySelector(".brand p")?.textContent).toBe("Providers");
     expect(
       host.querySelector(".side-rail-chrome button[aria-label='Settings']")?.className,
     ).toMatch(/active/);
@@ -382,7 +453,7 @@ describe("Sidebar", () => {
     act(() => {
       root.render(<Harness />);
     });
-    expect(host.querySelector(".brand p")?.textContent).toBe("Teams");
+    expect(host.querySelector(".brand p")?.textContent).toBe("1 team");
     expect(host.querySelector("[data-testid='swarm-teams']")?.getAttribute("aria-current")).toBe(
       "page",
     );
@@ -392,7 +463,7 @@ describe("Sidebar", () => {
     act(() => {
       teammates.click();
     });
-    expect(host.querySelector(".brand p")?.textContent).toBe("Teammates");
+    expect(host.querySelector(".brand p")?.textContent).toBe("0 teammates");
   });
 
   it("shows Teammates, Teams, and More on the Swarm icon rail", () => {
@@ -414,7 +485,7 @@ describe("Sidebar", () => {
     act(() => {
       root.render(<Harness />);
     });
-    expect(host.querySelector(".brand p")?.textContent).toBe("Teammates");
+    expect(host.querySelector(".brand p")?.textContent).toBe("0 teammates");
     expect(host.querySelector("[data-testid='swarm-teammates']")).toBeTruthy();
     expect(host.querySelector("[data-testid='swarm-teams']")).toBeTruthy();
     expect(host.querySelector(".rail-more")).toBeTruthy();
@@ -423,7 +494,7 @@ describe("Sidebar", () => {
     act(() => {
       teams.click();
     });
-    expect(host.querySelector(".brand p")?.textContent).toBe("Teams");
+    expect(host.querySelector(".brand p")?.textContent).toBe("0 teams");
     expect(host.textContent).toContain("New team");
     expect(host.textContent).toContain("No teams");
   });
@@ -755,13 +826,252 @@ describe("Sidebar", () => {
       ...initialState,
       sessions: [{ ...session, needsHuman: "Approve git_push" }],
     });
-    expect(host.querySelector("button[aria-label='Needs you, 1 waiting']")).toBeTruthy();
+    expect(host.querySelector("button[aria-label='Inbox, 1 waiting']")).toBeTruthy();
     expect(host.querySelector(".icon-badge.danger")?.textContent).toBe("1");
     expect(host.querySelector(".session-group-label.warn")?.textContent).toBe("Needs you");
     expect(host.querySelector(".session-item.needs-you")).toBeTruthy();
     expect(
       host.querySelector(".side-rail-nav button[aria-label='Agents, needs you 1']"),
     ).toBeTruthy();
+  });
+
+  it("opens Inbox as the attention list", () => {
+    renderLive({
+      ...initialState,
+      sessions: [{ ...session, needsHuman: "Approve git_push" }],
+    });
+    act(() => {
+      (host.querySelector("[data-testid='sidebar-inbox']") as HTMLElement).click();
+    });
+    expect(host.querySelector(".session-list")?.getAttribute("aria-label")).toBe("Inbox");
+    expect(host.querySelector(".brand h1")?.textContent).toBe("Inbox");
+    expect(host.textContent).toContain("Approve git_push");
+    expect(host.querySelector(".inbox-kind")?.textContent).toBe("Agent");
+    expect(host.querySelector("[aria-label='Session filter']")).toBeNull();
+    expect(host.querySelector(".side-actions")).toBeNull();
+    expect(host.querySelector(".side-foot")?.textContent).toBe("");
+  });
+
+  it("keeps an empty Inbox to the Caught up subtitle", () => {
+    renderLive({ ...initialState, sessions: [session] });
+    act(() => {
+      (host.querySelector("[data-testid='sidebar-inbox']") as HTMLElement).click();
+    });
+    expect(host.querySelector(".brand p")?.textContent).toBe("Caught up");
+    expect(host.querySelector(".empty-list")).toBeNull();
+    expect(host.querySelector(".session-list")?.textContent).toBe("");
+    expect(host.querySelector(".side-foot")?.textContent).toBe("");
+  });
+
+  it("approves a waiting tool from Inbox without opening the chat", async () => {
+    const dispatch = vi.fn();
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root.render(
+        <Store.Provider
+          value={{
+            state: {
+              ...initialState,
+              inboxOpen: true,
+              sessions: [
+                {
+                  ...session,
+                  messages: [
+                    {
+                      id: "a1",
+                      role: "assistant",
+                      content: "",
+                      createdAt: "2020-01-01T00:00:00.000Z",
+                      toolCalls: [
+                        {
+                          id: "c1",
+                          name: "git_push",
+                          arguments: {},
+                          startedAt: "t",
+                          approval: "needed",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            dispatch,
+          }}
+        >
+          <Sidebar />
+        </Store.Provider>,
+      );
+    });
+    const approve = [...host.querySelectorAll("button")].find(
+      (btn) => btn.textContent === "Approve",
+    );
+    expect(approve).toBeTruthy();
+    await act(async () => {
+      approve!.click();
+      await Promise.resolve();
+    });
+    expect(api.resolveApproval).toHaveBeenCalledWith("s1", "c1", "approved");
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "session",
+      session: expect.objectContaining({ id: "s1" }),
+    });
+  });
+
+  it("moves a pinned section up the rail", () => {
+    function Harness() {
+      const [state, dispatch] = useReducer(reducer, { ...initialState, sessions: [session] });
+      return (
+        <Store.Provider value={{ state, dispatch }}>
+          <Sidebar />
+        </Store.Provider>
+      );
+    }
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root.render(<Harness />);
+    });
+    act(() => {
+      (host.querySelector(".rail-more summary") as HTMLElement | null)?.click();
+    });
+    const pin = host.querySelector(
+      ".rail-more [data-menu-pin][aria-label='Pin Games to rail']",
+    ) as HTMLElement;
+    act(() => {
+      pin.click();
+    });
+    act(() => {
+      (host.querySelector(".side-rail-nav button[aria-label='Games']") as HTMLElement).click();
+    });
+    act(() => {
+      (host.querySelector("[aria-label='Session list']") as HTMLElement | null)?.click();
+    });
+    const moveUp = [...host.querySelectorAll(".menu-item")].find(
+      (el) => el.textContent === "Move up",
+    ) as HTMLButtonElement;
+    expect(moveUp).toBeTruthy();
+    act(() => {
+      moveUp.click();
+    });
+    const labels = [...host.querySelectorAll(".side-rail-nav > button .rail-label")].map(
+      (el) => el.textContent,
+    );
+    expect(labels.indexOf("Games")).toBeLessThan(labels.indexOf("Jobs"));
+  });
+
+  it("peeks the agent list when the rail is collapsed", () => {
+    render({ ...initialState, collapsed: true, sessions: [session] });
+    const agents = host.querySelector(".side-rail-nav button[aria-label='Agents']") as HTMLElement;
+    act(() => {
+      agents.focus();
+      agents.dispatchEvent(new FocusEvent("focus", { bubbles: true }));
+    });
+    expect(host.querySelector("[data-testid='rail-peek']")?.textContent).toContain(
+      "Build the agent",
+    );
+  });
+
+  it("jumps to Inbox with Alt+1", () => {
+    renderLive({ ...initialState, sessions: [session] });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "1", altKey: true, bubbles: true }));
+    });
+    expect(host.querySelector(".brand h1")?.textContent).toBe("Inbox");
+  });
+
+  it("pins Games onto the rail from More", () => {
+    render({ ...initialState, sessions: [session] });
+    act(() => {
+      (host.querySelector(".rail-more summary") as HTMLElement | null)?.click();
+    });
+    const pin = host.querySelector(
+      ".rail-more [data-menu-pin][aria-label='Pin Games to rail']",
+    ) as HTMLElement;
+    act(() => {
+      pin.click();
+    });
+    expect(host.querySelector(".side-rail-nav button[aria-label='Games']")).toBeTruthy();
+  });
+
+  it("unpins a rail section from its right-click menu", () => {
+    render({ ...initialState, sessions: [session] });
+    const design = host.querySelector(".side-rail-nav button[aria-label='Design']") as HTMLElement;
+    expect(design).toBeTruthy();
+    act(() => {
+      design.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 40,
+          clientY: 80,
+        }),
+      );
+    });
+    const menu = document.querySelector("[data-testid='rail-pin-menu']") as HTMLElement;
+    expect(menu).toBeTruthy();
+    const unpin = [...menu.querySelectorAll("button")].find(
+      (el) => el.textContent === "Unpin from rail",
+    ) as HTMLElement;
+    act(() => {
+      unpin.click();
+    });
+    expect(document.querySelector("[data-testid='rail-pin-menu']")).toBeNull();
+    expect(host.querySelector(".side-rail-nav button[aria-label='Design']")).toBeNull();
+    act(() => {
+      (host.querySelector(".rail-more summary") as HTMLElement | null)?.click();
+    });
+    expect(
+      host.querySelector(".rail-more [data-menu-pin][aria-label='Pin Design to rail']"),
+    ).toBeTruthy();
+  });
+
+  it("keeps the locked home section off the right-click unpin menu", () => {
+    render({ ...initialState, sessions: [session] });
+    const agents = host.querySelector(".side-rail-nav button[aria-current='page']") as HTMLElement;
+    act(() => {
+      agents.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    });
+    expect(document.querySelector("[data-testid='rail-pin-menu']")).toBeNull();
+  });
+
+  it("resizes the sidebar with arrow keys", () => {
+    render({ ...initialState, sessions: [session] });
+    const gutter = host.querySelector(".sidebar-gutter") as HTMLElement;
+    expect(gutter.getAttribute("aria-valuenow")).toBe("340");
+    act(() => {
+      gutter.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+    expect(
+      (host.querySelector(".sidebar-gutter") as HTMLElement).getAttribute("aria-valuenow"),
+    ).toBe("356");
+  });
+
+  it("hides the resize gutter when the rail is collapsed", () => {
+    render({ ...initialState, collapsed: true, sessions: [session] });
+    expect(host.querySelector(".sidebar-gutter")).toBeNull();
+  });
+
+  it("filters the agent list to Needs you", () => {
+    render({
+      ...initialState,
+      sessions: [session, { ...session, id: "s2", title: "Waiting", needsHuman: "Approve" }],
+    });
+    const chips = [...host.querySelectorAll("[aria-label='Session filter'] button")].map(
+      (el) => el.textContent,
+    );
+    expect(chips).toEqual(["All", "Needs you 1", "Running", "Unread"]);
+    const needs = [...host.querySelectorAll("[aria-label='Session filter'] button")].find(
+      (el) => el.textContent === "Needs you 1",
+    ) as HTMLElement;
+    act(() => {
+      needs.click();
+    });
+    expect(host.querySelector(".session-item[title='Waiting']")).toBeTruthy();
+    expect(host.querySelector(".session-item[title='Build the agent']")).toBeNull();
   });
 
   it("lists unresolved board comments in Needs you", () => {
@@ -779,7 +1089,7 @@ describe("Sidebar", () => {
         },
       ],
     });
-    expect(host.querySelector("button[aria-label='Needs you, 1 waiting']")).toBeTruthy();
+    expect(host.querySelector("button[aria-label='Inbox, 1 waiting']")).toBeTruthy();
     expect(host.querySelector(".icon-badge.danger")?.textContent).toBe("1");
     expect(host.querySelector(".session-group-label.warn")?.textContent).toBe("Needs you");
     expect(host.textContent).toContain("Name the owner");
@@ -915,7 +1225,7 @@ describe("Sidebar", () => {
     expect(host.querySelector(".side-actions .btn.primary")?.getAttribute("aria-label")).toBe(
       "New design",
     );
-    expect(host.querySelector(".brand p")?.textContent).toBe("Design");
+    expect(host.querySelector(".brand p")?.textContent).toBe("1 design");
     expect(host.querySelector(".search")?.getAttribute("placeholder")).toBe("Search designs");
     expect(host.querySelector(".search-wrap .search-icon svg")).toBeTruthy();
     expect(host.querySelector(".session-item.design-item .design-thumb.is-empty")).toBeTruthy();
@@ -941,7 +1251,7 @@ describe("Sidebar", () => {
     expect(host.querySelector(".side-actions .btn.primary")?.getAttribute("aria-label")).toBe(
       "New game",
     );
-    expect(host.querySelector(".brand p")?.textContent).toBe("Games");
+    expect(host.querySelector(".brand p")?.textContent).toBe("1 game");
     expect(host.querySelector(".search")?.getAttribute("placeholder")).toBe("Search games");
   });
 
@@ -965,7 +1275,7 @@ describe("Sidebar", () => {
     expect(host.querySelector(".side-actions .btn.primary")?.getAttribute("aria-label")).toBe(
       "New workspace",
     );
-    expect(host.querySelector(".brand p")?.textContent).toBe("IDE");
+    expect(host.querySelector(".brand p")?.textContent).toBe("1 workspace");
     expect(host.querySelector(".search")?.getAttribute("placeholder")).toBe("Search workspaces");
   });
 
@@ -1483,7 +1793,10 @@ describe("Sidebar", () => {
     expect(labels).toEqual(["Pinned", "Today", "Yesterday", "Earlier"]);
     expect(host.querySelector(".session-item[title='Pinned chat']")).toBeTruthy();
     expect(host.querySelector(".session-item[title='Today chat']")).toBeTruthy();
-    expect(css).toMatch(/\.session-group-label \{[\s\S]*?text-transform:\s*uppercase/);
+    // Sentence-case group labels, not uppercase monospace.
+    const rule = css.match(/\n\.session-group-label \{[^}]*\}/)?.[0] ?? "";
+    expect(rule).toMatch(/font-weight/);
+    expect(rule).not.toMatch(/uppercase|--mono/);
   });
 
   it("nests a repo heading when two chats in a day share a repo", () => {
@@ -1650,9 +1963,9 @@ describe("Sidebar", () => {
     ).toBeTruthy();
     expect(host.querySelector(".side-rail button[aria-label='Games']")).toBeNull();
     expect(host.querySelector(".side-rail button[aria-label='IDE'] .rail-icon svg")).toBeTruthy();
-    expect(host.querySelector(".side-rail button[aria-label='Automations, unread']")).toBeTruthy();
+    expect(host.querySelector(".side-rail button[aria-label='Jobs, unread']")).toBeTruthy();
     expect(
-      host.querySelector(".side-rail button[aria-label='Automations, unread'] .unread-dot"),
+      host.querySelector(".side-rail button[aria-label='Jobs, unread'] .unread-dot"),
     ).toBeTruthy();
     expect(host.querySelector(".rail-more")).toBeTruthy();
     expect(host.querySelector(".side-rail-nav .rail-sep")).toBeTruthy();
@@ -1677,9 +1990,7 @@ describe("Sidebar", () => {
     expect(host.querySelector(".side-main")?.getAttribute("aria-hidden")).toBe("true");
 
     expect(css).toMatch(/\.side-rail \{/);
-    expect(css).toMatch(/\.side-rail button:hover \.rail-tip/);
-    expect(css).toMatch(/\.side-rail button:focus-visible \.rail-tip/);
-    expect(css).toMatch(/\.app \{[\s\S]*?grid-template-columns: 340px 1fr/);
+    expect(css).toMatch(/\.app \{[\s\S]*?grid-template-columns: auto 1fr/);
     expect(css).toMatch(/\.app \{[\s\S]*?transition:\s*grid-template-columns var\(--dur-slow\)/);
     expect(css).toMatch(/\.collapsed \.side-main \{[\s\S]*?visibility:\s*hidden/);
     expect(css).toMatch(/\.collapsed \.side-rail \.rail-brand \{[\s\S]*?display: block/);
@@ -1770,10 +2081,9 @@ describe("Sidebar", () => {
 
   it("shows an empty catalog hint", () => {
     render({ ...initialState, section: "codebase" });
-    expect(host.querySelector(".empty-list")?.textContent).toMatch(/No linked repos/);
-    expect(
-      host.querySelector(".empty-list [data-testid='locus-mascot']")?.getAttribute("data-pose"),
-    ).toBe("rest");
+    expect(host.querySelector(".empty-list")?.textContent).toBe("No repos yet");
+    // One muted line: the main pane owns the mascot and the empty state.
+    expect(host.querySelector(".empty-list [data-testid='locus-mascot']")).toBeNull();
   });
 
   it("lists Slack channels and DMs with hash prefixes", () => {
@@ -1797,7 +2107,7 @@ describe("Sidebar", () => {
         },
       ],
     });
-    expect(host.querySelector(".brand p")?.textContent).toBe("slack · Locus Dev");
+    expect(host.querySelector(".brand p")?.textContent).toBe("Slack · Locus Dev");
     expect(host.querySelector(".search")?.getAttribute("placeholder")).toBe("Search channels");
     expect([...host.querySelectorAll(".session-group-label")].map((el) => el.textContent)).toEqual([
       "Channels",
@@ -2056,6 +2366,164 @@ describe("Sidebar", () => {
     expect(row?.querySelector(".slack-item-open")?.getAttribute("title")).toBe("🔒shipyard");
   });
 
+  it("hides list filter chips until the section has an item", () => {
+    render({ ...initialState, sessions: [] });
+    expect(host.querySelector("[aria-label='Session filter']")).toBeNull();
+    act(() => root.unmount());
+    host.remove();
+    render({ ...initialState, section: "docker", containers: [] });
+    expect(host.querySelector("[aria-label='Container filter']")).toBeNull();
+  });
+
+  it("collapses the footer strip when it has nothing to show", () => {
+    render({ ...initialState, section: "design" });
+    expect(host.querySelector(".side-foot")?.childElementCount).toBe(0);
+    expect(css).toMatch(/\.side-foot:empty \{\s*display: none;/);
+  });
+
+  it("puts the list menu beside the primary button on every section", () => {
+    for (const section of ["agents", "codebase", "board", "automations"] as const) {
+      render({ ...initialState, section });
+      const row = host.querySelector(".side-actions .side-actions-row");
+      expect(row?.querySelector(".btn.primary"), section).toBeTruthy();
+      expect(row?.querySelector("details.menu"), section).toBeTruthy();
+      expect(host.querySelector(".brand-actions"), section).toBeNull();
+      act(() => root.unmount());
+      host.remove();
+    }
+    render({ ...initialState, section: "agents" });
+  });
+
+  it("shows Stop on Docker only once a running container is picked", () => {
+    render({
+      ...initialState,
+      section: "docker",
+      pickedContainerIds: ["c1"],
+      containers: [
+        {
+          id: "c1",
+          name: "web",
+          image: "nginx:alpine",
+          state: "running",
+          status: "Up",
+          createdAt: "2020-01-01T00:00:00.000Z",
+          locus: false,
+        },
+      ],
+    });
+    const stop = host.querySelector(".side-actions [aria-label='Stop selected containers']");
+    expect(stop?.textContent).toBe(" Stop 1");
+    expect(host.querySelector("[aria-label='Container filter']")?.textContent).toBe("AllRunning 1");
+  });
+
+  it("opens the IDE Open folder / Clone repo choice from New workspace", () => {
+    const dispatch = vi.fn();
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root.render(
+        <Store.Provider value={{ state: { ...initialState, section: "ide" }, dispatch }}>
+          <Sidebar />
+        </Store.Provider>,
+      );
+    });
+    act(() => {
+      (host.querySelector("[data-testid='ide-new-workspace'] summary") as HTMLElement).click();
+    });
+    const items = [...host.querySelectorAll("[data-testid='ide-new-workspace'] .menu-item")];
+    expect(items.map((el) => el.textContent)).toEqual(["Open folder…", "Clone repo…"]);
+    act(() => {
+      (items[1] as HTMLElement).click();
+    });
+    expect(dispatch).toHaveBeenCalledWith({ type: "select", id: null });
+    expect(dispatch).toHaveBeenCalledWith({ type: "ideStart", intent: "clone" });
+  });
+
+  it("labels the bottom rail items like the ones above", () => {
+    render({
+      ...initialState,
+      setup: assessSetup({
+        hypervisorKind: "mock",
+        qemuFound: false,
+        linuxImageReady: false,
+        hasProvider: false,
+        hasGoldenImage: false,
+      }),
+    });
+    const labels = [...host.querySelectorAll(".side-rail-chrome .rail-label")].map(
+      (el) => el.textContent,
+    );
+    expect(labels).toEqual(["Setup", "Settings", "Collapse"]);
+    expect(css).toMatch(/\.side-rail-nav > button,\s*\.side-rail-chrome > button,/);
+  });
+
+  it("uses an icon-only rail at phone width", () => {
+    expect(css).toMatch(
+      /@media \(max-width: 599px\) \{\s*:root \{\s*--rail-w: 52px;\s*\}\s*\.side-rail \.rail-label \{\s*display: none;/,
+    );
+    render({ ...initialState, sessions: [session] });
+    const agents = host.querySelector(".side-rail-nav button[aria-label='Agents']");
+    expect(agents?.getAttribute("title")).toMatch(/^Agents/);
+  });
+
+  describe("narrow drawer", () => {
+    const originalMatchMedia = window.matchMedia;
+    function stubNarrow(matches: boolean) {
+      window.matchMedia = ((query: string) =>
+        ({
+          matches: query === "(max-width: 760px)" ? matches : false,
+          media: query,
+          onchange: null,
+          addEventListener: () => undefined,
+          removeEventListener: () => undefined,
+          addListener: () => undefined,
+          removeListener: () => undefined,
+          dispatchEvent: () => false,
+        }) as MediaQueryList) as typeof window.matchMedia;
+    }
+    afterEach(() => {
+      window.matchMedia = originalMatchMedia;
+    });
+
+    it("starts closed on narrow windows and closes from the scrim", () => {
+      stubNarrow(true);
+      renderLive({ ...initialState, sessions: [session] });
+      expect(host.querySelector(".app")?.classList.contains("collapsed")).toBe(true);
+      expect(host.querySelector("[data-testid='side-scrim']")).toBeNull();
+      act(() => {
+        (
+          host.querySelector(".side-rail button[aria-label='Expand sidebar']") as HTMLElement
+        ).click();
+      });
+      const scrim = host.querySelector("[data-testid='side-scrim']") as HTMLElement;
+      expect(scrim).toBeTruthy();
+      act(() => scrim.click());
+      expect(host.querySelector(".app")?.classList.contains("collapsed")).toBe(true);
+    });
+
+    it("closes the drawer after picking a list item", () => {
+      stubNarrow(true);
+      renderLive({ ...initialState, sessions: [session, { ...session, id: "s2", title: "Two" }] });
+      act(() => {
+        (
+          host.querySelector(".side-rail button[aria-label='Expand sidebar']") as HTMLElement
+        ).click();
+      });
+      act(() => {
+        (host.querySelector(".session-item[title='Two'] button") as HTMLElement | null)?.click();
+      });
+      expect(host.querySelector(".app")?.classList.contains("collapsed")).toBe(true);
+    });
+
+    it("leaves wide windows open with no scrim", () => {
+      stubNarrow(false);
+      renderLive({ ...initialState, sessions: [session] });
+      expect(host.querySelector(".app")?.classList.contains("collapsed")).toBe(false);
+      expect(host.querySelector("[data-testid='side-scrim']")).toBeNull();
+    });
+  });
+
   it("lists Docker containers with status dots", () => {
     render({
       ...initialState,
@@ -2073,17 +2541,17 @@ describe("Sidebar", () => {
         },
       ],
     });
-    expect(host.querySelector(".brand p")?.textContent).toBe("docker · mock");
+    expect(host.querySelector(".brand p")?.textContent).toBe("Docker · mock");
     expect(host.querySelector(".session-item.active .title-text")?.textContent).toBe("web");
     expect(host.querySelector(".session-item .dot.running")).toBeTruthy();
     expect(host.querySelector(".session-group-label")?.textContent).toMatch(/Running \(1\)/);
     expect(host.querySelector(".session-item .meta")?.textContent).toMatch(/c1/);
     expect(host.querySelector(".side-actions .btn.primary")).toBeNull();
     expect(host.querySelector(".side-actions [aria-label='Refresh containers']")).toBeTruthy();
-    expect(
-      host.querySelector(".side-actions [aria-label='Stop selected containers']"),
-    ).toBeTruthy();
-    expect(host.textContent).toContain("Running only");
+    // Stop only appears once something is picked.
+    expect(host.querySelector(".side-actions [aria-label='Stop selected containers']")).toBeNull();
+    expect(host.querySelector("[aria-label='Container filter']")?.textContent).toMatch(/All/);
+    expect(host.querySelector("[aria-label='Container filter']")?.textContent).toMatch(/Running/);
     expect(host.querySelector(".side-foot .hint")?.textContent).toMatch(/1 container/);
     expect(host.querySelector(".search-wrap .search-icon svg")).toBeTruthy();
     expect(host.querySelector(".search")?.getAttribute("placeholder")).toBe(
@@ -2091,7 +2559,7 @@ describe("Sidebar", () => {
     );
     expect(host.querySelector(".search-wrap kbd")).toBeNull();
     expect(host.querySelector(".side-foot .hint")?.textContent).toMatch(/daemon mock/);
-    expect(host.querySelector("[data-testid='docker-swarm-tab']")?.textContent).toBe("Swarm");
+    expect(host.querySelector("[data-testid='docker-swarm-tab']")?.textContent).toBe("Services");
     expect(css).toMatch(
       /\.session-item\.docker-item \{[\s\S]*?grid-template-columns: auto minmax\(0, 1fr\)/,
     );
@@ -2103,6 +2571,69 @@ describe("Sidebar", () => {
     expect(css).toMatch(
       /\.docker-item-open \{[\s\S]*?padding: var\(--space-2\) var\(--space-2-5\) var\(--space-2\) var\(--space-2\)/,
     );
+  });
+
+  it("shows Stop selected only once a running container is picked", () => {
+    render({
+      ...initialState,
+      section: "docker",
+      pickedContainerIds: ["c1"],
+      containers: [
+        {
+          id: "c1",
+          name: "web",
+          image: "nginx:alpine",
+          state: "running",
+          status: "Up",
+          createdAt: "2020-01-01T00:00:00.000Z",
+          locus: false,
+        },
+      ],
+    });
+    expect(
+      host.querySelector(".side-actions [aria-label='Stop selected containers']"),
+    ).toBeTruthy();
+    expect(host.querySelector(".side-actions [aria-label='Refresh containers']")?.textContent).toBe(
+      "",
+    );
+  });
+
+  it("makes Add Grafana the primary until Grafana is connected, then Investigate", () => {
+    render({ ...initialState, section: "grafana" });
+    expect(host.querySelector(".side-actions .btn.primary")?.textContent).toContain("Add Grafana");
+    expect(host.textContent).not.toContain("New agent");
+    act(() => root.unmount());
+    host.remove();
+    render({
+      ...initialState,
+      section: "grafana",
+      config: {
+        ...(initialState.config ?? ({} as NonNullable<typeof initialState.config>)),
+        integrations: [
+          {
+            id: "g1",
+            kind: "grafana",
+            name: "Grafana",
+            enabled: true,
+            baseUrl: "http://127.0.0.1:3000",
+            token: "••••••••",
+          },
+        ],
+      } as NonNullable<typeof initialState.config>,
+    });
+    expect(host.querySelector(".side-actions .btn.primary")?.textContent).toContain("Investigate");
+  });
+
+  it("hides Slack Refresh until Slack is connected and points the list at sign-in", () => {
+    render({
+      ...initialState,
+      section: "slack",
+      slackCatalogLoaded: true,
+      slackStatus: { connected: false, socket: "down" },
+      slackConversations: [],
+    });
+    expect(host.querySelector("[aria-label='Refresh channels']")).toBeNull();
+    expect(host.textContent).toContain("Sign in with Slack to see channels");
   });
 
   it("lists Docker Swarm services on the Swarm tab", () => {
@@ -2487,19 +3018,14 @@ describe("Sidebar", () => {
     });
     expect(host.textContent).toContain("Ship check");
     expect(host.textContent).not.toContain("Nightly");
-    const filter = host.querySelector('[aria-label="Job filter"]') as HTMLElement;
-    const paused = [...filter.querySelectorAll("button")].find((el) => el.textContent === "Paused");
     act(() => {
-      paused?.click();
+      expect(setSelectValue(host, "Job filter", "paused")).toBe(true);
     });
     expect(host.textContent).toContain("Ship check");
-    const failing = [...filter.querySelectorAll("button")].find(
-      (el) => el.textContent === "Failing",
-    );
     act(() => {
-      failing?.click();
+      setSelectValue(host, "Job filter", "failing");
     });
-    expect(host.textContent).toContain("No matching automations");
+    expect(host.textContent).toContain("No matching jobs");
   });
 
   it("shows a health strip above the automation list", () => {
@@ -2730,53 +3256,61 @@ describe("Sidebar", () => {
     expect(host.querySelector("[data-testid='auto-health']")?.textContent).toContain(
       "0 healthy · 1 failing · 0 paused",
     );
-    const filter = host.querySelector('[aria-label="Job filter"]') as HTMLElement;
-    const failing = [...filter.querySelectorAll("button")].find(
-      (el) => el.textContent === "Failing",
-    );
     act(() => {
-      failing?.click();
+      expect(setSelectValue(host, "Job filter", "failing")).toBe(true);
     });
     expect(host.textContent).toContain("Broken");
   });
 
-  it("sorts by trigger groups and can pause listed jobs", async () => {
+  function jobRow(
+    id: string,
+    name: string,
+    schedule: { kind: "webhook" } | { kind: "daily"; hour: number; minute: number },
+  ) {
+    return {
+      id,
+      name,
+      enabled: true,
+      prompt: "x",
+      os: "ubuntu" as const,
+      templateId: "ubuntu-24.04",
+      providerId: "p",
+      model: "grok-4",
+      startVm: false,
+      schedule,
+      createdAt: "2026-08-17T12:00:00.000Z",
+      updatedAt: "2026-08-17T12:00:00.000Z",
+    };
+  }
+
+  it("keeps a short job list to search plus one status dropdown", () => {
+    render({
+      ...initialState,
+      section: "automations",
+      automations: [jobRow("auto-daily", "Daily job", { kind: "daily", hour: 9, minute: 0 })],
+    });
+    expect(host.querySelector('[aria-label="Job filter"]')).toBeTruthy();
+    expect(host.querySelector('[aria-label="Job sort"]')).toBeNull();
+    expect(host.querySelector("[data-testid='auto-bulk']")).toBeNull();
+    expect(host.querySelector('[aria-label="Filter by health"]')).toBeNull();
+    expect(host.querySelector("[data-testid='auto-health']")).toBeTruthy();
+  });
+
+  it("sorts by trigger groups and can pause listed jobs once the list is long", async () => {
+    const fillers = Array.from({ length: 9 }, (_, i) =>
+      jobRow(`auto-fill-${i}`, `Filler ${i}`, { kind: "daily", hour: 10, minute: i }),
+    );
     render({
       ...initialState,
       section: "automations",
       automations: [
-        {
-          id: "auto-daily",
-          name: "Daily job",
-          enabled: true,
-          prompt: "x",
-          os: "ubuntu",
-          templateId: "ubuntu-24.04",
-          providerId: "p",
-          model: "grok-4",
-          startVm: false,
-          schedule: { kind: "daily", hour: 9, minute: 0 },
-          createdAt: "2026-08-17T12:00:00.000Z",
-          updatedAt: "2026-08-17T12:00:00.000Z",
-        },
-        {
-          id: "auto-hook",
-          name: "Hook job",
-          enabled: true,
-          prompt: "y",
-          os: "ubuntu",
-          templateId: "ubuntu-24.04",
-          providerId: "p",
-          model: "grok-4",
-          startVm: false,
-          schedule: { kind: "webhook" },
-          createdAt: "2026-08-17T12:00:00.000Z",
-          updatedAt: "2026-08-17T12:00:00.000Z",
-        },
+        jobRow("auto-daily", "Daily job", { kind: "daily", hour: 9, minute: 0 }),
+        jobRow("auto-hook", "Hook job", { kind: "webhook" }),
+        ...fillers,
       ],
     });
     expect(host.querySelector("[data-testid='auto-bulk']")).toBeTruthy();
-    const sort = host.querySelector('[aria-label="Automation sort"]') as HTMLElement;
+    const sort = host.querySelector('[aria-label="Job sort"]') as HTMLElement;
     const byTrigger = [...sort.querySelectorAll("button")].find(
       (el) => el.textContent === "By trigger",
     );
@@ -2796,7 +3330,7 @@ describe("Sidebar", () => {
       pauseListed?.click();
     });
     const modal = host.querySelector("[data-testid='auto-bulk-confirm']");
-    expect(modal?.textContent).toContain("Pause 2 automations");
+    expect(modal?.textContent).toContain("Pause 11 jobs");
     const confirm = [...modal!.querySelectorAll("button")].find(
       (el) => el.textContent === "Pause listed",
     );

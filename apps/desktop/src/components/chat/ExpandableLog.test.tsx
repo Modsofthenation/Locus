@@ -60,4 +60,13 @@ describe("ExpandableLog", () => {
     expect(css).toMatch(/\.log-blob pre \{[\s\S]*?padding: var\(--space-3-5\) var\(--space-4\)/);
     expect(css).toMatch(/\.term-log \.log-blob > summary \{[\s\S]*?color:\s*var\(--term-fg\)/);
   });
+  it("shows a Docker-down error as a plain sentence with the raw text in details", () => {
+    const raw =
+      "ERROR: failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory";
+    render(<ExpandableLog compact danger text={raw} />);
+    expect(host.querySelector("summary")?.textContent).toBe(
+      "Docker isn't running — switch to Host or start Docker",
+    );
+    expect(host.querySelector("pre")?.textContent).toBe(raw);
+  });
 });

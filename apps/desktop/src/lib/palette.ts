@@ -50,7 +50,7 @@ export type PaletteGroup =
   | "Project"
   | "IDE"
   | "Needs you"
-  | "Automations"
+  | "Jobs"
   | "Codebase"
   | "Brain"
   | "Slack"
@@ -337,16 +337,16 @@ export function paletteItems(input: {
   }
   items.push({
     id: "section:automations",
-    title: "Automations",
+    title: "Jobs",
     hint: "Scheduled and event jobs",
-    group: "Automations",
+    group: "Jobs",
     keywords: "automation schedule cron webhook forge-push pull-request job inbox",
   });
   items.push({
     id: "new-automation",
-    title: "New automation",
-    hint: shortcutHint("new", "on Automations"),
-    group: "Automations",
+    title: "New job",
+    hint: shortcutHint("new", "on Jobs"),
+    group: "Jobs",
     keywords: "new automation create schedule job",
   });
   for (const row of input.automations ?? []) {
@@ -354,7 +354,7 @@ export function paletteItems(input: {
       id: `automation:${row.id}`,
       title: row.name,
       hint: `${row.enabled ? "On" : "Off"} · ${formatSchedule(row.schedule)}`,
-      group: "Automations",
+      group: "Jobs",
       keywords: `${row.name} ${row.prompt} ${row.schedule.kind} automation job`,
     });
   }
@@ -676,7 +676,7 @@ const SWARM_HIDDEN_GROUPS = new Set<PaletteGroup>([
   "Games",
   "Board",
   "IDE",
-  "Automations",
+  "Jobs",
   "Codebase",
   "Brain",
   "Slack",

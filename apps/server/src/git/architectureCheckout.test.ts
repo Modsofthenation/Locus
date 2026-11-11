@@ -30,7 +30,9 @@ async function setup() {
   const hypervisor = new MockHypervisor(dir);
   const hub = new Hub();
   const sessions = new SessionService(store, hypervisor, hub);
-  const repos = new RepoService(store, sessions, hub);
+  // Linking looks up the default branch; keep tests offline.
+  const offline: typeof fetch = async () => new Response("{}", { status: 404 });
+  const repos = new RepoService(store, sessions, hub, offline);
   const app = createApp({ store, sessions, hypervisor, repos });
   return { dir, store, app };
 }

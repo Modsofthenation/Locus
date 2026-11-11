@@ -24,7 +24,7 @@ import {
 } from "@/lib/composerPaste";
 import { IconClose, IconPlus } from "@/components/layout/Icons";
 import { Tooltip } from "@/components/layout/Tooltip";
-import { placeMenuPop } from "@/components/layout/OverflowMenu";
+import { MenuItem, MenuSep, OverflowMenu, placeMenuPop } from "@/components/layout/OverflowMenu";
 
 export const COMPOSER_FILE_CAP = 4;
 export const COMPOSER_FILE_ACCEPT =
@@ -37,12 +37,17 @@ export function mergeComposerFiles(current: File[], incoming: File[]): File[] {
   return [...current, ...incoming].slice(0, COMPOSER_FILE_CAP);
 }
 
+/** Optional context the "+" menu can add (repo, asset, kit…); its chip appears once picked. */
+export type ComposerAddExtra = { id: string; label: string; onSelect: () => void };
+
 export function ComposerAddButton(props: {
   title: string;
   onPick: (files: File[]) => void;
   onError: (message: string | null) => void;
+  extras?: ComposerAddExtra[];
 }) {
   const input = useRef<HTMLInputElement>(null);
+  const extras = props.extras ?? [];
   return (
     <>
       <input
@@ -64,15 +69,37 @@ export function ComposerAddButton(props: {
           props.onPick(picked);
         }}
       />
-      <Tooltip label={props.title}>
-        <button
-          type="button"
-          className="btn small ghost composer-add"
-          onClick={() => input.current?.click()}
+      {extras.length ? (
+        <OverflowMenu
+          label={<IconPlus />}
+          title="Add"
+          align="left"
+          prefer="up"
+          className="composer-add-menu"
+          toggleClassName="btn small ghost composer-add"
+          testId="composer-add-menu"
         >
-          <IconPlus />
-        </button>
-      </Tooltip>
+          <MenuItem title={props.title} onClick={() => input.current?.click()}>
+            Attach files…
+          </MenuItem>
+          <MenuSep />
+          {extras.map((extra) => (
+            <MenuItem key={extra.id} testId={`composer-add-${extra.id}`} onClick={extra.onSelect}>
+              {extra.label}
+            </MenuItem>
+          ))}
+        </OverflowMenu>
+      ) : (
+        <Tooltip label={props.title}>
+          <button
+            type="button"
+            className="btn small ghost composer-add"
+            onClick={() => input.current?.click()}
+          >
+            <IconPlus />
+          </button>
+        </Tooltip>
+      )}
     </>
   );
 }

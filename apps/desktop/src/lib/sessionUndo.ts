@@ -3,13 +3,24 @@ import { api } from "./api";
 import { showNotice, showUndoNotice } from "./notice";
 
 type SessionDispatch = (
-  action: { type: "session"; session: AgentSession } | { type: "deleted"; id: string },
+  action:
+    | { type: "session"; session: AgentSession }
+    | { type: "deleted"; id: string }
+    | { type: "deselect"; id: string }
+    | { type: "select"; id: string },
 ) => void;
+
+type ArchiveOptions = {
+  /** Close the chat if it is open (Delete), and reopen it on Undo when `wasOpen`. */
+  close?: boolean;
+  wasOpen?: boolean;
+};
 
 export async function archiveSessions(
   targets: AgentSession[],
   dispatch: SessionDispatch,
   doneLabel: string,
+  opts: ArchiveOptions = {},
 ): Promise<void> {
   if (!targets.length) return;
   const previous = targets.map((session) => ({ ...session }));
@@ -18,6 +29,7 @@ export async function archiveSessions(
     try {
       await api.patchSession(session.id, { archived: true });
       dispatch({ type: "session", session: { ...session, archived: true } });
+      if (opts.close) dispatch({ type: "deselect", id: session.id });
     } catch (err) {
       errors.push(`${session.title}: ${err instanceof Error ? err.message : "Could not archive"}`);
     }
@@ -32,6 +44,7 @@ export async function archiveSessions(
         try {
           await api.patchSession(session.id, { archived: false });
           dispatch({ type: "session", session: { ...session, archived: false } });
+          if (opts.close && opts.wasOpen) dispatch({ type: "select", id: session.id });
         } catch (err) {
           showNotice(err instanceof Error ? err.message : "Could not undo archive");
         }
@@ -53,6 +66,7 @@ export async function deleteSessionWithUndo(
     confirmLabel: string;
     danger: boolean;
   }) => Promise<boolean>,
+  opts: { open?: boolean } = {},
 ): Promise<void> {
   if (session.archived) {
     if (
@@ -73,5 +87,10 @@ export async function deleteSessionWithUndo(
     }
     return;
   }
-  archiveOne(session, dispatch, `Deleted ${session.title}`);
+  // Delete of a live chat is a soft delete (archive + Undo). Close it so the
+  // pane goes back to the new-agent screen instead of showing a removed chat.
+  void archiveSessions([session], dispatch, `Deleted ${session.title}`, {
+    close: true,
+    wasOpen: opts.open,
+  });
 }

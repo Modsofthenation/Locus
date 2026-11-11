@@ -113,6 +113,8 @@ describe("kiro cli chat loop", () => {
     );
     expect(captured[0]?.args.at(-1)).toContain("Add a README");
     expect(captured[0]?.args.at(-1)).toContain("git_pr");
+    expect(captured[0]?.args.at(-1)).toMatch(/git stash/);
+    expect(captured[0]?.args.at(-1)).toContain("git_branch");
     expect(captured[0]?.env?.LOCUS_GIT_MCP_URL).toMatch(new RegExp(`/mcp/sessions/${created.id}$`));
     expect(captured[0]?.args).not.toContain("--require-mcp-startup");
     expect(captured[0]?.args).not.toContain("--resume-id");
@@ -229,6 +231,103 @@ describe("kiro cli chat loop", () => {
       command: "python3 ./manage.py test shop.tests.test_models",
       description: "Run Django tests",
     });
+    expect(assistant?.content).toContain("Tests passed.");
+  });
+
+  it("keeps one exec chip when V3 updates omit toolCallId and dump ACP content", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-kiro-cli-fingerprint-"));
+    cleanup.push(dir);
+    const store = new JsonStore(dir);
+    await store.init();
+    const config = await store.loadConfig();
+    const kiro = config.providers.find((p) => p.kind === "kiro-cli")!;
+    kiro.enabled = true;
+    await store.saveConfig(config);
+    const sessions = new SessionService(store, new MockHypervisor(dir), new Hub());
+    sessions.fetchFn = async () => {
+      throw new Error("Kiro CLI must not call chat completions");
+    };
+    sessions.kiroCliSpawner = linesSpawner(
+      [],
+      [
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            sessionId: "kiro-fp",
+            update: {
+              sessionUpdate: "tool_call",
+              toolCallId: "e1",
+              kind: "execute",
+              status: "pending",
+              rawInput: { command: "npx jest src/app.test.ts" },
+              _meta: { kiro: { toolName: "executeCommand" } },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              id: "msg-1",
+              status: "in_progress",
+              rawInput: { command: "npx jest src/app.test.ts", description: "Run unit tests" },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              id: "msg-2",
+              status: "in_progress",
+              rawInput: { command: "npx jest src/app.test.ts" },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "e1",
+              status: "completed",
+              content: [
+                {
+                  type: "content",
+                  content: { type: "text", text: "Output:\nPASS\n\nExit Code: 0" },
+                },
+              ],
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "runFinished",
+          data: { status: "success", sessionId: "kiro-fp", finalText: "Tests passed." },
+        }),
+      ],
+    );
+    const created = await sessions.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      runtime: "host",
+      providerId: kiro.id,
+      model: "auto",
+      startVm: false,
+    });
+    await sessions.sendChat(created.id, "run the tests");
+    const fresh = await waitFor(sessions, created.id, (session) =>
+      Boolean(session.status !== "running" && session.messages.some((m) => m.role === "assistant")),
+    );
+    const assistant = fresh?.messages.find((m) => m.role === "assistant");
+    expect(assistant?.toolCalls?.map((call) => `${call.name}:${call.id}`)).toEqual(["exec:e1"]);
+    expect(assistant?.toolCalls?.[0]?.arguments).toMatchObject({
+      command: "npx jest src/app.test.ts",
+      description: "Run unit tests",
+    });
+    expect(assistant?.toolCalls?.[0]?.result).toContain("Exit Code: 0");
+    expect(assistant?.toolCalls?.[0]?.result).not.toMatch(/"type":"content"/);
     expect(assistant?.content).toContain("Tests passed.");
   });
 

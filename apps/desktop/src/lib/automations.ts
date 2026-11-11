@@ -340,6 +340,40 @@ export function runOutcomeLabel(
   return summary ? clipFact(summary, 96) : undefined;
 }
 
+export const DOCKER_DOWN_MESSAGE = "Docker isn't running — switch to Host or start Docker";
+
+export type PlainJobError = {
+  /** One plain sentence for the run row / notice. */
+  summary: string;
+  /** What the runtime actually said, behind "Show details". */
+  detail: string;
+  /** Known cause the UI can offer actions for. */
+  cause?: "docker";
+};
+
+const DOCKER_DOWN_PATTERNS = [
+  /docker\.sock/i,
+  /docker API at/i,
+  /Cannot connect to the Docker daemon/i,
+  /Is the docker daemon running/i,
+  /docker daemon (is )?not (running|reachable)/i,
+  /error during connect:.*docker/i,
+];
+
+export function isDockerDownError(text: string | undefined): boolean {
+  const raw = text?.trim();
+  if (!raw) return false;
+  return DOCKER_DOWN_PATTERNS.some((re) => re.test(raw));
+}
+
+/** Map raw runtime errors we recognise to plain language; unknown errors return null. */
+export function plainJobError(text: string | undefined): PlainJobError | null {
+  const raw = text?.trim();
+  if (!raw) return null;
+  if (isDockerDownError(raw)) return { summary: DOCKER_DOWN_MESSAGE, detail: raw, cause: "docker" };
+  return null;
+}
+
 export function spendChipTitle(args: {
   over: boolean;
   label: string;

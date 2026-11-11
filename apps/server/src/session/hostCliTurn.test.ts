@@ -128,7 +128,7 @@ describe("runHostCliTurn", () => {
       },
     );
     expect(result).toBe("");
-    expect(append.mock.calls[0]?.[0]).toMatch(/running Linux guest with SSH/);
+    expect(append.mock.calls[0]?.[0]).toMatch(/running guest with SSH/);
   });
 
   it("spawns Claude Code over SSH on a Linux VM", async () => {

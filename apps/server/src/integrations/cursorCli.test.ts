@@ -1020,7 +1020,7 @@ describe("cursor cli chat loop", () => {
     expect(canvas.html).toContain("chihuahua walking");
     expect(canvas.html).toContain("First draft");
     expect(canvas.html).toContain("data-locus-host-fallback");
-    expect(fresh?.needsHuman).toMatch(/last-resort host draft/);
+    expect(fresh?.needsHuman).toMatch(/starter draft on this canvas/);
     expect(captured[1]?.args.at(-1)).toMatch(/Design canvas snapshot/);
     expect(captured[1]?.args.at(-1)).toMatch(/file_write now/);
     hypervisor.shutdown();

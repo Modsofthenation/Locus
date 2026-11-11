@@ -34,7 +34,7 @@ describe("css tokens", () => {
   });
 
   it("does not strip the global focus ring from composer selects", () => {
-    for (const selector of [".model-picker.compact > select", ".composer-head .subagent-select"]) {
+    for (const selector of [".model-picker.compact > select", ".composer-shell .subagent-select"]) {
       const start = css.indexOf(`${selector} {`);
       expect(start, selector).toBeGreaterThan(-1);
       const body = css.slice(start, css.indexOf("}", start));
@@ -43,16 +43,16 @@ describe("css tokens", () => {
   });
 
   it("keeps the composer subagent chip as short as neighboring head chips", () => {
-    const wrapperStart = css.indexOf(".composer-head .subagent-select {");
+    const wrapperStart = css.indexOf(".composer-shell .subagent-select {");
     expect(wrapperStart).toBeGreaterThan(-1);
     const wrapper = css.slice(wrapperStart, css.indexOf("}", wrapperStart));
     expect(wrapper).not.toMatch(/padding:/);
     expect(wrapper).not.toMatch(/min-height:/);
     expect(css).toMatch(
-      /\.composer-head \.ui-select\.compact\.subagent-select \.ui-select-toggle \{[\s\S]*?min-height:\s*0/,
+      /\.composer-shell \.ui-select\.compact\.subagent-select \.ui-select-toggle \{[\s\S]*?min-height:\s*0/,
     );
     expect(css).toMatch(
-      /\.composer-head \.ui-select\.compact\.subagent-select \.ui-select-toggle \{[\s\S]*?padding:\s*var\(--space-0-5\) var\(--space-2\)/,
+      /\.composer-shell \.ui-select\.compact\.subagent-select \.ui-select-toggle \{[\s\S]*?padding:\s*var\(--space-0-5\) var\(--space-2\)/,
     );
   });
 

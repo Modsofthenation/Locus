@@ -21,6 +21,12 @@ export const DEFAULT_DOCKER_LOG_TAIL = 400;
 export const MAX_DOCKER_LOG_TAIL = 2000;
 export const MAX_DOCKER_BULK_IDS = 64;
 
+/** `GET /api/docker/status`: whether the Docker daemon answers right now. */
+export interface DockerDaemonStatus {
+  kind: "mock" | "docker";
+  available: boolean;
+}
+
 export interface DockerBulkStopError {
   id: string;
   error: string;

@@ -71,12 +71,77 @@ describe("RecipeCards", () => {
   it("renders pill shortcuts without compact tiles", () => {
     const recipes = visibleRecipes(["ubuntu"]);
     render(
-      <RecipeCards pills recipes={recipes} selectedId="pr-reviewer" onSelect={() => undefined} />,
+      <RecipeCards
+        pills
+        shortcuts
+        recipes={recipes}
+        selectedId="pr-reviewer"
+        onSelect={() => undefined}
+      />,
     );
     expect(host.querySelector(".recipe-grid.pills")).toBeTruthy();
     expect(host.querySelector(".recipe-tile")).toBeNull();
     expect(host.querySelector("kbd")?.textContent).toBe("P");
     expect(host.querySelector("[aria-pressed='true']")?.textContent).toContain("PR reviewer");
+  });
+
+  it("omits letter hints where the screen has no shortcuts", () => {
+    render(
+      <RecipeCards
+        pills
+        recipes={visibleRecipes(["ubuntu"])}
+        selectedId={null}
+        onSelect={() => undefined}
+      />,
+    );
+    expect(host.querySelector("kbd")).toBeNull();
+    expect(host.querySelector("[aria-keyshortcuts]")).toBeNull();
+  });
+
+  it("shows letter hints while Alt is held", () => {
+    render(
+      <RecipeCards
+        pills
+        shortcuts
+        recipes={visibleRecipes(["ubuntu"])}
+        selectedId={null}
+        onSelect={() => undefined}
+      />,
+    );
+    const grid = host.querySelector(".recipe-grid.pills")!;
+    expect(grid.classList.contains("show-keys")).toBe(false);
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Alt" }));
+    });
+    expect(grid.classList.contains("show-keys")).toBe(true);
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "Alt" }));
+    });
+    expect(grid.classList.contains("show-keys")).toBe(false);
+  });
+
+  it("caps pills at the limit and reveals the rest with More…", () => {
+    const recipes = AGENT_RECIPES.slice(0, 5);
+    render(
+      <RecipeCards
+        pills
+        limit={2}
+        recipes={recipes}
+        selectedId={recipes[4]!.id}
+        onSelect={() => undefined}
+        more={<p data-testid="more-extra">extra</p>}
+      />,
+    );
+    // Two plus the selected one stay visible.
+    expect(host.querySelectorAll("button[aria-pressed]")).toHaveLength(3);
+    expect(host.querySelector("[data-testid='more-extra']")).toBeNull();
+    const more = [...host.querySelectorAll("button")].find((btn) => btn.textContent === "More…")!;
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    act(() => {
+      more.click();
+    });
+    expect(host.querySelectorAll("button[aria-pressed]")).toHaveLength(5);
+    expect(host.querySelector("[data-testid='more-extra']")).toBeTruthy();
   });
 });
 
@@ -89,7 +154,7 @@ describe("FirstTaskPills", () => {
     host.remove();
   });
 
-  it("renders one sample and calls onSelect", () => {
+  it("renders every first task and calls onSelect", () => {
     let picked = "";
     host = document.createElement("div");
     document.body.appendChild(host);
@@ -109,7 +174,7 @@ describe("FirstTaskPills", () => {
     expect(host.querySelector(".recipe-grid.pills")).toBeTruthy();
     expect(host.textContent).toContain("Try a first task");
     expect(host.textContent).toContain("hello.txt");
-    expect(host.querySelectorAll(".recipe-grid.pills button")).toHaveLength(1);
+    expect(host.querySelectorAll(".recipe-grid.pills button")).toHaveLength(FIRST_TASKS.length);
     act(() => {
       (host.querySelector(".recipe-grid.pills button") as HTMLButtonElement).click();
     });

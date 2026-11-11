@@ -132,7 +132,16 @@ describe("IdeEmpty", () => {
     render();
     expect(host.querySelector("[data-testid='ide-start']")).toBeTruthy();
     expect(host.querySelector("[data-testid='locus-mascot']")).toBeTruthy();
-    expect(host.querySelector(".empty-hero h2")?.textContent).toBe("IDE");
+    expect(host.querySelector(".empty-hero h2")?.textContent).toBe("Open a project to edit");
+    expect(host.querySelector(".ide-start-tiles")?.textContent).toContain(
+      "A folder on this machine",
+    );
+    expect(host.querySelector(".ide-start-tiles")?.textContent).toContain(
+      "From GitHub, GitLab or a URL",
+    );
+    const crossLink = host.querySelector("[data-testid='feature-hint-ide-codebase']");
+    expect(crossLink?.querySelector("button.linkish")?.textContent).toBe("Open Codebase");
+    expect(crossLink?.querySelector(".btn")).toBeNull();
     expect(host.textContent).toContain("Open folder");
     expect(host.textContent).toContain("Clone repo");
     expect(host.querySelector("[data-testid='ide-clone-panel']")).toBeNull();
@@ -160,8 +169,8 @@ describe("IdeEmpty", () => {
       hostDir: "/home/me/src/app",
     });
     render((action) => actions.push(action));
-    const openFolder = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Open folder",
+    const openFolder = [...host.querySelectorAll("button")].find((btn) =>
+      btn.textContent?.startsWith("Open folder"),
     );
     await act(async () => {
       openFolder!.click();
@@ -208,8 +217,8 @@ describe("IdeEmpty", () => {
       repoId: "r1",
     });
     render((action) => actions.push(action), { repos: [linkedRepo] });
-    const clone = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Clone repo",
+    const clone = [...host.querySelectorAll("button")].find((btn) =>
+      btn.textContent?.startsWith("Clone repo"),
     );
     act(() => {
       clone!.click();
@@ -240,7 +249,9 @@ describe("IdeEmpty", () => {
     vi.mocked(api.createSession).mockResolvedValue(created);
     render();
     act(() => {
-      [...host.querySelectorAll("button")].find((btn) => btn.textContent === "Clone repo")!.click();
+      [...host.querySelectorAll("button")]
+        .find((btn) => btn.textContent?.startsWith("Clone repo"))!
+        .click();
     });
     const url = host.querySelector("[aria-label='Repository URL']") as HTMLInputElement;
     act(() => {
@@ -296,7 +307,9 @@ describe("IdeEmpty", () => {
     const actions: Action[] = [];
     render((action) => actions.push(action));
     act(() => {
-      [...host.querySelectorAll("button")].find((btn) => btn.textContent === "Clone repo")!.click();
+      [...host.querySelectorAll("button")]
+        .find((btn) => btn.textContent?.startsWith("Clone repo"))!
+        .click();
     });
     await act(async () => {
       [...host.querySelectorAll("button")]
@@ -325,5 +338,12 @@ describe("IdeEmpty", () => {
     expect(actions).toContainEqual(
       expect.objectContaining({ type: "repo", repo: expect.objectContaining({ id: "r2" }) }),
     );
+  });
+
+  it("opens the clone choice when the sidebar New workspace menu asks for it", () => {
+    const actions: Action[] = [];
+    render((action) => actions.push(action), { ideStart: "clone" });
+    expect(host.querySelector("[data-testid='ide-clone-panel']")).toBeTruthy();
+    expect(actions).toContainEqual({ type: "ideStart", intent: null });
   });
 });

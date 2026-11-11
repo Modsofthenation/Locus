@@ -429,33 +429,48 @@ describe("AutomationsPane memory editor", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "compare", open: true });
   });
 
-  it("keeps Duplicate, Settings, Delete, and Run now in the pane head", async () => {
-    vi.mocked(api.runAutomation).mockResolvedValue({
-      id: "run-now",
-      automationId: item.id,
-      status: "running",
-      trigger: "manual",
-      startedAt: "2026-08-29T02:00:00.000Z",
-    });
+  it("keeps Duplicate, Settings, Delete in the pane head and leaves Run now to the topbar", () => {
     render();
     const headLabels = [...host.querySelectorAll(".auto-head button")].map((el) =>
       el.textContent?.trim(),
     );
-    expect(headLabels).toEqual(
-      expect.arrayContaining(["Run now", "Duplicate", "Settings", "Delete"]),
-    );
-    expect(host.querySelector("[data-testid='auto-pane-run-now']")).toBeTruthy();
-    expect(host.querySelector("[data-testid='auto-runs-empty-cta']")?.textContent).toMatch(
-      /Run now/,
-    );
-    await act(async () => {
-      (host.querySelector("[data-testid='auto-pane-run-now']") as HTMLButtonElement).click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(api.runAutomation).toHaveBeenCalledWith("auto-1");
+    expect(headLabels).toEqual(expect.arrayContaining(["Duplicate", "Settings", "Delete"]));
+    expect(headLabels).not.toContain("Run now");
+    expect(host.querySelector("[data-testid='auto-pane-run-now']")).toBeNull();
+    const empty = host.querySelector("[data-testid='auto-runs-empty-cta']");
+    expect(empty?.textContent).toMatch(/No runs yet/);
+    expect(empty?.querySelector("button")).toBeNull();
     expect(host.querySelector("[data-testid='auto-chips']")?.textContent).toMatch(/Enabled/);
     expect(host.querySelector("h2")).toBeNull();
+  });
+
+  it("shows a Docker socket failure as one plain sentence with Show details", () => {
+    const raw =
+      "failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory";
+    render(
+      { ...item, runtime: "docker", dockerImage: "ubuntu:24.04" },
+      {
+        runs: [
+          {
+            id: "run-docker",
+            automationId: item.id,
+            status: "failed",
+            trigger: "manual",
+            error: raw,
+            startedAt: "2026-08-29T02:00:00.000Z",
+            finishedAt: "2026-08-29T02:00:01.000Z",
+          },
+        ],
+      },
+    );
+    const plain = host.querySelector("[data-testid='run-error-plain']");
+    expect(plain?.querySelector("p")?.textContent).toBe(
+      "Docker isn't running — switch to Host or start Docker",
+    );
+    const details = plain?.querySelector("details");
+    expect(details?.querySelector("summary")?.textContent).toBe("Show details");
+    expect(details?.querySelector("pre")?.textContent).toBe(raw);
+    expect(details?.open).toBe(false);
   });
 
   it("shows starter pills when there are no jobs", () => {

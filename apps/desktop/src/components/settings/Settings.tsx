@@ -78,12 +78,14 @@ import {
   SettingsEmpty,
   SkillCard,
   WorkerCard,
+  integrationConnected,
   isBuiltinProvider,
   isBuiltinTemplate,
 } from "./SettingsCards";
 import { PolicyBanner, policyControlLocked } from "./PolicyBanner";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { NotificationSettings } from "./NotificationSettings";
+import { HowItWorks, SettingsToggleRow } from "./SettingsBits";
 import { SearchField } from "@/components/layout/SearchField";
 import { BusyButton } from "@/components/layout/Skeleton";
 import { EmptyHint } from "@/components/layout/EmptyHero";
@@ -136,6 +138,7 @@ export function Settings() {
   const [funnelBusy, setFunnelBusy] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
+  const [providerFilter, setProviderFilter] = useState("");
   const [expandedForge, setExpandedForge] = useState<string | null>(null);
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [expandedMachine, setExpandedMachine] = useState<string | null>(null);
@@ -224,7 +227,6 @@ export function Settings() {
   useEffect(() => {
     if (state.section === "settings" && state.config) {
       setDraft((current) => current ?? state.config);
-      setExpandedProvider((current) => current ?? state.config?.providers[0]?.id ?? null);
       setExpandedForge((current) => current ?? state.config?.forges[0]?.id ?? null);
       setExpandedSkill((current) => current ?? state.config?.skills?.[0]?.id ?? null);
       setExpandedMachine((current) => current ?? state.config?.templates[0]?.id ?? null);
@@ -477,6 +479,9 @@ export function Settings() {
   if (state.section !== "settings" || !draft) return null;
   const current = draft;
   const oauthCallback = forgeOauthCallbackUrl(current.advanced.bindPort);
+  const connectedKinds = new Set(
+    (current.integrations ?? []).filter(integrationConnected).map((row) => row.kind),
+  );
 
   async function startOauth(account: (typeof current.forges)[number]) {
     setError(null);
@@ -747,7 +752,7 @@ export function Settings() {
     if (
       !(await askConfirm({
         title: "Delete all Locus data?",
-        body: `Delete all Locus data in ${dir}? Sessions, secrets, disks, golden images, media, and automations will be gone. QEMU and Docker on this host stay.`,
+        body: `Delete all Locus data in ${dir}? Sessions, secrets, disks, golden images, media, and jobs will be gone. QEMU and Docker on this host stay.`,
         confirmLabel: "Continue",
         danger: true,
       }))
@@ -845,6 +850,7 @@ export function Settings() {
       extraHeaders: {},
     };
     setDraft({ ...current, providers: [...current.providers, next] });
+    setProviderFilter("");
     setExpandedProvider(next.id);
   }
 
@@ -1084,7 +1090,10 @@ export function Settings() {
   function focusSettingsHit(hit: SettingsSearchHit) {
     dispatch({ type: "settingsTab", tab: hit.tab });
     setFind("");
-    if (hit.tab === "providers" && hit.id) setExpandedProvider(hit.id);
+    if (hit.tab === "providers" && hit.id) {
+      setProviderFilter("");
+      setExpandedProvider(hit.id);
+    }
     if (hit.tab === "mcp" && hit.id) setExpandedMcp(hit.id);
     if (hit.tab === "skills" && hit.id) setExpandedSkill(hit.id);
     if (hit.tab === "machines" && hit.id) setExpandedMachine(hit.id);
@@ -1174,34 +1183,56 @@ export function Settings() {
                 Add provider
               </button>
             </div>
-            {draft.providers
-              .map((p, i) => ({ p, i }))
-              .sort((a, b) => Number(b.p.enabled) - Number(a.p.enabled))
-              .map(({ p, i }) => (
-                <ProviderCard
-                  key={p.id}
-                  provider={p}
-                  expanded={expandedProvider === p.id}
-                  busy={busyProvider === p.id}
-                  probe={probe[p.id]}
-                  locked={
-                    Boolean(draft.managedPolicy?.active) &&
-                    !providerAllowedByPolicy(p, draft.managedPolicy?.policy)
-                  }
-                  onToggleExpand={() => setExpandedProvider((id) => (id === p.id ? null : p.id))}
-                  onPatch={(patch) => patchProvider(i, patch)}
-                  onRefresh={() => void refreshModels(i)}
-                  onTest={() => void testConn(i)}
-                  onRemove={
-                    isBuiltinProvider(p)
-                      ? undefined
-                      : () => {
-                          removeListUndoable("providers", i, p.name);
-                          setExpandedProvider((id) => (id === p.id ? null : id));
-                        }
-                  }
-                />
-              ))}
+            {draft.providers.length > 6 ? (
+              <SearchField
+                className="search"
+                wrapClassName="provider-filter"
+                value={providerFilter}
+                placeholder="Filter providers…"
+                aria-label="Filter providers"
+                onChange={(event) => setProviderFilter(event.target.value)}
+              />
+            ) : null}
+            {providerGroups(draft.providers, providerFilter).map((group) => (
+              <section
+                key={group.id}
+                className="provider-group"
+                data-testid={`provider-group-${group.id}`}
+                aria-label={group.label}
+              >
+                <h3 className="provider-group-label">
+                  {group.label} <span className="provider-group-count">{group.rows.length}</span>
+                </h3>
+                {group.rows.map(({ p, i }) => (
+                  <ProviderCard
+                    key={p.id}
+                    provider={p}
+                    expanded={expandedProvider === p.id}
+                    busy={busyProvider === p.id}
+                    probe={probe[p.id]}
+                    locked={
+                      Boolean(draft.managedPolicy?.active) &&
+                      !providerAllowedByPolicy(p, draft.managedPolicy?.policy)
+                    }
+                    onToggleExpand={() => setExpandedProvider((id) => (id === p.id ? null : p.id))}
+                    onPatch={(patch) => patchProvider(i, patch)}
+                    onRefresh={() => void refreshModels(i)}
+                    onTest={() => void testConn(i)}
+                    onRemove={
+                      isBuiltinProvider(p)
+                        ? undefined
+                        : () => {
+                            removeListUndoable("providers", i, p.name);
+                            setExpandedProvider((id) => (id === p.id ? null : id));
+                          }
+                    }
+                  />
+                ))}
+              </section>
+            ))}
+            {providerFilter.trim() && !providerGroups(draft.providers, providerFilter).length ? (
+              <p className="hint">No providers match “{providerFilter.trim()}”.</p>
+            ) : null}
           </>
         )}
 
@@ -1215,7 +1246,7 @@ export function Settings() {
             formatOnSave={draft.formatOnSave !== false}
             showMinimap={draft.showMinimap !== false}
             onSelect={(id: ThemeId) => setDraft({ ...draft, theme: id })}
-            onEditor={(patch) => setDraft({ ...draft, ...patch })}
+            onEditor={(patch) => setDraft((prev) => (prev ? { ...prev, ...patch } : prev))}
           />
         )}
 
@@ -1308,7 +1339,7 @@ export function Settings() {
             <p className="scrim-note" style={{ marginTop: 0, marginBottom: 12 }}>
               Match a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps URL (or a substring
               like org/repo) to give that project a different CPU, RAM, or disk than the guest
-              default. Agent and automation forms still let you override per run.
+              default. Agent and job forms still let you override per run.
             </p>
             {(draft.hardwareProfiles ?? []).map((profile, i) => (
               <div className="template-row" key={profile.id}>
@@ -1438,16 +1469,37 @@ export function Settings() {
 
         {tab === "workers" && (
           <>
-            <div className="settings-pane-head">
-              <p className="hint">
-                Paste the add line from <code>npm run dev:worker</code> (or{" "}
-                <code>locus config workers add</code>). Locus does not scan the LAN. Chat, keys, and
-                approvals stay on this computer. Docker, Host, or QEMU VM. Cloud VMs destroy guests
-                on stop and after idle TTL. Set hourly USD so the spend cap meters VM time. Cloud
-                VMs need an image allowlist. Fargate needs a size allowlist and a task definition
-                that already runs locus-worker.
+            <HowItWorks
+              testId="workers-how"
+              lead={
+                <>
+                  Run agents on another machine: paste the add line it prints from{" "}
+                  <code>npm run dev:worker</code>.
+                </>
+              }
+            >
+              <p>
+                You can also use <code>locus config workers add</code>. Locus does not scan the LAN.
+                Chat, keys, and approvals stay on this computer; a worker runs Docker, Host, or QEMU
+                VM guests.
               </p>
-            </div>
+              <p>
+                Create a VM (or use a LAN box), install Docker, run <code>npm run dev:worker</code>,
+                then paste the printed <code>locus-worker:add</code> line. Add tests the host, pins
+                TLS, and lists it.
+              </p>
+              <p>
+                Mark <strong>Cloud VM</strong> so idle TTL, the concurrent cap, hourly USD, and the
+                image allowlist apply. Cloud VMs destroy guests on stop and after idle TTL; set
+                hourly USD so the spend cap meters VM time.
+              </p>
+              <p>
+                Mark <strong>Fargate</strong> to RunTask an allowed size (recorded HTTP, no AWS SDK)
+                using a task definition you already registered that runs locus-worker — Locus does
+                not create VPCs. An optional ECS endpoint sends RunTask through a VPC endpoint or
+                API Gateway.
+              </p>
+            </HowItWorks>
             <div className="worker-add-paste">
               <input
                 value={workerBlob}
@@ -1464,7 +1516,7 @@ export function Settings() {
               />
               <button
                 type="button"
-                className="btn small primary"
+                className={`btn small${workerBlob.trim() ? " primary" : ""}`}
                 disabled={workerAddBusy || !workerBlob.trim()}
                 onClick={() => void addWorkerFromBlob()}
               >
@@ -1499,28 +1551,19 @@ export function Settings() {
                 />
               ))
             )}
-            <p className="hint">
-              Create a VM (or use a LAN box), install Docker, run <code>npm run dev:worker</code>,
-              then paste the printed <code>locus-worker:add</code> line above. Add tests the host,
-              pins TLS, and lists it. Locus does not scan the LAN. Mark <strong>Cloud VM</strong> so
-              idle TTL, the concurrent cap, hourly USD, and the image allowlist apply. Mark{" "}
-              <strong>Fargate</strong> to RunTask an allowed size (recorded HTTP, no AWS SDK) using
-              a task definition you already registered — Locus does not create VPCs. Optional ECS
-              endpoint sends RunTask through a VPC endpoint or API Gateway.
-            </p>
           </>
         )}
         {tab === "environments" && (
           <>
             <p className="scrim-note">
               A named environment is golden image + jail + recipe + spend cap + Where. Save one from
-              New agent or Automations. Adaptive and webhook jobs reuse that machine overnight. This
-              is not a seventh rail.
+              New agent or Jobs. Adaptive and webhook jobs reuse that machine overnight. This is not
+              a seventh rail.
             </p>
             {(draft.namedEnvironments ?? []).length === 0 ? (
               <SettingsEmpty
                 title="No named environments yet"
-                hint="Save one from New agent or Automations. This page does not add another form."
+                hint="Save one from New agent or Jobs. This page does not add another form."
               >
                 <button
                   type="button"
@@ -1542,7 +1585,7 @@ export function Settings() {
                     dispatch({ type: "section", section: "automations" });
                   }}
                 >
-                  Open Automations
+                  Open Jobs
                 </button>
               </SettingsEmpty>
             ) : (
@@ -1564,14 +1607,21 @@ export function Settings() {
         )}
         {tab === "git" && (
           <>
-            <p className="scrim-note">
-              Add one or more GitHub, GitLab, Bitbucket, Gitea, Forgejo, and Azure DevOps accounts.
-              Sign in with GitHub, GitLab, or Bitbucket so SSO-protected orgs work, or paste a token
-              (Gitea, Forgejo, and Azure DevOps are PAT-only). Either is enough to clone, fetch a
-              branch or pull request, and push over HTTPS — no SSH key required. Multiple accounts
-              of the same forge can be active at once; each linked repo remembers which account to
-              use.
-            </p>
+            <HowItWorks
+              testId="git-how"
+              lead="Connect a Git account so agents can clone, fetch, and push over HTTPS."
+            >
+              <p>
+                Sign in with GitHub, GitLab, or Bitbucket so SSO-protected orgs work, or paste a
+                token (Gitea, Forgejo, and Azure DevOps are PAT-only). Either is enough to clone,
+                fetch a branch or pull request, and push over HTTPS — no SSH key required.
+              </p>
+              <p>
+                Multiple accounts of the same forge can be active at once; each linked repo
+                remembers which account to use. OAuth app IDs, API URLs, and SSH key paths live
+                under Advanced on each account.
+              </p>
+            </HowItWorks>
             <div className="git-accounts">
               {draft.forges.map((f, i) => {
                 const linked = state.repos.filter((row) => row.checkout.accountId === f.id);
@@ -1629,20 +1679,30 @@ export function Settings() {
 
         {tab === "integrations" && (
           <>
-            <p className="scrim-note">
-              First-party GitHub, GitLab, Bitbucket, Gitea, Forgejo, Azure DevOps, Jira, Confluence,
-              Linear, Slack, Grafana, Sentry, Miro, Figma, incident.io, AWS IAM, Portainer, Gmail,
-              Google Calendar, Google Drive, and Kubernetes, plus plugins the Locus agent can
-              author. Tokens stay in the vault, never in the guest or the prompt. Sign in with Slack
-              so Locus can act as you by default. Sign in with Google for Gmail, Calendar, and
-              Drive. Composer and slack_post can also send as the Locus bot when a bot token is
-              present. Agents only get those tools after that account has the required values.
-              Mutating Jira comments, creates, transitions, Confluence pages, Linear
-              comments/creates/updates, Slack posts, Sentry updates, Miro exports, Figma comments,
-              incident.io creates/updates, Portainer start/stop, Gmail sends, Calendar creates,
-              Drive uploads, Kubernetes apply/delete/scale, and plugin writes wait for Approve /
-              Deny. Ask an agent to add a plugin for a bespoke HTTP API.
-            </p>
+            <HowItWorks
+              testId="integrations-how"
+              lead="Connect the work tools agents can read from and act in. Tokens stay in the vault."
+            >
+              <p>
+                First-party GitHub, GitLab, Bitbucket, Gitea, Forgejo, Azure DevOps, Jira,
+                Confluence, Linear, Slack, Grafana, Sentry, Miro, Figma, incident.io, AWS IAM,
+                Portainer, Gmail, Google Calendar, Google Drive, and Kubernetes, plus plugins the
+                Locus agent can author. Tokens never reach the guest or the prompt.
+              </p>
+              <p>
+                Sign in with Slack so Locus can act as you by default. Sign in with Google for
+                Gmail, Calendar, and Drive. Composer and slack_post can also send as the Locus bot
+                when a bot token is present. Agents only get those tools after that account has the
+                required values.
+              </p>
+              <p>
+                Mutating Jira comments, creates, transitions, Confluence pages, Linear
+                comments/creates/updates, Slack posts, Sentry updates, Miro exports, Figma comments,
+                incident.io creates/updates, Portainer start/stop, Gmail sends, Calendar creates,
+                Drive uploads, Kubernetes apply/delete/scale, and plugin writes wait for Approve /
+                Deny. Ask an agent to add a plugin for a bespoke HTTP API.
+              </p>
+            </HowItWorks>
             <h3>Git forges</h3>
             <p className="hint">
               Same accounts as Settings → Git. Restricted jail allowlists those hosts.
@@ -1675,39 +1735,38 @@ export function Settings() {
                 in Git.
               </p>
             )}
-            <h3>
-              Jira, Confluence, Linear, Slack, Grafana, Sentry, Miro, Figma, incident.io, AWS IAM,
-              Portainer, Google, Kubernetes
-            </h3>
+            <h3>Work tools</h3>
             {draft.managedPolicy?.policy.tokenFreeMode ? (
               <p className="hint">
                 Token-free mode: integrations go through a managed MCP proxy. Personal tokens are
                 not stored in the vault.
               </p>
             ) : null}
-            <button
-              type="button"
-              className="btn small"
-              data-testid="revoke-all-tokens"
-              onClick={() => {
-                void (async () => {
-                  if (
-                    !(await askConfirm({
-                      title: "Revoke all tokens?",
-                      body: "Revoke every integration token stored in the vault?",
-                      confirmLabel: "Revoke",
-                      danger: true,
-                    }))
-                  )
-                    return;
-                  const result = await api.revokeAllIntegrations();
-                  setDraft(result.config);
-                  dispatch({ type: "config", config: result.config });
-                })();
-              }}
-            >
-              Revoke all tokens
-            </button>
+            {integrationsHaveToken(draft.integrations) ? (
+              <button
+                type="button"
+                className="btn small"
+                data-testid="revoke-all-tokens"
+                onClick={() => {
+                  void (async () => {
+                    if (
+                      !(await askConfirm({
+                        title: "Revoke all tokens?",
+                        body: "Revoke every integration token stored in the vault?",
+                        confirmLabel: "Revoke",
+                        danger: true,
+                      }))
+                    )
+                      return;
+                    const result = await api.revokeAllIntegrations();
+                    setDraft(result.config);
+                    dispatch({ type: "config", config: result.config });
+                  })();
+                }}
+              >
+                Revoke all tokens
+              </button>
+            ) : null}
             {(draft.integrations ?? []).map((row, i) => (
               <IntegrationCard
                 key={row.id}
@@ -1744,7 +1803,7 @@ export function Settings() {
                 <button
                   key={kind}
                   type="button"
-                  className="integration-catalog-card"
+                  className={`integration-catalog-card${connectedKinds.has(kind) ? " connected" : ""}`}
                   onClick={() => {
                     const next: IntegrationAccount = {
                       id: crypto.randomUUID(),
@@ -1759,6 +1818,9 @@ export function Settings() {
                 >
                   <strong>Add {integrationLabel(kind)}</strong>
                   <span>{integrationBlurb(kind)}</span>
+                  {connectedKinds.has(kind) ? (
+                    <em className="integration-catalog-connected">Connected</em>
+                  ) : null}
                 </button>
               ))}
             </div>
@@ -1791,13 +1853,19 @@ export function Settings() {
         )}
         {tab === "mcp" && (
           <>
-            <p className="scrim-note">
-              MCP stdio can run on this host (security exception) or inside the Docker guest.
-              HTTP/SSE stays on the host. For an AWS MCP / API Gateway URL, set AWS_ACCESS_KEY_ID
-              and AWS_SECRET_ACCESS_KEY in env (optional AWS_SIGV4 service, default execute-api).
-              Tool calls wait for Approve / Deny in chat. Command must be a single executable (no
-              shell).
-            </p>
+            <HowItWorks
+              testId="mcp-how"
+              lead="Give agents extra tools from MCP servers. Every tool call waits for Approve / Deny in chat."
+            >
+              <p>
+                MCP stdio can run on this host (security exception) or inside the Docker guest.
+                HTTP/SSE stays on the host. Command must be a single executable (no shell).
+              </p>
+              <p>
+                For an AWS MCP / API Gateway URL, set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in
+                env (optional AWS_SIGV4 service, default execute-api).
+              </p>
+            </HowItWorks>
             {(draft.mcpServers ?? []).length === 0 ? (
               <SettingsEmpty
                 title="No MCP servers yet"
@@ -1854,13 +1922,21 @@ export function Settings() {
 
         {tab === "phone" && (
           <>
-            <p className="hint">
-              Control this Locus from an Android phone on the same LAN or Tailscale network. The
-              control plane stays off the public internet. Pairing uses HTTPS with a self-signed
-              cert and a token; LAN clients without the token are rejected. The phone loads chats,
-              Slack, approvals, Design comments and promote, Codebase PR review and merge, workspace
-              files, and Docker Browser takeover. VNC stays on the desktop. Do not Funnel port 7420.
-            </p>
+            <HowItWorks
+              testId="phone-how"
+              lead="Control this Locus from an Android phone on the same LAN or Tailscale network."
+            >
+              <p>
+                The control plane stays off the public internet. Pairing uses HTTPS with a
+                self-signed cert and a token; LAN clients without the token are rejected. Do not
+                Funnel port 7420.
+              </p>
+              <p>
+                The phone loads chats, Slack, approvals, Design comments and promote, Codebase PR
+                review and merge, workspace files, and Docker Browser takeover. VNC stays on the
+                desktop.
+              </p>
+            </HowItWorks>
             <div className="provider-card open phone-card">
               <div className="provider-card-head">
                 <span className="provider-card-copy">
@@ -1870,18 +1946,13 @@ export function Settings() {
               </div>
               <div className="provider-card-body">
                 <p className="hint">Pairing applies immediately. Other settings auto-save.</p>
-                <div className="field">
-                  <label className="check">
-                    <input
-                      type="checkbox"
-                      data-testid="phone-enabled"
-                      checked={Boolean(phone?.enabled)}
-                      disabled={phoneBusy || policyControlLocked(draft, "phoneRemote")}
-                      onChange={(e) => void setPhoneEnabled(e.target.checked)}
-                    />
-                    Enable phone remote
-                  </label>
-                </div>
+                <SettingsToggleRow
+                  label="Phone remote"
+                  on={Boolean(phone?.enabled)}
+                  testId="phone-enabled"
+                  disabled={phoneBusy || policyControlLocked(draft, "phoneRemote")}
+                  onChange={(next) => void setPhoneEnabled(next)}
+                />
                 {phone?.enabled && phone.token ? (
                   <>
                     <div className="field">
@@ -1962,18 +2033,13 @@ export function Settings() {
                 </span>
               </div>
               <div className="provider-card-body">
-                <div className="field">
-                  <label className="check">
-                    <input
-                      type="checkbox"
-                      data-testid="chrome-enabled"
-                      checked={Boolean(chromeExt?.enabled)}
-                      disabled={chromeBusy || policyControlLocked(draft, "liveChrome")}
-                      onChange={(e) => void setChromeEnabled(e.target.checked)}
-                    />
-                    Enable Chrome extension
-                  </label>
-                </div>
+                <SettingsToggleRow
+                  label="Chrome extension"
+                  on={Boolean(chromeExt?.enabled)}
+                  testId="chrome-enabled"
+                  disabled={chromeBusy || policyControlLocked(draft, "liveChrome")}
+                  onChange={(next) => void setChromeEnabled(next)}
+                />
                 {chromeExt?.enabled && chromeExt.token ? (
                   <>
                     <div className="field">
@@ -2014,65 +2080,59 @@ export function Settings() {
 
         {tab === "advanced" && (
           <>
-            <details className="advanced" open>
+            <details className="advanced" open id="settings-advanced-brain">
               <summary>Brain</summary>
               <p className="scrim-note">
                 Shared knowledge graph + distilled memory. Coding agents orient on this
                 automatically. Workspace <code>.locus/memories.json</code> stays a manual override
                 via CLI.
               </p>
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={draft.brain?.autoIndex !== false}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      brain: { ...draft.brain, autoIndex: e.target.checked },
-                    })
-                  }
-                />
-                Auto-index after git clone
-              </label>
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={draft.brain?.ingestPaused === true}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      brain: { ...draft.brain, ingestPaused: e.target.checked },
-                    })
-                  }
-                />
-                Pause remember + session distill ingest
-              </label>
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={draft.brain?.slackCorpus === true}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      brain: { ...draft.brain, slackCorpus: e.target.checked },
-                    })
-                  }
-                />
-                Ingest Slack cache into Brain corpus (off by default)
-              </label>
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={draft.brain?.jiraCorpus === true}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      brain: { ...draft.brain, jiraCorpus: e.target.checked },
-                    })
-                  }
-                />
-                Ingest recent Jira issues into Brain corpus (off by default)
-              </label>
+              <SettingsToggleRow
+                label="Auto-index after git clone"
+                on={draft.brain?.autoIndex !== false}
+                testId="brain-autoIndex"
+                onChange={(next) =>
+                  setDraft({
+                    ...draft,
+                    brain: { ...draft.brain, autoIndex: next },
+                  })
+                }
+              />
+              <SettingsToggleRow
+                label="Pause remember and session distill ingest"
+                on={draft.brain?.ingestPaused === true}
+                testId="brain-ingestPaused"
+                onChange={(next) =>
+                  setDraft({
+                    ...draft,
+                    brain: { ...draft.brain, ingestPaused: next },
+                  })
+                }
+              />
+              <SettingsToggleRow
+                label="Ingest Slack cache into the Brain corpus"
+                hint="Off by default."
+                on={draft.brain?.slackCorpus === true}
+                testId="brain-slackCorpus"
+                onChange={(next) =>
+                  setDraft({
+                    ...draft,
+                    brain: { ...draft.brain, slackCorpus: next },
+                  })
+                }
+              />
+              <SettingsToggleRow
+                label="Ingest recent Jira issues into the Brain corpus"
+                hint="Off by default."
+                on={draft.brain?.jiraCorpus === true}
+                testId="brain-jiraCorpus"
+                onChange={(next) =>
+                  setDraft({
+                    ...draft,
+                    brain: { ...draft.brain, jiraCorpus: next },
+                  })
+                }
+              />
               <div className="grid-2">
                 <div className="field">
                   <label>Distiller provider id</label>
@@ -2368,7 +2428,7 @@ export function Settings() {
                   </p>
                 </div>
                 <div className="field">
-                  <label>Automation chats to keep</label>
+                  <label>Job chats to keep</label>
                   <input
                     type="number"
                     min={1}
@@ -2407,8 +2467,8 @@ export function Settings() {
                   }
                 />
                 <p className="hint">
-                  POST JSON when an automation finishes. Desktop notify already fires in-app. Slack
-                  incoming webhook URLs get a text summary.
+                  POST JSON when a job finishes. Desktop notify already fires in-app. Slack incoming
+                  webhook URLs get a text summary.
                 </p>
               </div>
               <div className="field">
@@ -2683,8 +2743,7 @@ export function Settings() {
                 <p className="hint">
                   Wipes {state.config?.advanced.dataDir ?? draft.advanced.dataDir}: config,
                   encrypted secrets, sessions, VM disks, Docker workspaces, golden images, media,
-                  and automations. Host QEMU/Docker installs are not touched. First-run setup runs
-                  again.
+                  and jobs. Host QEMU/Docker installs are not touched. First-run setup runs again.
                 </p>
                 <BusyButton
                   type="button"
@@ -2877,5 +2936,41 @@ function patchPluginConfig(
         config: Object.keys(config).length ? config : undefined,
       };
     }),
+  );
+}
+
+export type ProviderGroup = {
+  id: "enabled" | "available";
+  label: string;
+  rows: { p: AiProvider; i: number }[];
+};
+
+/** Split providers into Enabled / Available, keeping config order and applying a name filter. */
+export function providerGroups(providers: AiProvider[], filter: string): ProviderGroup[] {
+  const q = filter.trim().toLowerCase();
+  const rows = providers
+    .map((p, i) => ({ p, i }))
+    .filter(({ p }) =>
+      q
+        ? [p.name, p.kind, p.defaultModel ?? ""].some((text) => text.toLowerCase().includes(q))
+        : true,
+    );
+  const groups: ProviderGroup[] = [
+    { id: "enabled", label: "Enabled", rows: rows.filter(({ p }) => p.enabled) },
+    { id: "available", label: "Available", rows: rows.filter(({ p }) => !p.enabled) },
+  ];
+  return groups.filter((group) => group.rows.length);
+}
+
+/** True when any integration account holds a credential worth revoking. */
+export function integrationsHaveToken(rows: IntegrationAccount[] | undefined): boolean {
+  return (rows ?? []).some((row) =>
+    Boolean(
+      row.token?.trim() ||
+      row.userToken?.trim() ||
+      row.appToken?.trim() ||
+      row.refreshToken?.trim() ||
+      row.sessionToken?.trim(),
+    ),
   );
 }

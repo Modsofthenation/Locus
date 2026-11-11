@@ -20,7 +20,7 @@ describe("machine settings helpers", () => {
     expect(machineReady({ isoPath: "  /iso/ubuntu.img  " })).toBe(true);
     expect(machineReady({ isoPath: "   " })).toBe(false);
     expect(machineStatusLabel({ os: "ubuntu", isoPath: "/iso/ubuntu.img" })).toBe("ubuntu.img");
-    expect(machineStatusLabel({ os: "debian", isoPath: "" })).toBe("no image set - won't start");
-    expect(machineStatusLabel({ os: "windows-11", isoPath: "" })).toBe("licensed ISO required");
+    expect(machineStatusLabel({ os: "debian", isoPath: "" })).toBe("Needs an image");
+    expect(machineStatusLabel({ os: "windows-11", isoPath: "" })).toBe("Needs a licensed ISO");
   });
 });

@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  isLockedRailSection,
   isMoreRailSection,
   MORE_RAIL_SECTIONS,
   PRIMARY_RAIL_SECTIONS,
+  moveRailSection,
+  pinRailSection,
   primaryRailSections,
   moreRailSections,
+  railShortcutTargets,
+  reorderRailSections,
+  resolveRailSections,
+  unpinRailSection,
 } from "./railNav";
 
 describe("railNav", () => {
@@ -43,5 +50,47 @@ describe("railNav", () => {
     expect(isMoreRailSection("automations", "swarm")).toBe(true);
     expect(isMoreRailSection("brain", "swarm")).toBe(true);
     expect(moreRailSections("swarm")).toContain("docker");
+  });
+
+  it("pins optional surfaces onto the rail and refuses to unpin the home section", () => {
+    expect(resolveRailSections("developer").primary).toEqual([...PRIMARY_RAIL_SECTIONS]);
+    expect(isLockedRailSection("agents")).toBe(true);
+    expect(isLockedRailSection("design")).toBe(false);
+    const withGames = pinRailSection("developer", undefined, "games");
+    expect(withGames).toContain("games");
+    expect(resolveRailSections("developer", withGames).more).not.toContain("games");
+    const withoutDesign = unpinRailSection("developer", undefined, "design");
+    expect(withoutDesign).not.toContain("design");
+    expect(resolveRailSections("developer", withoutDesign).more[0]).toBe("design");
+    expect(unpinRailSection("developer", withoutDesign, "agents")).toContain("agents");
+    expect(resolveRailSections("swarm").primary).toEqual(["agents", "project"]);
+    expect(unpinRailSection("swarm", undefined, "project")).toContain("project");
+  });
+
+  it("keeps pin order and can move a non-locked icon", () => {
+    const pinned = pinRailSection("developer", undefined, "games");
+    expect(pinned.at(-1)).toBe("games");
+    const moved = moveRailSection("developer", pinned, "games", -1);
+    expect(moved.at(-2)).toBe("games");
+    expect(moved.at(-1)).toBe("automations");
+    expect(reorderRailSections("developer", moved, "games", "design")).toEqual([
+      "agents",
+      "games",
+      "design",
+      "ide",
+      "codebase",
+      "automations",
+    ]);
+    expect(moveRailSection("developer", pinned, "agents", 1)).toEqual(
+      resolveRailSections("developer", pinned).primary,
+    );
+    expect(railShortcutTargets("developer")).toEqual([
+      "inbox",
+      "agents",
+      "design",
+      "ide",
+      "codebase",
+      "automations",
+    ]);
   });
 });

@@ -1373,7 +1373,7 @@ describe("MobileShell", () => {
       [...host.querySelectorAll(".mobile-tags.is-muted li")].map((el) => el.textContent),
     ).toEqual(["Live VNC control still needs the desktop."]);
     expect(host.textContent).toContain("Settings");
-    expect(host.textContent).toContain("New automation");
+    expect(host.textContent).toContain("New job");
     expect(host.textContent).toContain("Command palette");
     const desktop = [...host.querySelectorAll("button")].find(
       (btn) => btn.textContent === "Desktop",
@@ -2164,7 +2164,7 @@ describe("MobileShell", () => {
       host.querySelector<HTMLButtonElement>(".mobile-overlay .mobile-back")!.click();
     });
     const automation = [...host.querySelectorAll("button")].find((btn) =>
-      btn.textContent?.includes("New automation"),
+      btn.textContent?.includes("New job"),
     );
     await act(async () => {
       automation!.click();

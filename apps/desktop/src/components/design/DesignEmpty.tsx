@@ -91,12 +91,13 @@ import { IconReturn } from "@/components/layout/Icons";
 import { OverflowMenu } from "@/components/layout/OverflowMenu";
 import { Select } from "@/components/layout/Select";
 import { EmptyHero } from "@/components/layout/EmptyHero";
+import { ProviderSetupBanner, SetupBanner } from "@/components/layout/SetupBanner";
 import {
   LaunchWorkspace,
   type LaunchWorkspaceSelection,
 } from "@/components/layout/LaunchWorkspace";
 
-const DESIGN_RUNTIMES: AgentRuntime[] = ["docker", "host"];
+const DESIGN_RUNTIMES: AgentRuntime[] = ["docker", "vm", "host"];
 
 function rememberedDesignRuntime(): AgentRuntime {
   try {
@@ -138,6 +139,8 @@ const CANVAS_LAUNCH = {
     createLabel: "Create design",
     createError: "Could not create design",
     showLook: true,
+    vmReason: "Design canvases need Docker or Host",
+    starterLimit: 0,
   },
   game: {
     kind: "game" as const,
@@ -152,6 +155,8 @@ const CANVAS_LAUNCH = {
     createLabel: "Create game",
     createError: "Could not create game",
     showLook: false,
+    vmReason: "Games need Docker or Host",
+    starterLimit: 6,
   },
   assets: {
     kind: "assets" as const,
@@ -166,6 +171,8 @@ const CANVAS_LAUNCH = {
     createLabel: "Create asset",
     createError: "Could not create asset",
     showLook: false,
+    vmReason: "Assets need Docker or Host",
+    starterLimit: 0,
   },
 };
 
@@ -213,6 +220,8 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
   const [netDirty, setNetDirty] = useState(false);
   const [namedEnvId, setNamedEnvId] = useState("");
   const [branchLock, setBranchLock] = useState(false);
+  /** Games / Assets keep unset context (repo, asset, kit, style, build) in the "+" menu. */
+  const [revealed, setRevealed] = useState<ReadonlySet<string>>(() => new Set());
   const canCreate = Boolean(state.config);
   const workers = state.config?.workers ?? [];
   const selectedWorker = workers.find((row) => row.id === backendId);
@@ -232,6 +241,32 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
     : parseDockerImage(appliedEnv.dockerImage ?? dockerImage) ||
       parseDockerImage(DESIGN_DOCKER_IMAGE);
   const launchHostDir = hostChat && workspace.kind === "host" ? workspace.path : undefined;
+  const foldContext = surface === "game" || surface === "assets";
+  const reveal = (id: string) => setRevealed((rows) => new Set([...rows, id]));
+  const styleId = surface === "assets" ? assetStyleId : gameStyleId;
+  const styleName =
+    surface === "assets"
+      ? state.assetStyles.find((row) => row.id === assetStyleId)?.name
+      : state.gameStyles.find((row) => row.id === gameStyleId)?.name;
+  const buildSet = JSON.stringify(assetBuild) !== JSON.stringify(ASSET_BUILD_DEFAULTS);
+  const showRepo = !foldContext || repoIds.length > 0 || revealed.has("repo");
+  const showAsset = surface === "game" && (assetIds.length > 0 || revealed.has("asset"));
+  const showKit = !foldContext || Boolean(designSystemId) || revealed.has("kit");
+  const showStyle = !foldContext || Boolean(styleId) || revealed.has("style");
+  const showBuild = surface === "assets" && (buildSet || revealed.has("build"));
+  const addExtras = foldContext
+    ? [
+        showRepo ? null : { id: "repo", label: "Repo context", onSelect: () => reveal("repo") },
+        surface === "game" && !showAsset
+          ? { id: "asset", label: "Asset", onSelect: () => reveal("asset") }
+          : null,
+        showKit ? null : { id: "kit", label: "Kit", onSelect: () => reveal("kit") },
+        showStyle ? null : { id: "style", label: "Style", onSelect: () => reveal("style") },
+        surface === "assets" && !showBuild
+          ? { id: "build", label: "Build", onSelect: () => reveal("build") }
+          : null,
+      ].filter((row): row is NonNullable<typeof row> => Boolean(row))
+    : undefined;
   const workerHint = backendId
     ? `The canvas is /workspace/index.html on ${
         selectedWorker ? workerWhereLabel(selectedWorker) : "the worker"
@@ -531,27 +566,16 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
         <section className="launch" aria-label={launch.aria}>
           {compactAssets ? null : (
             <>
-              {((state.setup && !state.setup.hasProvider) ||
-                (state.dockerKind === "mock" && !hostChat && !backendId)) && (
-                <div className="design-start-notes">
-                  {state.setup && !state.setup.hasProvider && (
-                    <p className="setup-callout">
-                      No provider key is enabled.{" "}
-                      <button
-                        className="btn small primary"
-                        onClick={() => dispatch({ type: "setupOpen", open: true })}
-                      >
-                        Finish setup
-                      </button>
-                    </p>
-                  )}
-                  {state.dockerKind === "mock" && !hostChat && !backendId && (
-                    <p className="setup-callout">
-                      Using a mock Docker engine until the Docker CLI is installed.
-                    </p>
-                  )}
-                </div>
-              )}
+              {state.setup && !state.setup.hasProvider ? (
+                <ProviderSetupBanner onFinish={() => dispatch({ type: "setupOpen", open: true })} />
+              ) : null}
+              {state.dockerKind === "mock" && !hostChat && !backendId ? (
+                <SetupBanner
+                  title="Docker isn't installed"
+                  detail="Using a mock engine until the Docker CLI is installed"
+                  testId="engine-setup-banner"
+                />
+              ) : null}
 
               {workers.length ? (
                 <div className="launch-env-bar">
@@ -577,6 +601,7 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                 onSelect={selectWorkspace}
                 onHostDir={setHostDir}
                 runtimes={DESIGN_RUNTIMES}
+                unavailableRuntimes={{ vm: launch.vmReason }}
                 disabledRuntimes={
                   policyAllowsHostAgents(state.config?.managedPolicy) ? [] : ["host"]
                 }
@@ -753,6 +778,7 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
               <div className="empty-composer-bar">
                 <ComposerAddButton
                   title="Attach a file (images, text, PDF). Copied into /workspace/.locus-attachments."
+                  extras={addExtras}
                   onError={setError}
                   onPick={(picked) => {
                     setFiles((rows) => mergeComposerFiles(rows, picked));
@@ -769,15 +795,17 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                     setFiles((rows) => rows.filter((file) => file !== target));
                   }}
                 />
-                <ComposerRepoPicker
-                  repos={state.repos}
-                  repoIds={repoIds}
-                  repoRefs={repoRefs}
-                  onChange={setSelectedRepos}
-                  contextOnly
-                  multiple
-                />
-                {surface === "game" ? (
+                {showRepo ? (
+                  <ComposerRepoPicker
+                    repos={state.repos}
+                    repoIds={repoIds}
+                    repoRefs={repoRefs}
+                    onChange={setSelectedRepos}
+                    contextOnly
+                    multiple
+                  />
+                ) : null}
+                {showAsset ? (
                   <ComposerAssetPicker
                     sessions={state.sessions}
                     assetIds={assetIds}
@@ -787,8 +815,8 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                 {launch.showLook ? (
                   <OverflowMenu
                     className="composer-look-more"
-                    title="Look"
-                    label="Look"
+                    title="Style"
+                    label={`Style: ${selectedSystem?.name ?? "default"}`}
                     align="left"
                     toggleClassName="btn small ghost"
                   >
@@ -808,28 +836,30 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                   </OverflowMenu>
                 ) : (
                   <>
-                    <Select
-                      className="game-kit-select"
-                      compact
-                      ariaLabel={surface === "assets" ? "Asset kit" : "Game kit"}
-                      value={designSystemId}
-                      options={[
-                        { value: "", label: "No kit" },
-                        ...(surface === "assets" ? ASSET_KITS : GAME_KITS).map((kit) => ({
-                          value: kit.id,
-                          label: kit.title,
-                        })),
-                      ]}
-                      onChange={(id) => {
-                        setSystemTouched(true);
-                        setDesignSystemId(id);
-                      }}
-                    />
-                    {surface === "game" ? (
+                    {showKit ? (
+                      <Select
+                        className="game-kit-select"
+                        compact
+                        ariaLabel={surface === "assets" ? "Asset kit" : "Game kit"}
+                        value={designSystemId}
+                        options={[
+                          { value: "", label: "No kit" },
+                          ...(surface === "assets" ? ASSET_KITS : GAME_KITS).map((kit) => ({
+                            value: kit.id,
+                            label: kit.title,
+                          })),
+                        ]}
+                        onChange={(id) => {
+                          setSystemTouched(true);
+                          setDesignSystemId(id);
+                        }}
+                      />
+                    ) : null}
+                    {surface === "game" && showStyle ? (
                       <OverflowMenu
                         className="composer-look-more"
                         title="Style"
-                        label="Style"
+                        label={`Style: ${styleName ?? "default"}`}
                         align="left"
                         toggleClassName="btn small ghost"
                       >
@@ -853,11 +883,11 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                         </div>
                       </OverflowMenu>
                     ) : null}
-                    {surface === "assets" ? (
+                    {surface === "assets" && showStyle ? (
                       <OverflowMenu
                         className="composer-look-more"
                         title="Style"
-                        label="Style"
+                        label={`Style: ${styleName ?? "default"}`}
                         align="left"
                         toggleClassName="btn small ghost"
                       >
@@ -881,7 +911,7 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                         </div>
                       </OverflowMenu>
                     ) : null}
-                    {surface === "assets" ? (
+                    {showBuild ? (
                       <OverflowMenu
                         className="composer-look-more"
                         title="Build"
@@ -1001,30 +1031,38 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                 <p className="design-start-from-label">Or start from</p>
                 <RecipeCards
                   pills
+                  shortcuts
                   recipes={launch.recipes}
                   selectedId={recipeId}
                   onSelect={applyRecipe}
                   label={launch.starters}
-                />
-                {surface === "game" ? (
-                  <>
-                    <p className="design-start-from-label">Remix a sentence</p>
-                    <div className="recipe-grid pills" role="group" aria-label="Remix a sentence">
-                      {GAME_REMIX_PROMPTS.map((row) => (
-                        <button
-                          key={row.id}
-                          type="button"
-                          title={row.prompt}
-                          aria-pressed={remixId === row.id}
-                          className={`os-card ${remixId === row.id ? "active" : ""}`}
-                          onClick={() => applyRemix(row)}
+                  limit={launch.starterLimit}
+                  more={
+                    surface === "game" ? (
+                      <>
+                        <p className="design-start-from-label">Remix a sentence</p>
+                        <div
+                          className="recipe-grid pills"
+                          role="group"
+                          aria-label="Remix a sentence"
                         >
-                          <h3>{row.title}</h3>
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                ) : null}
+                          {GAME_REMIX_PROMPTS.map((row) => (
+                            <button
+                              key={row.id}
+                              type="button"
+                              title={row.prompt}
+                              aria-pressed={remixId === row.id}
+                              className={`os-card ${remixId === row.id ? "active" : ""}`}
+                              onClick={() => applyRemix(row)}
+                            >
+                              <h3>{row.title}</h3>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : undefined
+                  }
+                />
                 {kitStarts.length ? (
                   <div className="recipe-grid pills" role="group" aria-label="Kit starting points">
                     {kitStarts.map((point) => (

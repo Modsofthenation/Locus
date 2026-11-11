@@ -21,6 +21,7 @@ const {
     healthUp?: boolean;
     uiUp?: boolean;
     owned?: boolean;
+    stale?: boolean;
   }) => "start" | "adopt" | "restart" | "leave";
   HEALTH_FAILS_BEFORE_KILL: number;
 };
@@ -57,5 +58,17 @@ describe("control plane restart", () => {
     expect(controlPlaneStartAction({ healthUp: true, uiUp: false, owned: true })).toBe("restart");
     expect(controlPlaneStartAction({ healthUp: true, uiUp: false, owned: false })).toBe("leave");
     expect(controlPlaneStartAction({ healthUp: false, uiUp: false, owned: false })).toBe("start");
+  });
+
+  it("restarts a desktop-owned plane kept alive from a different build", () => {
+    expect(controlPlaneStartAction({ healthUp: true, uiUp: true, owned: true, stale: true })).toBe(
+      "restart",
+    );
+    expect(controlPlaneStartAction({ healthUp: true, uiUp: true, owned: false, stale: true })).toBe(
+      "adopt",
+    );
+    expect(controlPlaneStartAction({ healthUp: true, uiUp: true, owned: true, stale: false })).toBe(
+      "adopt",
+    );
   });
 });

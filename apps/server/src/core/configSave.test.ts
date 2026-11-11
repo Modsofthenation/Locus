@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
 import { defaultConfig } from "../defaults.js";
-import { normalizeSavedConfig, providerBaseUrlError } from "./configSave.js";
+import { normalizeSavedConfig, prepareSavedConfig, providerBaseUrlError } from "./configSave.js";
 
 describe("normalizeSavedConfig", () => {
   it("rejects an unknown theme and a non-loopback bind host", () => {
@@ -70,6 +70,22 @@ describe("normalizeSavedConfig", () => {
       ok: false,
       error: expect.stringMatching(/Unknown worker/i),
     });
+  });
+});
+
+describe("prepareSavedConfig", () => {
+  it("restores masked secrets and locks managed policy from the stored config", () => {
+    const current = defaultConfig("/data");
+    current.providers[0]!.apiKey = "sk-live";
+    current.managedPolicy = { source: "file", path: "/etc/locus/policy.json" } as never;
+    const body = structuredClone(current);
+    body.providers[0]!.apiKey = "••••••••";
+    body.managedPolicy = { source: "none" } as never;
+    const saved = prepareSavedConfig(current, body, "/data");
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+    expect(saved.config.providers[0]?.apiKey).toBe("sk-live");
+    expect(saved.config.managedPolicy).toEqual(current.managedPolicy);
   });
 });
 

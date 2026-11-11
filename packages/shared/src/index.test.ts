@@ -134,6 +134,7 @@ import {
   pickConfiguredOs,
   isGuestReady,
   isGuestStarting,
+  isChatWaitingForGuest,
   toolNeedsGuest,
   isForgeToolName,
   isControlPlaneToolName,
@@ -2315,7 +2316,7 @@ describe("themes", () => {
     expect(resolveTheme("nord")).toBe("nord");
     expect(resolveTheme()).toBe("ember");
     expect(resolveTheme("not-a-theme")).toBe("ember");
-    expect(THEME_OPTIONS).toHaveLength(97);
+    expect(THEME_OPTIONS).toHaveLength(98);
     expect(THEME_OPTIONS.map((t) => t.id)).toEqual([
       "ember",
       "midnight",
@@ -2414,6 +2415,7 @@ describe("themes", () => {
       "grove",
       "peony",
       "glaze",
+      "console",
     ]);
     expect(THEME_OPTIONS.filter((t) => t.chatScene).map((t) => t.id)).toEqual([
       "cosmos",
@@ -3254,6 +3256,12 @@ describe("guest readiness", () => {
     expect(isGuestReady("booting")).toBe(false);
     expect(isGuestStarting("booting")).toBe(true);
     expect(isGuestStarting("running")).toBe(false);
+    expect(isChatWaitingForGuest({ viewing: true, vmStatus: "booting" })).toBe(false);
+    expect(isChatWaitingForGuest({ vmStatus: "booting" })).toBe(true);
+    expect(isChatWaitingForGuest({ sessionStatus: "provisioning", vmStatus: "stopped" })).toBe(
+      true,
+    );
+    expect(isChatWaitingForGuest({ sessionStatus: "provisioning", vmStatus: "ready" })).toBe(false);
   });
 });
 

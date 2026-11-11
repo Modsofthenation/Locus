@@ -9,7 +9,7 @@ const EN: Record<string, string> = {
   "empty.firstTask.cta": "Fill the composer",
   "setup.firstTask.hint": "After setup, the Agents empty state offers a first Host task.",
   "phone.more.settings": "Settings",
-  "phone.more.automation": "New automation",
+  "phone.more.automation": "New job",
   "phone.more.palette": "Command palette",
   "phone.more.find": "Find in chat",
   "phone.more.vnc": "VM display (view only)",

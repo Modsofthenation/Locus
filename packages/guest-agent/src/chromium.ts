@@ -132,6 +132,21 @@ export function isBrowserUrl(command: string): boolean {
   return /^https?:\/\/\S+$/i.test(command.trim());
 }
 
+export function isBrowserToolRequest(req: ToolRequest): boolean {
+  return (
+    DOCKER_BROWSER_TOOLS.has(req.name) ||
+    ((req.name === "exec" || req.name === "start_process") &&
+      isBrowserUrl(str(req.args, "command")))
+  );
+}
+
+export function dispatchBrowserTool(req: ToolRequest, driver: ChromiumDriver): Promise<ToolResult> {
+  if (req.name === "exec" || req.name === "start_process") {
+    return driver.navigate(str(req.args, "command").trim());
+  }
+  return driver.handle(req);
+}
+
 /** Map raw CDP/fetch failures to an action the model can take. */
 export function describeCdpError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);

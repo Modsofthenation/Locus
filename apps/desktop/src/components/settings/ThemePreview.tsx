@@ -1,5 +1,7 @@
 import { resolveTheme, themeOption } from "@locus/shared";
 import { EmptyHero } from "@/components/layout/EmptyHero";
+import { IconReturn } from "@/components/layout/Icons";
+import { NEW_AGENT_COPY } from "@/lib/launchCopy";
 
 export function ThemePreview({
   theme,
@@ -37,8 +39,8 @@ export function ThemePreview({
             <EmptyHero
               pose="rest"
               size={44}
-              title="What should we talk about?"
-              lead="A coding agent on this machine. Pick a folder, or leave it empty for a private workspace."
+              title={NEW_AGENT_COPY.heading}
+              lead={NEW_AGENT_COPY.lead}
             />
             <div className="runtime-toggle">
               <span>Docker</span>
@@ -46,11 +48,18 @@ export function ThemePreview({
               <span className="active">Host</span>
             </div>
             <div className="empty-composer">
-              <textarea readOnly tabIndex={-1} placeholder="Ask a question…" value="" />
+              <textarea readOnly tabIndex={-1} placeholder={NEW_AGENT_COPY.placeholder} value="" />
+              <div className="empty-composer-bar">
+                <div className="composer-toolbar-end">
+                  <span className="btn primary small composer-send">
+                    <span className="composer-send-label">{NEW_AGENT_COPY.send}</span>
+                    <IconReturn />
+                  </span>
+                </div>
+              </div>
             </div>
             <div className="empty-actions">
-              <span className="btn ghost">More options</span>
-              <span className="btn primary">Start chat</span>
+              <span className="btn ghost">{NEW_AGENT_COPY.moreOptions}</span>
             </div>
           </div>
         </div>

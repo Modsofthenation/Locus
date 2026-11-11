@@ -21,31 +21,39 @@ export function RuntimeToggle({
   onChange,
   runtimes = AGENT_RUNTIMES,
   disabledRuntimes = [],
+  unavailable = {},
 }: {
   value: AgentRuntime;
   onChange: (runtime: AgentRuntime) => void;
   runtimes?: AgentRuntime[];
   disabledRuntimes?: AgentRuntime[];
+  /** Shown but not selectable, with the reason as its tooltip. */
+  unavailable?: Partial<Record<AgentRuntime, string>>;
 }) {
   const options = runtimes.length ? runtimes : AGENT_RUNTIMES;
   return (
     <div className="runtime-toggle" role="tablist" aria-label="Agent runtime">
-      {options.map((runtime) => (
-        <button
-          key={runtime}
-          type="button"
-          role="tab"
-          aria-selected={value === runtime}
-          className={value === runtime ? "active" : ""}
-          disabled={disabledRuntimes.includes(runtime)}
-          onClick={() => {
-            if (disabledRuntimes.includes(runtime)) return;
-            onChange(runtime);
-          }}
-        >
-          {RUNTIME_LABEL[runtime]}
-        </button>
-      ))}
+      {options.map((runtime) => {
+        const reason = unavailable[runtime];
+        return (
+          <button
+            key={runtime}
+            type="button"
+            role="tab"
+            aria-selected={value === runtime}
+            className={value === runtime ? "active" : reason ? "is-unavailable" : ""}
+            disabled={disabledRuntimes.includes(runtime)}
+            aria-disabled={reason ? true : undefined}
+            title={reason}
+            onClick={() => {
+              if (reason || disabledRuntimes.includes(runtime)) return;
+              onChange(runtime);
+            }}
+          >
+            {RUNTIME_LABEL[runtime]}
+          </button>
+        );
+      })}
     </div>
   );
 }

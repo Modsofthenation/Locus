@@ -31,7 +31,7 @@ const {
   restartDelayMs,
 } = require("./control-plane.cjs");
 const { desktopCliInvocation } = require("./cli-argv.cjs");
-const { resolveLaunch, syncPackagedUi } = require("./launch.cjs");
+const { resolveLaunch, syncPackagedUi, uiBuildStamp } = require("./launch.cjs");
 const { loadUrlWithRetry, waitForUrl, waitUntilUrlDown } = require("./net-wait.cjs");
 const { wrapMasterKey } = require("./vault-key.cjs");
 const { dropWindowsApplicationMenu, installWindowsInputGuard } = require("./windows-input.cjs");
@@ -84,6 +84,8 @@ let child;
 let ownsServer = false;
 let adoptedPid;
 let adoptedOwner;
+/** Version + UI fingerprint of this install; unset in --dev (Vite serves the UI). */
+let desktopBuild;
 let quitPhase = "idle";
 let mainWindow;
 let restartTimer;
@@ -105,7 +107,10 @@ async function ensureServer() {
   const uiUp = up ? await probeControlPlane(fetch, uiUrl, 400) : false;
   const record = await readDesktopServer(recordPath);
   const owned = Boolean(record && processHasOwner(record.pid, record.owner));
-  const action = controlPlaneStartAction({ healthUp: up, uiUp, owned });
+  // A kept-alive plane from an older build would keep serving its old server
+  // code (and, packaged, the old UI); restart it when the build changed.
+  const stale = Boolean(desktopBuild && record && record.build !== desktopBuild);
+  const action = controlPlaneStartAction({ healthUp: up, uiUp, owned, stale });
   if (action === "adopt") {
     if (owned) {
       adoptedPid = record.pid;
@@ -257,7 +262,11 @@ async function releaseServer() {
   const action = serverQuitAction({ ownsChild: ownsServer, keepAlive, adoptedPid });
   if (action === "detach") {
     if (child && child.pid) {
-      await rememberDesktopServer(recordPath, { pid: child.pid, owner: desktopOwner });
+      await rememberDesktopServer(recordPath, {
+        pid: child.pid,
+        owner: desktopOwner,
+        build: desktopBuild,
+      });
     }
     detachChild(child);
     ownsServer = false;
@@ -301,6 +310,12 @@ app
       } catch (err) {
         console.error("Locus UI cache copy failed:", err);
       }
+    }
+    if (!dev) {
+      const builtUi = app.isPackaged
+        ? join(process.resourcesPath, "ui")
+        : join(__dirname, "..", "dist");
+      desktopBuild = uiBuildStamp(app.getVersion(), builtUi);
     }
     await ensureServer();
     if (!dev) startHealthWatch();

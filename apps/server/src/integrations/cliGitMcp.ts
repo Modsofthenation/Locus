@@ -30,7 +30,7 @@ The native shell is sandboxed and does not inherit Locus forge credentials. Do n
 If shell tests fail with spawn EPERM, report that validation limit; the Locus push/PR test gate runs on the host and must pass before publishing.`;
 
 export const KIRO_GIT_MCP_INSTRUCTIONS = `Locus Git:
-The locus MCP server for this turn exposes git_status, git_diff, git_log, git_branch, git_commit, git_fetch, git_push, and git_pr. Use those for Git and pull requests so Locus can apply saved forge credentials and its test gate. Do not git push, create the PR with gh/glab, or curl GitHub/GitLab/Bitbucket with tokens from the environment.
+The locus MCP server for this turn exposes git_status, git_diff, git_log, git_branch, git_commit, git_fetch, git_push, and git_pr. Use those for Git and pull requests so Locus can apply saved forge credentials and its test gate. Do not git stash, git checkout -b, git push, create the PR with gh/glab, or curl GitHub/GitLab/Bitbucket with tokens from the environment. Use git_branch instead of shell checkout.
 If a native locus MCP call is unavailable, POST tools/call JSON-RPC to LOCUS_GIT_MCP_URL. For example: curl -fsS -X POST "$LOCUS_GIT_MCP_URL" -H "content-type: application/json" --data '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git_status","arguments":{}}}'. Replace only the tool name and arguments. Do not claim a push or PR succeeded without that tool result.`;
 
 export const CLI_CANVAS_MCP_INSTRUCTIONS = `Locus canvas MCP:

@@ -387,6 +387,18 @@ describe("reducer", () => {
     expect(state.thinking.a).toBeUndefined();
   });
 
+  it("closes a chat removed by Delete but leaves another open chat alone", () => {
+    let state = reducer(initialState, { type: "session", session: session("a", "One") });
+    state = reducer(state, { type: "session", session: session("b", "Two") });
+    state = reducer(state, { type: "select", id: "a" });
+    state = reducer(state, { type: "deselect", id: "b" });
+    expect(state.selectedId).toBe("a");
+    state = reducer(state, { type: "deselect", id: "a" });
+    expect(state.selectedId).toBeNull();
+    expect(state.section).toBe("agents");
+    expect(state.sessions.map((row) => row.id).sort()).toEqual(["a", "b"]);
+  });
+
   it("deselects an agent without opening the new-agent modal", () => {
     let state = reducer(initialState, { type: "session", session: session("a", "One") });
     state = reducer(state, { type: "select", id: "a" });
@@ -394,6 +406,21 @@ describe("reducer", () => {
     expect(state.section).toBe("agents");
     expect(state.selectedId).toBeNull();
     expect(state.newOpen).toBe(false);
+  });
+
+  it("opens a Design / Games / Assets session with the canvas beside the chat", () => {
+    const design = { ...session("d1", "Landing"), kind: "design" as const };
+    let state = reducer(
+      { ...initialState, sessions: [design, session("a", "One")] },
+      {
+        type: "select",
+        id: "a",
+      },
+    );
+    expect(state.vmCollapsed).toBe(true);
+    state = reducer(state, { type: "select", id: "d1" });
+    expect(state.section).toBe("design");
+    expect(state.vmCollapsed).toBe(false);
   });
 
   it("collapses the agent list and the guest pane independently", () => {
@@ -407,6 +434,26 @@ describe("reducer", () => {
     state = reducer(state, { type: "toggleVmPane" });
     expect(state.collapsed).toBe(false);
     expect(state.vmCollapsed).toBe(true);
+  });
+
+  it("leaves the Inbox when navigating to a section or item", () => {
+    let state = reducer(initialState, { type: "session", session: session("a", "One") });
+    state = reducer(state, { type: "inbox", open: true });
+    expect(state.inboxOpen).toBe(true);
+    // Same section still leaves the Inbox, even though the section reducer is a no-op.
+    expect(reducer(state, { type: "section", section: "agents" }).inboxOpen).toBe(false);
+    expect(reducer(state, { type: "select", id: "a" }).inboxOpen).toBe(false);
+    expect(reducer(state, { type: "selectAutomation", id: "x" }).inboxOpen).toBe(false);
+    expect(reducer(state, { type: "query", query: "x" }).inboxOpen).toBe(true);
+  });
+
+  it("sets the sidebar collapsed state and the IDE start intent explicitly", () => {
+    let state = reducer(initialState, { type: "sidebarCollapsed", collapsed: true });
+    expect(state.collapsed).toBe(true);
+    expect(reducer(state, { type: "sidebarCollapsed", collapsed: true })).toBe(state);
+    state = reducer(state, { type: "ideStart", intent: "clone" });
+    expect(state.ideStart).toBe("clone");
+    expect(reducer(state, { type: "ideStart", intent: null }).ideStart).toBeNull();
   });
 
   it("marks unread until the session is selected", () => {

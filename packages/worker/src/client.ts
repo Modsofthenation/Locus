@@ -257,10 +257,8 @@ export class WorkerClient {
     const archive = await packDirectory(dir);
     const res = await this.request(this.url(this.guestPath(id, `/${kind}`)), {
       method: "PUT",
-      headers: {
-        authorization: `Bearer ${this.backend.token ?? ""}`,
-        "content-type": "application/gzip",
-      },
+      // Plane header included so plane-scoped guests are visible to the worker.
+      headers: { ...this.headers(), "content-type": "application/gzip" },
       body: archive,
     });
     if (!res.ok) {
@@ -305,6 +303,8 @@ export class WorkerClient {
       headers.set(key, value);
     });
     headers.set("authorization", `Bearer ${this.backend.token ?? ""}`);
+    headers.delete(WORKER_PLANE_HEADER);
+    if (this.planeId) headers.set(WORKER_PLANE_HEADER, this.planeId);
     const res = await this.request(
       this.url(this.guestPath(opts.id, `/preview/${opts.port}${suffix}${opts.search}`)),
       {

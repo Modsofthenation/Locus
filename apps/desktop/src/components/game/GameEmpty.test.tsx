@@ -39,6 +39,13 @@ const config = {
   workers: [],
 } as unknown as LocusConfig;
 
+/** Pick an entry from the composer "+" menu so its chip appears. */
+function reveal(id: string) {
+  act(() => {
+    (document.querySelector(`[data-testid='composer-add-${id}']`) as HTMLButtonElement).click();
+  });
+}
+
 describe("GameEmpty", () => {
   let host: HTMLElement;
   let root: Root;
@@ -74,11 +81,30 @@ describe("GameEmpty", () => {
     expect(host.querySelector("[aria-label='New game']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Look']")).toBeNull();
     expect(host.querySelector("[aria-label='Color palette']")).toBeNull();
+    // Unset kit / style / asset / repo live in the "+" menu until picked.
+    expect(host.querySelector("[aria-label='Style']")).toBeNull();
+    expect(host.querySelector("[aria-label='Game kit']")).toBeNull();
+    expect(host.querySelector("[aria-label='Assets']")).toBeNull();
+    expect(host.textContent).not.toContain("No repo context");
+    expect(host.querySelector("[data-testid='composer-add-kit']")).toBeTruthy();
+    expect(host.querySelector("[data-testid='composer-add-asset']")).toBeTruthy();
+    expect(host.querySelector("[data-testid='composer-add-repo']")).toBeTruthy();
+    reveal("style");
+    reveal("kit");
     expect(host.querySelector("[aria-label='Style']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Game style']")).toBeTruthy();
+    // Six starters, then "More…" for the rest and the remix sentences.
+    const starters = host.querySelector("[aria-label='Game starters']")!;
+    expect(starters.querySelectorAll("button[aria-pressed]")).toHaveLength(6);
     expect(host.textContent).toContain("Arcade");
     expect(host.textContent).toContain("Twin-stick");
     expect(host.textContent).toContain("Match-3");
+    expect(host.textContent).not.toContain("Trivia");
+    expect(host.querySelector("[aria-label='Remix a sentence']")).toBeNull();
+    act(() => {
+      ([...starters.querySelectorAll("button")].find((btn) => btn.textContent === "More…") as
+        HTMLButtonElement | undefined)!.click();
+    });
     expect(host.textContent).toContain("Trivia");
     expect(host.textContent).toContain("Tower defense");
     expect(host.textContent).toContain("Racing");
@@ -156,6 +182,11 @@ describe("GameEmpty", () => {
       seat!.click();
     });
     expect(selectValue(host, "Game kit")).toBe("three-starter");
+    act(() => {
+      ([...host.querySelectorAll("[aria-label='Game starters'] button")].find(
+        (btn) => btn.textContent === "More…",
+      ) as HTMLButtonElement)!.click();
+    });
     const remix = [...host.querySelectorAll("[aria-label='Remix a sentence'] button")].find(
       (btn) => btn.textContent === "Vegas match-3",
     ) as HTMLButtonElement | undefined;
@@ -203,6 +234,8 @@ describe("GameEmpty", () => {
         </Store.Provider>,
       );
     });
+    expect(host.querySelector("[aria-label='Assets']")).toBeNull();
+    reveal("asset");
     expect(host.querySelector("[aria-label='Assets']")).toBeTruthy();
     expect(host.textContent).toContain("No asset");
     act(() => {

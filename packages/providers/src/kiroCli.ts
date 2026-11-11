@@ -390,7 +390,13 @@ function parseV3ToolCall(
   isUpdate: boolean,
 ): ParsedKiroCliEvent | undefined {
   const statusRaw = typeof update.status === "string" ? update.status.toLowerCase() : "";
+  const failed =
+    statusRaw === "failed" ||
+    statusRaw === "error" ||
+    statusRaw === "cancelled" ||
+    statusRaw === "canceled";
   const completed =
+    failed ||
     statusRaw === "completed" ||
     statusRaw === "success" ||
     statusRaw === "done" ||
@@ -400,19 +406,26 @@ function parseV3ToolCall(
       statusRaw !== "inprogress" &&
       statusRaw !== "running");
   const name = kiroToolName(update);
+  const mappedName = CLI_TOOL_NAMES[name] ?? name;
+  // Prefer ACP toolCallId. Envelope `id` is often the update message id; streamKiroCli
+  // collapses those onto the running chip with the same command/path fingerprint.
   const id =
-    (typeof update.toolCallId === "string" && update.toolCallId) ||
-    (typeof update.tool_call_id === "string" && update.tool_call_id) ||
-    (typeof update.id === "string" && update.id) ||
-    name;
+    (typeof update.toolCallId === "string" && update.toolCallId.trim()) ||
+    (typeof update.tool_call_id === "string" && update.tool_call_id.trim()) ||
+    (typeof update.id === "string" && update.id.trim()) ||
+    mappedName;
+  const args = mapKiroToolArgs(name, asObject(update.rawInput ?? update.input ?? update.arguments));
+  const output = stringifyResult(update.content ?? update.result ?? update.output);
   return {
     type: "tool_call",
     id,
-    name: CLI_TOOL_NAMES[name] ?? name,
+    name: mappedName,
     status: completed ? "completed" : "running",
-    arguments: asObject(update.rawInput ?? update.input ?? update.arguments),
+    arguments: args,
     ...(completed
-      ? { result: stringifyResult(update.content ?? update.result ?? update.output) }
+      ? {
+          result: failed ? JSON.stringify({ isError: true, output: output ?? statusRaw }) : output,
+        }
       : {}),
   };
 }
@@ -434,7 +447,16 @@ function kiroToolName(update: Record<string, unknown>): string {
     typeof raw.command !== "string"
       ? raw.name.trim()
       : "";
-  return fromMeta || fromUpdate || fromRaw || "tool";
+  if (fromMeta || fromUpdate || fromRaw) return fromMeta || fromUpdate || fromRaw;
+  if (!raw) return "tool";
+  if (typeof raw.command === "string" && raw.command.trim()) return "executeCommand";
+  if (typeof raw.query === "string" || typeof raw.pattern === "string") return "search";
+  if (typeof raw.path === "string" && raw.path.trim()) {
+    if (typeof raw.oldStr === "string" || typeof raw.newStr === "string") return "strReplace";
+    if (typeof raw.text === "string" || typeof raw.content === "string") return "fsWrite";
+    return "fsRead";
+  }
+  return "tool";
 }
 
 function parseSessionInfoUpdate(update: Record<string, unknown>): ParsedKiroCliEvent[] {
@@ -640,15 +662,26 @@ export async function* streamKiroCli(input: {
   let streamedTools = false;
   let sawTerminal = false;
   const toolNames = new Map<string, string>();
+  const toolIdsByFingerprint = new Map<string, string>();
   const publish = (event: ParsedKiroCliEvent): KiroCliEvent | undefined => {
-    if (event.type === "tool_call" && event.id) {
+    if (event.type === "tool_call") {
       streamedTools = true;
-      if (event.name && event.name !== "tool") {
+      const fingerprint = kiroToolFingerprint(event.arguments);
+      const known = fingerprint ? toolIdsByFingerprint.get(fingerprint) : undefined;
+      if (known && event.id !== known) {
+        event.id = known;
+        event.name = toolNames.get(known) ?? event.name;
+      }
+      if (event.id && event.name && event.name !== "tool") {
         toolNames.set(event.id, event.name);
-      } else {
+        if (fingerprint) {
+          if (event.status === "completed") toolIdsByFingerprint.delete(fingerprint);
+          else toolIdsByFingerprint.set(fingerprint, event.id);
+        }
+      } else if (event.id) {
         event.name = toolNames.get(event.id) ?? event.name;
       }
-      if (event.status === "completed") {
+      if (event.status === "completed" && event.id) {
         event.name = toolNames.get(event.id) ?? event.name;
       }
     }
@@ -878,56 +911,92 @@ function asObject(value: unknown): Record<string, unknown> {
   return asRecord(value) ?? {};
 }
 
+function stripFileUrl(value: string): string {
+  return value.replace(/^file:\/\//i, "");
+}
+
+function kiroToolFingerprint(args?: Record<string, unknown>): string {
+  if (!args) return "";
+  const parts = [args.command, args.path, args.pattern, args.query, args.oldStr, args.text]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => stripFileUrl(value.trim()));
+  return parts.join("\n");
+}
+
 function mapKiroToolArgs(name: string, input: Record<string, unknown>): Record<string, unknown> {
-  const path =
+  const pathRaw =
     (typeof input.file_path === "string" && input.file_path) ||
     (typeof input.path === "string" && input.path) ||
     (typeof input.target_file === "string" && input.target_file) ||
     undefined;
+  const path = pathRaw ? stripFileUrl(pathRaw) : undefined;
   const mappedName = CLI_TOOL_NAMES[name] ?? name;
   if (
     mappedName === "file_read" ||
     mappedName === "file_write" ||
     mappedName === "file_list" ||
+    mappedName === "apply_patch" ||
     name === "Read" ||
     name === "Write" ||
     name === "LS" ||
     name === "Delete"
   ) {
-    return path ? { ...input, path } : input;
+    const next: Record<string, unknown> = path ? { ...input, path } : { ...input };
+    if (
+      mappedName === "file_write" &&
+      typeof next.text === "string" &&
+      typeof next.content !== "string"
+    ) {
+      next.content = next.text;
+    }
+    return next;
   }
-  if (mappedName === "grep" || name === "Grep") {
+  if (mappedName === "grep" || name === "Grep" || name === "search") {
     return {
+      ...input,
       pattern: input.pattern ?? input.query,
-      path: input.path,
-      glob: input.glob,
+      ...(path ? { path } : {}),
+      glob: input.glob ?? input.includePattern,
     };
   }
-  return input;
+  return path ? { ...input, path } : input;
+}
+
+function stringifyKiroDiff(rec: Record<string, unknown>): string {
+  const path = typeof rec.path === "string" && rec.path.trim() ? stripFileUrl(rec.path.trim()) : "";
+  return path ? `updated ${path}` : "updated file";
+}
+
+function stringifyResultPart(part: unknown): string {
+  const direct = textFromPart(part);
+  if (direct) return direct;
+  const rec = asRecord(part);
+  if (!rec) return "";
+  const kind = partKind(rec);
+  if (kind === "content") return stringifyResult(rec.content ?? rec.text) ?? "";
+  if (kind === "diff") return stringifyKiroDiff(rec);
+  if (kind === "toolresult") return stringifyResult(rec.data) ?? "";
+  if (Array.isArray(rec.content)) return stringifyResult(rec.content) ?? "";
+  const nested = asRecord(rec.content);
+  if (nested) return stringifyResult(nested) ?? "";
+  return "";
 }
 
 function stringifyResult(value: unknown): string | undefined {
   if (value == null) return undefined;
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
-    const texts = value
-      .map((part) => {
-        const direct = textFromPart(part);
-        if (direct) return direct;
-        const rec = asRecord(part);
-        if (!rec) return "";
-        const kind = partKind(rec);
-        if (kind === "toolresult") return stringifyResult(rec.data) ?? "";
-        if (Array.isArray(rec.content)) return stringifyResult(rec.content) ?? "";
-        return "";
-      })
-      .filter(Boolean);
+    const texts = value.map(stringifyResultPart).filter(Boolean);
     if (texts.length) return texts.join("\n");
   }
   const rec = asRecord(value);
-  if (rec && Array.isArray(rec.content)) {
-    const nested = stringifyResult(rec.content);
-    if (nested) return nested;
+  if (rec) {
+    const part = stringifyResultPart(rec);
+    if (part) return part;
+    if (Array.isArray(rec.content)) {
+      const nested = stringifyResult(rec.content);
+      if (nested) return nested;
+    }
   }
   try {
     return JSON.stringify(value);

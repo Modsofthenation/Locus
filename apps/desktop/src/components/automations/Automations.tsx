@@ -42,6 +42,7 @@ import { automationDetailPrefFor, saveAutomationDetailPref } from "@/lib/automat
 import {
   automationFunnelHint,
   automationSpendLabel,
+  plainJobError,
   promptNeedsCollapse,
   runMatchesHistoryFilter,
   runOutcomeLabel,
@@ -59,6 +60,7 @@ import { ConfirmModal } from "@/components/layout/ConfirmModal";
 import { TrustActions } from "@/components/chat/TrustActions";
 import { IconCopy, IconPlay, IconStop } from "@/components/layout/Icons";
 import { ModelPicker } from "@/components/settings/ModelPicker";
+import { JobRunNotice, reportJobError, setJobNotice, startJobRun } from "./jobRun";
 
 const RUN_HISTORY_PAGE = 25;
 const RUN_HISTORY_FETCH = 200;
@@ -133,7 +135,6 @@ export function AutomationsPane() {
   const [nameBusy, setNameBusy] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
   const [paneError, setPaneError] = useState<string | null>(null);
-  const [runActionError, setRunActionError] = useState<string | null>(null);
   const [runBusy, setRunBusy] = useState(false);
   const [runFilter, setRunFilter] = useState<RunHistoryFilter>("all");
   const hookHighlighted = state.highlightAutomationWebhookId === item?.id;
@@ -144,7 +145,7 @@ export function AutomationsPane() {
     setConfirmDelete(false);
     setPromptError(null);
     setPaneError(null);
-    setRunActionError(null);
+    setJobNotice(null);
     setRunBusy(false);
     setEditingName(false);
     setNameDraft(item?.name ?? "");
@@ -224,35 +225,16 @@ export function AutomationsPane() {
   async function replayRun(run: AutomationRun) {
     if (!item) return;
     setRunBusy(true);
-    setRunActionError(null);
     setPaneError(null);
     try {
-      const next = await api.runAutomation(item.id, { runId: run.id });
-      dispatch({ type: "run", run: next });
-    } catch (err) {
-      setRunActionError(err instanceof Error ? err.message : "Could not start a run");
-    } finally {
-      setRunBusy(false);
-    }
-  }
-
-  async function startManualRun() {
-    if (!item) return;
-    setRunBusy(true);
-    setRunActionError(null);
-    setPaneError(null);
-    try {
-      const run = await api.runAutomation(item.id);
-      dispatch({ type: "run", run });
-    } catch (err) {
-      setRunActionError(err instanceof Error ? err.message : "Could not start a run");
+      await startJobRun(item, dispatch, { runId: run.id });
     } finally {
       setRunBusy(false);
     }
   }
 
   async function stopLiveRun(run: AutomationRun) {
-    setRunActionError(null);
+    setJobNotice(null);
     const previous = run;
     dispatch({
       type: "run",
@@ -268,7 +250,7 @@ export function AutomationsPane() {
       if (result.run) dispatch({ type: "run", run: result.run });
     } catch (err) {
       dispatch({ type: "run", run: previous });
-      setRunActionError(err instanceof Error ? err.message : "Could not stop the run");
+      reportJobError(item!.id, err, "Could not stop the run");
     }
   }
 
@@ -287,22 +269,16 @@ export function AutomationsPane() {
         <div className="empty-card">
           <EmptyHero
             pose="rest"
-            eyebrow="Automations"
+            eyebrow="Jobs"
             title="When should an agent run?"
             lead="Pick a trigger — clock, git push, pull request, or webhook — then a prompt. Each run executes on Docker, VM, or host and keeps a thread you can open."
           />
-          <button
-            className="btn primary"
-            onClick={() => dispatch({ type: "newAutomation", open: true })}
-          >
-            New automation
-          </button>
           <div className="design-start-from">
-            <p className="design-start-from-label">Or start from</p>
+            <p className="design-start-from-label">Start from a template</p>
             <div
               className="recipe-grid pills"
               role="group"
-              aria-label="Automation starters"
+              aria-label="Job starters"
               data-testid="auto-starters"
             >
               {AUTOMATION_STARTERS.map((row) => (
@@ -327,7 +303,6 @@ export function AutomationsPane() {
   const runtime = sessionRuntime(item);
   const latestAgent = automationLatestAgentRun(runs, item.id);
   const running = runs.some((r) => r.status === "running" || r.status === "queued");
-  const liveRun = runs.find((r) => r.status === "running" || r.status === "queued");
   const jail = runtime === "host" ? undefined : (item.network ?? env?.network);
   const tz = isClockSchedule(item.schedule)
     ? localTimezoneLabel(undefined, item.timeZone)
@@ -469,32 +444,11 @@ export function AutomationsPane() {
           className="row"
           style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
         >
-          {running && liveRun ? (
-            <button
-              className="btn small danger"
-              type="button"
-              data-testid="auto-pane-stop"
-              onClick={() => void stopLiveRun(liveRun)}
-            >
-              <IconStop /> Stop
-            </button>
-          ) : (
-            <button
-              className="btn small primary"
-              type="button"
-              data-testid="auto-pane-run-now"
-              disabled={!item.enabled || runBusy}
-              title={item.enabled ? "Start a new manual run" : "Paused"}
-              onClick={() => void startManualRun()}
-            >
-              <IconPlay /> {runBusy ? "Starting…" : "Run now"}
-            </button>
-          )}
           {editingName ? (
             <>
               <input
                 className="auto-rename-input"
-                aria-label="Automation name"
+                aria-label="Job name"
                 value={nameDraft}
                 disabled={nameBusy}
                 onChange={(e) => {
@@ -579,7 +533,7 @@ export function AutomationsPane() {
       </div>
       {nameError ? <InlineError message={nameError} testId="auto-rename-error" /> : null}
       {paneError ? <ErrorBanner message={paneError} testId="auto-pane-error" /> : null}
-      {runActionError ? <ErrorBanner message={runActionError} testId="auto-pane-error" /> : null}
+      <JobRunNotice item={item} />
       {confirmDelete ? (
         <ConfirmModal
           title={`Delete ${item.name}?`}
@@ -726,7 +680,6 @@ export function AutomationsPane() {
         filter={runFilter}
         onFilterChange={setRunFilter}
         onOpenChat={(run) => void openChat(run)}
-        onRunNow={() => void startManualRun()}
         onReplay={(run) => void replayRun(run)}
         onStop={(run) => void stopLiveRun(run)}
         runBusy={runBusy}
@@ -849,7 +802,7 @@ function WebhookCard(props: { item: Automation; highlighted?: boolean }) {
         <div className="auto-forge-hook-help" data-testid="auto-forge-hook-help">
           <p className="hint">Forge webhook setup</p>
           <ol>
-            <li>Attach a repo on this automation (required).</li>
+            <li>Attach a repo on this job (required).</li>
             <li>Enable Funnel so the forge can reach this host.</li>
             <li>
               Add a forge webhook that POSTs to the URL below with the secret
@@ -1302,7 +1255,7 @@ function JobOptions(props: { item: Automation; onSaved: (automation: Automation)
           aria-label="Blackout dates"
           value={blackout}
           disabled={busy}
-          placeholder="2026-12-25, 2026-01-01"
+          placeholder="YYYY-MM-DD, comma-separated"
           onChange={(e) => setBlackout(e.target.value)}
           onBlur={() => {
             const dates = blackout
@@ -1355,7 +1308,6 @@ function RunHistory(props: {
   filter: RunHistoryFilter;
   onFilterChange: (filter: RunHistoryFilter) => void;
   onOpenChat: (run: AutomationRun) => void;
-  onRunNow: () => void;
   onReplay: (run: AutomationRun) => void;
   onStop: (run: AutomationRun) => void;
   runBusy: boolean;
@@ -1418,21 +1370,12 @@ function RunHistory(props: {
       {props.runs.length === 0 ? (
         <div className="auto-runs-empty" data-testid="auto-runs-empty-cta">
           <p className="hint">
-            No runs yet. Wait for the schedule, or start one now
+            No runs yet. Wait for the schedule, or use Run now at the top
             {isWebhookSchedule ? ", or POST the webhook." : "."}
           </p>
           {isWebhookSchedule ? (
             <p className="hint">Use the Webhook card to copy the URL or simulate a trigger.</p>
           ) : null}
-          <button
-            type="button"
-            className="btn small primary"
-            disabled={!props.item.enabled || props.runBusy}
-            title={props.item.enabled ? "Start a new manual run" : "Paused"}
-            onClick={props.onRunNow}
-          >
-            <IconPlay /> {props.runBusy ? "Starting…" : "Run now"}
-          </button>
         </div>
       ) : filtered.length === 0 ? (
         <EmptyHint title="No runs match this filter." />
@@ -1469,7 +1412,7 @@ function RunHistory(props: {
                           }
                         >
                           {run.status === "failed" || run.status === "skipped" ? (
-                            <ExpandableLog compact danger text={outcome} />
+                            <RunErrorText text={outcome} />
                           ) : (
                             <p className="hint">{outcome}</p>
                           )}
@@ -1548,6 +1491,21 @@ function RunHistory(props: {
         </>
       )}
     </section>
+  );
+}
+
+/** Known runtime errors read as one plain sentence; the raw text sits behind Show details. */
+function RunErrorText(props: { text: string }) {
+  const plain = plainJobError(props.text);
+  if (!plain) return <ExpandableLog compact danger text={props.text} />;
+  return (
+    <div className="run-error-plain" data-testid="run-error-plain">
+      <p>{plain.summary}</p>
+      <details className="auto-error-details">
+        <summary>Show details</summary>
+        <pre>{plain.detail}</pre>
+      </details>
+    </div>
   );
 }
 

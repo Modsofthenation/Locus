@@ -42,7 +42,7 @@ import { basename, dirname, join } from "node:path";
 import { appendVmLog, formatStatusLine } from "./logs.js";
 import { ensureLocusAgentImage } from "./images.js";
 import { nodeRunner, type CommandRunner } from "./runner.js";
-import type { VmListener } from "./types.js";
+import type { MachineLifecycle, VmListener } from "./types.js";
 
 export interface CreateContainerRequest {
   sessionId: string;
@@ -74,18 +74,11 @@ export interface CreateContainerRequest {
 
 export type ImageBuildListener = (id: string, progress: ImageBuildProgress) => void;
 
-export interface DockerEngine {
+export interface DockerEngine extends MachineLifecycle {
   readonly kind: "mock" | "docker";
-  /** Live engines talk to a real Docker daemon (vs the in-memory mock adapter). */
-  readonly liveEngine?: boolean;
-  available(): Promise<boolean>;
   create(req: CreateContainerRequest): Promise<VmInstance>;
-  start(id: string): Promise<VmInstance>;
-  stop(id: string): Promise<VmInstance>;
   restart(id: string): Promise<VmInstance>;
-  pause(id: string): Promise<VmInstance>;
   resume(id: string): Promise<VmInstance>;
-  destroy(id: string): Promise<void>;
   adopt?(instance: VmInstance): VmInstance;
   snapshotWorkspace?(id: string, destPath: string): Promise<void>;
   restoreWorkspace?(id: string, srcPath: string): Promise<void>;
@@ -104,10 +97,6 @@ export interface DockerEngine {
   listSwarmTasks(service: string): Promise<DockerSwarmTask[]>;
   swarmServiceLogs(ref: string, tail?: number): Promise<string>;
   scaleSwarmService(ref: string, replicas: number): Promise<DockerSwarmService>;
-  get(id: string): VmInstance | undefined;
-  list(): VmInstance[];
-  logs(id: string): string;
-  onStatus(listener: VmListener): void;
   onBuild(listener: ImageBuildListener): void;
 }
 

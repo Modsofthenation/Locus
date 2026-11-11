@@ -1,49 +1,37 @@
-import { useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   dockerDotClass,
   dockerSwarmActive,
   dockerSwarmManager,
   dockerSwarmNodeReady,
   dockerSwarmServiceLive,
-  formatSchedule,
   forgeLabel,
   forgeShort,
-  guestLabel,
   isDesignSession,
   isGameSession,
   isAssetSession,
   conversationLabel,
   isDirectConversation,
-  isLocusAgentImage,
-  sessionGitBranch,
-  sessionRuntime,
   shortRepoName,
-  automationLastFact,
-  automationLatestRun,
   automationLatestAgentRun,
   automationHealth,
   automationHealthCounts,
   automationMatchesQuery,
-  clipFact,
   formatAutomationHealth,
-  formatNextFire,
   runHistoryStatusLabel,
   runStatusText,
   sessionsListeningOnSlack,
   boardNeedsYouItems,
   brainClaimsForRepo,
   parseProductMode,
-  sessionDisplayName,
-  sessionAvatarId,
-  sessionAvatarPose,
-  sessionAvatarAccessory,
-  sessionListStamp,
   sessionMatchesSurface,
-  type AgentSession,
-  type Automation,
-  type AutomationRun,
-  type ForgeKind,
-  type LinkedRepo,
 } from "@locus/shared";
 import { api } from "@/lib/api";
 import { useCanvasPrefetch } from "@/lib/useCanvasPrefetch";
@@ -54,58 +42,49 @@ import {
   shortContainerId,
 } from "@/lib/docker";
 import {
-  clusterSessionsByRepo,
-  groupSessionsByDay,
   isEmptyDraftSession,
   isIdleArchiveCandidate,
   loadHideAutomationChats,
   saveHideAutomationChats,
-  sessionRepoKey,
-  sessionRepoLabel,
 } from "@/lib/sessionGroups";
-import { loadSidebarPrefs, saveSidebarPrefs } from "@/lib/sidebarPrefs";
+import {
+  loadSidebarPrefs,
+  saveSidebarPrefs,
+  SIDEBAR_WIDTH_DEFAULT,
+  SIDEBAR_WIDTH_MAX,
+  SIDEBAR_WIDTH_MIN,
+  type SidebarGroupBy,
+  type SidebarListFilter,
+} from "@/lib/sidebarPrefs";
+import {
+  buildInboxRows,
+  inboxRowMatchesQuery,
+  openInboxRow as openInboxTarget,
+  type InboxRow,
+} from "@/lib/inboxList";
+import { clampSplit, stepSplitValue } from "@/lib/splitter";
 import {
   IconAgents,
   IconChevron,
   IconClock,
-  IconContainer,
-  IconFolder,
-  IconFrame,
-  IconStack,
   IconGear,
-  IconHash,
-  IconPalette,
-  IconGamepad,
-  IconCube,
-  IconPanel,
   IconPlus,
   IconRefresh,
-  IconRepo,
-  IconBrain,
-  IconGrafana,
   IconStar,
   IconStop,
-  IconWrench,
   IconInbox,
-  IconMore,
 } from "./Icons";
 import { DesignThumb } from "@/components/design/DesignThumb";
 import { MenuItem, MenuLabel, MenuSep, OverflowMenu } from "./OverflowMenu";
 import { SearchField } from "./SearchField";
 import { rememberBrainInbox } from "@/lib/brainViewPrefs";
 import { needsYouSessions, sessionHasNeedsYou } from "@/lib/needsYou";
-import { formatSwarmListWhen, swarmRosterMeta } from "@/lib/swarmPresence";
+import { swarmRosterMeta } from "@/lib/swarmPresence";
 import {
-  addSwarmRosterSection,
-  hideSwarmSession,
   loadSwarmRosterPrefs,
-  moveSwarmSessionToSection,
   saveSwarmRosterPrefs,
-  sectionIdForSession,
-  showSwarmSession,
   type SwarmRosterPrefs,
 } from "@/lib/swarmRosterPrefs";
-import { TrustActions } from "@/components/chat/TrustActions";
 import {
   automationFleetExtras,
   automationSpendLabel,
@@ -116,9 +95,34 @@ import {
   sortAutomationsByPriority,
   type AutomationListSort,
 } from "@/lib/automations";
-import { loadAutomationSidebarPrefs, saveAutomationSidebarPrefs } from "@/lib/automationPrefs";
+import {
+  loadAutomationSidebarPrefs,
+  saveAutomationSidebarPrefs,
+  type AutomationJobFilter,
+} from "@/lib/automationPrefs";
 import { formatWhen } from "@/components/automations/Automations";
 import { ConfirmModal } from "@/components/layout/ConfirmModal";
+import { Select } from "@/components/layout/Select";
+import { Splitter } from "@/components/layout/Splitter";
+import { FilterChips } from "@/components/layout/sidebar/FilterChips";
+import { InboxList } from "@/components/layout/sidebar/InboxList";
+import { SideRail, shortcutCaption, type RailPeekRow } from "@/components/layout/sidebar/SideRail";
+import {
+  AutomationListItem,
+  patchListedAutomations,
+} from "@/components/layout/sidebar/automationList";
+import {
+  groupRepos,
+  sectionLabel,
+  sectionMetaFor,
+  sectionSearchPlaceholder,
+} from "@/components/layout/sidebar/sectionMeta";
+import {
+  SessionGroupBlocks,
+  SessionRow,
+  agentMeta,
+  sessionPassesListFilter,
+} from "@/components/layout/sidebar/sessionList";
 import {
   SlackChannelListSkeleton,
   SlackKindMark,
@@ -132,6 +136,8 @@ import {
   type SlackSidebarGroups,
 } from "@/components/slack/Slack";
 import { sessionMatchesQuery } from "@/lib/sessionSearch";
+import { sidebarBrandSubtitle } from "@/lib/sidebarCopy";
+import { matchAltDigit } from "@/lib/shortcuts";
 import {
   sectionQuery,
   sessionFitsSection,
@@ -147,545 +153,38 @@ import {
   settingsNavTabs,
 } from "@/lib/settingsNav";
 import { confirmLeaveSettings } from "@/lib/settingsLeave";
-import { showErrorNotice, showNotice, showUndoNotice } from "@/lib/notice";
-import { askConfirm, askPrompt } from "@/lib/dialog";
-import { archiveOne, archiveSessions, deleteSessionWithUndo } from "@/lib/sessionUndo";
-import { moreRailSections, primaryRailSections } from "@/lib/railNav";
+import { showErrorNotice, showNotice } from "@/lib/notice";
+import { askConfirm } from "@/lib/dialog";
+import { archiveSessions } from "@/lib/sessionUndo";
+import {
+  isLockedRailSection,
+  lockedRailSections,
+  moveRailSection,
+  pinRailSection,
+  railShortcutTargets,
+  reorderRailSections,
+  resolveRailSections,
+  unpinRailSection,
+} from "@/lib/railNav";
 import { swarmShellKeepsSection } from "@/lib/productMode";
-import { sessionStatusLabel } from "@/lib/sessionStatus";
-import { PersonaAvatar } from "@/components/layout/PersonaAvatar";
+import { useDrawerSidebar } from "@/lib/useDrawerSidebar";
 import { EmptyListNote } from "./EmptyHero";
 
-const SECTION_META: Record<Exclude<UiSection, "settings">, { label: string; icon: ReactNode }> = {
-  agents: { label: "Agents", icon: <IconAgents /> },
-  design: { label: "Design", icon: <IconPalette /> },
-  games: { label: "Games", icon: <IconGamepad /> },
-  assets: { label: "Assets", icon: <IconCube /> },
-  ide: { label: "IDE", icon: <IconFolder /> },
-  board: { label: "Board", icon: <IconFrame /> },
-  project: { label: "Projects", icon: <IconStack /> },
-  codebase: { label: "Codebase", icon: <IconRepo /> },
-  brain: { label: "Brain", icon: <IconBrain /> },
-  slack: { label: "Slack", icon: <IconHash /> },
-  grafana: { label: "Grafana", icon: <IconGrafana /> },
-  docker: { label: "Docker", icon: <IconContainer /> },
-  automations: { label: "Automations", icon: <IconClock /> },
-};
+/** Sort and bulk pause/enable only earn their rows once the list is long. */
+const JOB_LIST_TOOLS_MIN = 10;
 
-function sectionMetaFor(
-  mode: ReturnType<typeof parseProductMode>,
-): Record<Exclude<UiSection, "settings">, { label: string; icon: ReactNode }> {
-  if (mode !== "swarm") return SECTION_META;
-  return {
-    ...SECTION_META,
-    agents: { label: "Teammates", icon: <IconAgents /> },
-    project: { label: "Teams", icon: <IconStack /> },
-    automations: { label: "Routines", icon: <IconClock /> },
-  };
-}
-
-function sectionLabel(
-  section: UiSection,
-  mode: ReturnType<typeof parseProductMode> = "developer",
-): string {
-  if (section === "settings") return "Settings";
-  return sectionMetaFor(mode)[section]?.label ?? "Agents";
-}
-
-function sectionSearchPlaceholder(
-  section: UiSection,
-  mode: ReturnType<typeof parseProductMode> = "developer",
-): string {
-  if (section === "docker") return "Search containers or services";
-  if (section === "automations") {
-    return mode === "swarm" ? "Search routines" : "Search automations";
-  }
-  if (section === "board") return "Search boards";
-  if (section === "project") {
-    return mode === "swarm" ? "Search teams" : "Search projects";
-  }
-  if (section === "design") return "Search designs";
-  if (section === "games") return "Search games";
-  if (section === "assets") return "Search assets";
-  if (section === "ide") return "Search workspaces";
-  if (section === "codebase") return "Search repos";
-  if (section === "brain") return "Search claims";
-  if (section === "slack") return "Search channels";
-  if (section === "grafana") return "Search queries and dashboards";
-  return mode === "swarm" ? "Search teammates" : "Search agents";
-}
-
-const FORGE_ORDER: ForgeKind[] = [
-  "github",
-  "gitlab",
-  "bitbucket",
-  "gitea",
-  "forgejo",
-  "azuredevops",
+const JOB_FILTER_OPTIONS: { value: AutomationJobFilter; label: string }[] = [
+  { value: "all", label: "All jobs" },
+  { value: "failing", label: "Failing" },
+  { value: "needs-you", label: "Needs you" },
+  { value: "running", label: "Running" },
+  { value: "paused", label: "Paused" },
+  { value: "over-cap", label: "Over cap" },
 ];
-
-function groupRepos(repos: LinkedRepo[]): Array<{ forge: ForgeKind; repos: LinkedRepo[] }> {
-  const buckets = new Map<ForgeKind, LinkedRepo[]>();
-  for (const row of repos) {
-    const list = buckets.get(row.checkout.forge) ?? [];
-    list.push(row);
-    buckets.set(row.checkout.forge, list);
-  }
-  return FORGE_ORDER.filter((forge) => buckets.has(forge)).map((forge) => ({
-    forge,
-    repos: buckets.get(forge)!,
-  }));
-}
-
-function agentRuntimeMeta(s: AgentSession): string {
-  const where =
-    sessionRuntime(s) === "host"
-      ? "Host"
-      : s.runtime === "docker"
-        ? s.dockerImage?.trim() && !isLocusAgentImage(s.dockerImage.trim())
-          ? s.dockerImage.trim()
-          : null
-        : guestLabel(s.os);
-  return [where, s.model].filter(Boolean).join(" · ");
-}
-
-function agentMeta(s: AgentSession, projectTitle?: string): string {
-  return [
-    s.archived ? "Archived" : null,
-    s.automationId ? "Automation" : null,
-    s.persona?.hubRole ? s.persona.hubRole : null,
-    s.projectId ? (projectTitle ?? "Project") : null,
-    agentRuntimeMeta(s),
-    s.pull ? `#${s.pull.number}` : null,
-    s.sourceDesignId ? "design" : null,
-    sessionHasNeedsYou(s) ? "Needs you" : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-}
-
-function sessionRowTitle(session: AgentSession): string {
-  const branch = sessionGitBranch(session);
-  const name = sessionDisplayName(session);
-  return branch ? `${name} · ${branch}` : name;
-}
-
-function sessionRowClass(
-  session: AgentSession,
-  selected: boolean,
-  unread: boolean,
-  extra = "",
-): string {
-  return [
-    "session-item",
-    extra,
-    selected ? "active" : "",
-    session.archived ? "archived" : "",
-    unread ? "unread" : "",
-    sessionHasNeedsYou(session) ? "needs-you" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
-
-function SessionTitle(props: { session: AgentSession; unread: boolean }) {
-  return (
-    <div className="title">
-      {props.session.pinned ? (
-        <span className="pin" aria-label="Pinned">
-          ★
-        </span>
-      ) : null}
-      <span className="title-text">{sessionDisplayName(props.session)}</span>
-      {props.unread ? <span className="unread-dot" aria-label="Unread" /> : null}
-    </div>
-  );
-}
-
-function SessionGroupBlocks(props: {
-  sessions: AgentSession[];
-  selectedId: string | null;
-  unreadIds: string[];
-  repos: LinkedRepo[];
-  metaFor: (session: AgentSession) => string;
-  previewFor?: (session: AgentSession) => ReactNode;
-  onSelect: (id: string) => void;
-  trust?: boolean;
-  hub?: boolean;
-  rosterPrefs?: SwarmRosterPrefs;
-  onRosterPrefs?: (next: SwarmRosterPrefs) => void;
-}) {
-  return (
-    <>
-      {groupSessionsByDay(props.sessions).map((group) => (
-        <div key={group.id} className="session-group">
-          {props.hub ? null : <p className="session-group-label">{group.label}</p>}
-          {clusterSessionsByRepo(group.items, sessionRepoKey, (session) =>
-            sessionRepoLabel(session, props.repos),
-          ).map((cluster) => (
-            <div key={cluster.key} className={cluster.label ? "session-repo-group" : undefined}>
-              {cluster.label && !props.hub ? (
-                <p className="session-repo-label">{cluster.label}</p>
-              ) : null}
-              {cluster.items.map((s) => (
-                <SessionRow
-                  key={s.id}
-                  session={s}
-                  selected={props.selectedId === s.id}
-                  unread={props.unreadIds.includes(s.id)}
-                  meta={props.metaFor(s)}
-                  preview={props.previewFor?.(s)}
-                  trust={props.trust}
-                  hub={props.hub}
-                  rosterPrefs={props.rosterPrefs}
-                  onRosterPrefs={props.onRosterPrefs}
-                  onSelect={props.onSelect}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
-      ))}
-    </>
-  );
-}
-
-function SessionRow(props: {
-  session: AgentSession;
-  selected: boolean;
-  unread: boolean;
-  meta: string;
-  preview?: ReactNode;
-  onSelect: (id: string) => void;
-  trust?: boolean;
-  hub?: boolean;
-  rosterPrefs?: SwarmRosterPrefs;
-  onRosterPrefs?: (next: SwarmRosterPrefs) => void;
-}) {
-  const s = props.session;
-  const { dispatch } = useStore();
-  const branch = sessionGitBranch(s);
-  const rowTitle = sessionRowTitle(s);
-  const stamp = props.hub ? formatSwarmListWhen(sessionListStamp(s)) : "";
-  const rosterPrefs = props.rosterPrefs;
-  const hidden = Boolean(rosterPrefs?.hiddenSessionIds.includes(s.id));
-  const currentSectionId = rosterPrefs ? sectionIdForSession(rosterPrefs, s.id) : null;
-
-  function patch(next: { pinned?: boolean; archived?: boolean; title?: string }) {
-    void api.patchSession(s.id, next).catch((err: unknown) => {
-      showErrorNotice(err, "Could not update this agent");
-    });
-  }
-
-  function rename() {
-    void (async () => {
-      const next = (await askPrompt({ title: "Rename", value: s.title }))?.trim();
-      if (!next || next === s.title) return;
-      patch({ title: next });
-    })();
-  }
-
-  function remove() {
-    void deleteSessionWithUndo(s, dispatch, askConfirm);
-  }
-
-  function duplicateSession() {
-    void api
-      .fork(s.id)
-      .then((forked) => {
-        dispatch({ type: "session", session: forked });
-        dispatch({ type: "select", id: forked.id });
-      })
-      .catch((err: unknown) => {
-        showErrorNotice(err, "Could not duplicate");
-      });
-  }
-
-  function updateRoster(next: SwarmRosterPrefs) {
-    props.onRosterPrefs?.(next);
-  }
-
-  function hideTeammate() {
-    if (!rosterPrefs) return;
-    const previous = rosterPrefs;
-    updateRoster(hideSwarmSession(rosterPrefs, s.id));
-    showUndoNotice(`Hidden ${s.title}`, () => updateRoster(previous));
-  }
-
-  function restoreTeammate() {
-    if (!rosterPrefs) return;
-    updateRoster(showSwarmSession(rosterPrefs, s.id));
-  }
-
-  function newSection() {
-    if (!rosterPrefs) return;
-    void (async () => {
-      const name = (await askPrompt({ title: "Section name" }))?.trim();
-      if (!name) return;
-      updateRoster(addSwarmRosterSection(rosterPrefs, name, s.id));
-    })();
-  }
-
-  function moveToSection(sectionId: string | null) {
-    if (!rosterPrefs) return;
-    updateRoster(moveSwarmSessionToSection(rosterPrefs, s.id, sectionId));
-  }
-
-  const menu = (
-    <OverflowMenu title={`More for ${s.title}`} toggleClassName="btn icon ghost small">
-      <MenuItem onClick={() => patch({ pinned: !s.pinned })}>{s.pinned ? "Unpin" : "Pin"}</MenuItem>
-      <MenuItem onClick={duplicateSession}>
-        {props.hub ? "Duplicate teammate" : "Duplicate"}
-      </MenuItem>
-      {props.hub && rosterPrefs ? (
-        hidden ? (
-          <MenuItem onClick={restoreTeammate}>Show</MenuItem>
-        ) : (
-          <MenuItem onClick={hideTeammate}>Hide</MenuItem>
-        )
-      ) : null}
-      {props.hub && rosterPrefs ? (
-        <>
-          <MenuSep />
-          <MenuLabel>Section</MenuLabel>
-          {rosterPrefs.sections.map((section) => (
-            <MenuItem
-              key={section.id}
-              disabled={section.id === currentSectionId}
-              onClick={() => moveToSection(section.id)}
-            >
-              Move to {section.name}
-            </MenuItem>
-          ))}
-          <MenuItem onClick={newSection}>New section…</MenuItem>
-          {currentSectionId ? (
-            <MenuItem onClick={() => moveToSection(null)}>Remove from section</MenuItem>
-          ) : null}
-        </>
-      ) : null}
-      <MenuItem onClick={rename}>Rename</MenuItem>
-      <MenuItem
-        onClick={() => {
-          if (s.archived) patch({ archived: false });
-          else archiveOne(s, dispatch);
-        }}
-      >
-        {s.archived ? "Unarchive" : "Archive"}
-      </MenuItem>
-      <MenuSep />
-      <MenuItem danger onClick={remove}>
-        Delete
-      </MenuItem>
-    </OverflowMenu>
-  );
-  const copy = (
-    <>
-      <div className="session-row-main">
-        <SessionTitle session={s} unread={props.unread} />
-        {stamp ? <span className="session-stamp">{stamp}</span> : null}
-      </div>
-      <div className="meta">
-        {props.hub ? null : branch ? (
-          <span className="session-branch" title={branch}>
-            {branch}
-          </span>
-        ) : null}
-        {!props.hub && branch && props.meta ? <span className="session-meta-sep">·</span> : null}
-        {props.meta ? <span className="session-meta-rest">{props.meta}</span> : null}
-      </div>
-    </>
-  );
-  if (props.preview) {
-    return (
-      <div
-        className={sessionRowClass(s, props.selected, props.unread, "design-item has-menu")}
-        title={rowTitle}
-      >
-        <div className="design-thumb-hit" onClick={() => props.onSelect(s.id)}>
-          {props.preview}
-          <span className={`dot ${s.status}`} title={sessionStatusLabel(s.status)} />
-        </div>
-        <button
-          type="button"
-          className="design-item-open"
-          title={rowTitle}
-          onClick={() => props.onSelect(s.id)}
-        >
-          {copy}
-        </button>
-        {menu}
-      </div>
-    );
-  }
-  const trust = props.trust ? <TrustActions compact session={s} /> : null;
-  if (trust) {
-    return (
-      <div
-        className={sessionRowClass(s, props.selected, props.unread, "needs-you-item has-menu")}
-        title={rowTitle}
-      >
-        <button
-          type="button"
-          className="session-item-open"
-          title={rowTitle}
-          onClick={() => props.onSelect(s.id)}
-        >
-          <span className={`dot ${s.status}`} title={sessionStatusLabel(s.status)} />
-          <span>{copy}</span>
-        </button>
-        {trust}
-        {menu}
-      </div>
-    );
-  }
-  return (
-    <div
-      className={sessionRowClass(
-        s,
-        props.selected,
-        props.unread,
-        props.hub ? "has-menu hub-session-item" : "has-menu",
-      )}
-      title={rowTitle}
-    >
-      <button
-        type="button"
-        className="session-item-open"
-        title={rowTitle}
-        onClick={() => props.onSelect(s.id)}
-      >
-        {props.hub ? (
-          <PersonaAvatar
-            avatarId={sessionAvatarId(s)}
-            pose={sessionAvatarPose(s)}
-            accessory={sessionAvatarAccessory(s)}
-            accent={s.persona?.avatarAccent}
-            size={36}
-            title={sessionDisplayName(s)}
-          />
-        ) : null}
-        <span className={`dot ${s.status}`} title={sessionStatusLabel(s.status)} />
-        <span className={props.hub ? "session-item-copy" : undefined}>{copy}</span>
-      </button>
-      {menu}
-    </div>
-  );
-}
-
-function automationCardMeta(
-  item: Automation,
-  runs: AutomationRun[],
-): { last: string | undefined; next: string } {
-  const latest = automationLatestRun(runs, item.id);
-  const fact = automationLastFact(item);
-  const lastAt = latest?.startedAt ?? item.lastRunAt;
-  const last = [lastAt ? `Last ${formatWhen(lastAt)}` : null, fact ? clipFact(fact, 48) : null]
-    .filter(Boolean)
-    .join(" · ");
-  const next = formatNextFire(item);
-  const nextLine = !item.enabled
-    ? "Paused"
-    : next === "On webhook"
-      ? "On webhook"
-      : next
-        ? `Next ${formatWhen(next)}`
-        : formatSchedule(item.schedule);
-  return { last: last || undefined, next: nextLine };
-}
-
-function AutomationListItem(props: {
-  item: Automation;
-  runs: AutomationRun[];
-  selected: boolean;
-  unread: boolean;
-  onSelect: (id: string) => void;
-  onPauseToggle: (item: Automation) => void;
-  onDuplicate: (item: Automation) => void;
-  onSettings: (item: Automation) => void;
-  onDelete: (item: Automation) => void;
-}) {
-  const latest = automationLatestRun(props.runs, props.item.id);
-  const card = automationCardMeta(props.item, props.runs);
-  const live = latest?.status === "running" || latest?.status === "queued";
-  const dot = live
-    ? "running"
-    : latest?.status === "failed"
-      ? "error"
-      : props.item.enabled
-        ? "idle"
-        : "stopped";
-  const menu = (
-    <OverflowMenu title={`More for ${props.item.name}`} toggleClassName="btn icon ghost small">
-      <MenuItem onClick={() => props.onPauseToggle(props.item)}>
-        {props.item.enabled ? "Pause" : "Enable"}
-      </MenuItem>
-      <MenuItem onClick={() => props.onDuplicate(props.item)}>Duplicate</MenuItem>
-      <MenuItem onClick={() => props.onSettings(props.item)}>Settings</MenuItem>
-      <MenuSep />
-      <MenuItem danger onClick={() => props.onDelete(props.item)}>
-        Delete
-      </MenuItem>
-    </OverflowMenu>
-  );
-  return (
-    <div
-      className={`session-item has-menu ${props.selected ? "active" : ""} ${props.unread ? "unread" : ""}`}
-      title={props.item.name}
-    >
-      <button
-        type="button"
-        className="session-item-open"
-        title={props.item.name}
-        onClick={() => props.onSelect(props.item.id)}
-      >
-        <span className={`dot ${dot}`} />
-        <span>
-          <div className="title">
-            <span className="title-text">{props.item.name}</span>
-            {latest ? (
-              <span className={`status-chip ${latest.status}`}>{latest.status}</span>
-            ) : null}
-            {props.unread ? <span className="unread-dot" aria-label="Unread" /> : null}
-          </div>
-          {card.last ? <div className="meta">{card.last}</div> : null}
-          <div className="meta">{card.next}</div>
-        </span>
-      </button>
-      {menu}
-    </div>
-  );
-}
-
-async function patchListedAutomations(
-  items: Automation[],
-  enabled: boolean,
-  dispatch: (action: { type: "automation"; automation: Automation }) => void,
-): Promise<{ ok: number; failed: number; error?: string }> {
-  const results = await Promise.allSettled(
-    items.map((a) =>
-      api.patchAutomation(a.id, { enabled }).then((automation) => {
-        dispatch({ type: "automation", automation });
-        return automation;
-      }),
-    ),
-  );
-  let ok = 0;
-  let failed = 0;
-  let error: string | undefined;
-  for (const result of results) {
-    if (result.status === "fulfilled") ok += 1;
-    else {
-      failed += 1;
-      if (!error) {
-        error = result.reason instanceof Error ? result.reason.message : "Could not update jobs";
-      }
-    }
-  }
-  return { ok, failed, error };
-}
 
 export function Sidebar() {
   const { state, dispatch } = useStore();
+  const sideRef = useRef<HTMLElement>(null);
   const [showArchived, setShowArchived] = useState(() => loadSidebarPrefs().showArchived);
   const [showHiddenTeammates, setShowHiddenTeammates] = useState(
     () => loadSidebarPrefs().showHiddenTeammates,
@@ -693,6 +192,16 @@ export function Sidebar() {
   const [rosterPrefs, setRosterPrefs] = useState(loadSwarmRosterPrefs);
   const [stopping, setStopping] = useState(false);
   const [runningOnly, setRunningOnly] = useState(() => loadSidebarPrefs().runningOnly);
+  const [sidebarWidth, setSidebarWidth] = useState(() => loadSidebarPrefs().width);
+  const [pinnedSections, setPinnedSections] = useState<string[] | undefined>(
+    () => loadSidebarPrefs().pinnedSections,
+  );
+  const [listFilter, setListFilter] = useState<SidebarListFilter>(
+    () => loadSidebarPrefs().listFilter,
+  );
+  const [groupBy, setGroupBy] = useState<SidebarGroupBy>(() => loadSidebarPrefs().groupBy);
+  const inboxOpen = state.inboxOpen;
+  const [resizing, setResizing] = useState(false);
   const [hideAutomationChats, setHideAutomationChats] = useState(loadHideAutomationChats);
   const [slackGroups, setSlackGroups] = useState<SlackSidebarGroups>(loadSlackSidebarGroups);
   const [autoFilter, setAutoFilter] = useState(() => loadAutomationSidebarPrefs().filter);
@@ -716,8 +225,21 @@ export function Sidebar() {
       runningOnly,
       showHiddenTeammates,
       queries: state.queries,
+      width: sidebarWidth,
+      pinnedSections,
+      listFilter,
+      groupBy,
     });
-  }, [showArchived, runningOnly, showHiddenTeammates, state.queries]);
+  }, [
+    showArchived,
+    runningOnly,
+    showHiddenTeammates,
+    state.queries,
+    sidebarWidth,
+    pinnedSections,
+    listFilter,
+    groupBy,
+  ]);
   const q = query.toLowerCase();
   const productMode = parseProductMode(state.config?.productMode);
   const hideAutomationInList = hideAutomationChats || productMode === "swarm";
@@ -740,7 +262,7 @@ export function Sidebar() {
   const archivedAssetCount = state.sessions.filter(
     (s) => s.archived && isAssetSession(s) && sessionMatchesSurface(s, productMode),
   ).length;
-  const sessions = state.sessions.filter((s) => {
+  const agentCatalog = state.sessions.filter((s) => {
     if (!sessionFitsSection(s, "agents")) return false;
     if (!sessionMatchesSurface(s, productMode)) return false;
     if (productMode === "swarm" && s.projectId) return false;
@@ -755,6 +277,9 @@ export function Sidebar() {
     }
     return sessionMatchesQuery(s, q);
   });
+  const sessions = agentCatalog.filter((s) =>
+    sessionPassesListFilter(s, listFilter, state.unreadIds),
+  );
   const hiddenTeammateCount =
     productMode === "swarm"
       ? state.sessions.filter(
@@ -771,30 +296,40 @@ export function Sidebar() {
     saveSwarmRosterPrefs(next);
     setRosterPrefs(next);
   }
-  const ideSessions = state.sessions.filter((s) => {
+  const ideCatalog = state.sessions.filter((s) => {
     if (!sessionFitsSection(s, "ide")) return false;
     if (!sessionMatchesSurface(s, productMode)) return false;
     if (s.archived && !showArchived) return false;
     return sessionMatchesQuery(s, q);
   });
-  const designs = state.sessions.filter((s) => {
+  const ideSessions = ideCatalog.filter((s) =>
+    sessionPassesListFilter(s, listFilter, state.unreadIds),
+  );
+  const designCatalog = state.sessions.filter((s) => {
     if (!isDesignSession(s)) return false;
     if (!sessionMatchesSurface(s, productMode)) return false;
     if (s.archived && !showArchived) return false;
     return sessionMatchesQuery(s, q);
   });
-  const games = state.sessions.filter((s) => {
+  const designs = designCatalog.filter((s) =>
+    sessionPassesListFilter(s, listFilter, state.unreadIds),
+  );
+  const gameCatalog = state.sessions.filter((s) => {
     if (!isGameSession(s)) return false;
     if (!sessionMatchesSurface(s, productMode)) return false;
     if (s.archived && !showArchived) return false;
     return sessionMatchesQuery(s, q);
   });
-  const assets = state.sessions.filter((s) => {
+  const games = gameCatalog.filter((s) => sessionPassesListFilter(s, listFilter, state.unreadIds));
+  const assetCatalog = state.sessions.filter((s) => {
     if (!isAssetSession(s)) return false;
     if (!sessionMatchesSurface(s, productMode)) return false;
     if (s.archived && !showArchived) return false;
     return sessionMatchesQuery(s, q);
   });
+  const assets = assetCatalog.filter((s) =>
+    sessionPassesListFilter(s, listFilter, state.unreadIds),
+  );
   useCanvasPrefetch(
     state.section === "design" || state.section === "games" || state.section === "assets",
     state.section === "games" ? games : state.section === "assets" ? assets : designs,
@@ -823,13 +358,17 @@ export function Sidebar() {
     }),
     state.runs,
   );
+  const manyJobs = state.automations.length > JOB_LIST_TOOLS_MIN;
   const automationGroups =
-    autoSort === "schedule" ? groupAutomationsBySchedule(listedAutomations) : null;
+    manyJobs && autoSort === "schedule" ? groupAutomationsBySchedule(listedAutomations) : null;
   const fleetExtras = formatAutomationFleetExtras(
     automationFleetExtras(state.automations, state.runs, state.sessions, state.config ?? undefined),
   );
   const showFleetActivity =
-    state.section === "automations" && state.automations.length > 1 && state.runs.length > 0;
+    !inboxOpen &&
+    state.section === "automations" &&
+    state.automations.length > 1 &&
+    state.runs.length > 0;
   const boards = state.boards.filter(
     (row) =>
       !row.archived &&
@@ -886,16 +425,45 @@ export function Sidebar() {
   const waiting = needsYouSessions(state.sessions);
   const boardWaiting = boardNeedsYouItems(state.boards);
   const brainWaiting = state.brain?.inboxCount ?? 0;
-  const waitingCount = waiting.length + boardWaiting.length + brainWaiting;
   const sectionMeta = sectionMetaFor(productMode);
-  const primarySections = primaryRailSections(productMode).map((id) => ({
+  const railSections = resolveRailSections(productMode, pinnedSections);
+  const primarySections = railSections.primary.map((id) => ({
     id,
     ...sectionMeta[id as Exclude<UiSection, "settings">],
   }));
-  const secondarySections = moreRailSections(productMode).map((id) => ({
+  const secondarySections = railSections.more.map((id) => ({
     id,
     ...sectionMeta[id as Exclude<UiSection, "settings">],
   }));
+  const inboxAll = buildInboxRows({
+    sessions: state.sessions.filter((s) => sessionMatchesSurface(s, productMode)),
+    boards: state.boards,
+    brain: state.brain,
+    automations: state.automations,
+    runs: state.runs,
+  });
+  const inboxRows = inboxAll.filter((row) => inboxRowMatchesQuery(row, q));
+  const inboxCount = inboxAll.length;
+  const sessionListSection =
+    state.section === "agents" ||
+    state.section === "design" ||
+    state.section === "games" ||
+    state.section === "assets" ||
+    state.section === "ide";
+  const showNeedsGroup =
+    !inboxOpen && state.section === "agents" && listFilter === "all" && groupBy === "day";
+  const sectionCatalog =
+    state.section === "design"
+      ? designCatalog
+      : state.section === "games"
+        ? gameCatalog
+        : state.section === "assets"
+          ? assetCatalog
+          : state.section === "ide"
+            ? ideCatalog
+            : agentCatalog;
+  // Chips only once there is something to filter.
+  const showSessionFilters = !inboxOpen && sessionListSection && sectionCatalog.length > 0;
   const slackBooting = slackWorkspaceBooting({
     slackStatus: state.slackStatus,
     slackConversations: state.slackConversations,
@@ -905,6 +473,16 @@ export function Sidebar() {
   const picked = new Set(state.pickedContainerIds);
   const grouped = groupDockerContainers(containers);
   const liveListed = grouped.running;
+  const grafanaConnected = (state.config?.integrations ?? []).some(
+    (row) => row.kind === "grafana" && Boolean(row.token?.trim()),
+  );
+  function focusGrafanaInvestigate() {
+    const target =
+      document.querySelector<HTMLTextAreaElement>(".grafana-investigate textarea") ??
+      document.querySelector<HTMLInputElement>(".grafana-query input");
+    target?.scrollIntoView({ block: "nearest" });
+    target?.focus();
+  }
   const idleTargets = state.sessions.filter((s) => {
     if (!sessionFitsSection(s, state.section)) return false;
     if (!sessionMatchesSurface(s, productMode)) return false;
@@ -945,54 +523,184 @@ export function Sidebar() {
     }
   }
 
-  const sessionListMenu =
-    state.section === "agents" ||
-    state.section === "design" ||
-    state.section === "games" ||
-    state.section === "assets" ||
-    state.section === "ide" ? (
-      <OverflowMenu title="Session list" toggleClassName="btn icon ghost">
-        <MenuItem
-          disabled={!idleTargets.length}
-          onClick={() => {
-            const n = idleTargets.length;
-            void archiveSessions(
-              idleTargets,
-              dispatch,
-              n === 1 ? "Archived 1 idle chat" : `Archived ${n} idle chats`,
-            );
-          }}
-        >
-          {idleTargets.length ? `Archive idle (${idleTargets.length})` : "Archive idle"}
-        </MenuItem>
-        <MenuItem
-          disabled={!emptyDrafts.length}
-          onClick={() => {
-            const n = emptyDrafts.length;
-            void archiveSessions(
-              emptyDrafts,
-              dispatch,
-              n === 1 ? "Archived 1 empty draft" : `Archived ${n} empty drafts`,
-            );
-          }}
-        >
-          {emptyDrafts.length
-            ? `Archive empty drafts (${emptyDrafts.length})`
-            : "Archive empty drafts"}
-        </MenuItem>
-        {state.section === "agents" ? (
-          <MenuItem
-            onClick={() => {
-              const next = !hideAutomationChats;
-              setHideAutomationChats(next);
-              saveHideAutomationChats(next);
-            }}
-          >
-            {hideAutomationChats ? "Show automation chats" : "Hide automation chats"}
-          </MenuItem>
-        ) : null}
-      </OverflowMenu>
+  function togglePinnedSection(section: UiSection) {
+    if (section === "settings" || isLockedRailSection(section, productMode)) return;
+    const next = railSections.primary.includes(section)
+      ? unpinRailSection(productMode, pinnedSections, section)
+      : pinRailSection(productMode, pinnedSections, section);
+    setPinnedSections(next);
+  }
+
+  function movePinnedSection(section: UiSection, delta: -1 | 1) {
+    setPinnedSections(moveRailSection(productMode, pinnedSections, section, delta));
+  }
+
+  function reorderPinnedSection(section: UiSection, target: UiSection) {
+    setPinnedSections(reorderRailSections(productMode, pinnedSections, section, target));
+  }
+
+  function goToSection(section: UiSection) {
+    if (state.section === "settings" && !confirmLeaveSettings()) return;
+    dispatch({ type: "inbox", open: false });
+    if (productMode === "swarm" && section === "project") {
+      const selected = state.projects.find((item) => item.id === state.selectedProjectId);
+      if (!selected || selected.surface !== "swarm") {
+        dispatch({ type: "selectProject", id: null });
+        return;
+      }
+    }
+    dispatch({ type: "section", section });
+  }
+
+  function openInbox() {
+    if (state.section === "settings") {
+      if (!confirmLeaveSettings()) return;
+      dispatch({ type: "settings", open: false });
+    }
+    dispatch({ type: "inbox", open: true });
+  }
+
+  function openInboxRow(row: InboxRow) {
+    openInboxTarget(row, dispatch);
+  }
+
+  function setWidth(next: number) {
+    const clamped = clampSplit(next, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX);
+    setSidebarWidth(clamped);
+    saveSidebarPrefs({ width: clamped });
+  }
+
+  function onSidebarGutterDown(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const origin = event.clientX;
+    // Narrow windows cap the aside in CSS; drag from what is on screen so the
+    // handle tracks the pointer instead of the larger saved width.
+    const shown = sideRef.current?.getBoundingClientRect().width;
+    const start = shown && shown < sidebarWidth ? Math.round(shown) : sidebarWidth;
+    const node = event.currentTarget;
+    if (typeof node.setPointerCapture === "function") node.setPointerCapture(event.pointerId);
+    setResizing(true);
+    function move(ev: PointerEvent) {
+      setSidebarWidth(
+        clampSplit(start + (ev.clientX - origin), SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX),
+      );
+    }
+    function up() {
+      setResizing(false);
+      if (typeof node.releasePointerCapture === "function") {
+        node.releasePointerCapture(event.pointerId);
+      }
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setSidebarWidth((value) => {
+        saveSidebarPrefs({ width: value });
+        return value;
+      });
+    }
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  function onSidebarGutterKey(event: KeyboardEvent<HTMLDivElement>) {
+    const next = stepSplitValue({
+      key: event.key,
+      shift: event.shiftKey,
+      value: sidebarWidth,
+      min: SIDEBAR_WIDTH_MIN,
+      max: SIDEBAR_WIDTH_MAX,
+      axis: "vertical",
+      step: 16,
+      largeStep: 48,
+    });
+    if (next == null) return;
+    event.preventDefault();
+    setWidth(next);
+  }
+
+  const pinMenuItem =
+    state.section !== "settings" && !isLockedRailSection(state.section, productMode) ? (
+      <MenuItem onClick={() => togglePinnedSection(state.section)}>
+        {railSections.primary.includes(state.section) ? "Unpin from rail" : "Pin to rail"}
+      </MenuItem>
     ) : null;
+  const pinIndex = railSections.primary.indexOf(state.section);
+  const pinFloor = lockedRailSections(productMode).length;
+  const pinOrderMenu =
+    pinIndex >= 0 && !isLockedRailSection(state.section, productMode) ? (
+      <>
+        <MenuItem
+          disabled={pinIndex <= pinFloor}
+          onClick={() => movePinnedSection(state.section, -1)}
+        >
+          Move up
+        </MenuItem>
+        <MenuItem
+          disabled={pinIndex >= railSections.primary.length - 1}
+          onClick={() => movePinnedSection(state.section, 1)}
+        >
+          Move down
+        </MenuItem>
+      </>
+    ) : null;
+
+  const sessionListMenu = sessionListSection ? (
+    <OverflowMenu title="Session list" toggleClassName="btn icon ghost">
+      <MenuItem
+        disabled={!idleTargets.length}
+        onClick={() => {
+          const n = idleTargets.length;
+          void archiveSessions(
+            idleTargets,
+            dispatch,
+            n === 1 ? "Archived 1 idle chat" : `Archived ${n} idle chats`,
+          );
+        }}
+      >
+        {idleTargets.length ? `Archive idle (${idleTargets.length})` : "Archive idle"}
+      </MenuItem>
+      <MenuItem
+        disabled={!emptyDrafts.length}
+        onClick={() => {
+          const n = emptyDrafts.length;
+          void archiveSessions(
+            emptyDrafts,
+            dispatch,
+            n === 1 ? "Archived 1 empty draft" : `Archived ${n} empty drafts`,
+          );
+        }}
+      >
+        {emptyDrafts.length
+          ? `Archive empty drafts (${emptyDrafts.length})`
+          : "Archive empty drafts"}
+      </MenuItem>
+      {state.section === "agents" ? (
+        <MenuItem
+          onClick={() => {
+            const next = !hideAutomationChats;
+            setHideAutomationChats(next);
+            saveHideAutomationChats(next);
+          }}
+        >
+          {hideAutomationChats ? "Show job chats" : "Hide job chats"}
+        </MenuItem>
+      ) : null}
+      {pinMenuItem}
+      {pinOrderMenu}
+      <MenuSep />
+      <MenuLabel>Group by</MenuLabel>
+      {(
+        [
+          ["day", "Day"],
+          ["repo", "Repo"],
+          ["status", "Status"],
+        ] as const
+      ).map(([value, label]) => (
+        <MenuItem key={value} checked={groupBy === value} onClick={() => setGroupBy(value)}>
+          {label}
+        </MenuItem>
+      ))}
+    </OverflowMenu>
+  ) : null;
 
   const connTitle = state.connected ? "Control plane connected" : "Control plane offline";
   const connParts = [
@@ -1009,14 +717,72 @@ export function Sidebar() {
     dispatch({ type: "section", section: "agents" });
   }, [swarmMode, state.section, dispatch]);
 
+  // Narrow windows: the list is an overlay drawer. Start it closed, reopen it if the
+  // window widens again, and close it after a pick so the chosen item is visible.
+  const drawer = useDrawerSidebar();
+  const drawerAutoClosed = useRef(false);
+  useEffect(() => {
+    if (drawer) {
+      if (!state.collapsed) {
+        drawerAutoClosed.current = true;
+        dispatch({ type: "sidebarCollapsed", collapsed: true });
+      }
+    } else if (drawerAutoClosed.current) {
+      drawerAutoClosed.current = false;
+      dispatch({ type: "sidebarCollapsed", collapsed: false });
+    }
+    // Only react to crossing the breakpoint, not to every open / close.
+  }, [drawer]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pickKey = [
+    state.section,
+    state.selectedId,
+    state.selectedBoardId,
+    state.selectedProjectId,
+    state.selectedAutomationId,
+    state.selectedRepoId,
+    state.selectedContainerId,
+    state.selectedSlackChannelId,
+  ].join("|");
+  const lastPick = useRef({ key: pickKey, section: state.section });
+  useEffect(() => {
+    const prev = lastPick.current;
+    lastPick.current = { key: pickKey, section: state.section };
+    // A rail switch also moves the selection; keep the drawer open for that.
+    if (prev.key === pickKey || prev.section !== state.section) return;
+    if (drawer && !state.collapsed) dispatch({ type: "sidebarCollapsed", collapsed: true });
+  }, [pickKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const prefs = loadAutomationSidebarPrefs();
     if (prefs.fleetOpen !== undefined) return;
     if (fleetShouldAutoOpen(state.runs)) setFleetOpen(true);
   }, [state.runs]);
 
+  useEffect(() => {
+    function onKey(event: globalThis.KeyboardEvent) {
+      const digit = matchAltDigit(event);
+      if (!digit) return;
+      const target = event.target;
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) {
+          return;
+        }
+      }
+      const dest = railShortcutTargets(productMode, pinnedSections)[Number(digit) - 1];
+      if (!dest) return;
+      event.preventDefault();
+      if (dest === "inbox") openInbox();
+      else goToSection(dest);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // goToSection / openInbox close over the latest section; listing them retriggers every render.
+  }, [productMode, pinnedSections, state.section]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function returnToSwarmTeammates() {
     if (!confirmLeaveSettings()) return;
+    dispatch({ type: "inbox", open: false });
     const selected = state.sessions.find((s) => s.id === state.selectedId);
     dispatch({ type: "section", section: "agents" });
     // Section navigation can fall back to the first session. If that session
@@ -1027,383 +793,370 @@ export function Sidebar() {
     }
   }
 
-  return (
-    <aside className={`sidebar${swarmMode ? " swarm-sidebar" : ""}`}>
-      {
-        <div className="side-rail">
-          <div className="brand-mark rail-brand" aria-hidden="true" />
-          <nav className="side-rail-nav" aria-label="Sections">
-            {primarySections.map((row) => {
-              const sectionWaiting = waiting.filter((session) =>
-                sessionFitsSection(session, row.id),
-              );
-              const needCount = sectionWaiting.length;
-              const autoUnread = row.id === "automations" && state.unreadAutomationIds.length > 0;
-              const unread =
-                ((row.id === "ide" || row.id === "agents") && needCount > 0) || autoUnread;
-              const label =
-                (row.id === "agents" || row.id === "ide") && needCount
-                  ? `${row.label}, needs you ${needCount}`
-                  : autoUnread
-                    ? `${row.label}, unread`
-                    : row.label;
-              return (
-                <button
-                  key={row.id}
-                  className={state.section === row.id ? "active" : ""}
-                  aria-label={label}
-                  aria-current={state.section === row.id ? "page" : undefined}
-                  data-testid={
-                    swarmMode && row.id === "agents"
-                      ? "swarm-teammates"
-                      : swarmMode && row.id === "project"
-                        ? "swarm-teams"
-                        : undefined
-                  }
-                  onClick={() => {
-                    if (state.section === "settings" && !confirmLeaveSettings()) return;
-                    if (swarmMode && row.id === "project") {
-                      const selected = state.projects.find(
-                        (item) => item.id === state.selectedProjectId,
-                      );
-                      if (!selected || selected.surface !== "swarm") {
-                        dispatch({ type: "selectProject", id: null });
-                        return;
-                      }
-                    }
-                    dispatch({ type: "section", section: row.id });
-                  }}
-                >
-                  <span className="rail-icon" aria-hidden="true">
-                    {row.icon}
-                  </span>
-                  {unread ? <span className="unread-dot" aria-hidden="true" /> : null}
-                  <span className="rail-label">{row.label}</span>
-                </button>
-              );
-            })}
-            {secondarySections.length ? <div className="rail-sep" role="separator" /> : null}
-            {secondarySections.length ? (
-              <OverflowMenu
-                className={`rail-more${secondarySections.some((row) => row.id === state.section) ? " active" : ""}`}
-                title="More"
-                align="after"
-                label={
-                  <>
-                    <span className="rail-icon" aria-hidden="true">
-                      <IconMore />
-                    </span>
-                    {secondarySections.some(
-                      (row) =>
-                        (row.id === "slack" && slackUnread) ||
-                        (row.id === "board" && boardWaiting.length > 0),
-                    ) ? (
-                      <span className="unread-dot" aria-hidden="true" />
-                    ) : null}
-                    <span className="rail-label">More</span>
-                  </>
+  const shortcutTargets = railShortcutTargets(productMode, pinnedSections);
+  function shortcutHint(target: "inbox" | UiSection) {
+    return shortcutCaption(shortcutTargets.indexOf(target));
+  }
+
+  function peekRows(target: "inbox" | UiSection): RailPeekRow[] {
+    if (target === "inbox") {
+      return inboxAll.map((row) => ({ key: row.key, title: row.title, detail: row.detail }));
+    }
+    if (target === "agents") {
+      return agentCatalog.map((s) => ({ key: s.id, title: s.title }));
+    }
+    if (target === "design") {
+      return designCatalog.map((s) => ({ key: s.id, title: s.title }));
+    }
+    if (target === "games") {
+      return gameCatalog.map((s) => ({ key: s.id, title: s.title }));
+    }
+    if (target === "assets") {
+      return assetCatalog.map((s) => ({ key: s.id, title: s.title }));
+    }
+    if (target === "ide") {
+      return ideCatalog.map((s) => ({ key: s.id, title: s.title }));
+    }
+    if (target === "codebase") {
+      return repos.map((row) => ({ key: row.id, title: row.name }));
+    }
+    if (target === "automations") {
+      return automations.map((row) => ({ key: row.id, title: row.name }));
+    }
+    if (target === "docker") {
+      return containers.map((row) => ({ key: row.id, title: row.name, detail: row.state }));
+    }
+    if (target === "slack") {
+      return slackConversations.map((row) => ({
+        key: row.id,
+        title: conversationLabel(row),
+      }));
+    }
+    if (target === "board") {
+      return boards.map((row) => ({ key: row.id, title: row.title }));
+    }
+    if (target === "project") {
+      return projects.map((row) => ({ key: row.id, title: row.teamName ?? row.title }));
+    }
+    if (target === "brain" && state.brain) {
+      return [
+        {
+          key: "brain",
+          title: "Brain",
+          detail:
+            (state.brain.inboxCount ?? 0) > 0
+              ? `${state.brain.inboxCount} waiting`
+              : `${state.brain.nodeCount} nodes`,
+        },
+      ];
+    }
+    return [];
+  }
+
+  function onPeekOpen(target: "inbox" | UiSection, row: RailPeekRow) {
+    if (target === "inbox") {
+      const found = inboxAll.find((item) => item.key === row.key);
+      if (found) openInboxRow(found);
+      else openInbox();
+      return;
+    }
+    if (
+      target === "agents" ||
+      target === "design" ||
+      target === "games" ||
+      target === "assets" ||
+      target === "ide"
+    ) {
+      dispatch({ type: "select", id: row.key });
+      return;
+    }
+    if (target === "codebase") {
+      dispatch({ type: "selectRepo", id: row.key });
+      return;
+    }
+    if (target === "automations") {
+      dispatch({ type: "selectAutomation", id: row.key });
+      return;
+    }
+    if (target === "docker") {
+      dispatch({ type: "selectContainer", id: row.key });
+      return;
+    }
+    if (target === "slack") {
+      dispatch({ type: "selectSlackChannel", id: row.key });
+      return;
+    }
+    if (target === "board") {
+      dispatch({ type: "selectBoard", id: row.key });
+      return;
+    }
+    if (target === "project") {
+      dispatch({ type: "selectProject", id: row.key });
+      return;
+    }
+    goToSection(target);
+  }
+
+  const headerShown = state.section !== "settings" && !inboxOpen;
+  const layoutMenu = pinMenuItem ? (
+    <OverflowMenu title="Sidebar layout" toggleClassName="btn icon ghost">
+      {pinMenuItem}
+      {pinOrderMenu}
+    </OverflowMenu>
+  ) : null;
+  const headerMenu = sessionListSection
+    ? swarmMode && state.section === "agents"
+      ? null
+      : sessionListMenu
+    : layoutMenu;
+  const pickedLive = liveListed.filter((row) => picked.has(row.id));
+
+  function primaryButton(label: string, onClick: () => void, icon = <IconPlus />) {
+    return (
+      <button className="btn primary" title={label} aria-label={label} onClick={onClick}>
+        {icon} <span>{label}</span>
+      </button>
+    );
+  }
+
+  const primaryAction =
+    state.section === "automations" ? (
+      primaryButton(
+        swarmMode ? "New routine" : "New job",
+        () => dispatch({ type: "newAutomation", open: true }),
+        <IconClock />,
+      )
+    ) : state.section === "board" ? (
+      primaryButton("New board", () => dispatch({ type: "selectBoard", id: null }))
+    ) : state.section === "project" ? (
+      primaryButton(swarmMode ? "New team" : "New project", () =>
+        dispatch({ type: "selectProject", id: null }),
+      )
+    ) : state.section === "design" ? (
+      primaryButton("New design", () => dispatch({ type: "select", id: null }))
+    ) : state.section === "games" ? (
+      primaryButton("New game", () => dispatch({ type: "select", id: null }))
+    ) : state.section === "assets" ? (
+      primaryButton("New asset", () => dispatch({ type: "select", id: null }))
+    ) : state.section === "ide" ? (
+      <OverflowMenu
+        className="side-primary-menu"
+        title="New workspace"
+        align="left"
+        toggleClassName="btn primary"
+        testId="ide-new-workspace"
+        label={
+          <>
+            <IconPlus /> <span>New workspace</span>
+          </>
+        }
+      >
+        {(
+          [
+            ["open", "Open folder…"],
+            ["clone", "Clone repo…"],
+          ] as const
+        ).map(([intent, label]) => (
+          <MenuItem
+            key={intent}
+            onClick={() => {
+              dispatch({ type: "select", id: null });
+              dispatch({ type: "ideStart", intent });
+            }}
+          >
+            {label}
+          </MenuItem>
+        ))}
+      </OverflowMenu>
+    ) : state.section === "codebase" ? (
+      primaryButton("Link repo", () => dispatch({ type: "selectRepo", id: null }))
+    ) : state.section === "slack" ? (
+      state.slackStatus?.connected || slackConversations.length > 0 ? (
+        <button
+          className="btn"
+          title="Refresh channels"
+          aria-label="Refresh channels"
+          onClick={() => {
+            void api.slackConversations(true).then(
+              (conversations) => dispatch({ type: "slackConversations", conversations }),
+              (err: unknown) => {
+                showErrorNotice(err, "Could not refresh Slack");
+              },
+            );
+          }}
+        >
+          <IconRefresh /> <span>Refresh</span>
+        </button>
+      ) : null
+    ) : state.section === "docker" ? (
+      <>
+        <button
+          className="btn icon ghost"
+          title="Refresh containers"
+          aria-label="Refresh containers"
+          onClick={() => {
+            void Promise.all([
+              api.dockerContainers(),
+              typeof api.dockerSwarm === "function" ? api.dockerSwarm() : null,
+            ]).then(
+              ([snapshot, swarm]) => {
+                dispatch({ type: "containers", containers: snapshot.containers });
+                if (swarm) {
+                  dispatch({
+                    type: "dockerSwarm",
+                    swarm: {
+                      info: swarm.info,
+                      nodes: swarm.nodes,
+                      services: swarm.services,
+                      stacks: swarm.stacks,
+                    },
+                  });
                 }
-                toggleClassName="rail-more-toggle"
-              >
-                {secondarySections.map((row) => {
-                  const unread =
-                    (row.id === "slack" && slackUnread) ||
-                    (row.id === "board" && boardWaiting.length > 0);
-                  return (
-                    <MenuItem
-                      key={row.id}
-                      active={state.section === row.id}
-                      onClick={() => {
-                        if (state.section === "settings" && !confirmLeaveSettings()) return;
-                        dispatch({ type: "section", section: row.id });
-                      }}
-                    >
-                      {row.label}
-                      {unread ? " · unread" : ""}
-                    </MenuItem>
-                  );
-                })}
-              </OverflowMenu>
-            ) : null}
-          </nav>
-          <span className="rail-spacer" />
-          <div className="side-rail-chrome">
-            {waitingCount ? (
-              <button
-                className="btn icon ghost"
-                aria-label={`Needs you, ${waitingCount} waiting`}
-                onClick={() => {
-                  if (state.section === "settings" && !confirmLeaveSettings()) return;
-                  if (waiting[0]) dispatch({ type: "select", id: waiting[0].id });
-                  else if (boardWaiting[0]) {
-                    dispatch({
-                      type: "selectBoard",
-                      id: boardWaiting[0].boardId,
-                      objectId: boardWaiting[0].objectId,
-                    });
-                  } else if (brainWaiting) {
-                    dispatch({ type: "section", section: "brain" });
-                  }
-                }}
-              >
-                <span className="icon-badge-wrap">
-                  <IconInbox />
-                  <span className="icon-badge danger">{waitingCount}</span>
-                </span>
-                <span className="rail-tip" aria-hidden="true">
-                  Needs you
-                </span>
-              </button>
-            ) : null}
-            <span
-              className={`conn rail-conn ${state.connected ? "live" : ""}`}
-              title={`${connTitle}. ${connDetail}`}
-              role="status"
-              aria-label={connDetail}
-              aria-hidden={state.collapsed ? undefined : true}
-            >
-              <span className="conn-dot" />
-            </span>
-            {state.setup && !state.setup.ready && (
-              <button
-                className="btn ghost setup-btn"
-                aria-label="Setup"
-                onClick={() => dispatch({ type: "setupOpen", open: true })}
-              >
-                <span className="rail-icon" aria-hidden="true">
-                  <IconWrench />
-                </span>
-                <span className="rail-tip" aria-hidden="true">
-                  Setup
-                </span>
-              </button>
-            )}
-            <button
-              className={`btn icon ghost${state.section === "settings" ? " active" : ""}`}
-              aria-label="Settings"
-              aria-current={state.section === "settings" ? "page" : undefined}
-              onClick={() => dispatch({ type: "settings", open: true })}
-            >
-              <IconGear />
-              <span className="rail-tip" aria-hidden="true">
-                Settings
-              </span>
-            </button>
-            <button
-              className="btn icon ghost"
-              aria-label={state.collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              onClick={() => dispatch({ type: "toggleSidebar" })}
-            >
-              <IconPanel />
-              <span className="rail-tip" aria-hidden="true">
-                {state.collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              </span>
-            </button>
-          </div>
-        </div>
-      }
+              },
+              (err: unknown) => {
+                showErrorNotice(err, "Could not refresh Docker");
+              },
+            );
+          }}
+        >
+          <IconRefresh />
+        </button>
+        {state.dockerView === "containers" && pickedLive.length ? (
+          <button
+            className="btn"
+            title="Stop selected"
+            aria-label="Stop selected containers"
+            disabled={stopping}
+            onClick={() => void stopSelectedContainers(pickedLive)}
+          >
+            <IconStop /> <span>Stop {pickedLive.length}</span>
+          </button>
+        ) : null}
+      </>
+    ) : state.section === "brain" ? null : state.section === "grafana" ? (
+      grafanaConnected ? (
+        primaryButton("Investigate", focusGrafanaInvestigate, <></>)
+      ) : (
+        primaryButton("Add Grafana", () => openSettings(dispatch, "integrations"))
+      )
+    ) : (
+      primaryButton(swarmMode ? "New teammate" : "New agent", () =>
+        dispatch({ type: "select", id: null }),
+      )
+    );
+
+  const brandSubtitle = sidebarBrandSubtitle({
+    inboxOpen,
+    inboxCount,
+    section: state.section,
+    mode: productMode,
+    settingsTab: state.settingsTab,
+    dockerKind: state.dockerKind,
+    slackTeam: state.slackStatus?.teamName,
+    agentCount: agentCatalog.length,
+    needsCount: agentCatalog.filter(sessionHasNeedsYou).length,
+    designCount: designCatalog.length,
+    gameCount: gameCatalog.length,
+    assetCount: assetCatalog.length,
+    ideCount: ideCatalog.length,
+    repoCount: repos.length,
+    boardCount: boards.length,
+    projectCount: projects.length,
+    automationCount: automations.length,
+    brainNodes: state.brain?.nodeCount,
+    brainMemories: state.brain?.memoryCount,
+  });
+
+  return (
+    <aside
+      ref={sideRef}
+      className={`sidebar${swarmMode ? " swarm-sidebar" : ""}${resizing ? " resizing" : ""}`}
+      style={state.collapsed && !swarmMode ? undefined : { width: sidebarWidth }}
+    >
+      <SideRail
+        collapsed={state.collapsed}
+        swarmMode={swarmMode}
+        connected={state.connected}
+        connTitle={connTitle}
+        connDetail={connDetail}
+        inboxOpen={inboxOpen}
+        inboxCount={inboxCount}
+        activeSection={state.section}
+        primary={primarySections}
+        secondary={secondarySections}
+        waiting={waiting}
+        unreadAutomation={state.unreadAutomationIds.length > 0}
+        slackUnread={slackUnread}
+        boardWaiting={boardWaiting.length}
+        shortcutHint={shortcutHint}
+        setupOpen={Boolean(state.setup && !state.setup.ready)}
+        onInbox={openInbox}
+        onSection={goToSection}
+        onPin={togglePinnedSection}
+        onReorder={reorderPinnedSection}
+        onMove={movePinnedSection}
+        onSettings={() => dispatch({ type: "settings", open: true })}
+        onToggleCollapse={() => dispatch({ type: "toggleSidebar" })}
+        onSetup={() => dispatch({ type: "setupOpen", open: true })}
+        peekRows={peekRows}
+        onPeekOpen={onPeekOpen}
+      />
       <div
         className="side-main"
         inert={state.collapsed || undefined}
         aria-hidden={state.collapsed || undefined}
       >
         <div className="brand">
-          <div className="brand-mark" aria-hidden="true" />
           <div className="brand-copy">
-            <h1>Locus</h1>
-            <p>
-              {state.section === "docker"
-                ? `docker · ${state.dockerKind === "docker" ? "local" : "mock"}`
-                : state.section === "slack"
-                  ? state.slackStatus?.teamName
-                    ? `slack · ${state.slackStatus.teamName}`
-                    : "Slack"
-                  : state.section === "grafana"
-                    ? "Grafana"
-                    : sectionLabel(state.section, productMode)}
-            </p>
+            <h1>{inboxOpen ? "Inbox" : sectionLabel(state.section, productMode)}</h1>
+            {brandSubtitle ? <p>{brandSubtitle}</p> : null}
           </div>
-          <div className="brand-actions" />
+          {headerShown && !primaryAction && headerMenu ? (
+            <div className="brand-actions">{headerMenu}</div>
+          ) : null}
         </div>
-        {state.section !== "settings" ? (
+        {headerShown && primaryAction ? (
           <div className="side-actions">
-            {state.section === "automations" ? (
-              <button
-                className="btn primary"
-                title={swarmMode ? "New routine" : "New automation"}
-                aria-label={swarmMode ? "New routine" : "New automation"}
-                onClick={() => dispatch({ type: "newAutomation", open: true })}
-              >
-                <IconClock /> <span>{swarmMode ? "New routine" : "New automation"}</span>
-              </button>
-            ) : state.section === "board" ? (
-              <div className="side-actions-row">
-                <button
-                  className="btn primary"
-                  title="New board"
-                  aria-label="New board"
-                  onClick={() => dispatch({ type: "selectBoard", id: null })}
-                >
-                  <IconPlus /> <span>New board</span>
-                </button>
-              </div>
-            ) : state.section === "project" ? (
-              <div className="side-actions-row">
-                <button
-                  className="btn primary"
-                  title={swarmMode ? "New team" : "New project"}
-                  aria-label={swarmMode ? "New team" : "New project"}
-                  onClick={() => dispatch({ type: "selectProject", id: null })}
-                >
-                  <IconPlus /> <span>{swarmMode ? "New team" : "New project"}</span>
-                </button>
-              </div>
-            ) : state.section === "design" ? (
-              <div className="side-actions-row">
-                <button
-                  className="btn primary"
-                  title="New design"
-                  aria-label="New design"
-                  onClick={() => dispatch({ type: "select", id: null })}
-                >
-                  <IconPlus /> <span>New design</span>
-                </button>
-                {sessionListMenu}
-              </div>
-            ) : state.section === "games" ? (
-              <div className="side-actions-row">
-                <button
-                  className="btn primary"
-                  title="New game"
-                  aria-label="New game"
-                  onClick={() => dispatch({ type: "select", id: null })}
-                >
-                  <IconPlus /> <span>New game</span>
-                </button>
-                {sessionListMenu}
-              </div>
-            ) : state.section === "assets" ? (
-              <div className="side-actions-row">
-                <button
-                  className="btn primary"
-                  title="New asset"
-                  aria-label="New asset"
-                  onClick={() => dispatch({ type: "select", id: null })}
-                >
-                  <IconPlus /> <span>New asset</span>
-                </button>
-                {sessionListMenu}
-              </div>
-            ) : state.section === "ide" ? (
-              <div className="side-actions-row">
-                <button
-                  className="btn primary"
-                  title="New workspace"
-                  aria-label="New workspace"
-                  onClick={() => dispatch({ type: "select", id: null })}
-                >
-                  <IconPlus /> <span>New workspace</span>
-                </button>
-                {sessionListMenu}
-              </div>
-            ) : state.section === "codebase" ? (
-              <button
-                className="btn primary"
-                title="Link repo"
-                aria-label="Link repo"
-                onClick={() => dispatch({ type: "selectRepo", id: null })}
-              >
-                <IconPlus /> <span>Link repo</span>
-              </button>
-            ) : state.section === "slack" ? (
-              <button
-                className="btn"
-                title="Refresh channels"
-                aria-label="Refresh channels"
-                onClick={() => {
-                  void api.slackConversations(true).then(
-                    (conversations) => dispatch({ type: "slackConversations", conversations }),
-                    (err: unknown) => {
-                      showErrorNotice(err, "Could not refresh Slack");
-                    },
-                  );
-                }}
-              >
-                <IconRefresh /> <span>Refresh</span>
-              </button>
-            ) : state.section === "docker" ? (
-              <>
-                <button
-                  className="btn"
-                  title="Refresh containers"
-                  aria-label="Refresh containers"
-                  onClick={() => {
-                    void Promise.all([
-                      api.dockerContainers(),
-                      typeof api.dockerSwarm === "function" ? api.dockerSwarm() : null,
-                    ]).then(
-                      ([snapshot, swarm]) => {
-                        dispatch({ type: "containers", containers: snapshot.containers });
-                        if (swarm) {
-                          dispatch({
-                            type: "dockerSwarm",
-                            swarm: {
-                              info: swarm.info,
-                              nodes: swarm.nodes,
-                              services: swarm.services,
-                              stacks: swarm.stacks,
-                            },
-                          });
-                        }
-                      },
-                      (err: unknown) => {
-                        showErrorNotice(err, "Could not refresh Docker");
-                      },
-                    );
-                  }}
-                >
-                  <IconRefresh /> <span>Refresh</span>
-                </button>
-                {state.dockerView === "containers" ? (
-                  <button
-                    className="btn"
-                    title="Stop selected"
-                    aria-label="Stop selected containers"
-                    disabled={
-                      stopping || liveListed.filter((row) => picked.has(row.id)).length === 0
-                    }
-                    onClick={() =>
-                      void stopSelectedContainers(liveListed.filter((row) => picked.has(row.id)))
-                    }
-                  >
-                    <IconStop /> <span>Stop selected</span>
-                  </button>
-                ) : null}
-              </>
-            ) : state.section === "brain" ? null : (
-              <div className="side-actions-row">
-                <button
-                  className="btn primary"
-                  title={swarmMode ? "New teammate" : "New agent"}
-                  aria-label={swarmMode ? "New teammate" : "New agent"}
-                  onClick={() => dispatch({ type: "select", id: null })}
-                >
-                  <IconPlus /> <span>{swarmMode ? "New teammate" : "New agent"}</span>
-                </button>
-                {swarmMode ? null : sessionListMenu}
-              </div>
-            )}
+            <div className="side-actions-row">
+              {primaryAction}
+              {headerMenu}
+            </div>
           </div>
         ) : null}
         {state.section !== "settings" ? (
           <SearchField
             className="search"
-            placeholder={sectionSearchPlaceholder(state.section, productMode)}
+            placeholder={
+              inboxOpen ? "Search inbox" : sectionSearchPlaceholder(state.section, productMode)
+            }
             value={query}
             onChange={(e: FormEvent<HTMLInputElement>) =>
               dispatch({ type: "query", query: (e.target as HTMLInputElement).value })
             }
             shortcut={undefined}
+          />
+        ) : null}
+        {showSessionFilters ? (
+          <FilterChips
+            label="Session filter"
+            value={listFilter}
+            options={(
+              [
+                ["all", "All"],
+                ["needs", "Needs you"],
+                ["running", "Running"],
+                ["unseen", "Unread"],
+              ] as const
+            ).map(([value, label]) => ({
+              value,
+              label,
+              count:
+                value === "all"
+                  ? undefined
+                  : sectionCatalog.filter((s) => sessionPassesListFilter(s, value, state.unreadIds))
+                      .length,
+            }))}
+            onChange={setListFilter}
           />
         ) : null}
         {state.section === "docker" ? (
@@ -1426,72 +1179,60 @@ export function Sidebar() {
                 data-testid="docker-swarm-tab"
                 onClick={() => dispatch({ type: "dockerView", view: "swarm" })}
               >
-                Swarm
+                Services
               </button>
             </div>
-            {state.dockerView === "containers" ? (
-              <label className="side-toggle">
-                <input
-                  type="checkbox"
-                  checked={runningOnly}
-                  onChange={(e) => setRunningOnly(e.target.checked)}
-                />
-                Running only
-              </label>
+            {state.dockerView === "containers" && containers.length ? (
+              <FilterChips
+                label="Container filter"
+                value={runningOnly ? "running" : "all"}
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "running", label: "Running", count: grouped.running.length },
+                ]}
+                onChange={(value) => setRunningOnly(value === "running")}
+              />
             ) : null}
           </>
         ) : null}
         {state.section === "automations" && state.automations.length ? (
           <>
             <div className="auto-side-filters">
-              <div className="auto-side-filter-row" role="group" aria-label="Job filter">
-                {(
-                  [
-                    ["all", "All"],
-                    ["failing", "Failing"],
-                    ["needs-you", "Needs you"],
-                    ["running", "Running"],
-                    ["paused", "Paused"],
-                    ["over-cap", "Over cap"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={`btn small${autoFilter === value ? " primary" : " ghost"}`}
-                    aria-pressed={autoFilter === value}
-                    onClick={() => {
-                      setAutoFilter(value);
-                      saveAutomationSidebarPrefs({ filter: value, sort: autoSort });
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="auto-side-filter-row" role="group" aria-label="Automation sort">
-                {(
-                  [
-                    ["priority", "Priority"],
-                    ["schedule", "By trigger"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={`btn small${autoSort === value ? " primary" : " ghost"}`}
-                    aria-pressed={autoSort === value}
-                    onClick={() => {
-                      setAutoSort(value);
-                      saveAutomationSidebarPrefs({ filter: autoFilter, sort: value });
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <Select
+                compact
+                ariaLabel="Job filter"
+                value={autoFilter}
+                options={JOB_FILTER_OPTIONS}
+                onChange={(next) => {
+                  setAutoFilter(next);
+                  saveAutomationSidebarPrefs({ filter: next, sort: autoSort });
+                }}
+              />
+              {manyJobs ? (
+                <div className="auto-side-filter-row" role="group" aria-label="Job sort">
+                  {(
+                    [
+                      ["priority", "Priority"],
+                      ["schedule", "By trigger"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`btn small${autoSort === value ? " primary" : " ghost"}`}
+                      aria-pressed={autoSort === value}
+                      onClick={() => {
+                        setAutoSort(value);
+                        saveAutomationSidebarPrefs({ filter: autoFilter, sort: value });
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
-            {listedAutomations.length ? (
+            {manyJobs && listedAutomations.length ? (
               <div className="auto-bulk" data-testid="auto-bulk">
                 <button
                   type="button"
@@ -1555,8 +1296,8 @@ export function Sidebar() {
               <ConfirmModal
                 title={
                   bulkConfirm.enabled
-                    ? `Enable ${bulkConfirm.count} automations?`
-                    : `Pause ${bulkConfirm.count} automations?`
+                    ? `Enable ${bulkConfirm.count} jobs?`
+                    : `Pause ${bulkConfirm.count} jobs?`
                 }
                 body={
                   bulkConfirm.enabled
@@ -1590,7 +1331,7 @@ export function Sidebar() {
             ) : null}
             {deleteAutomationId ? (
               <ConfirmModal
-                title={`Delete ${state.automations.find((a) => a.id === deleteAutomationId)?.name ?? "automation"}?`}
+                title={`Delete ${state.automations.find((a) => a.id === deleteAutomationId)?.name ?? "job"}?`}
                 body="This cannot be undone."
                 confirmLabel="Delete"
                 danger
@@ -1612,40 +1353,6 @@ export function Sidebar() {
           <div className="auto-health" data-testid="auto-health">
             <p>{formatAutomationHealth(automationHealthCounts(state.automations, state.runs))}</p>
             {fleetExtras ? <p data-testid="auto-fleet-extras">{fleetExtras}</p> : null}
-            <div className="auto-health-actions" role="group" aria-label="Filter by health">
-              <button
-                type="button"
-                className="btn small ghost"
-                onClick={() => {
-                  setAutoFilter("failing");
-                  saveAutomationSidebarPrefs({ filter: "failing", sort: autoSort });
-                }}
-              >
-                Failing
-              </button>
-              <button
-                type="button"
-                className="btn small ghost"
-                onClick={() => {
-                  setAutoFilter("paused");
-                  saveAutomationSidebarPrefs({ filter: "paused", sort: autoSort });
-                }}
-              >
-                Paused
-              </button>
-              {fleetExtras?.includes("over cap") ? (
-                <button
-                  type="button"
-                  className="btn small ghost"
-                  onClick={() => {
-                    setAutoFilter("over-cap");
-                    saveAutomationSidebarPrefs({ filter: "over-cap", sort: autoSort });
-                  }}
-                >
-                  Over cap
-                </button>
-              ) : null}
-            </div>
           </div>
         ) : null}
         <div
@@ -1653,8 +1360,19 @@ export function Sidebar() {
             showFleetActivity && fleetOpen ? " is-open" : ""
           }`}
         >
-          <div className="session-list" aria-label={sectionLabel(state.section, productMode)}>
-            {state.section === "settings" ? (
+          <div
+            className="session-list"
+            aria-label={inboxOpen ? "Inbox" : sectionLabel(state.section, productMode)}
+          >
+            {inboxOpen ? (
+              <InboxList
+                rows={inboxRows}
+                sessions={state.sessions}
+                query={q}
+                mode={productMode}
+                onOpen={openInboxRow}
+              />
+            ) : state.section === "settings" ? (
               <nav
                 className="settings-nav"
                 aria-label="Settings"
@@ -1701,7 +1419,7 @@ export function Sidebar() {
                 <EmptyListNote>
                   {q || autoFilter !== "all" ? (
                     <>
-                      No matching automations
+                      No matching jobs
                       <button
                         type="button"
                         className="btn small"
@@ -1717,7 +1435,7 @@ export function Sidebar() {
                       </button>
                     </>
                   ) : (
-                    "No automations"
+                    "No jobs"
                   )}
                 </EmptyListNote>
               ) : automationGroups ? (
@@ -1977,6 +1695,7 @@ export function Sidebar() {
                     />
                   )}
                   onSelect={(id) => dispatch({ type: "select", id })}
+                  groupBy={groupBy}
                 />
               )
             ) : state.section === "games" ? (
@@ -1998,6 +1717,7 @@ export function Sidebar() {
                     />
                   )}
                   onSelect={(id) => dispatch({ type: "select", id })}
+                  groupBy={groupBy}
                 />
               )
             ) : state.section === "assets" ? (
@@ -2018,6 +1738,7 @@ export function Sidebar() {
                     />
                   )}
                   onSelect={(id) => dispatch({ type: "select", id })}
+                  groupBy={groupBy}
                 />
               )
             ) : state.section === "ide" ? (
@@ -2031,16 +1752,13 @@ export function Sidebar() {
                   repos={state.repos}
                   metaFor={agentMeta}
                   onSelect={(id) => dispatch({ type: "select", id })}
+                  groupBy={groupBy}
                 />
               )
             ) : state.section === "codebase" ? (
               <>
                 {repos.length === 0 ? (
-                  <EmptyListNote>
-                    {q
-                      ? "No matching repos"
-                      : "No linked repos. Linked repos appear here, grouped by host."}
-                  </EmptyListNote>
+                  <EmptyListNote>{q ? "No matching repos" : "No repos yet"}</EmptyListNote>
                 ) : (
                   groupRepos(repos).map((group) => (
                     <div key={group.forge} className="repo-group">
@@ -2136,23 +1854,15 @@ export function Sidebar() {
                 )}
               </>
             ) : state.section === "brain" ? (
-              <EmptyListNote>
-                {q
-                  ? "No matching claims"
-                  : "Shared graph of services, APIs, and distilled memory. Build from a repo folder in the pane."}
-              </EmptyListNote>
+              <EmptyListNote>{q ? "No matching claims" : "No claims yet"}</EmptyListNote>
             ) : state.section === "grafana" ? (
-              <EmptyListNote>
-                {q
-                  ? "No matching queries"
-                  : "Lucene logs, stack traces into linked repos, and Investigate."}
-              </EmptyListNote>
+              <EmptyListNote>{q ? "No matching queries" : "No saved queries yet"}</EmptyListNote>
             ) : state.section === "slack" ? (
               slackBooting ? (
                 <SlackChannelListSkeleton />
               ) : slackConversations.length === 0 && !state.slackStatus?.connected ? (
                 <EmptyListNote>
-                  {q ? "No matching channels" : "Sign in with Slack in Settings → Integrations"}
+                  {q ? "No matching channels" : "Sign in with Slack to see channels"}
                 </EmptyListNote>
               ) : (
                 <div className="slack-sidebar">
@@ -2497,9 +2207,10 @@ export function Sidebar() {
               </EmptyListNote>
             ) : (
               <>
-                {sessions.filter(sessionHasNeedsYou).length ||
-                boardWaiting.length ||
-                brainWaiting ? (
+                {showNeedsGroup &&
+                (sessions.filter(sessionHasNeedsYou).length ||
+                  boardWaiting.length ||
+                  brainWaiting) ? (
                   <div className="session-group">
                     {productMode === "swarm" ? null : (
                       <p className="session-group-label warn">Needs you</p>
@@ -2538,6 +2249,7 @@ export function Sidebar() {
                           })
                         }
                       >
+                        <span className="dot needs-you" aria-hidden="true" />
                         <span>
                           <div className="title">
                             <span className="title-text">{row.title}</span>
@@ -2556,6 +2268,7 @@ export function Sidebar() {
                           dispatch({ type: "section", section: "brain" });
                         }}
                       >
+                        <span className="dot needs-you" aria-hidden="true" />
                         <span>
                           <div className="title">
                             <span className="title-text">Brain</span>
@@ -2572,7 +2285,9 @@ export function Sidebar() {
                 ) : null}
                 {productMode === "swarm" && rosterPrefs.sections.length ? (
                   (() => {
-                    const rest = sessions.filter((s) => !sessionHasNeedsYou(s));
+                    const rest = showNeedsGroup
+                      ? sessions.filter((s) => !sessionHasNeedsYou(s))
+                      : sessions;
                     const assigned = new Set(
                       rosterPrefs.sections.flatMap((section) => section.sessionIds),
                     );
@@ -2610,13 +2325,16 @@ export function Sidebar() {
                           onRosterPrefs={updateRosterPrefs}
                           metaFor={(s) => swarmRosterMeta(s)}
                           onSelect={(id) => dispatch({ type: "select", id })}
+                          groupBy={groupBy}
                         />
                       </>
                     );
                   })()
                 ) : (
                   <SessionGroupBlocks
-                    sessions={sessions.filter((s) => !sessionHasNeedsYou(s))}
+                    sessions={
+                      showNeedsGroup ? sessions.filter((s) => !sessionHasNeedsYou(s)) : sessions
+                    }
                     selectedId={state.selectedId}
                     unreadIds={state.unreadIds}
                     repos={state.repos}
@@ -2629,6 +2347,7 @@ export function Sidebar() {
                         : agentMeta(s, state.projects.find((row) => row.id === s.projectId)?.title)
                     }
                     onSelect={(id) => dispatch({ type: "select", id })}
+                    groupBy={groupBy}
                   />
                 )}
               </>
@@ -2705,21 +2424,9 @@ export function Sidebar() {
               Show hidden ({hiddenTeammateCount})
             </label>
           ) : null}
-          {state.section === "docker" ? null : (
-            <span className={`conn ${state.connected ? "live" : ""}`} title={connTitle}>
-              <span className="conn-dot" />
-              <span className="conn-label">{connDetail}</span>
-            </span>
-          )}
           {state.section === "codebase" ? (
             <span className="hint">
               {repos.length} {repos.length === 1 ? "repo" : "repos"}
-            </span>
-          ) : state.section === "brain" ? (
-            <span className="hint">
-              {state.brain
-                ? `${state.brain.nodeCount} nodes · ${state.brain.memoryCount} memories`
-                : "Empty brain"}
             </span>
           ) : state.section === "board" ? (
             <span className="hint">
@@ -2769,7 +2476,7 @@ export function Sidebar() {
                 </span>
               )}
             </span>
-          ) : (state.section === "agents" && archivedCount > 0) ||
+          ) : inboxOpen ? null : (state.section === "agents" && archivedCount > 0) ||
             (state.section === "ide" && archivedIdeCount > 0) ||
             (state.section === "design" && archivedDesignCount > 0) ||
             (state.section === "games" && archivedGameCount > 0) ||
@@ -2795,6 +2502,28 @@ export function Sidebar() {
           ) : null}
         </div>
       </div>
+      {drawer && !state.collapsed && !swarmMode ? (
+        <div
+          className="side-scrim"
+          data-testid="side-scrim"
+          aria-hidden="true"
+          onClick={() => dispatch({ type: "sidebarCollapsed", collapsed: true })}
+        />
+      ) : null}
+      {state.collapsed && !swarmMode ? null : (
+        <Splitter
+          className="sidebar-gutter"
+          orientation="vertical"
+          label="Resize sidebar"
+          value={sidebarWidth}
+          min={SIDEBAR_WIDTH_MIN}
+          max={SIDEBAR_WIDTH_MAX}
+          valueText={`${sidebarWidth} pixels`}
+          onPointerDown={onSidebarGutterDown}
+          onKeyDown={onSidebarGutterKey}
+          onDoubleClick={() => setWidth(SIDEBAR_WIDTH_DEFAULT)}
+        />
+      )}
     </aside>
   );
 }

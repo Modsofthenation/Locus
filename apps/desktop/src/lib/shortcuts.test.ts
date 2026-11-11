@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SHORTCUTS,
+  matchAltDigit,
   matchModDigit,
   matchModKey,
   shortcutDisplay,
@@ -21,6 +22,7 @@ describe("shortcuts", () => {
       "Ctrl/Cmd+,",
       "Ctrl/Cmd+F",
       "Ctrl/Cmd+1–9",
+      "Alt+1–9",
       "F12",
       "Alt+F12",
       "Ctrl/Cmd+.",
@@ -72,6 +74,12 @@ describe("shortcuts", () => {
     ).toBe("3");
     expect(
       matchModDigit({ key: "0", ctrlKey: true, metaKey: false, shiftKey: false, altKey: false }),
+    ).toBe(null);
+    expect(
+      matchAltDigit({ key: "2", altKey: true, metaKey: false, ctrlKey: false, shiftKey: false }),
+    ).toBe("2");
+    expect(
+      matchAltDigit({ key: "2", altKey: true, metaKey: true, ctrlKey: false, shiftKey: false }),
     ).toBe(null);
   });
 });

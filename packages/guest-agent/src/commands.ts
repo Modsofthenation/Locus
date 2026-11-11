@@ -9,7 +9,7 @@ import {
   sanitizeRecordingName,
 } from "@locus/shared";
 import { gitCloneCommand, gitFetchCommand, gitPushCommand, argPull, argForge } from "./git.js";
-import type { ToolRequest } from "./types.js";
+import type { ToolRequest, ToolResult } from "./types.js";
 import { num, optNum, str, truthy, grepContextLines } from "./types.js";
 
 export const RECORDING_MARKER = "LOCUS_RECORDING:";
@@ -230,6 +230,27 @@ export function parseRecordScreenResult(output: string): {
   const recordingGuestPath = match[1].replace(/\\/g, "/");
   const recordingName = recordingGuestPath.split("/").pop();
   return recordingName ? { recordingGuestPath, recordingName } : { recordingGuestPath };
+}
+
+/** Shape SSH / WinRM exec output into a ToolResult (screenshot base64, record_screen marker). */
+export function decorateRemoteToolResult(
+  name: string,
+  result: { code: number; stdout?: string; stderr?: string },
+): ToolResult {
+  const output = (result.stdout || result.stderr || "").trim();
+  if (name === "screenshot" && result.code === 0 && output.length > 80) {
+    return {
+      ok: true,
+      output: "screenshot captured",
+      screenshotBase64: output.replace(/\s/g, ""),
+    };
+  }
+  if (name === "record_screen") {
+    const parsed = parseRecordScreenResult(output);
+    const cleaned = output.replace(/LOCUS_RECORDING:\S+\s*/g, "").trim();
+    return { ok: result.code === 0, output: cleaned || `(exit ${result.code})`, ...parsed };
+  }
+  return { ok: result.code === 0, output: output || `(exit ${result.code})` };
 }
 
 function linuxRecordScreen(req: ToolRequest): string {

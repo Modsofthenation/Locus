@@ -2,7 +2,7 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import { BUILTIN_PROVIDERS, builtinProviderKey, type AiProvider } from "@locus/shared";
-import { CodexReasoningPicker, ModelPicker } from "./ModelPicker";
+import { CodexReasoningPicker, ModelPicker, composerModelLabel } from "./ModelPicker";
 import {
   selectOptionLabels,
   selectOptionValues,
@@ -57,6 +57,20 @@ describe("ModelPicker", () => {
     expect(host.textContent).toMatch(/Approx\. published \$\/1M tokens \(2026-08\)/i);
   });
 
+  it("gives the composer chip and the topbar one model label that flags an off provider", () => {
+    expect(composerModelLabel(providers, "missing", "big-pickle")).toEqual({
+      label: "big-pickle · No provider",
+      off: true,
+    });
+    expect(composerModelLabel(providers, "", "")).toEqual({ label: "No provider", off: true });
+    const on = providers.map((p) => (p.id === "openai" ? { ...p, enabled: true } : p));
+    expect(composerModelLabel(on, "openai", "gpt-4.1")).toEqual({
+      label: "OpenAI · gpt-4.1",
+      off: false,
+    });
+    expect(composerModelLabel(providers, "openai", "gpt-4.1").label).toBe("OpenAI (off) · gpt-4.1");
+  });
+
   it("labels empty compact pickers instead of rendering blank selects", () => {
     render(
       <ModelPicker
@@ -84,7 +98,7 @@ describe("ModelPicker", () => {
     );
     expect(
       host.querySelector("[aria-label='Model'] .model-picker-combined-label")?.textContent,
-    ).toBe("OpenAI · gpt-4.1");
+    ).toBe("OpenAI (off) · gpt-4.1");
     act(() => {
       host
         .querySelector("[aria-label='Model']")
@@ -405,7 +419,7 @@ describe("ModelPicker", () => {
       />,
     );
     expect(host.querySelector(".model-picker-combined-label")?.textContent).toBe(
-      "Anthropic · claude-sonnet-4-5",
+      "Anthropic (off) · claude-sonnet-4-5",
     );
     act(() => {
       host

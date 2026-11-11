@@ -1491,49 +1491,49 @@ describe("generation eval score", () => {
         kind: "design",
         html: `<!doctype html><html lang="en" data-locus-host-fallback="design"><body><h1>First draft</h1></body></html>`,
       }),
-    ).toMatch(/last-resort host draft/);
+    ).toMatch(/starter draft on this canvas/);
     expect(
       generationQualityNeedsHuman({
         kind: "asset",
         html: `<!doctype html><html lang="en" data-locus-host-fallback="asset"><body><canvas></canvas><script>import * as THREE from "./vendor/three.module.js"; reconstructFromPhoto("./source.png");</script></body></html>`,
       }),
-    ).toMatch(/last-resort host draft/);
+    ).toMatch(/starter draft on this canvas/);
     expect(
       generationQualityNeedsHuman({
         kind: "design",
         html: `<!doctype html><html lang="en"><head><style>:root { --line: color-mix(in srgb, var(--text) 14%, var(--bg)); }</style></head><body><p class="kicker">First draft</p><a class="cta" href="#next">Continue</a></body></html>`,
       }),
-    ).toMatch(/last-resort host draft/);
+    ).toMatch(/starter draft on this canvas/);
     expect(
       generationQualityNeedsHuman({
         kind: "asset",
         html: `<!doctype html><html><body><canvas></canvas><script>function drawPlaceholder(){ ctx.beginPath(); ctx.ellipse(0, 8, 72, 118, 0, 0, Math.PI * 2); } studio.paint = drawPlaceholder; reconstructFromPhoto("./source.png");</script></body></html>`,
       }),
-    ).toMatch(/last-resort host draft/);
+    ).toMatch(/starter draft on this canvas/);
     expect(
       generationQualityNeedsHuman({
         kind: "design",
         html: `<!doctype html><html lang="en"><head><style>:root { --line: color-mix(in srgb, var(--text) 15%, var(--bg)); }</style></head><body><p class="kicker">First draft</p><a class="cta" href="#next">Continue</a></body></html>`,
       }),
-    ).toMatch(/last-resort host draft/);
+    ).toMatch(/starter draft on this canvas/);
     expect(
       generationQualityNeedsHuman({
         kind: "asset",
         html: `<!doctype html><html><body><canvas></canvas><script>function drawPlaceholder(){ ctx.beginPath(); ctx.ellipse(0, 8, 72, 119, 0, 0, Math.PI * 2); } studio.paint = drawPlaceholder; reconstructFromPhoto("./source.png");</script></body></html>`,
       }),
-    ).toMatch(/last-resort host draft/);
+    ).toMatch(/starter draft on this canvas/);
     expect(
       generationQualityNeedsHuman({
         kind: "design",
         html: `<!doctype html><html lang="en"><head><style>:root { --line: color-mix(in srgb, var(--text) 15%, var(--bg)); } main { max-width: 40rem; margin: 0 auto; padding: calc(var(--space) * 8); } .lede { margin: 0 0 calc(var(--space) * 6); } .cta { display: inline-block; padding: calc(var(--space) * 1.5) calc(var(--space) * 3); }</style></head><body><p class="kicker">Draft</p><p class="lede">Hello</p><a class="cta" href="#next">Continue</a></body></html>`,
       }),
-    ).toMatch(/last-resort host draft/);
+    ).toMatch(/starter draft on this canvas/);
     expect(
       generationQualityNeedsHuman({
         kind: "game",
         html: `<!doctype html><html><body><script>window.addEventListener('keydown', () => {}); const hazards = [{x: 421, y: 0}]; function beep(){ new AudioContext(); } ctx.fillRect(x-10, y-20, 20, 20); h.x -= 3 + score * 0.05; if (keys.Space) vy = -f.j * 0.7; if (y > canvas.height - 64) vy = 0; ctx.fillText("Game over — R restart", 24, 80);</script>Score 0<button>Restart</button></body></html>`,
       }),
-    ).toMatch(/last-resort host draft/);
+    ).toMatch(/starter draft on this canvas/);
     expect(
       generationQualityNeedsHuman({
         kind: "design",

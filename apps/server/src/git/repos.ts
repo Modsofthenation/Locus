@@ -9,6 +9,7 @@ import {
   architectureSessionTitle,
   buildLoadPath,
   buildChangeStack,
+  DEFAULT_FORGE_SPECS,
   emptyArchitectureAnalysis,
   formatArchitectureSuggestPrompt,
   isArchScope,
@@ -57,6 +58,8 @@ import type { SessionService } from "../session/sessions.js";
 import type { JsonStore } from "../core/store.js";
 import { summarizeChangeStack, type ChangeStackSummarizer } from "./changeStackSummaries.js";
 import { readArchitectureSources, resolveArchitectureRoot } from "./architectureCheckout.js";
+
+const DEFAULT_BRANCH_TIMEOUT_MS = 5_000;
 
 function stamp(): string {
   return new Date().toISOString();
@@ -135,6 +138,7 @@ export class RepoService {
       createdAt: now,
       updatedAt: now,
     };
+    if (!created.checkout.ref) created.checkout.ref = await this.lookupDefaultBranch(created);
     await this.store.replaceRepo(created);
     this.hub.broadcast({ type: "repo.updated", repo: created });
     return created;
@@ -221,8 +225,10 @@ export class RepoService {
     } catch {
       /* Issues tracker may be off; keep the last known count. */
     }
+    const ref = repo.checkout.ref || (await this.lookupDefaultBranch(repo));
     const next: LinkedRepo = {
       ...repo,
+      checkout: { ...repo.checkout, ref },
       openPullCount: pulls.filter(isOpenInboxPull).length,
       openIssueCount,
       lastFetchAt: stamp(),
@@ -235,7 +241,7 @@ export class RepoService {
 
   async listBranches(id: string): Promise<RepoBranchList> {
     const repo = await this.require(id);
-    const account = await this.accountFor(repo);
+    const account = await this.readAccountFor(repo);
     const parsed = requireOwnerRepo(repo.checkout.url);
     const listed = await this.forge.listBranches(account, parsed.owner, parsed.repo);
     return mergeRepoBranches(listed.branches, listed.defaultBranch || repo.checkout.ref);
@@ -850,9 +856,46 @@ export class RepoService {
     return fresh;
   }
 
+  /**
+   * Account for reads. Without a token this returns a tokenless account so public repos load
+   * unauthenticated; the forge adapters throw `ForgeAccessError` when that is refused.
+   */
+  async readAccountFor(repo: LinkedRepo): Promise<GitForgeAccount> {
+    const config = await this.store.loadConfig();
+    const account = resolveForgeAccount(config.forges, {
+      accountId: repo.checkout.accountId,
+      kind: repo.checkout.forge,
+      url: repo.checkout.url,
+    });
+    if (account) return withFreshForgeToken(this.store, account, this.fetchFn);
+    const spec = DEFAULT_FORGE_SPECS.find((row) => row.kind === repo.checkout.forge);
+    if (!spec) throw new Error("Add a forge account in Settings → Git");
+    return { id: `anonymous-${spec.kind}`, ...spec };
+  }
+
+  /** Default branch from the forge, or undefined when it can't be reached. Never throws. */
+  private async lookupDefaultBranch(repo: LinkedRepo): Promise<string | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const account = await this.readAccountFor(repo);
+      const parsed = requireOwnerRepo(repo.checkout.url);
+      const listed = await Promise.race([
+        this.forge.listBranches(account, parsed.owner, parsed.repo),
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), DEFAULT_BRANCH_TIMEOUT_MS);
+        }),
+      ]);
+      return listed?.defaultBranch?.trim() || undefined;
+    } catch {
+      return undefined;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   private async fetchListPulls(id: string, state: PullListState): Promise<PullRequestRef[]> {
     const repo = await this.require(id);
-    const account = await this.accountFor(repo);
+    const account = await this.readAccountFor(repo);
     const parsed = requireOwnerRepo(repo.checkout.url);
     const rows = await this.forge.listPulls(account, parsed.owner, parsed.repo, state);
     const mapped = await this.withListSessions(
@@ -864,7 +907,7 @@ export class RepoService {
 
   private async fetchPull(id: string, number: number): Promise<PullRequestDetail> {
     const repo = await this.require(id);
-    const account = await this.accountFor(repo);
+    const account = await this.readAccountFor(repo);
     const parsed = requireOwnerRepo(repo.checkout.url);
     const detail = await this.forge.getPull(account, parsed.owner, parsed.repo, number);
     return this.withDetailSessions(repo.id, number, { ...detail, repoId: repo.id });
@@ -872,7 +915,7 @@ export class RepoService {
 
   private async fetchListIssues(id: string, state: IssueListState): Promise<IssueRef[]> {
     const repo = await this.require(id);
-    const account = await this.accountFor(repo);
+    const account = await this.readAccountFor(repo);
     const parsed = requireOwnerRepo(repo.checkout.url);
     const rows = await this.forge.listIssues(account, parsed.owner, parsed.repo, state);
     return rows.map((row) => ({ ...row, repoId: repo.id }));
@@ -880,7 +923,7 @@ export class RepoService {
 
   private async fetchIssue(id: string, number: number): Promise<IssueDetail> {
     const repo = await this.require(id);
-    const account = await this.accountFor(repo);
+    const account = await this.readAccountFor(repo);
     const parsed = requireOwnerRepo(repo.checkout.url);
     const detail = await this.forge.getIssue(account, parsed.owner, parsed.repo, number);
     return { ...detail, repoId: repo.id };

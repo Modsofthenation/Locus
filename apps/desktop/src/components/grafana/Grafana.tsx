@@ -27,8 +27,6 @@ import {
 } from "@locus/shared";
 import { api } from "@/lib/api";
 import { loadLastAgent, pickProvider } from "@/lib/lastAgent";
-import { SECTION_FEATURE_HINTS } from "@/lib/discoverability";
-import { FeatureHintRow } from "@/components/layout/FeatureHint";
 import { EmptyHero, EmptyHint } from "@/components/layout/EmptyHero";
 import { InlineError, Skeleton } from "@/components/layout/Skeleton";
 import { Select } from "@/components/layout/Select";
@@ -382,9 +380,6 @@ export function GrafanaPane() {
                 Add Grafana
               </button>
             </div>
-            {SECTION_FEATURE_HINTS.grafana ? (
-              <FeatureHintRow hint={SECTION_FEATURE_HINTS.grafana} />
-            ) : null}
           </div>
         </div>
       </div>

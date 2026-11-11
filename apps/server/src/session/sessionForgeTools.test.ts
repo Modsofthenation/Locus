@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "@locus/shared";
-import { executeForgeTool, isForgeToolName } from "./sessionForgeTools.js";
+import { executeForgeTool, executeSessionForgeTool, isForgeToolName } from "./sessionForgeTools.js";
 
 function session(patch: Partial<AgentSession> = {}): AgentSession {
   return {
@@ -17,6 +17,40 @@ function session(patch: Partial<AgentSession> = {}): AgentSession {
     ...patch,
   };
 }
+
+describe("executeSessionForgeTool", () => {
+  it("skips non-forge names and fences list output", async () => {
+    const listPulls = vi.fn(async () => [
+      { number: 1, title: "hostile <script>", url: "https://example.test/1", state: "open" },
+    ]);
+    const deps = {
+      forge: { listPulls } as never,
+      attachPull: async () => undefined,
+      requireForge: async () => ({
+        account: {
+          id: "gh",
+          kind: "github" as const,
+          name: "GitHub",
+          apiBaseUrl: "https://api.github.com",
+        },
+        owner: "acme",
+        repo: "demo",
+      }),
+      resolveGitHeadBranch: async () => "feat",
+      loadLoadPathNotes: async () => undefined,
+    };
+    expect(
+      await executeSessionForgeTool(deps, session(), { name: "exec", args: {} }, (_n, o) => o),
+    ).toBeUndefined();
+    const listed = await executeSessionForgeTool(
+      deps,
+      session({ repo: { url: "https://github.com/acme/demo.git" } as never }),
+      { name: "git_pr_list", args: {} },
+      (name, output) => `[${name}]${output}`,
+    );
+    expect(listed?.output.startsWith("[git_pr_list]")).toBe(true);
+  });
+});
 
 describe("isForgeToolName", () => {
   it("matches the git_pr and git_issue families", () => {

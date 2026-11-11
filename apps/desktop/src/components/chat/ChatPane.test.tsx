@@ -1161,7 +1161,8 @@ describe("ChatPane", () => {
       vms: [{ ...vm, runtime: "host", status: "ready" }],
     });
     const textarea = host.querySelector("textarea") as HTMLTextAreaElement;
-    expect(textarea.placeholder).toMatch(/@game/i);
+    // Plain placeholder; @ mentions stay discoverable by typing @.
+    expect(textarea.placeholder).toBe("Message the agent…");
     const setValue = Object.getOwnPropertyDescriptor(
       window.HTMLTextAreaElement.prototype,
       "value",
@@ -1625,7 +1626,7 @@ describe("ChatPane", () => {
     expect(host.querySelector("[data-testid='guest-start-note']")?.textContent).toMatch(
       /Starting the container/,
     );
-    expect(host.querySelector(".composer-meta")?.textContent).not.toMatch(/Agent is working/);
+    expect(host.querySelector(".composer-meta")?.textContent ?? "").not.toMatch(/Agent is working/);
   });
 
   it("shows waiting for the guest on a provisioning session", () => {
@@ -2832,7 +2833,9 @@ describe("ChatPane", () => {
     expect(host.querySelector(".vision-toggle")).toBeNull();
     expect(host.querySelector(".composer-add")).toBeTruthy();
     expect(host.querySelector(".websearch-toggle")).toBeNull();
-    expect(host.querySelector(".chat-runtime-badge")?.textContent).toBe("This machine");
+    // No lone "This machine" label under the composer; the topbar subtitle says Host.
+    expect(host.querySelector(".chat-runtime-badge")).toBeNull();
+    expect(host.textContent).not.toContain("This machine");
   });
 
   it("lays out the composer with model and Send on the footer", () => {
@@ -2983,10 +2986,9 @@ describe("ChatPane", () => {
 
   it("lets developer thinking snippets fill the message column", () => {
     render({ ...initialState, selectedId: session.id, sessions: [session] });
-    const css = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "../../index.css"),
-      "utf8",
-    );
+    const css =
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../index.css"), "utf8") +
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../styles/swarm.css"), "utf8");
     expect(css).toMatch(/\.bubble\.working \{[^}]*width:\s*100%/);
     expect(css).toMatch(/\.working-copy \{[^}]*flex:\s*1 1 auto/);
     expect(css).toMatch(/\.working-thought \{[^}]*width:\s*100%/);
@@ -4824,111 +4826,47 @@ describe("ChatPane", () => {
     expect(api.chat).toHaveBeenCalledWith("s1", "fix login", undefined);
   });
 
-  it("offers Replay after an idle turn and Compare models after two", async () => {
-    const dispatch = vi.fn();
-    render(
-      {
-        ...initialState,
-        selectedId: session.id,
-        sessions: [
-          {
-            ...session,
-            status: "idle",
-            messages: [
-              {
-                id: "u1",
-                role: "user",
-                content: "fix login",
-                createdAt: "2020-01-01T00:00:00.000Z",
-              },
-              {
-                id: "a1",
-                role: "assistant",
-                content: "done",
-                screenshotName: "shot.png",
-                createdAt: "2020-01-01T00:00:01.000Z",
-              },
-            ],
-          },
-        ],
-        vms: [{ ...vm, status: "ready" }],
-      },
-      dispatch,
-    );
+  it("keeps Replay and Compare in the topbar, not under the last turn", () => {
+    render({
+      ...initialState,
+      selectedId: session.id,
+      sessions: [
+        {
+          ...session,
+          status: "idle",
+          messages: [
+            { id: "u1", role: "user", content: "fix login", createdAt: "2020-01-01T00:00:00.000Z" },
+            {
+              id: "a1",
+              role: "assistant",
+              content: "done",
+              screenshotName: "shot.png",
+              createdAt: "2020-01-01T00:00:01.000Z",
+            },
+            {
+              id: "u2",
+              role: "user",
+              content: "also tests",
+              createdAt: "2020-01-01T00:00:02.000Z",
+            },
+            {
+              id: "a2",
+              role: "assistant",
+              content: "ok",
+              screenshotName: "shot2.png",
+              createdAt: "2020-01-01T00:00:03.000Z",
+            },
+          ],
+        },
+      ],
+      vms: [{ ...vm, status: "ready" }],
+    });
+    expect(host.querySelector(".thread .turn-trust")).toBeNull();
     expect(
-      [...host.querySelectorAll("button")].find((btn) => btn.textContent === "Compare models"),
-    ).toBeUndefined();
-    const replay = [...host.querySelectorAll("button")].find((btn) => btn.textContent === "Replay");
-    expect(replay).toBeTruthy();
-    act(() => root.unmount());
-    host.remove();
-    render(
-      {
-        ...initialState,
-        selectedId: session.id,
-        sessions: [
-          {
-            ...session,
-            status: "idle",
-            messages: [
-              {
-                id: "u1",
-                role: "user",
-                content: "fix login",
-                createdAt: "2020-01-01T00:00:00.000Z",
-              },
-              {
-                id: "a1",
-                role: "assistant",
-                content: "done",
-                screenshotName: "shot.png",
-                createdAt: "2020-01-01T00:00:01.000Z",
-              },
-              {
-                id: "u2",
-                role: "user",
-                content: "also tests",
-                createdAt: "2020-01-01T00:00:02.000Z",
-              },
-              {
-                id: "a2",
-                role: "assistant",
-                content: "ok",
-                screenshotName: "shot2.png",
-                createdAt: "2020-01-01T00:00:03.000Z",
-              },
-            ],
-          },
-        ],
-        vms: [{ ...vm, status: "ready" }],
-      },
-      dispatch,
-    );
-    const compare = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Compare models",
-    );
-    expect(compare).toBeTruthy();
-    const replayTwo = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Replay",
-    );
-    act(() => {
-      compare!.click();
-    });
-    expect(dispatch).toHaveBeenCalledWith({ type: "compare", open: true });
-    act(() => {
-      replayTwo!.click();
-    });
-    expect(dispatch).toHaveBeenCalledWith({ type: "replay", open: true });
-    expect(compare!.closest(".turn-trust")).toBeTruthy();
-    expect(compare!.closest(".msg")).toBeNull();
-    const css = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "../../index.css"),
-      "utf8",
-    );
-    expect(css).toMatch(
-      /\.turn-trust \{[\s\S]*?max-width:\s*720px[\s\S]*?margin:\s*var\(--space-2\) auto var\(--space-1\)/,
-    );
-    expect(css).toMatch(/\.turn-trust\.compact \{[\s\S]*?max-width:\s*none/);
+      [...host.querySelectorAll(".thread button")].some((btn) =>
+        /^(Replay|Compare models)$/.test(btn.textContent ?? ""),
+      ),
+    ).toBe(false);
   });
 
   it("copies assistant text to the clipboard", async () => {
@@ -5646,10 +5584,9 @@ describe("ChatPane", () => {
       ],
     });
     expect(host.querySelector("[data-testid='chat-new-divider']")?.textContent).toBe("New");
-    const css = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "../../index.css"),
-      "utf8",
-    );
+    const css =
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../index.css"), "utf8") +
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../styles/swarm.css"), "utf8");
     expect(css).toMatch(/\.chat-new-divider \{[\s\S]*?color: var\(--accent\)/);
     expect(css).toMatch(
       /\.chat-new-divider::before,[\s\S]*?background: color-mix\(in srgb, var\(--accent\) 85%/,

@@ -3,7 +3,6 @@ import type {
   AgentRuntime,
   AgentSession,
   ChatMessage,
-  SubagentLive,
   Automation,
   AutomationRun,
   BoardDocument,
@@ -42,6 +41,7 @@ import {
   projectSummary,
   compareSessionsForList,
   isBoardSession,
+  isCanvasSession,
   isProjectSession,
   isDesignSession,
   isGameSession,
@@ -51,6 +51,9 @@ import {
 } from "@locus/shared";
 import type { SettingsTab } from "@/lib/settingsNav";
 import { lastVisibleMessageId, startChatVisit, type ChatNewVisit } from "@/lib/chatNewMarker";
+import { mergeSession } from "./sessionMerge";
+
+export { mergeSession } from "./sessionMerge";
 
 export type { SettingsTab };
 
@@ -158,6 +161,10 @@ export interface UiState {
   slackThreadTs: string | null;
   brain: BrainSummary | null;
   section: UiSection;
+  /** Rail Inbox is showing in the list and main pane instead of the section. */
+  inboxOpen: boolean;
+  /** One-shot: IDE start screen should open this choice when it mounts. */
+  ideStart: "open" | "clone" | null;
   queries: Partial<Record<UiSection, string>>;
   collapsed: boolean;
   vmCollapsed: boolean;
@@ -265,6 +272,8 @@ export const initialState: UiState = {
   slackThreadTs: null,
   brain: null,
   section: "agents",
+  inboxOpen: false,
+  ideStart: null,
   queries: {},
   collapsed: false,
   vmCollapsed: true,
@@ -352,6 +361,8 @@ export type Action =
   | { type: "vm"; vm: VmInstance }
   | { type: "vms"; vms: VmInstance[] }
   | { type: "select"; id: string | null }
+  /** Close a chat that is being removed; a no-op when another chat is open. */
+  | { type: "deselect"; id: string }
   | { type: "selectAutomation"; id: string | null }
   | { type: "selectBoard"; id: string | null; objectId?: string }
   | { type: "selectProject"; id: string | null }
@@ -375,8 +386,11 @@ export type Action =
   | { type: "slackMessage"; message: SlackMessage }
   | { type: "slackThread"; ts: string | null }
   | { type: "section"; section: UiSection }
+  | { type: "inbox"; open: boolean }
+  | { type: "ideStart"; intent: "open" | "clone" | null }
   | { type: "query"; query: string }
   | { type: "toggleSidebar" }
+  | { type: "sidebarCollapsed"; collapsed: boolean }
   | { type: "toggleVmPane" }
   | { type: "showVmPane" }
   | { type: "settings"; open: boolean }
@@ -458,8 +472,28 @@ export function openSettings(dispatch: Dispatch<Action>, tab?: SettingsTab): voi
   if (tab) dispatch({ type: "settingsTab", tab });
 }
 
+/** Navigating anywhere from the rail, list, switcher, or a deep link leaves the Inbox. */
+const LEAVES_INBOX = new Set<Action["type"]>([
+  "section",
+  "select",
+  "selectBoard",
+  "selectProject",
+  "selectAutomation",
+  "selectRepo",
+  "selectPull",
+  "selectIssue",
+  "selectContainer",
+  "selectSwarmService",
+  "selectSwarmNode",
+  "selectSlackChannel",
+  "selectSlackActivity",
+  "settings",
+]);
+
 export function reducer(state: UiState, action: Action): UiState {
-  return rememberChatOnLeave(state, action, reduceUiState(state, action));
+  const next = rememberChatOnLeave(state, action, reduceUiState(state, action));
+  if (next.inboxOpen && LEAVES_INBOX.has(action.type)) return { ...next, inboxOpen: false };
+  return next;
 }
 
 function sectionShowsChatThread(section: UiSection): boolean {
@@ -634,6 +668,14 @@ function reduceUiState(state: UiState, action: Action): UiState {
     }
     case "vms":
       return { ...state, vms: action.vms };
+    case "deselect": {
+      if (state.selectedId !== action.id) return state;
+      return {
+        ...state,
+        selectedId: null,
+        workspaceFocus: state.workspaceFocus?.sessionId === action.id ? null : state.workspaceFocus,
+      };
+    }
     case "select": {
       const picked = action.id ? state.sessions.find((s) => s.id === action.id) : undefined;
       const stayOnProject = Boolean(picked?.projectId && state.section === "project");
@@ -657,6 +699,11 @@ function reduceUiState(state: UiState, action: Action): UiState {
             ? picked.projectId
             : state.selectedProjectId,
         unreadIds: action.id ? state.unreadIds.filter((id) => id !== action.id) : state.unreadIds,
+        // Design / Games / Assets open with the canvas beside the chat.
+        vmCollapsed:
+          picked && picked.id !== state.selectedId && isCanvasSession(picked)
+            ? false
+            : state.vmCollapsed,
       };
     }
     case "unread":
@@ -996,6 +1043,7 @@ function reduceUiState(state: UiState, action: Action): UiState {
         ...state,
         section: action.section,
         selectedId: next?.id ?? null,
+        vmCollapsed: next && isCanvasSession(next) ? false : state.vmCollapsed,
         unreadIds: next ? state.unreadIds.filter((id) => id !== next.id) : state.unreadIds,
         pickedContainerIds: pickedIds,
       };
@@ -1007,6 +1055,14 @@ function reduceUiState(state: UiState, action: Action): UiState {
     }
     case "toggleSidebar":
       return { ...state, collapsed: !state.collapsed };
+    case "sidebarCollapsed":
+      return action.collapsed === state.collapsed
+        ? state
+        : { ...state, collapsed: action.collapsed };
+    case "inbox":
+      return action.open === state.inboxOpen ? state : { ...state, inboxOpen: action.open };
+    case "ideStart":
+      return action.intent === state.ideStart ? state : { ...state, ideStart: action.intent };
     case "toggleVmPane":
       return { ...state, vmCollapsed: !state.vmCollapsed };
     case "showVmPane":
@@ -1306,108 +1362,6 @@ export function patchSessionMessage(
     return next;
   }
   return undefined;
-}
-
-function preferFullerMessage(local: ChatMessage, incoming: ChatMessage): ChatMessage {
-  const nextMsg: ChatMessage = {
-    ...incoming,
-    content: local.content.length >= incoming.content.length ? local.content : incoming.content,
-  };
-  const oldThink = local.thinking ?? "";
-  const newThink = incoming.thinking ?? "";
-  if (oldThink.length >= newThink.length && local.thinking != null) {
-    nextMsg.thinking = local.thinking;
-  }
-  const localTools = local.toolCalls;
-  const incomingTools = incoming.toolCalls;
-  if (
-    localTools?.length &&
-    (!incomingTools?.length ||
-      localTools.some((call, i) => {
-        const other = incomingTools[i];
-        if (!other) return true;
-        return (
-          (call.result?.length ?? 0) > (other.result?.length ?? 0) ||
-          JSON.stringify(call.arguments).length > JSON.stringify(other.arguments).length
-        );
-      }))
-  ) {
-    nextMsg.toolCalls = localTools;
-  }
-  if (local.images?.some((img) => img.base64)) nextMsg.images = local.images;
-  if (local.screenshotBase64) nextMsg.screenshotBase64 = local.screenshotBase64;
-  return nextMsg;
-}
-
-function mergeSubagentRows(
-  prev: SubagentLive[] | undefined,
-  next: SubagentLive[] | undefined,
-): SubagentLive[] | undefined {
-  if (!next?.length) return prev;
-  if (!prev?.length) return next;
-  const prevById = new Map(prev.map((row) => [row.id, row]));
-  return next.map((row) => {
-    const old = prevById.get(row.id);
-    if (!old?.messages?.length) return row;
-    const oldById = new Map(old.messages.map((message) => [message.id, message]));
-    const messages = (row.messages ?? []).map((message) => {
-      const prevMsg = oldById.get(message.id);
-      return prevMsg ? preferFullerMessage(prevMsg, message) : message;
-    });
-    return { ...old, ...row, messages };
-  });
-}
-
-function listViewNeedsRefetch(prev: AgentSession, next: AgentSession): boolean {
-  const prevIds = new Set(prev.messages.map((row) => row.id));
-  if (next.messages.length !== prev.messages.length) return true;
-  if (next.messages.some((row) => !prevIds.has(row.id))) return true;
-  const prevAgents = new Map((prev.subagents ?? []).map((row) => [row.id, row]));
-  for (const row of next.subagents ?? []) {
-    const old = prevAgents.get(row.id);
-    if (!old) return true;
-    const oldIds = new Set((old.messages ?? []).map((message) => message.id));
-    if ((row.messages ?? []).some((message) => !oldIds.has(message.id))) return true;
-  }
-  return false;
-}
-
-export function mergeSession(prev: AgentSession, next: AgentSession): AgentSession {
-  if (next.listView && !prev.listView && prev.messages.length > 0) {
-    const { listView: _drop, messages: _messages, subagents: _subagents, ...meta } = next;
-    const prevById = new Map(prev.messages.map((row) => [row.id, row]));
-    const messages = next.messages.map((message) => {
-      const old = prevById.get(message.id);
-      return old ? preferFullerMessage(old, message) : message;
-    });
-    const merged: AgentSession = {
-      ...prev,
-      ...meta,
-      messages,
-      subagents: mergeSubagentRows(prev.subagents, next.subagents),
-    };
-    if (listViewNeedsRefetch(prev, next)) merged.listView = true;
-    else delete merged.listView;
-    return merged;
-  }
-  const prevById = new Map(prev.messages.map((row) => [row.id, row]));
-  const messages = next.messages.map((m) => {
-    const old = prevById.get(m.id);
-    if (!old) return m;
-    let nextMsg = m;
-    if (old.content.length > m.content.length && old.content.startsWith(m.content)) {
-      nextMsg = { ...nextMsg, content: old.content };
-    }
-    const oldThink = old.thinking ?? "";
-    const newThink = m.thinking ?? "";
-    if (oldThink.length > newThink.length && oldThink.startsWith(newThink)) {
-      nextMsg = { ...nextMsg, thinking: oldThink };
-    }
-    return nextMsg;
-  });
-  const merged = { ...next, messages };
-  if (!next.listView) delete merged.listView;
-  return merged;
 }
 
 export const Store = createContext<{ state: UiState; dispatch: Dispatch<Action> } | null>(null);

@@ -48,7 +48,7 @@ Composition root stays at the top of `src/`: `index.ts` boots the process, `app.
 | Folder | Responsibility |
 |--------|----------------|
 | `http/` | Route modules extracted from the app (docker including Swarm, repo, automation, workflow, board, project, brain, workspace, slack, grafana, design) |
-| `core/` | Store, vault, hub, guests, sockets, rate limit, redaction |
+| `core/` | Store, vault, hub, guests (thin adapter over the Guest factory), sockets, rate limit, redaction |
 | `session/` | Agent turns, create, checkpoints, subscriptions, tool gates |
 | `workspace/` | Files, git dirty, LSP, repo index, host folders |
 | `git/` | GitHub / GitLab / Bitbucket adapters, linked repos |

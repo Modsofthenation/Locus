@@ -11,9 +11,16 @@ import {
   parseDockerPsJson,
   sessionHostWorkspace,
 } from "./docker.js";
+import type { MachineLifecycle } from "./types.js";
 import type { CommandRunner, ExecResult } from "./runner.js";
 
 describe("MockDockerEngine", () => {
+  it("satisfies the Machine lifecycle seam", async () => {
+    const engine: MachineLifecycle = new MockDockerEngine(join(tmpdir(), "locus-docker-lifecycle"));
+    expect(await engine.available()).toBe(true);
+    expect(engine.list()).toEqual([]);
+  });
+
   it("creates and boots a container without a QEMU disk", async () => {
     const engine = new MockDockerEngine(join(tmpdir(), "locus-docker-test"));
     const vm = await engine.create({

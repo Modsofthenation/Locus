@@ -47,7 +47,7 @@ vi.mock("@/lib/api", () => ({
       connected: false,
       tabs: [],
     })),
-    checkUpdates: vi.fn(async () => ({ status: "unavailable", current: "0.18.0" })),
+    checkUpdates: vi.fn(async () => ({ status: "unavailable", current: "0.19.0" })),
     workersStatus: vi.fn(async () => []),
     tailscale: vi.fn(async () => ({
       installed: false,
@@ -346,6 +346,33 @@ describe("App mobile shell", () => {
       expect(host.querySelector(".app-settings")).toBeTruthy();
     });
     expect(host.querySelector(".topbar")).toBeNull();
+  });
+
+  it("gives the rail Inbox its own main pane instead of the Agents screen", async () => {
+    setUiShell("desktop");
+    vi.mocked(api.config).mockResolvedValue(config);
+    vi.mocked(api.sessions).mockResolvedValue([session]);
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root.render(<App />);
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector("[data-testid='boot-screen']")).toBeNull();
+    });
+    await act(async () => {
+      (host.querySelector("[data-testid='sidebar-inbox']") as HTMLButtonElement).click();
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector("[data-testid='inbox-pane']")).toBeTruthy();
+    });
+    expect(host.querySelector(".topbar")).toBeNull();
+    expect(host.querySelector("[data-testid='inbox-pane'] h2")?.textContent).toBe("All caught up");
+    await act(async () => {
+      (host.querySelector(".side-rail-nav button[aria-label='Agents']") as HTMLElement).click();
+    });
+    expect(host.querySelector("[data-testid='inbox-pane']")).toBeNull();
   });
 });
 

@@ -183,6 +183,14 @@ describe("formatMarkdown", () => {
     const html = formatMarkdown("- one\n\n- two\n\n- three");
     expect(html).toBe("<ul><li>one</li><li>two</li><li>three</li></ul>");
   });
+
+  it("renders a badge image inside a link instead of a raw placeholder", () => {
+    const html = formatMarkdown("[![CI](https://img.shields.io/ci.svg)](https://x.dev)");
+    expect(html).toContain(
+      '<a href="https://x.dev" target="_blank" rel="noreferrer"><img class="md-img" src="https://img.shields.io/ci.svg" alt="CI"></a>',
+    );
+    expect(html).not.toContain("\u0000");
+  });
 });
 
 describe("prUrlFromToolOutput", () => {

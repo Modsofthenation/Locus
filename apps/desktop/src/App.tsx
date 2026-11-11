@@ -36,6 +36,7 @@ import { SessionSwitcher } from "@/components/layout/SessionSwitcher";
 import { FeatureChecklist } from "@/components/layout/FeatureChecklist";
 import { NoticeBanner } from "@/components/layout/NoticeBanner";
 import { DialogHost } from "@/components/layout/DialogHost";
+import { InboxPane } from "@/components/layout/InboxPane";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { WorkspaceBody } from "@/components/workspace/WorkspaceBody";
@@ -554,7 +555,7 @@ export function App() {
                 )
               ) {
                 const name =
-                  automationsRef.current.find((a) => a.id === automationId)?.name ?? "Automation";
+                  automationsRef.current.find((a) => a.id === automationId)?.name ?? "Job";
                 notifyTurnDone(
                   name,
                   `Run ${event.run.status}`,
@@ -866,14 +867,16 @@ export function App() {
             <Sidebar />
             <main className="workspace">
               <WorkspaceStage
-                key={state.section}
+                key={state.inboxOpen ? "inbox" : state.section}
                 section={state.section}
                 enter={workspaceEnterRef.current}
               >
-                {state.section === "settings" ? null : <Topbar />}
+                {state.section === "settings" || state.inboxOpen ? null : <Topbar />}
                 <Suspense fallback={null}>
                   <BootReveal onReady={markShellReady}>
-                    {state.section === "settings" ? (
+                    {state.inboxOpen ? (
+                      <InboxPane />
+                    ) : state.section === "settings" ? (
                       <Settings />
                     ) : state.section === "automations" ? (
                       <AutomationsPane />
@@ -897,6 +900,7 @@ export function App() {
                           <WorkspaceBody
                             variant="design"
                             collapsed={state.vmCollapsed}
+                            topbarToggle
                             chat={<ChatPane />}
                             preview={<DesignCanvas />}
                           />
@@ -911,6 +915,7 @@ export function App() {
                           <WorkspaceBody
                             variant="design"
                             collapsed={state.vmCollapsed}
+                            topbarToggle
                             chat={<ChatPane />}
                             preview={<DesignCanvas />}
                           />
@@ -925,6 +930,7 @@ export function App() {
                           <WorkspaceBody
                             variant="design"
                             collapsed={state.vmCollapsed}
+                            topbarToggle
                             chat={<ChatPane />}
                             preview={<DesignCanvas />}
                           />
@@ -952,6 +958,7 @@ export function App() {
                         <WorkspaceBody
                           variant="agent"
                           collapsed={state.vmCollapsed}
+                          topbarToggle
                           chat={<ChatPane />}
                           preview={
                             productMode === "swarm" ? (

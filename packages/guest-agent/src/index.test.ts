@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   commandFor,
   isSupported,
+  decorateRemoteToolResult,
   parseRecordScreenResult,
   RECORDING_MARKER,
   windowsCommand,
@@ -515,6 +516,26 @@ describe("commandFor", () => {
       recordingName: "demo.mp4",
     });
     expect(parseRecordScreenResult("recording started")).toEqual({});
+    expect(
+      decorateRemoteToolResult("screenshot", { code: 0, stdout: "a".repeat(81) }),
+    ).toMatchObject({
+      ok: true,
+      output: "screenshot captured",
+      screenshotBase64: "a".repeat(81),
+    });
+    expect(
+      decorateRemoteToolResult("record_screen", {
+        code: 0,
+        stdout: `ok\n${RECORDING_MARKER}/tmp/demo.mp4`,
+      }),
+    ).toMatchObject({
+      ok: true,
+      recordingName: "demo.mp4",
+    });
+    expect(decorateRemoteToolResult("exec", { code: 1, stderr: "boom" })).toEqual({
+      ok: false,
+      output: "boom",
+    });
   });
 
   it("clones a named ref with --branch instead of a post-clone checkout", () => {
