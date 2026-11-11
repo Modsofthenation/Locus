@@ -79,10 +79,12 @@ function inline(text: string): string {
       return `${prefix}<span class="md-mention">@${name}</span>`;
     },
   );
-  return html.replace(
-    new RegExp(`${SENTINEL_I}(\\d+)${SENTINEL_END}`, "g"),
-    (_m, i: string) => slots[Number(i)] ?? "",
-  );
+  // Slots can hold other slots (a badge image inside a link label), so restore recursively.
+  const restore = (value: string, depth: number): string =>
+    value.replace(new RegExp(`${SENTINEL_I}(\\d+)${SENTINEL_END}`, "g"), (_m, i: string) =>
+      depth > 0 ? restore(slots[Number(i)] ?? "", depth - 1) : "",
+    );
+  return restore(html, 4);
 }
 
 function isTableSep(line: string): boolean {

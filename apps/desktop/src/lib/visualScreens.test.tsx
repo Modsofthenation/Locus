@@ -163,6 +163,7 @@ describe("visual screens contract", () => {
       "chat",
       "empty-hint",
       "splitter",
+      "sidebar",
     ]) {
       expect(source).toContain(`"${screen}"`);
     }

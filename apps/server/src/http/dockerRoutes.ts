@@ -55,6 +55,8 @@ export function registerDockerRoutes(app: Hono, docker: DockerInventory): void {
     }
   });
 
+  app.get("/api/docker/status", async (c) => c.json(await docker.status()));
+
   app.get("/api/docker/containers", async (c) => {
     const containers = await docker.list();
     return c.json({ kind: docker.kind(), containers });

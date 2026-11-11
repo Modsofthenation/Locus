@@ -104,7 +104,7 @@ Board:
 Brain:
   locus brain status|build|search|remember|inbox|correct|setup
 
-Automations:
+Jobs:
   locus automation list|get|new|patch|enable|disable|delete|run|runs|clone|test-webhook
 
 Workflows:

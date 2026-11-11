@@ -264,6 +264,21 @@ function svgPreviewSrc(markup: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
 }
 
+const MD_IMG_RE = /<img class="md-img" src="([^"]*)" alt="([^"]*)">/g;
+
+/**
+ * Markdown preview without remote images: each `![alt](https://…)` becomes its alt text, so
+ * README badges read as words instead of broken image boxes until the reader opts in.
+ */
+export function blockMarkdownImages(html: string): { html: string; blocked: number } {
+  let blocked = 0;
+  const next = html.replace(MD_IMG_RE, (_m, src: string, alt: string) => {
+    blocked += 1;
+    return `<span class="md-img-alt" title="${src}">${alt || "image"}</span>`;
+  });
+  return { html: next, blocked };
+}
+
 function copyMarkdownFence(event: ReactMouseEvent) {
   const btn = (event.target as HTMLElement | null)?.closest(".md-copy");
   if (!btn) return;
@@ -828,6 +843,12 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
   const showMarkdown = Boolean(isMd && active?.htmlView === "browser");
   const showSvg = Boolean(isSvg && active?.htmlView === "browser");
   const showPanePreview = showBrowser || showMarkdown || showSvg;
+  const [mdImagesFor, setMdImagesFor] = useState<string | null>(null);
+  const markdownPreview = useMemo(() => {
+    if (!showMarkdown) return { html: "", blocked: 0 };
+    const html = formatMarkdown(content) || " ";
+    return mdImagesFor === activePath ? { html, blocked: 0 } : blockMarkdownImages(html);
+  }, [showMarkdown, content, mdImagesFor, activePath]);
   useCanvasFrameHtml(showBrowser ? content : "", browserFrame);
   const dirty = Boolean(active && !isImage && !isPdf && active.content !== active.original);
   const project = useMemo(() => detectProjectKind(entries.map((row) => row.path)), [entries]);
@@ -3367,6 +3388,7 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
         {store?.state.section === "ide" ? (
           <DockerExplorer
             selectedId={dockerInspect?.id}
+            sessionId={sessionId}
             onInspect={(row) => setDockerInspect(row)}
           />
         ) : null}
@@ -3943,11 +3965,27 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
                 data-srcdoc={content}
               />
             ) : showMarkdown ? (
-              <div
-                className="workspace-markdown pr-md"
-                dangerouslySetInnerHTML={{ __html: formatMarkdown(content) || " " }}
-                onClick={copyMarkdownFence}
-              />
+              <div className="workspace-markdown-wrap">
+                {markdownPreview.blocked ? (
+                  <div className="workspace-md-images" role="status">
+                    <span>
+                      External images blocked ({markdownPreview.blocked}) — showing their alt text.
+                    </span>
+                    <button
+                      type="button"
+                      className="btn small ghost"
+                      onClick={() => setMdImagesFor(activePath)}
+                    >
+                      Load
+                    </button>
+                  </div>
+                ) : null}
+                <div
+                  className="workspace-markdown pr-md"
+                  dangerouslySetInnerHTML={{ __html: markdownPreview.html }}
+                  onClick={copyMarkdownFence}
+                />
+              </div>
             ) : showSvg ? (
               <div className="workspace-svg workspace-image">
                 <img alt={activePath.split("/").pop() ?? "SVG"} src={svgPreviewSrc(content)} />
@@ -4412,66 +4450,8 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
           aria-label="Editor status"
           style={split ? { gridArea: "stat" } : undefined}
         >
+          {/* Branch, cursor and language stay visible; everything else lives in the status menu. */}
           <div className="workspace-status-start">
-            <span className="workspace-status-path" title={activePath || undefined}>
-              {activePath || "Open a file to edit"}
-            </span>
-            {activePath ? (
-              <span
-                className="workspace-status-cursor"
-                title={`Line ${cursor.line}, column ${cursor.col}`}
-              >
-                Ln {cursor.line}, Col {cursor.col}
-              </span>
-            ) : null}
-            {project.label ? (
-              <span className="workspace-status-project" data-project={project.kind}>
-                {project.label}
-              </span>
-            ) : null}
-            {activePath ? (
-              <span className="workspace-status-indent">
-                {indent === "\t" ? "Tabs" : `Spaces: ${indent.length}`}
-              </span>
-            ) : null}
-          </div>
-          <div className="workspace-status-end">
-            {runHint ? (
-              <button
-                type="button"
-                className="workspace-run-hint workspace-status-run"
-                title="Run this command in the workspace terminal"
-                onClick={() => requestWorkspaceTerminalRun(runHint)}
-              >
-                {runHint}
-              </button>
-            ) : null}
-            {indexing ? (
-              <span
-                className="workspace-status-indexing"
-                title="Workspace index for Go to file and chat"
-              >
-                {indexScanned > 0 ? `Indexing ${indexScanned.toLocaleString()}` : "Indexing…"}
-              </span>
-            ) : (
-              <button
-                type="button"
-                className="workspace-status-index"
-                title="Re-index workspace for Go to file and chat"
-                aria-label="Re-index workspace"
-                disabled={!treeReady}
-                onClick={() => void reindex()}
-              >
-                {indexCount != null ? (
-                  <>
-                    <span className="workspace-status-index-prefix">Indexed </span>
-                    {indexCount.toLocaleString()}
-                  </>
-                ) : (
-                  "Index workspace"
-                )}
-              </button>
-            )}
             {git?.branch ? (
               <button
                 type="button"
@@ -4487,28 +4467,19 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
                 {git.behind ? ` ↓${git.behind}` : ""}
               </button>
             ) : null}
-            {pylspMissing && /\.py$/.test(activePath) ? (
+            {activePath ? (
               <span
-                className="workspace-status-pylsp"
-                title="Install python-lsp-server for completions and Go to Definition"
+                className="workspace-status-cursor"
+                title={`Line ${cursor.line}, column ${cursor.col}`}
               >
-                Install python-lsp-server
+                Ln {cursor.line}, Col {cursor.col}
               </span>
             ) : null}
-            {blame ? (
-              <span className="workspace-status-blame" title={`git blame: ${blame}`}>
-                {blame}
-              </span>
+            {activePath && !isImage && !isPdf ? (
+              <span className="workspace-status-lang">{isSvg ? "SVG" : languageLabel(lang)}</span>
             ) : null}
-            <button
-              type="button"
-              className="workspace-status-index workspace-status-debug"
-              aria-pressed={debugOpen}
-              title="Debugger (gutter click toggles breakpoints)"
-              onClick={() => setDebugOpen((open) => !open)}
-            >
-              Debug{debug && debug.status !== "idle" ? ` · ${debug.status}` : ""}
-            </button>
+          </div>
+          <div className="workspace-status-end">
             {allProblems.length || diagnostics.length ? (
               <button
                 type="button"
@@ -4524,6 +4495,14 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
                 errors
               </button>
             ) : null}
+            {indexing ? (
+              <span
+                className="workspace-status-indexing"
+                title="Workspace index for Go to file and chat"
+              >
+                {indexScanned > 0 ? `Indexing ${indexScanned.toLocaleString()}` : "Indexing…"}
+              </span>
+            ) : null}
           </div>
           <OverflowMenu
             className="workspace-status-more"
@@ -4533,6 +4512,63 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
             toggleClassName="workspace-status-index"
             label={<IconMore />}
           >
+            {project.label ? (
+              <MenuItem disabled>
+                <span className="workspace-status-project" data-project={project.kind}>
+                  {project.label}
+                </span>
+              </MenuItem>
+            ) : null}
+            {activePath ? (
+              <MenuItem disabled>
+                <span className="workspace-status-indent">
+                  {indent === "\t" ? "Tabs" : `Spaces: ${indent.length}`}
+                </span>
+              </MenuItem>
+            ) : null}
+            {blame ? (
+              <MenuItem disabled title={`git blame: ${blame}`}>
+                <span className="workspace-status-blame">{blame}</span>
+              </MenuItem>
+            ) : null}
+            {pylspMissing && /\.py$/.test(activePath) ? (
+              <MenuItem
+                disabled
+                title="Install python-lsp-server for completions and Go to Definition"
+              >
+                <span className="workspace-status-pylsp">Install python-lsp-server</span>
+              </MenuItem>
+            ) : null}
+            {project.label || activePath || blame ? <MenuSep /> : null}
+            {runHint ? (
+              <MenuItem
+                title="Run this command in the workspace terminal"
+                onClick={() => requestWorkspaceTerminalRun(runHint)}
+              >
+                <span className="workspace-status-run">Run {runHint}</span>
+              </MenuItem>
+            ) : null}
+            <MenuItem
+              title="Re-index workspace for Go to file and chat"
+              disabled={!treeReady || indexing}
+              onClick={() => void reindex()}
+            >
+              <span className="workspace-status-reindex">
+                {indexing
+                  ? "Indexing…"
+                  : indexCount != null
+                    ? `Re-index workspace · Indexed ${indexCount.toLocaleString()}`
+                    : "Index workspace"}
+              </span>
+            </MenuItem>
+            <MenuItem
+              checked={debugOpen}
+              title="Debugger (gutter click toggles breakpoints)"
+              onClick={() => setDebugOpen((open) => !open)}
+            >
+              Debug{debug && debug.status !== "idle" ? ` · ${debug.status}` : ""}
+            </MenuItem>
+            <MenuSep />
             <MenuItem onClick={() => requestWorkspaceGoto()}>
               Go to file
               <span>Ctrl+P</span>

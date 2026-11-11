@@ -35,7 +35,7 @@ describe("locus agent images", () => {
     await ensureLocusAgentImage(runner, "/usr/bin/docker", "locus/agent", undefined, dir);
     expect(calls).toEqual([
       ["image", "inspect", LOCUS_AGENT_IMAGE],
-      ["build", "--progress=plain", "-t", LOCUS_AGENT_IMAGE, "-t", "locus/agent:0.18.0", dir],
+      ["build", "--progress=plain", "-t", LOCUS_AGENT_IMAGE, "-t", "locus/agent:0.19.0", dir],
     ]);
     calls.length = 0;
     const present: CommandRunner = {

@@ -1,13 +1,6 @@
 import type { GuestOs, VmInstance } from "@locus/shared";
-import { DOCKER_WORKSPACE, LINUX_WORKSPACE, hostChromeProfileDir } from "@locus/shared";
-import {
-  DockerGuestRuntime,
-  HostGuestRuntime,
-  MockGuestRuntime,
-  SshGuestRuntime,
-  sshTargetFromInstance,
-  type GuestRuntime,
-} from "@locus/guest-agent";
+import { hostChromeProfileDir } from "@locus/shared";
+import { createGuestRuntime, type GuestRuntime } from "@locus/guest-agent";
 
 export interface WorkerGuestHubOpts {
   liveDocker?: boolean;
@@ -52,27 +45,14 @@ export class WorkerGuestHub {
   }
 
   private create(vm: VmInstance): GuestRuntime {
-    if (vm.runtime === "host") {
-      return new HostGuestRuntime(
-        vm.os,
-        vm.diskPath,
-        undefined,
-        this.dataDir ? hostChromeProfileDir(this.dataDir, vm.sessionId) : undefined,
-      );
-    }
-    if (isWorkerVmGuest(vm)) {
-      const ssh = sshTargetFromInstance(vm);
-      if (this.liveQemu && ssh) {
-        return new SshGuestRuntime(vm.os, {
-          ...ssh,
-          identityFile: ssh.identityFile ?? this.identityFile,
-        });
-      }
-      return new MockGuestRuntime(vm.os, { cwd: LINUX_WORKSPACE });
-    }
-    return this.liveDocker
-      ? new DockerGuestRuntime(vm)
-      : new MockGuestRuntime(vm.os, { cwd: DOCKER_WORKSPACE, root: vm.diskPath });
+    return createGuestRuntime(vm, {
+      liveDocker: this.liveDocker,
+      liveQemu: this.liveQemu,
+      identityFile: this.identityFile,
+      hostChromeProfileDir: this.dataDir
+        ? hostChromeProfileDir(this.dataDir, vm.sessionId)
+        : undefined,
+    });
   }
 
   drop(vmId: string): void {

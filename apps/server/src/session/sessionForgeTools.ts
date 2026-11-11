@@ -43,7 +43,33 @@ function failed(ready: ForgeReady | ToolResult): ready is ToolResult {
 
 export { isForgeToolName };
 
+const FENCED_FORGE_LISTS = new Set(["git_pr_list", "git_pr_loadpath", "git_issue_list"]);
+
+export async function executeSessionForgeTool(
+  deps: SessionForgeDeps,
+  session: AgentSession,
+  req: { name: string; args: Record<string, unknown> },
+  fenceHostile: (name: string, output: string) => string,
+): Promise<ToolResult | undefined> {
+  if (!isForgeToolName(req.name)) return undefined;
+  return executeForgeTool(deps, session, req.name, req.args, fenceHostile);
+}
+
 export async function executeForgeTool(
+  deps: SessionForgeDeps,
+  session: AgentSession,
+  name: string,
+  args: Record<string, unknown>,
+  fenceHostile?: (name: string, output: string) => string,
+): Promise<ToolResult> {
+  const result = await runForgeTool(deps, session, name, args);
+  if (fenceHostile && FENCED_FORGE_LISTS.has(name)) {
+    return { ...result, output: fenceHostile(name, result.output) };
+  }
+  return result;
+}
+
+async function runForgeTool(
   deps: SessionForgeDeps,
   session: AgentSession,
   name: string,

@@ -1,5 +1,8 @@
 import {
+  forgeAccessMessage,
+  forgeLabel,
   formatRemoteError,
+  type ForgeAccessProblem,
   type GitForgeAccount,
   type PullListState,
   type PullState,
@@ -10,6 +13,33 @@ export type ForgeFetcher = typeof fetch;
 export const MAX_FORGE_JSON = 2_000_000;
 export const MAX_PR_COMMENT = 16_384;
 
+/** No token: reads go out unauthenticated (public repos); writes still require one. */
+export function hasForgeToken(account: GitForgeAccount): boolean {
+  return Boolean(account.token?.trim());
+}
+
+/** A tokenless read the forge refused: the repo needs a token, or the anonymous quota ran out. */
+export class ForgeAccessError extends Error {
+  constructor(
+    readonly problem: ForgeAccessProblem,
+    forge: string,
+  ) {
+    super(forgeAccessMessage(forge, problem));
+    this.name = "ForgeAccessError";
+  }
+}
+
+function anonymousRefusal(res: Response, text: string): ForgeAccessProblem | undefined {
+  if (res.status === 429) return "rate_limited";
+  if (
+    res.status === 403 &&
+    (res.headers.get("x-ratelimit-remaining") === "0" || /rate limit/i.test(text))
+  )
+    return "rate_limited";
+  if (res.status === 401 || res.status === 403 || res.status === 404) return "needs_token";
+  return undefined;
+}
+
 export function apiRoot(account: GitForgeAccount): string {
   return account.apiBaseUrl.replace(/\/$/, "");
 }
@@ -18,6 +48,7 @@ export function gitlabAuthHeaders(
   account: GitForgeAccount,
   extra?: Record<string, string>,
 ): Record<string, string> {
+  if (!hasForgeToken(account)) return { ...(extra ?? {}) };
   return { ...(extra ?? {}), "private-token": account.token ?? "" };
 }
 
@@ -25,10 +56,8 @@ export function githubAuthHeaders(
   account: GitForgeAccount,
   extra?: Record<string, string>,
 ): Record<string, string> {
-  const out: Record<string, string> = {
-    ...(extra ?? {}),
-    authorization: `Bearer ${account.token ?? ""}`,
-  };
+  const out: Record<string, string> = { ...(extra ?? {}) };
+  if (hasForgeToken(account)) out.authorization = `Bearer ${account.token ?? ""}`;
   out.accept = out.accept ?? "application/vnd.github+json";
   return out;
 }
@@ -39,7 +68,7 @@ export function giteaAuthHeaders(
 ): Record<string, string> {
   return {
     ...(extra ?? {}),
-    authorization: `token ${account.token ?? ""}`,
+    ...(hasForgeToken(account) ? { authorization: `token ${account.token ?? ""}` } : {}),
     accept: "application/json",
   };
 }
@@ -51,7 +80,9 @@ export function azureDevOpsAuthHeaders(
   const token = account.token ?? "";
   return {
     ...(extra ?? {}),
-    authorization: `Basic ${Buffer.from(`:${token}`).toString("base64")}`,
+    ...(hasForgeToken(account)
+      ? { authorization: `Basic ${Buffer.from(`:${token}`).toString("base64")}` }
+      : {}),
     accept: "application/json",
   };
 }
@@ -60,6 +91,7 @@ export function bitbucketAuthHeaders(
   account: GitForgeAccount,
   extra?: Record<string, string>,
 ): Record<string, string> {
+  if (!hasForgeToken(account)) return { ...(extra ?? {}) };
   return { ...(extra ?? {}), authorization: `Bearer ${account.token ?? ""}` };
 }
 
@@ -149,6 +181,10 @@ export async function forgeJson<T>(
     },
   });
   const text = await readBody(res);
+  if (!hasForgeToken(account)) {
+    const problem = anonymousRefusal(res, text);
+    if (problem) throw new ForgeAccessError(problem, forgeLabel(account.kind));
+  }
   let json = {} as T;
   try {
     json = text ? (JSON.parse(text) as T) : ({} as T);

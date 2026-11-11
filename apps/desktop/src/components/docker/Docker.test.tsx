@@ -263,7 +263,7 @@ describe("DockerPane", () => {
         stacks: [],
       },
     });
-    expect(host.textContent).toMatch(/Swarm inactive/);
+    expect(host.textContent).toMatch(/Swarm mode is off/);
     expect(host.textContent).toMatch(/not Locus Swarm teams/);
     expect(host.textContent).toMatch(/Portainer/);
   });

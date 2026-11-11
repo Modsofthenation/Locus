@@ -190,7 +190,7 @@ describe("HostWorkspace", () => {
     expect(host.querySelector(".vm-pane.rail")).toBeNull();
   });
 
-  it("opens the workspace terminal from the Terminal tab", async () => {
+  it("opens the workspace terminal from its bottom panel tab", async () => {
     render({
       ...initialState,
       section: "ide",
@@ -202,10 +202,11 @@ describe("HostWorkspace", () => {
       await Promise.resolve();
     });
     expect(host.querySelector("[data-testid='workspace-terminal']")).toBeNull();
+    expect(host.querySelector(".docker-ide-tabs")?.textContent).not.toContain("Terminal");
     const toggle = [...host.querySelectorAll("button")].find(
       (btn) => btn.textContent === "Terminal",
     );
-    expect(toggle).toBeTruthy();
+    expect(toggle?.closest(".term-tabs")).toBeTruthy();
     await act(async () => {
       toggle!.click();
       await Promise.resolve();

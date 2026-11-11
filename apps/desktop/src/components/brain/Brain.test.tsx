@@ -206,6 +206,34 @@ describe("BrainPane", () => {
     );
   });
 
+  it("hides data actions and the extra index banner until the brain has data", async () => {
+    vi.mocked(api.brain).mockResolvedValue(emptyBrain());
+    render();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const labels = [...host.querySelectorAll("button")].map((btn) => btn.textContent);
+    expect(labels).not.toContain("Export");
+    expect(labels).not.toContain("Pause ingest");
+    expect(labels).not.toContain("Index folder");
+    expect(host.querySelector("[data-testid='feature-hint-brain-memory']")).toBeNull();
+    // The Repo folder + Build form is the one index entry point.
+    expect(labels).toContain("Build");
+    expect(labels).toContain("Review");
+    expect(labels).not.toContain("Inbox");
+  });
+
+  it("shows Export and Pause ingest once the brain has data", async () => {
+    vi.mocked(api.brain).mockResolvedValue(sample());
+    render();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const labels = [...host.querySelectorAll("button")].map((btn) => btn.textContent);
+    expect(labels).toContain("Export");
+    expect(labels).toContain("Pause ingest");
+  });
+
   it("searches the brain from the Memories segment", async () => {
     vi.mocked(api.brain).mockResolvedValue(sample());
     vi.mocked(api.brainSearch).mockResolvedValue({ output: "- Service service:billing-gateway" });
@@ -246,7 +274,7 @@ describe("BrainPane", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    clickTab(host, "Inbox (1)");
+    clickTab(host, "Review (1)");
     expect(host.querySelector("[data-testid='brain-inbox']")?.textContent).toMatch(
       /Auth owns this/,
     );

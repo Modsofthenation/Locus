@@ -18,8 +18,11 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+/** Default stub: linking looks up the default branch, and tests must never hit the network. */
+const offlineFetch: typeof fetch = async () => json({ message: "offline" }, 503);
+
 async function setup(
-  fetchFn: typeof fetch = fetch,
+  fetchFn: typeof fetch = offlineFetch,
   summarizer: ChangeStackSummarizer | null = null,
 ) {
   const dir = await mkdtemp(join(tmpdir(), "locus-repos-"));
@@ -1136,5 +1139,108 @@ describe("repos api", () => {
       body: JSON.stringify({ body: "ship it" }),
     });
     expect(comment.status).toBe(200);
+  });
+});
+
+describe("repos api without a forge token", () => {
+  const pull = {
+    number: 7,
+    title: "Add router",
+    html_url: "https://github.com/honojs/hono/pull/7",
+    state: "open",
+    head: { ref: "feat", sha: "abc" },
+    base: { ref: "main" },
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  function publicGithub(calls: Array<{ url: string; auth: string | null; method: string }>) {
+    const fetchFn: typeof fetch = async (input, init) => {
+      const url = String(input);
+      calls.push({
+        url,
+        auth: new Headers(init?.headers).get("authorization"),
+        method: init?.method ?? "GET",
+      });
+      if (url.endsWith("/repos/honojs/hono")) return json({ default_branch: "main" });
+      if (url.includes("/repos/honojs/hono/branches")) return json([{ name: "main" }]);
+      if (url.includes("/repos/honojs/hono/pulls?")) return json([pull]);
+      if (url.includes("/repos/honojs/hono/issues?")) return json([]);
+      return json({ message: "Not Found" }, 404);
+    };
+    return fetchFn;
+  }
+
+  async function linkHono(ctx: Awaited<ReturnType<typeof setup>>, url = "honojs/hono") {
+    const created = await ctx.app.request("/api/repos", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: `https://github.com/${url}` }),
+    });
+    expect(created.status).toBe(201);
+    return (await created.json()) as LinkedRepo;
+  }
+
+  it("reads a public GitHub repo's pulls unauthenticated and fills the default branch", async () => {
+    const calls: Array<{ url: string; auth: string | null; method: string }> = [];
+    const ctx = await setup(publicGithub(calls));
+    cleanup.push(ctx.dir);
+    const repo = await linkHono(ctx);
+    expect(repo.checkout.ref).toBe("main");
+    const res = await ctx.app.request(`/api/repos/${repo.id}/pulls`);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Array<{ number: number }>).map((row) => row.number)).toEqual([7]);
+    const issues = await ctx.app.request(`/api/repos/${repo.id}/issues`);
+    expect(issues.status).toBe(200);
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((row) => row.auth === null)).toBe(true);
+  });
+
+  it("returns a needs-token error when the forge refuses an anonymous read", async () => {
+    const ctx = await setup(async () => json({ message: "Not Found" }, 404));
+    cleanup.push(ctx.dir);
+    const repo = await linkHono(ctx, "acme/private");
+    expect(repo.checkout.ref).toBeUndefined();
+    const res = await ctx.app.request(`/api/repos/${repo.id}/pulls`);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(
+      /GitHub needs a token to read this repo/,
+    );
+  });
+
+  it("returns a rate-limit error when the anonymous quota is spent", async () => {
+    const ctx = await setup(
+      async () =>
+        new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
+          status: 403,
+          headers: { "x-ratelimit-remaining": "0" },
+        }),
+    );
+    cleanup.push(ctx.dir);
+    const repo = await linkHono(ctx);
+    const res = await ctx.app.request(`/api/repos/${repo.id}/issues`);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/rate limit reached/);
+  });
+
+  it("still requires a token to merge, comment, or review", async () => {
+    const calls: Array<{ url: string; auth: string | null; method: string }> = [];
+    const ctx = await setup(publicGithub(calls));
+    cleanup.push(ctx.dir);
+    const repo = await linkHono(ctx);
+    calls.length = 0;
+    for (const [path, body] of [
+      ["merge", {}],
+      ["comments", { body: "hi" }],
+      ["reviews", { body: "hi" }],
+    ] as const) {
+      const res = await ctx.app.request(`/api/repos/${repo.id}/pulls/7/${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/token/);
+    }
+    expect(calls.filter((row) => row.method !== "GET")).toEqual([]);
   });
 });

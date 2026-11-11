@@ -228,7 +228,18 @@ export function OverflowMenu(props: {
     function onKey(event: KeyboardEvent) {
       if (isTypingTarget(event.target)) return;
       const list = items();
-      const current = list.findIndex((el) => el === document.activeElement);
+      const focused = document.activeElement;
+      // A row's trailing toggle (`.menu-row [data-menu-pin]`) counts as its row for
+      // Up/Down; Left/Right move between the row's item and its toggle.
+      const row = focused instanceof HTMLElement ? focused.closest(".menu-row") : null;
+      const rowItem = row ? menuItemButtons(row)[0] : undefined;
+      const rowPin = row?.querySelector<HTMLButtonElement>("[data-menu-pin]");
+      const current = list.findIndex((el) => el === focused || el === rowItem);
+      if (rowPin && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {
+        event.preventDefault();
+        focusMenuEl(event.key === "ArrowRight" ? rowPin : rowItem);
+        return;
+      }
       if (event.key === "Escape") {
         event.preventDefault();
         setOpen(false);

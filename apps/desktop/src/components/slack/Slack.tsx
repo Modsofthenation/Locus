@@ -1917,7 +1917,7 @@ export function SlackPane() {
               pose="rest"
               size={76}
               title="Sign in as yourself"
-              lead="Tokens live in Settings → Integrations. Locus is the local client. Sign in as yourself to read Slack; send as you by default, or as the Locus bot. Slack.com is still Slack."
+              lead="Read Slack and reply as you, or as the Locus bot. Your token stays in Settings → Integrations."
             />
             <div className="row-actions">
               <button

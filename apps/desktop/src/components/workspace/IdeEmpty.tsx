@@ -20,7 +20,7 @@ import { HostFolderPicker } from "./HostFolderField";
 import { IconClone, IconFolder } from "@/components/layout/Icons";
 import { ImportAccounts } from "@/components/settings/ImportAccounts";
 import { EmptyHero } from "@/components/layout/EmptyHero";
-import { FeatureHintRow } from "@/components/layout/FeatureHint";
+import { runFeatureActionFromDispatch } from "@/components/layout/FeatureHint";
 import { SECTION_FEATURE_HINTS } from "@/lib/discoverability";
 
 const FORGE_ORDER: ForgeKind[] = [
@@ -60,6 +60,18 @@ export function IdeEmpty() {
   const tokened = forgesWithTokens(state.config?.forges ?? []);
   const grouped = groupRepos(state.repos);
   const recents = loadIdeRecents();
+
+  // The sidebar "New workspace" menu asks for one of these two choices.
+  useEffect(() => {
+    if (!state.ideStart) return;
+    if (state.ideStart === "open") {
+      setMode("home");
+      setPickerOpen(true);
+    } else {
+      setMode("clone");
+    }
+    dispatch({ type: "ideStart", intent: null });
+  }, [state.ideStart, dispatch]);
 
   useEffect(() => {
     if (mode !== "clone") {
@@ -177,6 +189,7 @@ export function IdeEmpty() {
   }
 
   const message = error ? formatRemoteError(error) : null;
+  const codebaseHint = SECTION_FEATURE_HINTS.ide;
   const auth = message ? isForgeAuthError(message) : false;
 
   return (
@@ -184,10 +197,9 @@ export function IdeEmpty() {
       <div className="empty-card">
         <EmptyHero
           followCursor
-          title="IDE"
-          lead="Open a folder on this machine, or clone a repository from the GitHub, GitLab, and Bitbucket accounts already connected in Settings."
+          title="Open a project to edit"
+          lead="Edit files, run a terminal and commit, with an agent beside you."
         />
-        {SECTION_FEATURE_HINTS.ide ? <FeatureHintRow hint={SECTION_FEATURE_HINTS.ide} /> : null}
         <div className="ide-start-tiles" role="group" aria-label="Start a workspace">
           <button
             type="button"
@@ -201,7 +213,8 @@ export function IdeEmpty() {
             <span className="ide-start-tile-icon" aria-hidden>
               <IconFolder />
             </span>
-            Open folder
+            <span className="ide-start-tile-label">Open folder</span>
+            <span className="ide-start-tile-desc">A folder on this machine</span>
           </button>
           <button
             type="button"
@@ -213,7 +226,8 @@ export function IdeEmpty() {
             <span className="ide-start-tile-icon" aria-hidden>
               <IconClone />
             </span>
-            Clone repo
+            <span className="ide-start-tile-label">Clone repo</span>
+            <span className="ide-start-tile-desc">From GitHub, GitLab or a URL</span>
           </button>
         </div>
         {recents.length ? (
@@ -330,6 +344,18 @@ export function IdeEmpty() {
               />
             ) : null}
           </div>
+        ) : null}
+        {codebaseHint ? (
+          <p className="ide-start-crosslink" data-testid={`feature-hint-${codebaseHint.id}`}>
+            Reviewing pull requests?{" "}
+            <button
+              type="button"
+              className="linkish"
+              onClick={() => runFeatureActionFromDispatch(dispatch, codebaseHint.action)}
+            >
+              {codebaseHint.actionLabel}
+            </button>
+          </p>
         ) : null}
         {message ? (
           <div className="error-row" role="alert">

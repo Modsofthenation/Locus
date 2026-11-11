@@ -15,8 +15,6 @@ import { api } from "@/lib/api";
 import { useStore } from "@/state/store";
 import { EmptyHero } from "@/components/layout/EmptyHero";
 import { IconFolder } from "@/components/layout/Icons";
-import { FeatureHintRow } from "@/components/layout/FeatureHint";
-import { SECTION_FEATURE_HINTS } from "@/lib/discoverability";
 import { HostFolderPicker } from "@/components/workspace/HostFolderField";
 import { loadBrainViewPrefs, saveBrainViewPrefs, type BrainSegment } from "@/lib/brainViewPrefs";
 import { type BrainGraphLayoutId } from "@/lib/brainGraph";
@@ -172,9 +170,8 @@ export function BrainPane() {
             <div className="empty-card">
               <EmptyHero
                 title="Brain"
-                lead="Index a repo folder to learn services and APIs. Remember durable conclusions. Coding agents orient on this automatically — grep still wins for the tree."
+                lead="Index a repo folder below so coding agents can orient on its services and APIs."
               />
-              <FeatureHintRow hint={SECTION_FEATURE_HINTS.brain!} />
             </div>
           ) : null}
 
@@ -214,7 +211,7 @@ export function BrainPane() {
               [
                 ["graph", "Graph"],
                 ["memories", "Memories"],
-                ["inbox", inbox.length ? `Inbox (${inbox.length})` : "Inbox"],
+                ["inbox", inbox.length ? `Review (${inbox.length})` : "Review"],
                 ["activity", "Activity"],
               ] as const
             ).map(([id, label]) => (
@@ -264,42 +261,44 @@ export function BrainPane() {
                 </div>
               ) : null}
 
-              <div className="brain-actions">
-                <button
-                  className="btn"
-                  type="button"
-                  disabled={busy === "export"}
-                  onClick={() =>
-                    void run("export", async () => {
-                      const next = await api.brainExport();
-                      setDoc(next);
-                      setOutput(next.path ? `Exported to ${next.path}` : "Exported.");
-                    })
-                  }
-                >
-                  {busy === "export" ? "Exporting…" : "Export"}
-                </button>
-                <button
-                  className="btn"
-                  type="button"
-                  disabled={busy === "ingest"}
-                  onClick={() =>
-                    void run("ingest", async () => {
-                      const next = await api.brainIngest(!paused);
-                      setDoc(next);
-                      if (next.brain && state.config) {
-                        dispatch({
-                          type: "config",
-                          config: { ...state.config, brain: next.brain },
-                        });
-                      }
-                      setOutput(paused ? "Ingest resumed." : "Ingest paused.");
-                    })
-                  }
-                >
-                  {busy === "ingest" ? "Saving…" : paused ? "Resume ingest" : "Pause ingest"}
-                </button>
-              </div>
+              {!empty ? (
+                <div className="brain-actions">
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={busy === "export"}
+                    onClick={() =>
+                      void run("export", async () => {
+                        const next = await api.brainExport();
+                        setDoc(next);
+                        setOutput(next.path ? `Exported to ${next.path}` : "Exported.");
+                      })
+                    }
+                  >
+                    {busy === "export" ? "Exporting…" : "Export"}
+                  </button>
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={busy === "ingest"}
+                    onClick={() =>
+                      void run("ingest", async () => {
+                        const next = await api.brainIngest(!paused);
+                        setDoc(next);
+                        if (next.brain && state.config) {
+                          dispatch({
+                            type: "config",
+                            config: { ...state.config, brain: next.brain },
+                          });
+                        }
+                        setOutput(paused ? "Ingest resumed." : "Ingest paused.");
+                      })
+                    }
+                  >
+                    {busy === "ingest" ? "Saving…" : paused ? "Resume ingest" : "Pause ingest"}
+                  </button>
+                </div>
+              ) : null}
 
               <form className="brain-toolbar" onSubmit={onBuild}>
                 <label>
@@ -502,7 +501,7 @@ export function BrainPane() {
                   ))}
                 </ul>
               ) : (
-                <p className="hint">Inbox is empty.</p>
+                <p className="hint">Nothing to review.</p>
               )}
             </div>
           ) : null}

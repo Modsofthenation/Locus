@@ -30,8 +30,13 @@ const {
   probeControlPlane: (fetchImpl: typeof fetch, url: string, timeoutMs?: number) => Promise<boolean>;
   controlPlaneKeepAlive: (fetchImpl: typeof fetch, url: string) => Promise<boolean>;
   desktopServerRecordPath: (home?: string) => string;
-  rememberDesktopServer: (path: string, record: { pid?: number; owner?: string }) => Promise<void>;
-  readDesktopServer: (path: string) => Promise<{ pid: number; owner: string } | undefined>;
+  rememberDesktopServer: (
+    path: string,
+    record: { pid?: number; owner?: string; build?: string },
+  ) => Promise<void>;
+  readDesktopServer: (
+    path: string,
+  ) => Promise<{ pid: number; owner: string; build?: string } | undefined>;
   forgetDesktopServer: (path: string) => Promise<void>;
   pidAlive: (pid: number) => boolean;
   environHasOwner: (raw: Buffer | string, owner: string) => boolean;
@@ -97,6 +102,14 @@ describe("control plane keep-alive", () => {
       await rememberDesktopServer(path, { pid: child.pid, owner });
       expect(await readDesktopServer(path)).toEqual({ pid: child.pid, owner });
       await rememberDesktopServer(path, { pid: 1, owner });
+      expect(await readDesktopServer(path)).toEqual({ pid: child.pid, owner });
+      await rememberDesktopServer(path, { pid: child.pid, owner, build: "0.18.0+abc123" });
+      expect(await readDesktopServer(path)).toEqual({
+        pid: child.pid,
+        owner,
+        build: "0.18.0+abc123",
+      });
+      await rememberDesktopServer(path, { pid: child.pid, owner, build: "bad build/../" });
       expect(await readDesktopServer(path)).toEqual({ pid: child.pid, owner });
       stopAdoptedProcess(child.pid!);
       const deadline = Date.now() + 2000;

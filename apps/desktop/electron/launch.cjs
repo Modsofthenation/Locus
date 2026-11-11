@@ -1,3 +1,4 @@
+const { createHash } = require("node:crypto");
 const { cpSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } = require("node:fs");
 const { homedir } = require("node:os");
 const { join } = require("node:path");
@@ -16,11 +17,35 @@ function packagedUiDir(resourcesPath, home) {
   return join(resourcesPath, "ui");
 }
 
+/**
+ * Fingerprint of a built UI: Vite hashes every asset name into index.html, so
+ * its digest changes whenever any bundled JS/CSS does. Empty when there is no build.
+ */
+function uiBuildHash(dir) {
+  try {
+    return createHash("sha256")
+      .update(readFileSync(join(dir, "index.html")))
+      .digest("hex")
+      .slice(0, 16);
+  } catch {
+    return "";
+  }
+}
+
+/** App version plus UI fingerprint, so same-version rebuilds still count as new. */
+function uiBuildStamp(version, dir) {
+  const v = version == null ? "" : String(version);
+  const hash = uiBuildHash(dir);
+  return hash ? `${v}+${hash}` : v;
+}
+
 /** Copy the AppImage/asar UI onto a real disk path so keep-alive servers survive FUSE unmount. */
 function syncPackagedUi(opts = {}) {
   const resourcesPath = opts.resourcesPath;
-  const version = opts.version == null ? "" : String(opts.version);
   const bundled = join(resourcesPath, "ui");
+  // Stamp by content, not just version: rebuilds between releases (same
+  // package.json version) must still replace the cached UI.
+  const version = uiBuildStamp(opts.version, bundled);
   const cache = desktopUiCacheDir(opts.home);
   const bundledIndex = join(bundled, "index.html");
   const cacheIndex = join(cache, "index.html");
@@ -107,4 +132,5 @@ module.exports = {
   resolveLaunch,
   spawnIo,
   syncPackagedUi,
+  uiBuildStamp,
 };

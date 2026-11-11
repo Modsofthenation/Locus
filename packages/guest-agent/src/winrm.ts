@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { GuestOs } from "@locus/shared";
-import { commandFor, isSupported, parseRecordScreenResult } from "./commands.js";
+import { commandFor, decorateRemoteToolResult, isSupported } from "./commands.js";
 import type { GuestRuntime, ToolRequest, ToolResult } from "./types.js";
 
 export interface WinRmTarget {
@@ -60,20 +60,7 @@ export class WinRmGuestRuntime implements GuestRuntime {
     const script = commandFor(this.os, req);
     try {
       const result = await winrmRun(this.target, script, this.post);
-      const output = (result.stdout || result.stderr).trim();
-      if (req.name === "screenshot" && result.code === 0 && output.length > 80) {
-        return {
-          ok: true,
-          output: "screenshot captured",
-          screenshotBase64: output.replace(/\s/g, ""),
-        };
-      }
-      if (req.name === "record_screen") {
-        const parsed = parseRecordScreenResult(output);
-        const cleaned = output.replace(/LOCUS_RECORDING:\S+\s*/g, "").trim();
-        return { ok: result.code === 0, output: cleaned || `(exit ${result.code})`, ...parsed };
-      }
-      return { ok: result.code === 0, output: output || `(exit ${result.code})` };
+      return decorateRemoteToolResult(req.name, result);
     } catch (err) {
       return { ok: false, output: err instanceof Error ? err.message : "WinRM failed" };
     }

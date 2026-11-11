@@ -96,6 +96,7 @@ export const THEME_IDS = [
   "grove",
   "peony",
   "glaze",
+  "console",
 ] as const;
 
 export type ThemeId = (typeof THEME_IDS)[number];
@@ -856,6 +857,13 @@ export const THEME_OPTIONS: ThemeOption[] = [
     scheme: "light",
     gradient: true,
     swatches: ["#eef2f6", "#f8fafc", "#2a5a88", "#6a4a88"],
+  },
+  {
+    id: "console",
+    name: "Console",
+    summary: "A terminal window — amber phosphor, scanlines, and a titlebar.",
+    scheme: "dark",
+    swatches: ["#0c0a06", "#1e1a12", "#ffb020", "#5ec8a8"],
   },
 ];
 

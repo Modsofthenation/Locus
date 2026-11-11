@@ -74,6 +74,7 @@ import type {
   VmInstance,
   AgentSkill,
   DockerContainer,
+  DockerDaemonStatus,
   DockerContainerStats,
   DockerBulkStopResult,
   DockerSwarmService,
@@ -1167,6 +1168,7 @@ export const api = {
       { method: "POST" },
     ),
   vms: () => json<VmInstance[]>("/api/vms"),
+  dockerStatus: () => json<DockerDaemonStatus>("/api/docker/status"),
   dockerContainers: () =>
     json<{ kind: "mock" | "docker"; containers: DockerContainer[] }>("/api/docker/containers"),
   dockerContainer: (id: string) =>

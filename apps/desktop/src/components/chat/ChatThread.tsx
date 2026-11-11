@@ -51,7 +51,6 @@ import { screenshotSrc } from "./GuestTimeline";
 import { IconCopy } from "@/components/layout/Icons";
 import { Mascot } from "@/components/layout/Mascot";
 import { PersonaAvatar } from "@/components/layout/PersonaAvatar";
-import { TrustActions } from "./TrustActions";
 import { CloneProgressCard, ImageBuildCard } from "./CloneProgressCard";
 import { ThinkingTrace } from "./ThinkingTrace";
 import { ChatScrollIndicator } from "./ChatScrollIndicator";
@@ -240,7 +239,7 @@ function SystemOrMarkdown(props: { role: string; content: string; liveWait?: boo
 const MarkdownBubble = memo(function MarkdownBubble({ content }: { content: string }) {
   return (
     <div
-      className="bubble"
+      className="bubble md-bubble"
       dangerouslySetInnerHTML={{ __html: formatMarkdown(content) }}
       onClick={(event) => {
         const btn = (event.target as HTMLElement | null)?.closest(".md-copy");
@@ -738,7 +737,6 @@ export const ChatThread = memo(function ChatThread({
             )}
           </div>
         ) : null}
-        {!turning && !viewing ? <TrustActions session={session} /> : null}
         {session.taskList?.length && !viewing ? (
           <TaskListCard key={session.id} tasks={session.taskList} />
         ) : null}

@@ -116,6 +116,51 @@ async function atomicWrite(path: string, data: string): Promise<void> {
   await enqueue(path, () => replaceFile(path, data));
 }
 
+async function loadParsedCatalog<T>(
+  path: string,
+  parse: (row: unknown) => T | undefined,
+): Promise<T[]> {
+  try {
+    const raw = JSON.parse(await readFile(path, "utf8")) as unknown;
+    if (!Array.isArray(raw)) return [];
+    return raw.map(parse).filter((row): row is T => Boolean(row));
+  } catch {
+    return [];
+  }
+}
+
+async function replaceCatalogItem<T extends { id: string }>(
+  path: string,
+  item: T,
+  parse: (row: unknown) => T | undefined,
+): Promise<void> {
+  await enqueue(path, async () => {
+    const items = await loadParsedCatalog(path, parse);
+    const idx = items.findIndex((row) => row.id === item.id);
+    if (idx < 0) items.push(item);
+    else items[idx] = item;
+    await replaceFile(path, JSON.stringify(items, null, 2));
+  });
+}
+
+async function deleteCatalogItem<T extends { id: string }>(
+  path: string,
+  id: string,
+  parse: (row: unknown) => T | undefined,
+): Promise<void> {
+  await enqueue(path, async () => {
+    const items = await loadParsedCatalog(path, parse);
+    await replaceFile(
+      path,
+      JSON.stringify(
+        items.filter((row) => row.id !== id),
+        null,
+        2,
+      ),
+    );
+  });
+}
+
 /** Newest runs kept for one job. */
 export const MAX_AUTOMATION_RUNS_PER_JOB = 500;
 /** Newest runs kept across the fleet. */
@@ -783,15 +828,7 @@ export class JsonStore {
   }
 
   async loadDesignSystems(): Promise<DesignSystem[]> {
-    try {
-      const raw = JSON.parse(await readFile(this.designSystemsPath, "utf8")) as unknown;
-      if (!Array.isArray(raw)) return [];
-      return raw
-        .map((row) => parseDesignSystem(row))
-        .filter((row): row is DesignSystem => Boolean(row));
-    } catch {
-      return [];
-    }
+    return loadParsedCatalog(this.designSystemsPath, parseDesignSystem);
   }
 
   async saveDesignSystems(items: DesignSystem[]): Promise<void> {
@@ -799,59 +836,15 @@ export class JsonStore {
   }
 
   async replaceDesignSystem(item: DesignSystem): Promise<void> {
-    await enqueue(this.designSystemsPath, async () => {
-      let items: DesignSystem[] = [];
-      try {
-        const raw = JSON.parse(await readFile(this.designSystemsPath, "utf8")) as unknown;
-        items = Array.isArray(raw)
-          ? raw
-              .map((row) => parseDesignSystem(row))
-              .filter((row): row is DesignSystem => Boolean(row))
-          : [];
-      } catch {
-        items = [];
-      }
-      const idx = items.findIndex((row) => row.id === item.id);
-      if (idx < 0) items.push(item);
-      else items[idx] = item;
-      await replaceFile(this.designSystemsPath, JSON.stringify(items, null, 2));
-    });
+    await replaceCatalogItem(this.designSystemsPath, item, parseDesignSystem);
   }
 
   async deleteDesignSystem(id: string): Promise<void> {
-    await enqueue(this.designSystemsPath, async () => {
-      let items: DesignSystem[] = [];
-      try {
-        const raw = JSON.parse(await readFile(this.designSystemsPath, "utf8")) as unknown;
-        items = Array.isArray(raw)
-          ? raw
-              .map((row) => parseDesignSystem(row))
-              .filter((row): row is DesignSystem => Boolean(row))
-          : [];
-      } catch {
-        items = [];
-      }
-      await replaceFile(
-        this.designSystemsPath,
-        JSON.stringify(
-          items.filter((row) => row.id !== id),
-          null,
-          2,
-        ),
-      );
-    });
+    await deleteCatalogItem(this.designSystemsPath, id, parseDesignSystem);
   }
 
   async loadAssetStyles(): Promise<AssetStyle[]> {
-    try {
-      const raw = JSON.parse(await readFile(this.assetStylesPath, "utf8")) as unknown;
-      if (!Array.isArray(raw)) return [];
-      return raw
-        .map((row) => parseAssetStyle(row))
-        .filter((row): row is AssetStyle => Boolean(row));
-    } catch {
-      return [];
-    }
+    return loadParsedCatalog(this.assetStylesPath, parseAssetStyle);
   }
 
   async saveAssetStyles(items: AssetStyle[]): Promise<void> {
@@ -859,31 +852,11 @@ export class JsonStore {
   }
 
   async replaceAssetStyle(item: AssetStyle): Promise<void> {
-    await enqueue(this.assetStylesPath, async () => {
-      let items: AssetStyle[] = [];
-      try {
-        const raw = JSON.parse(await readFile(this.assetStylesPath, "utf8")) as unknown;
-        items = Array.isArray(raw)
-          ? raw.map((row) => parseAssetStyle(row)).filter((row): row is AssetStyle => Boolean(row))
-          : [];
-      } catch {
-        items = [];
-      }
-      const idx = items.findIndex((row) => row.id === item.id);
-      if (idx < 0) items.push(item);
-      else items[idx] = item;
-      await replaceFile(this.assetStylesPath, JSON.stringify(items, null, 2));
-    });
+    await replaceCatalogItem(this.assetStylesPath, item, parseAssetStyle);
   }
 
   async loadGameStyles(): Promise<GameStyle[]> {
-    try {
-      const raw = JSON.parse(await readFile(this.gameStylesPath, "utf8")) as unknown;
-      if (!Array.isArray(raw)) return [];
-      return raw.map((row) => parseGameStyle(row)).filter((row): row is GameStyle => Boolean(row));
-    } catch {
-      return [];
-    }
+    return loadParsedCatalog(this.gameStylesPath, parseGameStyle);
   }
 
   async saveGameStyles(items: GameStyle[]): Promise<void> {
@@ -891,65 +864,15 @@ export class JsonStore {
   }
 
   async replaceGameStyle(item: GameStyle): Promise<void> {
-    await enqueue(this.gameStylesPath, async () => {
-      let items: GameStyle[] = [];
-      try {
-        const raw = JSON.parse(await readFile(this.gameStylesPath, "utf8")) as unknown;
-        items = Array.isArray(raw)
-          ? raw.map((row) => parseGameStyle(row)).filter((row): row is GameStyle => Boolean(row))
-          : [];
-      } catch {
-        items = [];
-      }
-      const idx = items.findIndex((row) => row.id === item.id);
-      if (idx < 0) items.push(item);
-      else items[idx] = item;
-      await replaceFile(this.gameStylesPath, JSON.stringify(items, null, 2));
-    });
+    await replaceCatalogItem(this.gameStylesPath, item, parseGameStyle);
   }
 
   async deleteGameStyle(id: string): Promise<void> {
-    await enqueue(this.gameStylesPath, async () => {
-      let items: GameStyle[] = [];
-      try {
-        const raw = JSON.parse(await readFile(this.gameStylesPath, "utf8")) as unknown;
-        items = Array.isArray(raw)
-          ? raw.map((row) => parseGameStyle(row)).filter((row): row is GameStyle => Boolean(row))
-          : [];
-      } catch {
-        items = [];
-      }
-      await replaceFile(
-        this.gameStylesPath,
-        JSON.stringify(
-          items.filter((row) => row.id !== id),
-          null,
-          2,
-        ),
-      );
-    });
+    await deleteCatalogItem(this.gameStylesPath, id, parseGameStyle);
   }
 
   async deleteAssetStyle(id: string): Promise<void> {
-    await enqueue(this.assetStylesPath, async () => {
-      let items: AssetStyle[] = [];
-      try {
-        const raw = JSON.parse(await readFile(this.assetStylesPath, "utf8")) as unknown;
-        items = Array.isArray(raw)
-          ? raw.map((row) => parseAssetStyle(row)).filter((row): row is AssetStyle => Boolean(row))
-          : [];
-      } catch {
-        items = [];
-      }
-      await replaceFile(
-        this.assetStylesPath,
-        JSON.stringify(
-          items.filter((row) => row.id !== id),
-          null,
-          2,
-        ),
-      );
-    });
+    await deleteCatalogItem(this.assetStylesPath, id, parseAssetStyle);
   }
 
   private repoPullsDir(repoId: string, invalidMessage = "Invalid pull cache path"): string {

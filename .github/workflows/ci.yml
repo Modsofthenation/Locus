@@ -41,7 +41,7 @@ jobs:
         run: |
           mkdir -p images/agent/vendor
           node scripts/prefetch-github-release-asset.mjs --owner coder --repo code-server --tag v4.96.4 --file code-server-4.96.4-linux-amd64.tar.gz --out images/agent/vendor/code-server.tar.gz
-      - run: docker build -t locus/agent:0.1 -t locus/agent:0.18.0 images/agent
+      - run: docker build -t locus/agent:0.1 -t locus/agent:0.19.0 images/agent
 
   android:
     runs-on: ubuntu-latest

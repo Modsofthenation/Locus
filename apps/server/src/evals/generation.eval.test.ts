@@ -1546,7 +1546,7 @@ describe("generation harness smoke", () => {
       html: html ?? "",
     });
     expect(score, score.reason).toMatchObject({ passed: false, reason: "host fallback" });
-    expect(needsHuman).toMatch(/last-resort host draft/);
+    expect(needsHuman).toMatch(/starter draft on this canvas/);
   }, 30_000);
 
   it("game-host-fallback: host stub first paint, look, rewrite note, juicy loop", async () => {
@@ -1597,7 +1597,7 @@ describe("generation harness smoke", () => {
       html: html ?? "",
     });
     expect(score, score.reason).toMatchObject({ passed: false, reason: "host fallback" });
-    expect(needsHuman).toMatch(/last-resort host draft/);
+    expect(needsHuman).toMatch(/starter draft on this canvas/);
   }, 30_000);
 
   it("asset-host-fallback-unstamped-stuck: stripped host stub, look, talk through quality cap, needs a human", async () => {
@@ -1616,7 +1616,7 @@ describe("generation harness smoke", () => {
       html: html ?? "",
     });
     expect(score, score.reason).toMatchObject({ passed: false, reason: "host fallback" });
-    expect(needsHuman).toMatch(/last-resort host draft/);
+    expect(needsHuman).toMatch(/starter draft on this canvas/);
   }, 30_000);
 
   it("design-host-fallback-mutated-stuck: one-token stub edit, look, talk through quality cap, needs a human", async () => {
@@ -1636,7 +1636,7 @@ describe("generation harness smoke", () => {
       html: html ?? "",
     });
     expect(score, score.reason).toMatchObject({ passed: false, reason: "host fallback" });
-    expect(needsHuman).toMatch(/last-resort host draft/);
+    expect(needsHuman).toMatch(/starter draft on this canvas/);
   }, 30_000);
 
   it("design-host-fallback-two-token-stuck: two-token stub edit, look, talk through quality cap, needs a human", async () => {
@@ -1658,7 +1658,7 @@ describe("generation harness smoke", () => {
       html: html ?? "",
     });
     expect(score, score.reason).toMatchObject({ passed: false, reason: "host fallback" });
-    expect(needsHuman).toMatch(/last-resort host draft/);
+    expect(needsHuman).toMatch(/starter draft on this canvas/);
   }, 30_000);
 
   it("game-host-fallback-two-token-stuck: two-token juiced stub, look, rewrite note, needs a human", async () => {
@@ -1679,7 +1679,7 @@ describe("generation harness smoke", () => {
       html: html ?? "",
     });
     expect(score, score.reason).toMatchObject({ passed: false, reason: "host fallback" });
-    expect(needsHuman).toMatch(/last-resort host draft/);
+    expect(needsHuman).toMatch(/starter draft on this canvas/);
   }, 30_000);
 
   it("asset-host-fallback-mutated-stuck: one-token stub edit, look, talk through quality cap, needs a human", async () => {
@@ -1699,7 +1699,7 @@ describe("generation harness smoke", () => {
       html: html ?? "",
     });
     expect(score, score.reason).toMatchObject({ passed: false, reason: "host fallback" });
-    expect(needsHuman).toMatch(/last-resort host draft/);
+    expect(needsHuman).toMatch(/starter draft on this canvas/);
   }, 30_000);
 
   it("design-stuck: generic first paint, look, talk through quality cap, needs a human", async () => {

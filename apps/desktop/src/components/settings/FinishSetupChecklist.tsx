@@ -1,6 +1,7 @@
 import type { SetupStatus } from "@locus/shared";
 import { setupTodos } from "@locus/shared";
 import type { ReactNode } from "react";
+import { SetupBanner } from "@/components/layout/SetupBanner";
 
 type ChecklistTodo = {
   id: string;
@@ -52,22 +53,16 @@ export function FinishSetupChecklist({
   if (todos.every((row) => row.done) && !extraActions) return null;
   const summary = remainingSummary(todos);
   return (
-    <div className="setup-checklist" data-testid="finish-setup-checklist">
-      <p className="setup-checklist-copy">
-        <strong>Finish setup</strong>
-        {summary ? <span className="hint"> · {summary}</span> : null}
-      </p>
-      <div className="setup-checklist-actions">
-        {extraActions}
-        <button type="button" className="btn small primary" onClick={onFinish}>
-          Continue
-        </button>
-        {onDismiss ? (
-          <button type="button" className="btn small ghost" onClick={onDismiss}>
-            Dismiss
-          </button>
-        ) : null}
-      </div>
-    </div>
+    <SetupBanner
+      title="Finish setup"
+      detail={summary || undefined}
+      testId="finish-setup-checklist"
+      onDismiss={onDismiss}
+    >
+      {extraActions}
+      <button type="button" className="btn small primary" onClick={onFinish}>
+        Continue
+      </button>
+    </SetupBanner>
   );
 }

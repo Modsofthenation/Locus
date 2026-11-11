@@ -34,7 +34,7 @@ const SOURCES: {
   {
     key: "notifyAutomations",
     testId: "notify-automations",
-    title: "Automations",
+    title: "Jobs",
     hint: "When a scheduled job finishes.",
   },
 ];
@@ -53,8 +53,8 @@ export function NotificationSettings(props: {
   return (
     <div className="notify-layout">
       <p className="notify-lead">
-        Desktop alerts for turns, Needs you, Slack Activity, and automations. Permission is
-        requested the first time one of these would fire — never if every source is off.
+        Desktop alerts for turns, Needs you, Slack Activity, and jobs. Permission is requested the
+        first time one of these would fire — never if every source is off.
       </p>
 
       <section className="notify-card">

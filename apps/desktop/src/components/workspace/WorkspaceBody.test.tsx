@@ -11,6 +11,7 @@ import {
   COLLAPSED_BODY_COLUMNS,
   COLLAPSED_BODY_ROWS,
   DESIGN_SPLIT_KEY,
+  HIDDEN_PANEL_COLUMNS,
   IDE_SPLIT_DEFAULT,
   IDE_SPLIT_KEY,
   SINGLE_BODY_TRACK,
@@ -146,6 +147,22 @@ describe("WorkspaceBody", () => {
       /^minmax\(0, 0\.65fr\)/,
     );
     expect(localStorage.getItem(CHAT_SPLIT_KEY)).toBe("0.65");
+  });
+
+  it("hides a collapsed panel fully (no rotated rail) when the topbar owns the toggle", () => {
+    render(
+      <WorkspaceBody
+        variant="design"
+        collapsed
+        topbarToggle
+        chat={<section className="chat">chat</section>}
+        preview={<aside className="vm-pane rail">Canvas</aside>}
+      />,
+    );
+    const body = host.querySelector(".body") as HTMLElement;
+    expect(body.style.gridTemplateColumns).toBe(HIDDEN_PANEL_COLUMNS);
+    expect(body.classList.contains("panel-hidden")).toBe(true);
+    expect(css).toMatch(/\.body\.panel-hidden > \.body-files \{[\s\S]*?visibility:\s*hidden/);
   });
 
   it("keeps a zero-width gutter when the preview is collapsed and drops it for host-only chat", () => {

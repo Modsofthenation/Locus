@@ -2,7 +2,15 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { AgentSession, Automation, AutomationRun } from "@locus/shared";
+import type {
+  AgentSession,
+  AssetStyle,
+  Automation,
+  AutomationRun,
+  DesignSystem,
+  GameStyle,
+} from "@locus/shared";
+import { DEFAULT_DESIGN_PALETTE } from "@locus/shared";
 import { assertWipeableDataDir } from "../defaults.js";
 import { JsonStore, SESSION_FLUSH_MS } from "./store.js";
 
@@ -477,5 +485,59 @@ describe("JsonStore automations", () => {
     const runs = await store.loadRuns();
     expect(runs.filter((row) => row.automationId === "a1")).toHaveLength(201);
     expect(runs.some((row) => row.automationId === "b1")).toBe(true);
+  });
+});
+
+describe("JsonStore style catalogs", () => {
+  const t = "2026-08-21T00:00:00.000Z";
+
+  it("replaces and deletes Design, Asset, and Game style rows", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-store-styles-"));
+    const store = new JsonStore(dir);
+    await store.init();
+    const system: DesignSystem = {
+      id: "sys1",
+      name: "Brand",
+      summary: "",
+      palette: DEFAULT_DESIGN_PALETTE,
+      typography: { sans: "Inter", mono: "Mono", display: "Inter", basePx: 16 },
+      radiusPx: 8,
+      spacePx: 8,
+      createdAt: t,
+      updatedAt: t,
+    };
+    const asset: AssetStyle = {
+      id: "as1",
+      name: "Clay",
+      summary: "",
+      guidelines: "",
+      createdAt: t,
+      updatedAt: t,
+    };
+    const game: GameStyle = {
+      id: "gs1",
+      name: "Arcade",
+      summary: "",
+      guidelines: "",
+      tilePx: 16,
+      hud: "normal",
+      juice: "crunchy",
+      createdAt: t,
+      updatedAt: t,
+    };
+    await store.replaceDesignSystem(system);
+    await store.replaceAssetStyle(asset);
+    await store.replaceGameStyle(game);
+    expect(await store.loadDesignSystems()).toEqual([system]);
+    expect(await store.loadAssetStyles()).toEqual([asset]);
+    expect(await store.loadGameStyles()).toEqual([game]);
+    await store.replaceDesignSystem({ ...system, name: "Brand 2" });
+    expect((await store.loadDesignSystems())[0]?.name).toBe("Brand 2");
+    await store.deleteDesignSystem("sys1");
+    await store.deleteAssetStyle("as1");
+    await store.deleteGameStyle("gs1");
+    expect(await store.loadDesignSystems()).toEqual([]);
+    expect(await store.loadAssetStyles()).toEqual([]);
+    expect(await store.loadGameStyles()).toEqual([]);
   });
 });

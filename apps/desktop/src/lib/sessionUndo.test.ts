@@ -45,6 +45,40 @@ describe("sessionUndo", () => {
     stop();
   });
 
+  it("closes the open chat when deleting a live session, and reopens it on undo", async () => {
+    const dispatch = vi.fn();
+    let undo: (() => void) | undefined;
+    const stop = subscribeNotices((rows) => {
+      const row = rows.find((r) => r.message === "Deleted Fix login");
+      undo = row?.onAction;
+    });
+    await deleteSessionWithUndo(session(), dispatch, vi.fn(), { open: true });
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith({ type: "deselect", id: "s1" }));
+    expect(undo).toBeTypeOf("function");
+    undo?.();
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith({ type: "select", id: "s1" }));
+    stop();
+  });
+
+  it("does not reopen a deleted chat on undo when it was not the open one", async () => {
+    const dispatch = vi.fn();
+    let undo: (() => void) | undefined;
+    const stop = subscribeNotices((rows) => {
+      undo = rows.find((r) => r.message === "Deleted Fix login")?.onAction;
+    });
+    await deleteSessionWithUndo(session(), dispatch, vi.fn(), { open: false });
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith({ type: "deselect", id: "s1" }));
+    undo?.();
+    await vi.waitFor(() =>
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "session",
+        session: expect.objectContaining({ id: "s1", archived: false }),
+      }),
+    );
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "select", id: "s1" });
+    stop();
+  });
+
   it("hard-deletes an already archived session after confirm", async () => {
     const dispatch = vi.fn();
     const ask = vi.fn(async () => true);

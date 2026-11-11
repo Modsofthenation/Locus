@@ -48,11 +48,10 @@ export function EmptyHint(props: {
   );
 }
 
-/** Sidebar / catalog empty row with the rest mascot. */
+/** Sidebar list empty row: one line of muted text. The main pane carries the empty state. */
 export function EmptyListNote({ children }: { children: ReactNode }) {
   return (
-    <div className="empty-list">
-      <Mascot pose="rest" size={36} />
+    <div className="empty-list" role="status">
       <div className="empty-list-body">{children}</div>
     </div>
   );

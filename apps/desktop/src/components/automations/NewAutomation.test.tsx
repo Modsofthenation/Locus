@@ -25,6 +25,7 @@ vi.mock("@/lib/api", () => ({
     browseHost: vi.fn(),
     saveConfig: vi.fn(async (config) => config),
     workersStatus: vi.fn(async () => []),
+    dockerStatus: vi.fn(async () => ({ kind: "mock", available: true })),
   },
 }));
 
@@ -141,11 +142,11 @@ describe("NewAutomationModal runtimes", () => {
     expect(host.querySelector(".docker-image-field")).toBeNull();
     expect(host.querySelector(".host-folder-field")).not.toBeNull();
     expect(host.textContent).not.toContain("Extra allow hosts");
-    expect(host.textContent).toContain("Reuse the last chat for this automation");
+    expect(host.textContent).toContain("Reuse the last chat for this job");
     expect(host.textContent).toContain("Remember facts between runs");
     expect(host.textContent).toContain("keeps the newest 60 chats");
     expect(host.querySelector("label.check")?.textContent).toContain(
-      "Reuse the last chat for this automation",
+      "Reuse the last chat for this job",
     );
     expect(
       [...host.querySelectorAll("label.check")].some((el) =>
@@ -170,7 +171,7 @@ describe("NewAutomationModal runtimes", () => {
       prompt.dispatchEvent(new Event("input", { bubbles: true }));
     });
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Create automation",
+      (btn) => btn.textContent === "Create job",
     );
     await act(async () => {
       create!.click();
@@ -226,7 +227,7 @@ describe("NewAutomationModal runtimes", () => {
       prompt.dispatchEvent(new Event("input", { bubbles: true }));
     });
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Create automation",
+      (btn) => btn.textContent === "Create job",
     );
     await act(async () => {
       create!.click();
@@ -299,9 +300,8 @@ describe("NewAutomationModal runtimes", () => {
     expect(kindValues).toEqual(expect.arrayContaining(["cron", "daily", "adaptive"]));
     expect(kindValues).not.toContain("webhook");
     expect(host.textContent).not.toContain("Git ref (optional)");
-    expect(host.querySelector("[data-testid='auto-modal-starters']")?.textContent).toContain(
-      "Nightly tests",
-    );
+    expect(host.querySelector("[data-testid='auto-modal-starters']")).toBeNull();
+    expect(host.querySelector("h2")?.textContent).toBe("New job");
   });
 
   it("keeps the spend cap field inside More options next to autonomy", () => {
@@ -360,7 +360,7 @@ describe("NewAutomationModal runtimes", () => {
       prompt.dispatchEvent(new Event("input", { bubbles: true }));
     });
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Create automation",
+      (btn) => btn.textContent === "Create job",
     );
     await act(async () => {
       create!.click();
@@ -478,7 +478,7 @@ describe("NewAutomationModal runtimes", () => {
       prompt.dispatchEvent(new Event("input", { bubbles: true }));
     });
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Create automation",
+      (btn) => btn.textContent === "Create job",
     );
     await act(async () => {
       create!.click();
@@ -619,5 +619,70 @@ describe("NewAutomationModal runtimes", () => {
     expect(host.querySelector("[data-testid='auto-tz-hint']")?.textContent).toMatch(
       /IANA zone.*This machine is UTC/,
     );
+  });
+  it("warns before save when Docker is selected but the daemon is down", async () => {
+    vi.mocked(api.dockerStatus).mockResolvedValueOnce({ kind: "docker", available: false });
+    render();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const warn = host.querySelector("[data-testid='auto-editor-docker-down']");
+    expect(warn?.textContent).toContain("Docker isn't running — switch to Host or start Docker");
+    const labels = [...warn!.querySelectorAll("button")].map((el) => el.textContent);
+    expect(labels).toEqual(expect.arrayContaining(["Switch to Host", "Start Docker"]));
+    const start = [...warn!.querySelectorAll("button")].find(
+      (el) => el.textContent === "Start Docker",
+    );
+    act(() => start!.click());
+    expect(host.querySelector("[data-testid='auto-docker-help']")?.textContent).toContain(
+      "systemctl start docker",
+    );
+    const toHost = [...warn!.querySelectorAll("button")].find(
+      (el) => el.textContent === "Switch to Host",
+    );
+    act(() => toHost!.click());
+    expect(host.querySelector("[data-testid='auto-editor-docker-down']")).toBeNull();
+    expect(host.textContent).toContain("Reuse the last chat for this job");
+  });
+
+  it("warns on a disabled provider and shows the price once", () => {
+    const off: LocusConfig = {
+      ...config,
+      providers: [{ ...config.providers[0]!, name: "OpenCode", enabled: false }],
+    };
+    render({ ...initialState, config: off, newAutomationOpen: true });
+    expect(host.querySelector("[data-testid='auto-provider-off']")?.textContent).toContain(
+      "OpenCode is off",
+    );
+    expect(host.querySelector(".model-cost")).toBeNull();
+  });
+
+  it("offers linked repos first instead of a Paste a URL label", () => {
+    const repo = {
+      id: "r1",
+      name: "acme/app",
+      checkout: { forge: "github" as const, url: "https://github.com/acme/app.git", ref: "main" },
+      createdAt: "2020-01-01T00:00:00.000Z",
+      updatedAt: "2020-01-01T00:00:00.000Z",
+    };
+    render({ ...initialState, config, newAutomationOpen: true, repos: [repo] });
+    const labels = selectOptionLabels(host, "Repository");
+    expect(labels[0]).toBe("No repo");
+    expect(labels).toEqual(expect.arrayContaining(["Another URL…"]));
+    expect(labels.some((label) => label.startsWith("acme/app"))).toBe(true);
+    expect(labels).not.toContain("Paste a URL");
+    expect(host.querySelector('[aria-label="Repository URL"]')).toBeNull();
+    act(() => setSelectValue(host, "Repository", "r1"));
+    expect(selectValue(host, "Repository")).toBe("r1");
+    act(() => setSelectValue(host, "Repository", "__url"));
+    expect(host.querySelector('[aria-label="Repository URL"]')).toBeTruthy();
+  });
+
+  it("starts blackout dates empty with a format hint", () => {
+    render();
+    const blackout = host.querySelector('[aria-label="Blackout dates"]') as HTMLInputElement;
+    expect(blackout.value).toBe("");
+    expect(blackout.placeholder).toBe("YYYY-MM-DD, comma-separated");
   });
 });

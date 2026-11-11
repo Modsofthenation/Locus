@@ -69,6 +69,9 @@ import {
 } from "@/components/settings/FinishSetupChecklist";
 import { LaunchWorkspace, type LaunchWorkspaceSelection } from "./LaunchWorkspace";
 import { EmptyHero } from "./EmptyHero";
+import { ProviderSetupBanner, SetupBanner } from "./SetupBanner";
+import { IconReturn } from "./Icons";
+import { NEW_AGENT_COPY, newAgentSendLabel } from "@/lib/launchCopy";
 import { Select } from "./Select";
 import { PersonaAvatarPicker } from "./PersonaAvatar";
 
@@ -442,12 +445,8 @@ export function EmptyState() {
         <EmptyHero
           hideMascot={hubMode}
           followCursor
-          title={hubMode ? "Create a teammate" : "What should we talk about?"}
-          lead={
-            hubMode
-              ? "Name them, pick a look, and give them a role."
-              : "Choose how it runs, then the folder it can touch."
-          }
+          title={hubMode ? "Create a teammate" : NEW_AGENT_COPY.heading}
+          lead={hubMode ? "Name them, pick a look, and give them a role." : NEW_AGENT_COPY.lead}
         />
 
         {hubMode ? (
@@ -576,56 +575,51 @@ export function EmptyState() {
             />
           ) : null}
           {showProviderCallout && (
-            <p className="setup-callout">
-              No provider key is enabled.{" "}
-              <button
-                className="btn small primary"
-                onClick={() => dispatch({ type: "setupOpen", open: true })}
-              >
-                Finish setup
-              </button>
-            </p>
+            <ProviderSetupBanner onFinish={() => dispatch({ type: "setupOpen", open: true })} />
           )}
           {showEngineCallout && (
-            <p className="setup-callout">
-              {mockDocker
-                ? "Docker is not installed. Agents cannot run on a mock engine."
-                : "QEMU is not installed. VM agents cannot run on a mock hypervisor."}{" "}
+            <SetupBanner
+              title={mockDocker ? "Docker isn't installed" : "QEMU isn't installed"}
+              detail={
+                mockDocker
+                  ? "Agents cannot run on a mock engine"
+                  : "VM agents cannot run on a mock hypervisor"
+              }
+              testId="engine-setup-banner"
+            >
               <button
+                type="button"
                 className="btn small primary"
                 onClick={() => dispatch({ type: "setupOpen", open: true })}
               >
                 {mockDocker ? "Install Docker" : "Install QEMU"}
               </button>
-              <button
-                className="btn small primary"
-                onClick={() => dispatch({ type: "setupOpen", open: true })}
-              >
-                Finish setup
-              </button>
-              <button className="btn small" onClick={useHostInstead}>
+              <button type="button" className="btn small" onClick={useHostInstead}>
                 Use Host instead
               </button>
-            </p>
+            </SetupBanner>
           )}
           {showImageCallout && (
-            <p className="setup-callout">
-              A Linux cloud image is not set.{" "}
+            <SetupBanner title="Finish setup" detail="Linux cloud image">
               <button
+                type="button"
                 className="btn small primary"
                 onClick={() => dispatch({ type: "setupOpen", open: true })}
               >
-                Finish setup
+                Continue
               </button>
-            </p>
+            </SetupBanner>
           )}
           {showGitCallout ? (
-            <p className="setup-callout">
-              Sign in or add a GitHub token in Settings → Git to clone and review pull requests.{" "}
-              <button className="btn small primary" onClick={() => openSettings(dispatch, "git")}>
+            <SetupBanner title="Connect GitHub" detail="to clone and review pull requests">
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => openSettings(dispatch, "git")}
+              >
                 Add a GitHub token
               </button>
-            </p>
+            </SetupBanner>
           ) : null}
 
           {hubMode ? (
@@ -732,13 +726,9 @@ export function EmptyState() {
                 placeholder={
                   hubMode
                     ? "First message to your teammate…"
-                    : hostChat
-                      ? "Ask a question…"
-                      : runtime === "docker"
-                        ? "Describe the task…"
-                        : manyOs
-                          ? "Describe the task, then pick an OS…"
-                          : "Describe the task…"
+                    : !hostChat && runtime === "vm" && manyOs
+                      ? NEW_AGENT_COPY.placeholderPickOs
+                      : NEW_AGENT_COPY.placeholder
                 }
                 onChange={setPrompt}
                 onKeyDown={(e) => {
@@ -804,6 +794,21 @@ export function EmptyState() {
                       setReasoningEffort(undefined);
                     }}
                   />
+                  <button
+                    type="button"
+                    className="btn primary small composer-send"
+                    disabled={busy || !canCreate}
+                    title={newAgentSendLabel({ hubMode, hostChat })}
+                    aria-label={busy ? "Creating…" : newAgentSendLabel({ hubMode, hostChat })}
+                    onClick={() => void createQuick()}
+                  >
+                    {busy ? (
+                      "Creating…"
+                    ) : (
+                      <span className="composer-send-label">{NEW_AGENT_COPY.send}</span>
+                    )}
+                    <IconReturn />
+                  </button>
                 </div>
               </div>
             </div>
@@ -841,7 +846,7 @@ export function EmptyState() {
               disabled={engineBlocked}
               onClick={() => setShowOptions((open) => !open)}
             >
-              {showOptions ? "Hide options" : "More options"}
+              {showOptions ? "Hide options" : NEW_AGENT_COPY.moreOptions}
             </button>
             {showOptions ? (
               <button
@@ -871,19 +876,6 @@ export function EmptyState() {
                 Full form
               </button>
             ) : null}
-            <button
-              className="btn primary"
-              disabled={busy || !canCreate}
-              onClick={() => void createQuick()}
-            >
-              {busy
-                ? "Creating…"
-                : hubMode
-                  ? "Create teammate"
-                  : hostChat
-                    ? "Start chat"
-                    : "Create agent"}
-            </button>
           </div>
 
           {showRuntimeChrome ? (

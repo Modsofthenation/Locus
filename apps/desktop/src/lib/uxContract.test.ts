@@ -22,14 +22,14 @@ describe("quiet shell contract", () => {
 
   it("pins a short featured theme set and keeps the rest as extras", () => {
     expect([...FEATURED_THEME_IDS]).toEqual(["ember", "midnight", "paper", "contrast"]);
-    expect(THEME_OPTIONS).toHaveLength(97);
+    expect(THEME_OPTIONS).toHaveLength(98);
   });
 
   it("ships the quiet-shell screenshot contract in ux.css", () => {
     expect(ux).toMatch(/\.ui-select-toggle \{/);
     expect(ux).toMatch(/\.session-settings-tabs \{/);
     expect(ux).toMatch(/\.integration-catalog \{/);
-    expect(ux).toMatch(/\.chat-runtime-badge \{/);
+    expect(ux).not.toMatch(/\.chat-runtime-badge \{/);
     expect(ux).toMatch(/\.chat-empty-hint \{/);
     expect(ux).toMatch(/\.setup-later \{/);
     expect(ux).toMatch(/\.theme-featured-note \{/);

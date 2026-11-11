@@ -18,6 +18,7 @@ import {
   type ThemeOption,
 } from "@locus/shared";
 import { ThemePreview } from "./ThemePreview";
+import { SettingsToggleRow } from "./SettingsBits";
 import { PRODUCT_MODE_LABELS } from "@/lib/productMode";
 
 const CHAT_SCENE_NAMES = THEME_OPTIONS.filter((t) => t.chatScene).map((t) => t.name);
@@ -32,12 +33,12 @@ const PRODUCT_MODE_OPTIONS: { id: ProductMode; label: string; hint: string }[] =
   {
     id: "developer",
     label: PRODUCT_MODE_LABELS.developer,
-    hint: "Full control plane — Agents, Design, IDE, guests, and forge tools.",
+    hint: "Agents, Design, IDE, Codebase, Jobs, guests, and forge tools.",
   },
   {
     id: "swarm",
     label: PRODUCT_MODE_LABELS.swarm,
-    hint: "Teammate-first shell — chats stay in Swarm; Developer chats stay in Developer.",
+    hint: "Teammates and teams only. Developer chats stay in Developer.",
   },
 ];
 
@@ -122,35 +123,30 @@ export function AppearanceSettings(props: {
   return (
     <div className="appearance-layout">
       <div className="appearance-main">
-        <header className="appearance-head">
-          <p>Hover a theme to preview it live. Click to apply.</p>
-        </header>
-        <div className="appearance-editor-prefs">
-          <div className="field appearance-chat-density">
-            <span id="product-mode-label">Product mode</span>
-            <div
-              className="theme-filter-pills"
-              role="radiogroup"
-              aria-labelledby="product-mode-label"
-            >
-              {PRODUCT_MODE_OPTIONS.map((row) => (
-                <button
-                  type="button"
-                  key={row.id}
-                  role="radio"
-                  aria-checked={productMode === row.id}
-                  className={productMode === row.id ? "on" : ""}
-                  data-testid={`appearance-product-mode-${row.id}`}
-                  onClick={() => props.onEditor({ productMode: row.id })}
-                >
-                  {row.label}
-                </button>
-              ))}
-            </div>
-            <p className="appearance-density-hint">
-              {PRODUCT_MODE_OPTIONS.find((row) => row.id === productMode)?.hint}
-            </p>
+        <section className="appearance-product-mode" aria-labelledby="product-mode-label">
+          <h3 id="product-mode-label">Product mode</h3>
+          <div
+            className="appearance-mode-cards"
+            role="radiogroup"
+            aria-labelledby="product-mode-label"
+          >
+            {PRODUCT_MODE_OPTIONS.map((row) => (
+              <button
+                type="button"
+                key={row.id}
+                role="radio"
+                aria-checked={productMode === row.id}
+                className={`appearance-mode-card${productMode === row.id ? " on" : ""}`}
+                data-testid={`appearance-product-mode-${row.id}`}
+                onClick={() => props.onEditor({ productMode: row.id })}
+              >
+                <strong>{row.label}</strong>
+                <span>{row.hint}</span>
+              </button>
+            ))}
           </div>
+        </section>
+        <div className="appearance-editor-prefs">
           <div className="field appearance-chat-density">
             <span id="chat-density-label">Chat density</span>
             <div
@@ -190,23 +186,24 @@ export function AppearanceSettings(props: {
               }
             />
           </div>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={props.formatOnSave}
-              onChange={(event) => props.onEditor({ formatOnSave: event.target.checked })}
+          <div className="appearance-toggles">
+            <SettingsToggleRow
+              label="Format on save"
+              on={props.formatOnSave}
+              testId="appearance-format-on-save"
+              onChange={(next) => props.onEditor({ formatOnSave: next })}
             />
-            Format on save
-          </label>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={props.showMinimap}
-              onChange={(event) => props.onEditor({ showMinimap: event.target.checked })}
+            <SettingsToggleRow
+              label="Editor minimap"
+              on={props.showMinimap}
+              testId="appearance-minimap"
+              onChange={(next) => props.onEditor({ showMinimap: next })}
             />
-            Editor minimap
-          </label>
+          </div>
         </div>
+        <header className="appearance-head">
+          <p>Hover a theme to preview it live. Click to apply.</p>
+        </header>
         <div className="theme-filters">
           <div className="theme-filter-pills" role="radiogroup" aria-label="Theme filters">
             {FILTERS.map((row) => (

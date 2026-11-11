@@ -75,7 +75,8 @@ export function scoreGenerationEval(input: {
 }
 
 const GENERATION_QUALITY_NEEDS_HUMAN: Record<string, string> = {
-  "host fallback": "Canvas is a last-resort host draft. Needs a human.",
+  "host fallback":
+    "Locus put a starter draft on this canvas because the agent did not write one. Describe the change and send again.",
   "canvas incomplete": "Design canvas is incomplete. Needs a human.",
   "generic template": "Design canvas is still a generic AI template. Needs a human.",
   unplayable: "Game canvas is not playable. Needs a human.",

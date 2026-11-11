@@ -1,5 +1,7 @@
 export { applyGuestPatch } from "./applyPatch.js";
 export type { GuestRuntime, ToolRequest, ToolResult } from "./types.js";
+export { createGuestRuntime } from "./factory.js";
+export type { GuestFactoryOpts } from "./factory.js";
 export { MockGuestRuntime } from "./mock.js";
 export {
   DockerGuestRuntime,
@@ -24,7 +26,9 @@ export {
   CHROMIUM_REMOTE_ADDRESS,
   DOCKER_BROWSER_TOOLS,
   boxCenter,
+  dispatchBrowserTool,
   formatAccessibilitySnapshot,
+  isBrowserToolRequest,
   isBrowserUrl,
   normalizeSnapshotRef,
   parseBrowserPages,
@@ -37,6 +41,7 @@ export { guestLoopbackRelayScript, listenGuestLoopbackTunnel } from "./tunnel.js
 export type { GuestLoopbackTunnel } from "./tunnel.js";
 export {
   commandFor,
+  decorateRemoteToolResult,
   isSupported,
   linuxCommand,
   parseRecordScreenResult,

@@ -23,7 +23,6 @@ import {
 } from "@locus/shared";
 import { runWebSearch } from "../integrations/websearch.js";
 import { callPluginTool } from "../integrations/pluginRuntime.js";
-import { executeForgeTool, isForgeToolName, type SessionForgeDeps } from "./sessionForgeTools.js";
 import { executeIntegrationTool, type SessionIntegrationDeps } from "./sessionIntegrationTools.js";
 
 export type ControlPlaneToolPorts = {
@@ -178,23 +177,4 @@ export async function executeLateControlPlaneTool(
     );
   }
   return undefined;
-}
-
-/** Forge tools stay after the Guest catalog check so missing-catalog names still throw. */
-export async function executeForgeControlPlaneTool(
-  forge: SessionForgeDeps,
-  session: AgentSession,
-  req: ToolRequest,
-  fenceHostile: FenceHostile,
-): Promise<ToolResult | undefined> {
-  if (!isForgeToolName(req.name)) return undefined;
-  const result = await executeForgeTool(forge, session, req.name, req.args);
-  if (
-    req.name === "git_pr_list" ||
-    req.name === "git_pr_loadpath" ||
-    req.name === "git_issue_list"
-  ) {
-    return { ...result, output: fenceHostile(req.name, result.output) };
-  }
-  return result;
 }

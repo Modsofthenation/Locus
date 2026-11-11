@@ -63,6 +63,8 @@ export function LaunchWorkspace(props: {
   onRuntimeChange?: (runtime: AgentRuntime) => void;
   runtimes?: AgentRuntime[];
   disabledRuntimes?: AgentRuntime[];
+  /** Runtimes shown but not selectable, keyed to the tooltip reason. */
+  unavailableRuntimes?: Partial<Record<AgentRuntime, string>>;
   /** Small badge beside the Workspace / Container / VM disk kicker (e.g. solo OS). */
   kickerBadge?: string;
   headerEnd?: ReactNode;
@@ -198,6 +200,7 @@ export function LaunchWorkspace(props: {
                 onChange={props.onRuntimeChange!}
                 runtimes={props.runtimes}
                 disabledRuntimes={props.disabledRuntimes}
+                unavailable={props.unavailableRuntimes}
               />
             ) : null}
             {props.headerEnd}

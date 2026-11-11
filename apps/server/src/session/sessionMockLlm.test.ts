@@ -31,4 +31,18 @@ describe("sessionMockLlm", () => {
     expect(reply).toMatch(/fix the login/);
     expect(EMPTY_MODEL_REPLY.length).toBeGreaterThan(0);
   });
+
+  it("keeps the demo reply to one short line", () => {
+    const reply = mockAssistantReply("hi", { ...session, runtime: "host" });
+    expect(reply.split("\n")).toHaveLength(1);
+    expect(reply).not.toMatch(/Settings → Providers/);
+  });
+
+  it("gives canvases their own demo reply", () => {
+    const design = mockAssistantReply("a pricing page", { ...session, kind: "design" });
+    expect(design).toMatch(/starter design/);
+    expect(design).not.toMatch(/desktop/);
+    expect(mockAssistantReply("snake", { ...session, kind: "game" })).toMatch(/starter game/);
+    expect(mockAssistantReply("a crate", { ...session, kind: "assets" })).toMatch(/starter asset/);
+  });
 });

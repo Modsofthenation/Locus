@@ -22,6 +22,30 @@ import { modelsForProvider } from "@/lib/lastAgent";
 import { MenuItem, MenuLabel, MenuSep, OverflowMenu } from "@/components/layout/OverflowMenu";
 import { Select } from "@/components/layout/Select";
 
+/**
+ * One label for "what the next turn runs on", shared by the composer model chip and the
+ * topbar subtitle so they never disagree. Flags a provider that is off or missing.
+ */
+export function composerModelLabel(
+  providers: AiProvider[],
+  providerId: string,
+  model: string,
+): { label: string; off: boolean } {
+  const provider = providers.find((p) => p.id === providerId);
+  if (!provider) {
+    return { label: model ? `${model} · No provider` : "No provider", off: true };
+  }
+  const selected = isCodexCliProvider(provider) ? normalizeCodexCliModel(model) : model;
+  const listed = modelsForProvider(provider, selected);
+  const value = usesCursorModelIds(provider)
+    ? cursorModelSelectValue(listed, selected)
+    : listed.includes(selected)
+      ? selected
+      : (listed[0] ?? "");
+  const name = provider.enabled ? provider.name : `${provider.name} (off)`;
+  return { label: `${name} · ${value || "No model"}`, off: !provider.enabled };
+}
+
 export function ModelPicker(props: {
   providers: AiProvider[];
   providerId: string;
@@ -31,6 +55,8 @@ export function ModelPicker(props: {
   onReasoningEffortChange?: (value: CodexReasoningEffort | undefined) => void;
   compact?: boolean;
   disabled?: boolean;
+  /** Cost table under the pickers; off where the model option label already shows the rate. */
+  showCosts?: boolean;
 }) {
   const provider = props.providers.find((p) => p.id === props.providerId);
   const selectedModel =
@@ -122,11 +148,7 @@ export function ModelPicker(props: {
   const modelControls = cursorControls || codexControls;
 
   if (props.compact) {
-    const combinedLabel = !provider
-      ? "No provider"
-      : !modelValue
-        ? `${provider.name} · No model`
-        : `${provider.name} · ${modelValue}`;
+    const combinedLabel = composerModelLabel(props.providers, props.providerId, props.model).label;
     return (
       <div className="model-picker-wrap">
         <div className="model-picker compact">
@@ -219,7 +241,7 @@ export function ModelPicker(props: {
         </div>
       </div>
       {cursorControls}
-      {costs.length > 0 ? <CostCompare costs={costs} /> : null}
+      {props.showCosts !== false && costs.length > 0 ? <CostCompare costs={costs} /> : null}
     </div>
   );
 }

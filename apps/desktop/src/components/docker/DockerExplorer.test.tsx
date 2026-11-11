@@ -78,7 +78,10 @@ describe("DockerExplorer", () => {
     localStorage.clear();
   });
 
-  function render(state: UiState = { ...initialState, section: "ide", containers: [web, db] }) {
+  function render(
+    state: UiState = { ...initialState, section: "ide", containers: [web, db] },
+    sessionId?: string,
+  ) {
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
@@ -93,7 +96,11 @@ describe("DockerExplorer", () => {
     act(() => {
       root.render(
         <Harness>
-          <DockerExplorer selectedId={null} onInspect={(row) => inspected.push(row)} />
+          <DockerExplorer
+            selectedId={null}
+            sessionId={sessionId}
+            onInspect={(row) => inspected.push(row)}
+          />
         </Harness>,
       );
     });
@@ -125,6 +132,22 @@ describe("DockerExplorer", () => {
       await Promise.resolve();
     });
     expect(api.dockerContainerAction).toHaveBeenCalledWith("c1", "restart");
+  });
+
+  it("lists only this workspace's containers and hides when it has none", async () => {
+    const mine = { ...web, sessionId: "s1" };
+    const job = { ...db, id: "c3", name: "Nightly tests", sessionId: "job-1" };
+    vi.mocked(api.dockerContainers).mockResolvedValue({ kind: "mock", containers: [mine, job] });
+    render({ ...initialState, section: "ide", containers: [mine, job] }, "s1");
+    await flush();
+    expect(host.querySelector(".docker-explorer-count")?.textContent).toBe("1");
+    expect(host.textContent).not.toContain("Nightly tests");
+    act(() => root.unmount());
+    host.remove();
+    vi.mocked(api.dockerContainers).mockResolvedValue({ kind: "mock", containers: [job] });
+    render({ ...initialState, section: "ide", containers: [job] }, "s1");
+    await flush();
+    expect(host.querySelector('[data-testid="docker-explorer"]')).toBeNull();
   });
 
   it("starts a stopped container without a confirm", async () => {

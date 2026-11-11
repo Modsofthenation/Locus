@@ -17,8 +17,6 @@ import { useStore } from "@/state/store";
 import { EmptyHero } from "@/components/layout/EmptyHero";
 import { IconPlus } from "@/components/layout/Icons";
 import { PersonaAvatar } from "@/components/layout/PersonaAvatar";
-import { FeatureHintRow } from "@/components/layout/FeatureHint";
-import { SECTION_FEATURE_HINTS } from "@/lib/discoverability";
 
 export function ProjectEmpty() {
   const { state, dispatch } = useStore();
@@ -101,9 +99,6 @@ export function ProjectEmpty() {
               : "A body of work with a coordinator, shared context, and members. The coordinator plans and delegates — it does not write application code."
           }
         />
-        {SECTION_FEATURE_HINTS.project ? (
-          <FeatureHintRow hint={SECTION_FEATURE_HINTS.project} />
-        ) : null}
         {hubMode ? (
           <div className="swarm-start-modes" role="group" aria-label="Start a Swarm conversation">
             <button

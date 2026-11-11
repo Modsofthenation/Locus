@@ -39,6 +39,7 @@ const SCREENS = [
   "new-automation",
   "empty-hero",
   "rail",
+  "sidebar",
   "confirm",
   "prompt",
   "toast",
@@ -126,7 +127,7 @@ function stubApi(): void {
   api.checkUpdates = async () =>
     ({
       status: "unavailable",
-      current: "0.18.0",
+      current: "0.19.0",
       message: "No GitHub release found yet.",
     }) as never;
 }
@@ -138,6 +139,20 @@ function parseScreen(raw: string | null): VisualScreen {
 function parseThemeParam(raw: string | null): ThemeId {
   return resolveTheme(raw ?? "ember");
 }
+
+const visualSession = {
+  id: "s1",
+  title: "Fix login",
+  os: "ubuntu" as const,
+  templateId: "ubuntu-24.04",
+  providerId: "p1",
+  model: "gpt-4.1",
+  status: "idle" as const,
+  vmId: "v1",
+  messages: [],
+  createdAt: "2020-01-01T00:00:00.000Z",
+  updatedAt: "2020-01-01T00:00:00.000Z",
+};
 
 function visualState(screen: VisualScreen, theme: ThemeId): UiState {
   const themed = { ...config, theme };
@@ -158,6 +173,24 @@ function visualState(screen: VisualScreen, theme: ThemeId): UiState {
   }
   if (screen === "appearance") {
     return { ...initialState, config: themed, section: "settings", settingsTab: "appearance" };
+  }
+  if (screen === "sidebar" || screen === "rail") {
+    return {
+      ...initialState,
+      config: themed,
+      section: "agents",
+      connected: true,
+      sessions: [
+        visualSession as AgentSession,
+        {
+          ...visualSession,
+          id: "s2",
+          title: "Review checkout",
+          needsHuman: "Approve git_push",
+          updatedAt: "2020-01-02T00:00:00.000Z",
+        } as AgentSession,
+      ],
+    };
   }
   return { ...initialState, config: themed, section: "agents" };
 }
@@ -197,20 +230,6 @@ function FeedbackPreview() {
     </div>
   );
 }
-
-const visualSession = {
-  id: "s1",
-  title: "Fix login",
-  os: "ubuntu" as const,
-  templateId: "ubuntu-24.04",
-  providerId: "p1",
-  model: "gpt-4.1",
-  status: "idle" as const,
-  vmId: "v1",
-  messages: [],
-  createdAt: "2020-01-01T00:00:00.000Z",
-  updatedAt: "2020-01-01T00:00:00.000Z",
-};
 
 function EmptyHintPreview() {
   return (
@@ -358,6 +377,14 @@ function Screen(props: { screen: VisualScreen; theme: ThemeId }): ReactNode {
   if (props.screen === "rail") {
     return (
       <div className="app collapsed">
+        <Sidebar />
+        <div />
+      </div>
+    );
+  }
+  if (props.screen === "sidebar") {
+    return (
+      <div className="app">
         <Sidebar />
         <div />
       </div>

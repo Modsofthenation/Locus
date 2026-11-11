@@ -142,8 +142,11 @@
   display: flex;
 }
 .desktop-shell[data-product-mode="swarm"] .app.collapsed {
-  /* No icon rail in Swarm — collapsing would hide the only nav column. */
-  grid-template-columns: 300px 1fr;
+  /* Keep the teammate list usable even if the collapsed flag is set. */
+  grid-template-columns: auto 1fr;
+}
+.desktop-shell[data-product-mode="swarm"] .app.collapsed .sidebar {
+  width: var(--sidebar-w, 300px);
 }
 .desktop-shell[data-product-mode="swarm"] .app.collapsed .side-main {
   /* Keep Swarm list usable even if collapsed flag is set. */

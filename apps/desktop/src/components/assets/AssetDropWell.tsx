@@ -1,5 +1,4 @@
 import {
-  ASSET_VIEW_FILES,
   ASSET_VIEW_SLOTS,
   formatAssetViewSlotLabel,
   namedAssetViewFile,
@@ -78,9 +77,6 @@ export function AssetDropWell(props: {
         takeFiles(incoming);
       }}
     >
-      {props.compact ? null : (
-        <p className="asset-drop-lead">Drop a photo to reconstruct — front, side, and back.</p>
-      )}
       <div className="asset-drop-slots" role="group" aria-label="View slots">
         {ASSET_VIEW_SLOTS.map((slot) => {
           const file = files[slot];
@@ -110,7 +106,7 @@ export function AssetDropWell(props: {
               )}
               <span className="asset-drop-slot-label">
                 {formatAssetViewSlotLabel(slot)}
-                <small>{ASSET_VIEW_FILES[slot]}</small>
+                {slot === "back" ? <small>optional</small> : null}
               </span>
               <input
                 type="file"

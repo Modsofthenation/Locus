@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.19.0 — 2026-11-11
+
+Inbox and a resizable sidebar with pinnable rail sections, the Console theme, a UI/UX polish pass across every section, and more reliable Jobs, worker uploads, and desktop updates. Settings → About is **0.19.0**.
+
+**Sidebar and Inbox.** The icon rail opens with Inbox: agents, boards, Brain, and failing jobs waiting on you, with Approve / Deny on waiting tools. Sections from More can be pinned to the rail, reordered, and unpinned by right-clicking a rail icon. The list panel resizes (240–480px), session lists share All / Needs you / Running / Unread filters, and Alt+1–9 jumps between Inbox and pinned sections. On narrow windows the sidebar no longer slides under the chat, and the phone Needs you tab shares the Inbox list.
+
+**UI/UX pass.** List headers, empty states, and filter chips are consistent across the app. The chat composer is a single frame with Send inside it, the model chip and topbar always agree, and Design sessions open with the canvas visible. Automations are called Jobs throughout. Settings pages lead with a one-line summary, providers are grouped Enabled / Available, and on/off settings are switches.
+
+**Console theme.** Settings → Appearance adds Console: amber phosphor on charcoal with a monospace font and scanlines (`locus config theme console`).
+
+**Jobs.** Run now checks Docker first and offers to switch to Host or start Docker. Jobs whose linked repo was removed run and save again, and run errors read as one plain sentence with details on demand.
+
+**Codebase and IDE.** Public GitHub, GitLab, Bitbucket, Gitea, and Azure repos load pull requests and issues without a token, and blocked or rate-limited reads say so in place. README badges render correctly in the IDE.
+
+**Fixes.** Uploads to guests on a worker plane no longer answer "Not found". Deleting the open agent returns to the new-agent screen, with Undo reopening it. The desktop app picks up rebuilt UI between releases and restarts a control plane left by an older build. Kiro CLI turns no longer duplicate tool chips, recognise more test runners as verification, and use Locus's Git tools instead of reading forge tokens from the environment.
+
+**Under the hood.** Host, Docker, and worker guests share one tool catalog and lifecycle, simplifying how VMs, containers, and remote workers are driven.
+
 ## 0.18.0 — 2026-11-09
 
 Worker VMs with proxied displays and golden disks, Azure and GCP placement, Slack Approve, Windows guest CLIs, and Linux installers. Settings → About is **0.18.0**.

@@ -6,6 +6,7 @@ import type {
   GoldenImage,
   GuestOs,
   HardwareOverride,
+  LinkedRepo,
   LocusConfig,
   NamedEnvironment,
   NetworkJail,
@@ -14,11 +15,11 @@ import {
   DEFAULT_DOCKER_IMAGE,
   DEFAULT_WEBHOOK_PROMPT,
   MAX_AUTOMATION_CHATS,
-  AUTOMATION_STARTERS,
   applyNamedEnvironment,
   buildAutomationSchedule,
   automationStarterById,
   computeNextRunAt,
+  forgeLabel,
   formatClockTime,
   formatLocalTimezone,
   formatNextFire,
@@ -49,19 +50,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pickProvider } from "@/lib/lastAgent";
 import { suggestedHardware } from "@/lib/hardware";
 import { api } from "@/lib/api";
-import { useStore } from "@/state/store";
+import { openSettings, useStore } from "@/state/store";
 import {
   AUTOMATION_TRIGGER_FAMILIES,
   CLOCK_SCHEDULE_KINDS,
   automationAllowlistOptions,
   automationTriggerFamily,
   defaultKindForTriggerFamily,
+  DOCKER_DOWN_MESSAGE,
   isClockScheduleKind,
 } from "@/lib/automations";
+import { DockerDownActions, dockerDownFor, hostJobsLocked } from "./jobRun";
 import { HardwareFields } from "@/components/settings/HardwareFields";
 import { ModelPicker } from "@/components/settings/ModelPicker";
 import { OsPicker, OsSoloHint } from "@/components/settings/OsPicker";
-import { RepoField } from "@/components/codebase/RepoField";
 import {
   DockerImageField,
   PlacementToggle,
@@ -101,7 +103,7 @@ export function NewAutomationModal() {
   );
   const [model, setModel] = useState(editing?.model ?? pickProvider(providers)?.defaultModel ?? "");
   const [repo, setRepo] = useState(editing?.repo?.url ?? "");
-  const [repoId, setRepoId] = useState(editing?.repoId ?? "");
+  const [repoId, setRepoId] = useState(liveRepoId(state.repos, editing?.repoId));
   const [ref, setRef] = useState(editing?.repo?.ref ?? "");
   const [startVm, setStartVm] = useState(editing?.startVm ?? true);
   const [reuseSession, setReuseSession] = useState(editing?.reuseSession ?? false);
@@ -173,8 +175,9 @@ export function NewAutomationModal() {
   const [backendId, setBackendId] = useState(editing?.backendId ?? "");
   const [network, setNetwork] = useState<NetworkJail>(editing?.network ?? "restricted");
   const [confirmHost, setConfirmHost] = useState(false);
-  const [confirmStarterId, setConfirmStarterId] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [dockerDown, setDockerDown] = useState(false);
+  const [dockerCheck, setDockerCheck] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [advancedTab, setAdvancedTab] = useState<"runtime" | "agent" | "notify">("runtime");
 
@@ -222,7 +225,11 @@ export function NewAutomationModal() {
           : ""),
     );
     setRepoId(
-      current?.repoId ?? (state.section === "codebase" ? (state.selectedRepoId ?? "") : ""),
+      current
+        ? liveRepoId(state.repos, current.repoId)
+        : state.section === "codebase"
+          ? (state.selectedRepoId ?? "")
+          : "",
     );
     setRef(
       current?.repo?.ref ??
@@ -289,6 +296,32 @@ export function NewAutomationModal() {
   }, [state.newAutomationOpen, state.editingAutomationId, state.automationStarterId]);
 
   useEffect(() => {
+    if (!state.newAutomationOpen || runtime !== "docker" || backendId) {
+      setDockerDown(false);
+      return;
+    }
+    let cancelled = false;
+    void dockerDownFor({ runtime, backendId: undefined }).then((down) => {
+      if (!cancelled) setDockerDown(down);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [state.newAutomationOpen, runtime, backendId, dockerCheck]);
+
+  useEffect(() => {
+    if (!state.newAutomationOpen || repoId || repo.trim()) return;
+    if ((kind === "forge" || kind === "pull_request") && state.repos.length === 1) {
+      const only = state.repos[0]!;
+      setRepoId(only.id);
+      setRepo(only.checkout.url);
+      if (only.checkout.ref) setRef(only.checkout.ref);
+    }
+    // Only when the trigger switches to a repo event; picking "No repo" afterwards sticks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.newAutomationOpen, kind]);
+
+  useEffect(() => {
     if (!state.newAutomationOpen) return;
     void api
       .images()
@@ -325,10 +358,6 @@ export function NewAutomationModal() {
   function requestClose() {
     if (confirmHost) {
       setConfirmHost(false);
-      return;
-    }
-    if (confirmStarterId) {
-      setConfirmStarterId(null);
       return;
     }
     if (confirmDiscard) {
@@ -466,6 +495,7 @@ export function NewAutomationModal() {
             ...input,
             hostDir: hostChat ? hostDir.trim() || null : null,
             repo: repoValue ?? null,
+            repoId: repoId || null,
             hardware: hardware ?? null,
             namedEnvironmentId: namedEnvId || null,
             placement: backendId ? "worker" : null,
@@ -497,10 +527,23 @@ export function NewAutomationModal() {
       }
       dispatch({ type: "newAutomation", open: false });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save automation");
+      setError(err instanceof Error ? err.message : "Could not save job");
     } finally {
       setBusy(false);
     }
+  }
+
+  function chooseRuntime(next: AgentRuntime) {
+    setDirty(true);
+    setRuntime(next);
+    const nextOs = next !== "vm" && (os === "windows-11" || os === "windows-10") ? "ubuntu" : os;
+    if (nextOs !== os) setOs(nextOs);
+    setStartVm(next !== "host" || Boolean(backendId));
+    setImageId(
+      next === "host"
+        ? ""
+        : (latestGoldenImage(images, nextOs, next === "docker" ? "docker" : "vm")?.id ?? ""),
+    );
   }
 
   function applyEnv(env?: NamedEnvironment) {
@@ -530,41 +573,11 @@ export function NewAutomationModal() {
       onInput={() => setDirty(true)}
       onChange={() => setDirty(true)}
     >
-      <h2 id="new-automation-title">{editing ? "Edit automation" : "New automation"}</h2>
+      <h2 id="new-automation-title">{editing ? "Edit job" : "New job"}</h2>
       {!editing ? (
         <p className="modal-lead">
           When an event fires, run a prompt on a guest and keep the history.
         </p>
-      ) : null}
-      {!editing ? (
-        <div className="auto-modal-starters" data-testid="auto-modal-starters">
-          <p className="hint">
-            Start from a template, or duplicate an existing job from the detail pane.
-          </p>
-          <div className="recipe-grid pills" role="group" aria-label="Automation starters">
-            {AUTOMATION_STARTERS.map((row) => (
-              <button
-                key={row.id}
-                type="button"
-                className={`os-card${state.automationStarterId === row.id ? " active" : ""}`}
-                title={row.blurb}
-                onClick={() => {
-                  const current = automationStarterById(state.automationStarterId);
-                  const untouched =
-                    (!name.trim() && !prompt.trim()) ||
-                    (current != null && name === current.name && prompt === current.prompt);
-                  if (!untouched && state.automationStarterId !== row.id) {
-                    setConfirmStarterId(row.id);
-                    return;
-                  }
-                  dispatch({ type: "newAutomation", open: true, starterId: row.id });
-                }}
-              >
-                <h3>{row.title}</h3>
-              </button>
-            ))}
-          </div>
-        </div>
       ) : null}
       <section className="auto-form-section" data-testid="auto-when">
         <h3>When</h3>
@@ -810,7 +823,7 @@ export function NewAutomationModal() {
           />
         </div>
       </section>
-      <RepoField
+      <JobRepoField
         repos={state.repos}
         repoId={repoId}
         url={repo}
@@ -828,11 +841,28 @@ export function NewAutomationModal() {
         providers={providers}
         providerId={providerId}
         model={model}
+        showCosts={false}
         onChange={(next) => {
           setProviderId(next.providerId);
           setModel(next.model);
         }}
       />
+      {provider && !provider.enabled ? (
+        <div className="auto-runtime-notice" role="status" data-testid="auto-provider-off">
+          <p className="auto-runtime-notice-title">
+            {provider.name} is off. Runs fail until you turn it on.
+          </p>
+          <div className="auto-memory-actions">
+            <button
+              type="button"
+              className="btn small"
+              onClick={() => openSettings(dispatch, "providers")}
+            >
+              Open Providers
+            </button>
+          </div>
+        </div>
+      ) : null}
       <details className="advanced">
         <summary>More options</summary>
         <p className="hint">
@@ -882,19 +912,7 @@ export function NewAutomationModal() {
                 ? ["host"]
                 : []
             }
-            onChange={(next) => {
-              setRuntime(next);
-              const nextOs =
-                next !== "vm" && (os === "windows-11" || os === "windows-10") ? "ubuntu" : os;
-              if (nextOs !== os) setOs(nextOs);
-              setStartVm(next !== "host" || Boolean(backendId));
-              setImageId(
-                next === "host"
-                  ? ""
-                  : (latestGoldenImage(images, nextOs, next === "docker" ? "docker" : "vm")?.id ??
-                      ""),
-              );
-            }}
+            onChange={chooseRuntime}
           />
           <p className="hint">
             {backendId
@@ -945,8 +963,8 @@ export function NewAutomationModal() {
               diskSizeGb={diskSizeGb}
               hint={
                 repoProfile
-                  ? "Using a repo hardware profile. Edit to override for this automation."
-                  : "Defaults from Settings → Machines. Override for this automation if you want."
+                  ? "Using a repo hardware profile. Edit to override for this job."
+                  : "Defaults from Settings → Machines. Override for this job if you want."
               }
               onChange={(next) => {
                 setHwDirty(true);
@@ -1022,8 +1040,8 @@ export function NewAutomationModal() {
               onChange={(e) => setReuseSession(e.target.checked)}
             />
             {runtime === "host"
-              ? "Reuse the last chat for this automation"
-              : "Reuse the last machine for this automation"}
+              ? "Reuse the last chat for this job"
+              : "Reuse the last machine for this job"}
           </label>
           {parseProductMode(state.config?.productMode) === "swarm" ? (
             <div className="field">
@@ -1051,7 +1069,7 @@ export function NewAutomationModal() {
           ) : null}
           <p className="hint" style={{ marginTop: -4, marginBottom: 12 }}>
             Without reuse, each run opens a new chat. Locus keeps the newest {MAX_AUTOMATION_CHATS}{" "}
-            chats for this automation and deletes older ones. Pinned chats stay.
+            chats for this job and deletes older ones. Pinned chats stay.
           </p>
           <label className="hint check">
             <input
@@ -1117,7 +1135,7 @@ export function NewAutomationModal() {
             <input
               aria-label="Blackout dates"
               value={blackout}
-              placeholder="2026-12-25, 2026-01-01"
+              placeholder="YYYY-MM-DD, comma-separated"
               onChange={(e) => setBlackout(e.target.value)}
             />
           </div>
@@ -1142,7 +1160,7 @@ export function NewAutomationModal() {
                 onChange={(e) => setAllowHosts(e.target.value)}
                 placeholder="your-domain.atlassian.net, grafana.example.com, api.incident.io"
               />
-              <p className="hint">Added to the restricted jail allowlist for this automation.</p>
+              <p className="hint">Added to the restricted jail allowlist for this job.</p>
             </div>
           )}
           <div className="field">
@@ -1174,13 +1192,24 @@ export function NewAutomationModal() {
           </div>
         </div>
       </details>
+      {dockerDown && runtime === "docker" && !backendId ? (
+        <div className="auto-runtime-notice" role="alert" data-testid="auto-editor-docker-down">
+          <p className="auto-runtime-notice-title">{DOCKER_DOWN_MESSAGE}</p>
+          <p className="hint">You can still save. Runs fail until Docker answers.</p>
+          <DockerDownActions
+            hostLocked={hostJobsLocked(state.config)}
+            onSwitchToHost={() => chooseRuntime("host")}
+            onCheckAgain={() => setDockerCheck((n) => n + 1)}
+          />
+        </div>
+      ) : null}
       {error && <p className="scrim-note is-danger">{error}</p>}
       <div className="modal-actions">
         <button className="btn ghost" onClick={requestClose}>
           Cancel
         </button>
         <button className="btn primary" disabled={busy} onClick={() => void submit()}>
-          {busy ? "Saving…" : editing ? "Save" : "Create automation"}
+          {busy ? "Saving…" : editing ? "Save" : "Create job"}
         </button>
       </div>
       {confirmHost ? (
@@ -1192,20 +1221,6 @@ export function NewAutomationModal() {
           testId="auto-host-confirm"
           onCancel={() => setConfirmHost(false)}
           onConfirm={() => void submit({ hostConfirmed: true })}
-        />
-      ) : null}
-      {confirmStarterId ? (
-        <ConfirmModal
-          title="Replace draft with starter?"
-          body="Your current name and prompt will be overwritten."
-          confirmLabel="Use starter"
-          testId="auto-starter-confirm"
-          onCancel={() => setConfirmStarterId(null)}
-          onConfirm={() => {
-            const id = confirmStarterId;
-            setConfirmStarterId(null);
-            dispatch({ type: "newAutomation", open: true, starterId: id });
-          }}
         />
       ) : null}
       {confirmDiscard ? (
@@ -1294,7 +1309,7 @@ function McpAllowlistField(props: {
       <p className="hint">
         Empty means this job gets no MCP, Jira, Confluence, Linear, Slack, Grafana, Sentry, Figma,
         incident.io, AWS IAM, Portainer, Gmail, Calendar, Drive, Kubernetes, or plugin tools. Listed
-        names skip Approve on this automation only.
+        names skip Approve on this job only.
       </p>
       {groups.map((group) => (
         <div className="auto-mcp-group" key={group}>
@@ -1331,4 +1346,83 @@ function McpAllowlistField(props: {
       </div>
     </div>
   );
+}
+
+const OTHER_URL = "__url";
+
+/** Linked repos first; a pasted URL is the fallback, not the default label. */
+function JobRepoField(props: {
+  repos: LinkedRepo[];
+  repoId: string;
+  url: string;
+  onRepoId: (id: string) => void;
+  onUrl: (url: string) => void;
+  onRef: (ref: string) => void;
+}) {
+  const [urlMode, setUrlMode] = useState(!props.repoId && Boolean(props.url.trim()));
+
+  useEffect(() => {
+    if (props.repoId) setUrlMode(false);
+    else if (props.url.trim()) setUrlMode(true);
+  }, [props.repoId, props.url]);
+
+  const urlInput = (
+    <input
+      aria-label="Repository URL"
+      value={props.url}
+      onChange={(e) => {
+        props.onUrl(e.target.value);
+        props.onRepoId("");
+      }}
+      placeholder="https://github.com/acme/app, https://gitlab.com/acme/app, or https://bitbucket.org/org/repo"
+    />
+  );
+
+  if (!props.repos.length) {
+    return (
+      <div className="field">
+        <label>Repository (optional)</label>
+        {urlInput}
+      </div>
+    );
+  }
+
+  return (
+    <div className="field" data-testid="auto-repo-field">
+      <label>Repository</label>
+      <Select
+        ariaLabel="Repository"
+        value={props.repoId || (urlMode ? OTHER_URL : "")}
+        options={[
+          { value: "", label: "No repo" },
+          ...props.repos.map((row) => ({
+            value: row.id,
+            label: `${row.name} · ${forgeLabel(row.checkout.forge)}`,
+          })),
+          { value: OTHER_URL, label: "Another URL…" },
+        ]}
+        onChange={(id) => {
+          if (!id || id === OTHER_URL) {
+            props.onRepoId("");
+            props.onUrl("");
+            setUrlMode(id === OTHER_URL);
+            return;
+          }
+          const linked = props.repos.find((row) => row.id === id);
+          props.onRepoId(id);
+          setUrlMode(false);
+          if (linked) {
+            props.onUrl(linked.checkout.url);
+            if (linked.checkout.ref) props.onRef(linked.checkout.ref);
+          }
+        }}
+      />
+      {urlMode ? urlInput : null}
+    </div>
+  );
+}
+
+/** Drop a stored repoId whose linked repo no longer exists, so the form falls back to its URL. */
+function liveRepoId(repos: LinkedRepo[], repoId: string | undefined): string {
+  return repoId && repos.some((row) => row.id === repoId) ? repoId : "";
 }

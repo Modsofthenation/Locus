@@ -25,8 +25,8 @@ import type { GuestRuntime, ToolRequest, ToolResult } from "./types.js";
 import { optNum, str } from "./types.js";
 import {
   CdpChromiumDriver,
-  DOCKER_BROWSER_TOOLS,
-  isBrowserUrl,
+  dispatchBrowserTool,
+  isBrowserToolRequest,
   type ChromiumDriver,
 } from "./chromium.js";
 import { launchHostChrome, type HostChromeHandle } from "./hostChrome.js";
@@ -65,26 +65,13 @@ export class HostGuestRuntime implements GuestRuntime {
     if (!HOST_SET.has(req.name)) {
       return { ok: false, output: `${req.name} is not available in a host agent` };
     }
-    if (
-      DOCKER_BROWSER_TOOLS.has(req.name) ||
-      (req.name === "exec" && isBrowserUrl(str(req.args, "command"))) ||
-      (req.name === "start_process" && isBrowserUrl(str(req.args, "command")))
-    ) {
+    if (isBrowserToolRequest(req)) {
       const live = this.liveBrowser?.();
-      if (live) {
-        if (req.name === "exec" || req.name === "start_process") {
-          return live.navigate(str(req.args, "command").trim());
-        }
-        return live.handle(req);
-      }
+      if (live) return dispatchBrowserTool(req, live);
       if (!this.chromeProfileDir) {
         return { ok: false, output: "Host Chrome needs an isolated profile directory" };
       }
-      const driver = this.browserFor();
-      if (req.name === "exec" || req.name === "start_process") {
-        return driver.navigate(str(req.args, "command").trim());
-      }
-      return driver.handle(req);
+      return dispatchBrowserTool(req, this.browserFor());
     }
     if (req.name === "apply_patch") return this.applyPatch(req);
     if (req.name === "file_read") return this.fileRead(req);

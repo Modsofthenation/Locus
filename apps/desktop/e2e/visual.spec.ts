@@ -7,6 +7,7 @@ const SCREENS = [
   "new-automation",
   "empty-hero",
   "rail",
+  "sidebar",
   "confirm",
   "prompt",
   "toast",
@@ -25,6 +26,7 @@ const EXTRA_SCREENS = ["confirm", "appearance"] as const;
 
 function shotTarget(page: Page, screen: (typeof SCREENS)[number]) {
   if (screen === "rail") return page.locator(".side-rail");
+  if (screen === "sidebar") return page.locator(".sidebar");
   if (screen === "empty-hero" || screen === "design-empty" || screen === "ide-empty") {
     return page.locator(".empty-hero");
   }
@@ -93,6 +95,7 @@ test.describe("visual regression", () => {
       "new-agent",
       "empty-hero",
       "rail",
+      "sidebar",
       "feedback",
       "shortcuts",
       "chat",
@@ -152,6 +155,27 @@ test.describe("visual regression", () => {
       : Number.parseFloat(duration) * 1000;
     expect(ms).toBeLessThan(20);
   });
+
+  for (const saved of [340, 480]) {
+    test(`sidebar (${saved}px saved) never runs under the workspace on narrow windows`, async ({
+      page,
+    }) => {
+      await page.addInitScript((width) => {
+        localStorage.setItem("locus.sidebarPrefs", JSON.stringify({ width }));
+      }, saved);
+      for (const width of [1440, 1094, 900, 800, 700]) {
+        await page.setViewportSize({ width, height: 800 });
+        await openScreen(page, "sidebar", "ember");
+        const box = await page.evaluate(() => {
+          const app = document.querySelector(".app");
+          const side = app?.children[0]?.getBoundingClientRect();
+          const work = app?.children[1]?.getBoundingClientRect();
+          return { side: side?.right ?? 0, work: work?.left ?? 0 };
+        });
+        expect(box.side, `viewport ${width}px`).toBeLessThanOrEqual(box.work + 1);
+      }
+    });
+  }
 });
 
 test.describe("visual phone", () => {

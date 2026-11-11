@@ -24,6 +24,8 @@ const GUTTER_PX = 6;
 export const COLLAPSED_BODY_COLUMNS = `minmax(0, 1fr) 0px minmax(${PREVIEW_RAIL_PX}px, 0fr)`;
 /** Definite bottom track so the rail cannot collapse to 0 on portrait rows. */
 export const COLLAPSED_BODY_ROWS = `minmax(0, 1fr) 0px ${STACKED_RAIL_PX}px`;
+/** Collapsed with no rail: the topbar owns the labelled panel toggle. */
+export const HIDDEN_PANEL_COLUMNS = "minmax(0, 1fr) 0px 0px";
 export const SINGLE_BODY_TRACK = "minmax(0, 1fr)";
 
 export function splitTracks(frac: number): string {
@@ -70,6 +72,8 @@ export function WorkspaceBody(props: {
   collapsed: boolean;
   chat: ReactNode;
   preview: ReactNode | null;
+  /** The topbar shows a labelled toggle, so a collapsed side-by-side panel hides fully. */
+  topbarToggle?: boolean;
 }) {
   const hostChat = props.variant === "host" || !props.preview;
   const editorFirst = props.variant === "ide" || props.variant === "board";
@@ -88,6 +92,7 @@ export function WorkspaceBody(props: {
   const root = useRef<HTMLDivElement>(null);
   const hasSplit = Boolean(props.preview) && !hostChat;
   const stacked = prefersStacked && hasSplit;
+  const panelHidden = Boolean(props.topbarToggle) && props.collapsed && hasSplit && !stacked;
 
   useEffect(() => {
     setFrac(loadChatSplit(splitKey, fallback));
@@ -168,6 +173,7 @@ export function WorkspaceBody(props: {
     props.variant === "board" ? "board" : "",
     hostChat ? "host-chat" : "",
     props.collapsed ? "vm-collapsed" : "",
+    panelHidden ? "panel-hidden" : "",
     stacked ? "body-stacked" : "",
     dragging ? "resizing" : "",
   ]
@@ -192,7 +198,11 @@ export function WorkspaceBody(props: {
                 gridTemplateRows: stackedRows,
               }
             : {
-                gridTemplateColumns: props.collapsed ? COLLAPSED_BODY_COLUMNS : expandedTracks,
+                gridTemplateColumns: panelHidden
+                  ? HIDDEN_PANEL_COLUMNS
+                  : props.collapsed
+                    ? COLLAPSED_BODY_COLUMNS
+                    : expandedTracks,
               }
           : undefined
       }

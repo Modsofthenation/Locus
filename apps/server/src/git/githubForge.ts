@@ -22,6 +22,7 @@ import {
   forgeJson,
   giteaAuthHeaders,
   githubAuthHeaders,
+  hasForgeToken,
   pullFlags,
   type ForgeFetcher,
 } from "./forgeHttp.js";
@@ -125,7 +126,8 @@ export async function listGithubPulls(
   repo: string,
   state: PullListState,
 ): Promise<Omit<PullRequestRef, "repoId">[]> {
-  if (!githubCompatible(account)) {
+  // GraphQL always needs a token; tokenless reads of public repos use REST.
+  if (!githubCompatible(account) && hasForgeToken(account)) {
     const fromGraphql = await listGithubPullsGraphql(fetchFn, account, owner, repo, state);
     if (fromGraphql) return fromGraphql;
   }
@@ -554,7 +556,7 @@ async function githubViewedPaths(
   number: number,
 ): Promise<Set<string>> {
   const viewed = new Set<string>();
-  if (githubCompatible(account)) return viewed;
+  if (githubCompatible(account) || !hasForgeToken(account)) return viewed;
   try {
     const { ok, json } = await githubGraphql<{
       data?: {

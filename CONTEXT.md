@@ -10,9 +10,21 @@ A chat session that drives a **guest** (Docker container, VM, or host workspace)
 
 The machine the agent tools target. Docker, VM, and host are adapters behind one **guest runtime** interface. Live guests set `liveGuest`; the in-memory mock adapter omits it.
 
+## Guest factory
+
+Picks the Guest runtime adapter (Docker, Host, Windows SSH+WinRM, SSH, or mock) from a Machine. Control-plane GuestHub and worker WorkerGuestHub are thin adapters on that interface.
+
+## Runtime catalog
+
+The shared Guest tool list Host and Docker catalogs are derived from. Host adds Board / Project / Swarm planning tools and headed Chrome; Docker adds `start_process`, `record_screen`, and headed Chromium.
+
+## Studio continue
+
+Turn policy after a Design / Game / Asset round: look, incomplete canvas, quality, juice, sculpt, unused assets, mutate follow-up. Model, tool, and CLI Turns share the predicates; coding / review / ops continue stays on the Turn module.
+
 ## Session
 
-Persisted agent state: messages, queue, checkpoints, linked repo, preview.
+Persisted agent state: messages, queue, checkpoints, linked repo, preview. Desktop streaming applies **Session merge** so a list-view snapshot does not wipe a fuller local transcript.
 
 ## Machine
 
@@ -76,7 +88,7 @@ A scheduled or webhook-triggered prompt run that reuses an agent or boots a gold
 
 ## Config save
 
-The Settings write path: merge secrets, validate providers/forges/templates/MCP/skills/plugins/workers, then persist.
+The Settings write path: merge secrets, lock managed policy, validate providers/forges/templates/MCP/skills/plugins/workers, then persist. `prepareSavedConfig` is the merge+normalize interface; the route persists and notifies.
 
 ## Agent canvas
 

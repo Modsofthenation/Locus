@@ -43,6 +43,13 @@ import {
 } from "@locus/shared";
 import { extractEmbeddedToolCalls } from "@locus/providers";
 import type { ToolResult } from "@locus/guest-agent";
+import {
+  incompleteBlocksLook,
+  leftoverCanvasRepair,
+  lookedOrLookBudgetSpent,
+  wantsCanvasQuality,
+  wantsStudioFollowUpMutate,
+} from "./studioContinue.js";
 
 export type AfterModelObservation = {
   toolCallCount: number;
@@ -187,62 +194,6 @@ export type AfterToolDecision =
       searchWander?: boolean;
       usedAllRounds: boolean;
     };
-
-/** HTML quality walls need a look, or the look budget already spent without a screenshot. */
-function lookedOrLookBudgetSpent(input: {
-  calledPlaywright?: boolean;
-  calledPlaywrightThisTurn?: boolean;
-  gamePlaywrightNudges?: number;
-}): boolean {
-  return (
-    Boolean(input.calledPlaywright) ||
-    Boolean(input.calledPlaywrightThisTurn) ||
-    (input.gamePlaywrightNudges ?? 0) >= MAX_CANVAS_NUDGES
-  );
-}
-
-/** Finish-the-document still wins while the incomplete budget is open. After that cap, look can fire. */
-function incompleteBlocksLook(obs: {
-  canvasIncomplete?: boolean;
-  canvasIncompleteNudges?: number;
-}): boolean {
-  return Boolean(obs.canvasIncomplete) && (obs.canvasIncompleteNudges ?? 0) < MAX_CANVAS_NUDGES;
-}
-
-/** Host-fallback stubs skip generic/placeholder fingerprints; still need a quality rewrite after a look. */
-function wantsCanvasQuality(obs: {
-  hostFallback?: boolean;
-  genericDesign?: boolean;
-  isGame?: boolean;
-  isAsset?: boolean;
-}): boolean {
-  return Boolean(obs.hostFallback) || (Boolean(obs.genericDesign) && !obs.isGame && !obs.isAsset);
-}
-
-type CanvasRepairObservation = {
-  hostFallback?: boolean;
-  genericDesign?: boolean;
-  isGame?: boolean;
-  isAsset?: boolean;
-  isDesign?: boolean;
-  dryGame?: boolean;
-  unusedLinkedAssets?: boolean;
-  gameUnplayable?: boolean;
-  placeholderAsset?: boolean;
-  assetUnwired?: boolean;
-  adherenceIssues?: boolean;
-};
-
-/**
- * Leftover quality/juice/sculpt/adherence/unused/unplayable still need a look
- * (and must not lose to talk-only mutate) even when this round did not write.
- */
-function leftoverCanvasRepair(obs: CanvasRepairObservation): boolean {
-  if (wantsCanvasQuality(obs)) return true;
-  if (obs.isGame && (obs.dryGame || obs.unusedLinkedAssets || obs.gameUnplayable)) return true;
-  if (obs.isAsset && (obs.placeholderAsset || obs.assetUnwired)) return true;
-  return Boolean(obs.isDesign && !obs.isGame && !obs.isAsset && obs.adherenceIssues);
-}
 
 /** Round-control policy after the model streams. Steer-after-reply stays on the adapter. */
 export function decideAfterModelRound(obs: AfterModelObservation): AfterModelDecision {
@@ -442,18 +393,6 @@ function missingReviewVerdict(obs: AfterModelObservation): boolean {
     planTurn: obs.planTurn,
     stopped: obs.stopped,
   });
-}
-
-function wantsStudioFollowUpMutate(obs: {
-  isGame?: boolean;
-  isAsset?: boolean;
-  followUpMissing?: boolean;
-  iterateUnchanged?: boolean;
-}): boolean {
-  return (
-    Boolean(obs.isGame || obs.isAsset) &&
-    (Boolean(obs.followUpMissing) || Boolean(obs.iterateUnchanged))
-  );
 }
 
 /** Round-control policy after tools finish. */

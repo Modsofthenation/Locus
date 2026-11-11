@@ -162,15 +162,6 @@
   margin-top: var(--space-2);
 }
 
-.chat-runtime-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  margin: 0;
-  font-size: var(--type-xs);
-  color: var(--muted);
-}
-
 .chat-empty-hint {
   margin: var(--space-4) auto;
   max-width: 36ch;

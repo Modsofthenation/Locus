@@ -22,7 +22,9 @@ import {
   shortLoadPath,
   shortRepoName,
   formatRemoteError,
+  forgeAccessProblem,
   isForgeAuthError,
+  toHttpsRemoteUrl,
   LOAD_PATH_TRACE_LIMIT,
   visibleReviewAssistantText,
   parseDiffLayout,
@@ -67,7 +69,7 @@ import { PatchCard, patchFilesFromPull, type DiffLineRef } from "@/components/ch
 import { ArchitecturePane } from "./ArchitecturePane";
 import { ChangeStackPanel } from "./ChangeStackPanel";
 import { PullSummaryCell, PullTable } from "./PullTable";
-import { IconCompress, IconExpand, IconMore } from "@/components/layout/Icons";
+import { IconArrowUpRight, IconCompress, IconExpand, IconMore } from "@/components/layout/Icons";
 import { EmptyHero, EmptyHint } from "@/components/layout/EmptyHero";
 import { Splitter } from "@/components/layout/Splitter";
 import { stepSplitValue } from "@/lib/splitter";
@@ -221,6 +223,28 @@ function IdeOpenBanner({ open, progress }: { open: IdeOpen; progress?: CloneProg
   );
 }
 
+type FetchProblem = "needs_token" | "rate_limited" | "error";
+
+/** Classify a pull/issue list failure so the pane can say why in place. */
+function fetchProblem(error: string | null): FetchProblem | null {
+  if (!error) return null;
+  const message = formatRemoteError(error);
+  return forgeAccessProblem(message) ?? (isForgeAuthError(message) ? "needs_token" : "error");
+}
+
+function blockedText(what: "pull requests" | "issues", problem: FetchProblem): string {
+  if (problem === "needs_token") return `Can't load ${what} — add a token.`;
+  if (problem === "rate_limited")
+    return `Can't load ${what} — the limit for reads without a token is used up. Add a token or try again later.`;
+  return `Can't load ${what}.`;
+}
+
+/** Browser URL for a clone remote (`git@…`/`….git` → https page), or undefined. */
+export function repoWebUrl(url: string): string | undefined {
+  const https = toHttpsRemoteUrl(url).replace(/\.git$/i, "");
+  return /^https:\/\//i.test(https) ? https : undefined;
+}
+
 function ErrorBanner({ error }: { error: string }) {
   const { dispatch } = useStore();
   const message = formatRemoteError(error);
@@ -258,11 +282,14 @@ export function CodebasePane() {
   const [accounts, setAccounts] = useState<ForgeImportAccount[] | null>(null);
   const [pulls, setPulls] = useState<PullRequestRef[]>([]);
   const [pullsLoading, setPullsLoading] = useState(false);
+  const [pullsError, setPullsError] = useState<string | null>(null);
+  const [pullsReady, setPullsReady] = useState(false);
   const [pullState, setPullState] = useState<PullListState>("open");
   const [issues, setIssues] = useState<IssueRef[]>([]);
   const [issuesLoading, setIssuesLoading] = useState(false);
   const [issueState, setIssueState] = useState<IssueListState>("open");
   const [issueLoadError, setIssueLoadError] = useState<string | null>(null);
+  const [issuesError, setIssuesError] = useState<string | null>(null);
   const [issueCommentBody, setIssueCommentBody] = useState("");
   const [listWidth, setListWidth] = useState(loadPrListWidth);
   const [issueListWidth, setIssueListWidth] = useState(loadIssueListWidth);
@@ -406,6 +433,8 @@ export function CodebasePane() {
   }, [issueFocus]);
 
   useEffect(() => {
+    setPullsError(null);
+    setPullsReady(false);
     if (!repo) {
       setPulls([]);
       setPullsLoading(false);
@@ -414,20 +443,24 @@ export function CodebasePane() {
     const cached = peekPullList(repo.id, pullState);
     if (cached) {
       setPulls(cached.rows);
+      setPullsReady(true);
       setPullsLoading(false);
       if (cached.fresh) return;
     } else {
+      setPulls([]);
       setPullsLoading(true);
     }
     let cancelled = false;
     void api
       .repoPulls(repo.id, pullState)
       .then((rows) => {
-        if (!cancelled) setPulls(rows);
+        if (cancelled) return;
+        setPulls(rows);
+        setPullsReady(true);
       })
       .catch((err) => {
         if (!cancelled)
-          setError(err instanceof Error ? err.message : "Could not load pull requests");
+          setPullsError(err instanceof Error ? err.message : "Could not load pull requests");
       })
       .finally(() => {
         if (!cancelled) setPullsLoading(false);
@@ -441,9 +474,11 @@ export function CodebasePane() {
     if (!repo) {
       setIssues([]);
       setIssuesLoading(false);
+      setIssuesError(null);
       return;
     }
     if (tab !== "issues") return;
+    setIssuesError(null);
     const cached = peekIssueList(repo.id, issueState);
     if (cached) {
       setIssues(cached.rows);
@@ -459,7 +494,8 @@ export function CodebasePane() {
         if (!cancelled) setIssues(rows);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load issues");
+        if (!cancelled)
+          setIssuesError(err instanceof Error ? err.message : "Could not load issues");
       })
       .finally(() => {
         if (!cancelled) setIssuesLoading(false);
@@ -1109,6 +1145,74 @@ export function CodebasePane() {
   }
 
   if (!repo) {
+    const importCard = (
+      <section className="codebase-start-card">
+        <h3>Import from Git</h3>
+        {tokened.length ? (
+          <>
+            <p className="meta">Pick from the accounts connected in Settings → Git.</p>
+            <BusyButton
+              className="btn primary"
+              busy={importing}
+              busyLabel="Importing…"
+              onClick={() => void importFromGit()}
+            >
+              Import from Git
+            </BusyButton>
+            <button type="button" className="linkish" onClick={() => openSettings(dispatch, "git")}>
+              Manage tokens
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="meta">
+              Connect GitHub, GitLab or Bitbucket to pick from your repos, including private ones.
+            </p>
+            <button type="button" className="linkish" onClick={() => openSettings(dispatch, "git")}>
+              Add a GitHub token
+            </button>
+          </>
+        )}
+      </section>
+    );
+    const urlCard = (
+      <section className="codebase-start-card">
+        <h3>Paste a URL</h3>
+        <p className="meta">Any repo URL. Public repos load without a token.</p>
+        <div className="field">
+          <label>Repository URL</label>
+          <input
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            placeholder="https://github.com/acme/app"
+          />
+        </div>
+        {tokened.length > 1 ? (
+          <div className="field">
+            <label>Account</label>
+            <Select
+              ariaLabel="Account"
+              value={linkAccountId}
+              options={[
+                { value: "", label: "Auto (one token per forge)" },
+                ...tokened.map((row) => ({
+                  value: row.id,
+                  label: `${row.name} · ${forgeLabel(row.kind)}`,
+                })),
+              ]}
+              onChange={setLinkAccountId}
+            />
+          </div>
+        ) : null}
+        <button
+          className={tokened.length ? "btn" : "btn primary"}
+          disabled={busy}
+          onClick={() => void link()}
+        >
+          Link
+        </button>
+      </section>
+    );
     return (
       <div className="codebase-pane">
         <div className="empty">
@@ -1119,60 +1223,18 @@ export function CodebasePane() {
               title="Link a repository"
               lead="Catalog a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps repo, then review pulls here."
             />
-            <p>
-              <button
-                type="button"
-                className="linkish"
-                onClick={() => openSettings(dispatch, "git")}
-              >
-                {tokened.length ? "Manage tokens in Settings → Git" : "Add a GitHub token"}
-              </button>
-            </p>
             <div className="codebase-start-cards">
-              <section className="codebase-start-card">
-                <h3>Sign in and pick a repo</h3>
-                <p className="meta">Import from accounts already connected in Settings.</p>
-                <BusyButton
-                  className="btn"
-                  busy={importing}
-                  busyLabel="Importing…"
-                  onClick={() => void importFromGit()}
-                >
-                  Import from Git
-                </BusyButton>
-              </section>
-              <section className="codebase-start-card">
-                <h3>Paste a URL</h3>
-                <p className="meta">Catalog a clone you already have, or a public repo URL.</p>
-                <div className="field">
-                  <label>Repository URL</label>
-                  <input
-                    value={linkUrl}
-                    onChange={(e) => setLinkUrl(e.target.value)}
-                    placeholder="https://github.com/acme/app"
-                  />
-                </div>
-                {tokened.length > 1 ? (
-                  <div className="field">
-                    <label>Account</label>
-                    <Select
-                      ariaLabel="Account"
-                      value={linkAccountId}
-                      options={[
-                        { value: "", label: "Auto (one token per forge)" },
-                        ...tokened.map((row) => ({
-                          value: row.id,
-                          label: `${row.name} · ${forgeLabel(row.kind)}`,
-                        })),
-                      ]}
-                      onChange={setLinkAccountId}
-                    />
-                  </div>
-                ) : null}
-                <button className="btn primary" disabled={busy} onClick={() => void link()}>
-                  Link repo
-                </button>
-              </section>
+              {tokened.length ? (
+                <>
+                  {importCard}
+                  {urlCard}
+                </>
+              ) : (
+                <>
+                  {urlCard}
+                  {importCard}
+                </>
+              )}
             </div>
             {error ? <ErrorBanner error={error} /> : null}
             {importing || accounts ? (
@@ -1211,13 +1273,46 @@ export function CodebasePane() {
             : ""
         }`);
 
+  const webUrl = repoWebUrl(repo.checkout.url);
+  const inbox = pulls.filter(isOpenInboxPull);
+  const pullsProblem = fetchProblem(pullsError);
+  const issuesProblem = fetchProblem(issuesError);
+  const blockedNote =
+    pullsProblem === "needs_token"
+      ? "Needs a token"
+      : pullsProblem === "rate_limited"
+        ? "Rate limited"
+        : pullsProblem
+          ? "Couldn't load"
+          : null;
+  const openPullCount =
+    typeof repo.openPullCount === "number"
+      ? repo.openPullCount
+      : pullsReady && pullState === "open"
+        ? inbox.length
+        : undefined;
+  const topError = error ?? pullsError ?? issuesError;
+
   return (
     <div className={prFocus ? "codebase-pane pr-focus" : "codebase-pane"}>
       <div className="codebase-head">
-        <div className="row-actions">
+        {webUrl ? (
+          <a
+            className={`forge-badge forge-link ${repo.checkout.forge}`}
+            href={webUrl}
+            target="_blank"
+            rel="noreferrer"
+            title={`Open ${repo.name} on ${forgeLabel(repo.checkout.forge)}`}
+          >
+            {forgeLabel(repo.checkout.forge)}
+            <IconArrowUpRight />
+          </a>
+        ) : (
           <span className={`forge-badge ${repo.checkout.forge}`}>
             {forgeLabel(repo.checkout.forge)}
           </span>
+        )}
+        <div className="row-actions">
           {bound ? (
             <button className="btn primary" disabled={busy} onClick={() => void startAgent(true)}>
               Continue
@@ -1253,7 +1348,7 @@ export function CodebasePane() {
               Setup environment
             </MenuItem>
             <MenuItem onClick={() => dispatch({ type: "newAutomation", open: true })}>
-              New automation
+              New job
             </MenuItem>
             <MenuSep />
             <MenuItem danger disabled={busy} onClick={() => void unlink()}>
@@ -1262,7 +1357,7 @@ export function CodebasePane() {
           </OverflowMenu>
         </div>
       </div>
-      {error ? <ErrorBanner error={error} /> : null}
+      {topError ? <ErrorBanner error={topError} /> : null}
       {!pullDetailOpen && ideOpen ? (
         <IdeOpenBanner open={ideOpen} progress={repoCloneProgress} />
       ) : null}
@@ -1283,30 +1378,30 @@ export function CodebasePane() {
               ? `Pull requests${typeof repo.openPullCount === "number" ? ` ${repo.openPullCount}` : ""}`
               : id === "issues"
                 ? `Issues${typeof repo.openIssueCount === "number" ? ` ${repo.openIssueCount}` : ""}`
-                : id[0]!.toUpperCase() + id.slice(1)}
+                : id === "automations"
+                  ? "Jobs"
+                  : id[0]!.toUpperCase() + id.slice(1)}
           </button>
         ))}
       </div>
-      {!tokened.length ? (
-        <div className="notice-row">
-          <span className="notice-dot" aria-hidden="true" />
-          <p>Sign in or add a GitHub token in Settings → Git to fetch pull requests and issues.</p>
-          <button className="btn small" onClick={() => openSettings(dispatch, "git")}>
-            Open Git settings
-          </button>
-        </div>
-      ) : null}
       {tab === "architecture" ? <ArchitecturePane repoId={repo.id} repoName={repo.name} /> : null}
       {tab === "overview" ? (
         <div className="codebase-body overview-panes">
           <div className="repo-stats">
             <button className="repo-stat" onClick={() => setTab("pulls")}>
-              <strong>{typeof repo.openPullCount === "number" ? repo.openPullCount : "—"}</strong>
+              <strong>{typeof openPullCount === "number" ? openPullCount : "—"}</strong>
               <span>Open PRs</span>
+              {typeof openPullCount !== "number" && blockedNote ? (
+                <em className="repo-stat-note">{blockedNote}</em>
+              ) : null}
             </button>
             <button className="repo-stat" onClick={() => setTab("issues")}>
               <strong>{typeof repo.openIssueCount === "number" ? repo.openIssueCount : "—"}</strong>
               <span>Open issues</span>
+              {typeof repo.openIssueCount !== "number" &&
+              (pullsProblem === "needs_token" || pullsProblem === "rate_limited") ? (
+                <em className="repo-stat-note">{blockedNote}</em>
+              ) : null}
             </button>
             <button className="repo-stat" onClick={() => setTab("agents")}>
               <strong>{agents.length}</strong>
@@ -1314,7 +1409,7 @@ export function CodebasePane() {
             </button>
             <button className="repo-stat" onClick={() => setTab("automations")}>
               <strong>{automations.length}</strong>
-              <span>Automations</span>
+              <span>Jobs</span>
             </button>
             <div className="repo-stat">
               <strong>{formatAgo(repo.lastFetchAt)}</strong>
@@ -1362,17 +1457,33 @@ export function CodebasePane() {
           <section className="surface-pane pr-table-pane">
             <header>
               <span className="pane-label">Review inbox</span>
-              <span className="hint">
-                {pulls.filter(isOpenInboxPull).length}{" "}
-                {pulls.filter(isOpenInboxPull).length === 1 ? "item" : "items"}
-              </span>
+              {pullsReady ? (
+                <span className="hint">
+                  {inbox.length} {inbox.length === 1 ? "item" : "items"}
+                </span>
+              ) : null}
             </header>
             <div className="surface-pane-body pr-table-body">
-              {pulls.filter(isOpenInboxPull).length === 0 ? (
+              {pullsProblem ? (
+                <div className="pr-inbox-blocked" data-testid="pr-inbox-blocked">
+                  <p className="hint">{blockedText("pull requests", pullsProblem)}</p>
+                  {pullsProblem !== "error" ? (
+                    <button
+                      type="button"
+                      className="btn small"
+                      onClick={() => openSettings(dispatch, "git")}
+                    >
+                      Add a token
+                    </button>
+                  ) : null}
+                </div>
+              ) : !pullsReady && pullsLoading ? (
+                <p className="hint">Loading pull requests…</p>
+              ) : inbox.length === 0 ? (
                 <p className="hint">No open pull requests.</p>
               ) : (
                 <PullTable
-                  rows={pulls.filter(isOpenInboxPull)}
+                  rows={inbox}
                   onSelect={(number) => {
                     setTab("pulls");
                     dispatch({ type: "selectPull", number });
@@ -1395,7 +1506,9 @@ export function CodebasePane() {
                 </div>
                 <div>
                   <dt>Default branch</dt>
-                  <dd>{repo.checkout.ref || "unset"}</dd>
+                  <dd className={repo.checkout.ref ? undefined : "hint"}>
+                    {repo.checkout.ref || "Not fetched yet"}
+                  </dd>
                 </div>
               </dl>
             </div>
@@ -1406,6 +1519,7 @@ export function CodebasePane() {
         <PullInbox
           pulls={pulls}
           pullsLoading={pullsLoading}
+          blocked={pullsProblem ? blockedText("pull requests", pullsProblem) : undefined}
           pullState={pullState}
           setPullState={setPullState}
           selectedNumber={state.selectedPullNumber}
@@ -1485,6 +1599,7 @@ export function CodebasePane() {
         <IssueInbox
           issues={issues}
           issuesLoading={issuesLoading}
+          blocked={issuesProblem ? blockedText("issues", issuesProblem) : undefined}
           issueState={issueState}
           setIssueState={setIssueState}
           selectedNumber={state.selectedIssueNumber}
@@ -1527,9 +1642,7 @@ export function CodebasePane() {
       ) : null}
       {tab === "automations" ? (
         <div className="codebase-body">
-          {automations.length === 0 ? (
-            <p className="hint">No automations on this repo yet.</p>
-          ) : null}
+          {automations.length === 0 ? <p className="hint">No jobs on this repo yet.</p> : null}
           {automations.map((item) => (
             <button
               key={item.id}
@@ -1686,6 +1799,8 @@ function PullInbox(
   props: Omit<PullDetailProps, "pull"> & {
     pulls: PullRequestRef[];
     pullsLoading: boolean;
+    /** Why the list could not load (shown in place of the empty state). */
+    blocked?: string;
     pullState: PullListState;
     setPullState: (value: PullListState) => void;
     selectedNumber: number | null;
@@ -1751,7 +1866,9 @@ function PullInbox(
             onChange={(value) => props.setPullState(parsePullListState(value))}
           />
         </div>
-        {props.pullsLoading && props.pulls.length === 0 ? (
+        {props.blocked && props.pulls.length === 0 ? (
+          <EmptyHint title={props.blocked} testId="pr-list-blocked" />
+        ) : props.pullsLoading && props.pulls.length === 0 ? (
           <PullListSkeleton />
         ) : props.pulls.length === 0 ? (
           <EmptyHint title="No pull requests." />
@@ -1815,6 +1932,7 @@ function PullInbox(
 function IssueInbox(props: {
   issues: IssueRef[];
   issuesLoading: boolean;
+  blocked?: string;
   issueState: IssueListState;
   setIssueState: (value: IssueListState) => void;
   selectedNumber: number | null;
@@ -1881,7 +1999,9 @@ function IssueInbox(props: {
             onChange={(value) => props.setIssueState(parseIssueListState(value))}
           />
         </div>
-        {props.issuesLoading && props.issues.length === 0 ? (
+        {props.blocked && props.issues.length === 0 ? (
+          <EmptyHint title={props.blocked} testId="issue-list-blocked" />
+        ) : props.issuesLoading && props.issues.length === 0 ? (
           <PullListSkeleton />
         ) : props.issues.length === 0 ? (
           <EmptyHint title="No issues." />

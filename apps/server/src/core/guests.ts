@@ -7,11 +7,8 @@ import {
   sessionRuntime,
 } from "@locus/shared";
 import {
-  DockerGuestRuntime,
+  createGuestRuntime,
   HostGuestRuntime,
-  MockGuestRuntime,
-  SshGuestRuntime,
-  WindowsGuestRuntime,
   type ChromiumDriver,
   type GuestRuntime,
 } from "@locus/guest-agent";
@@ -91,35 +88,11 @@ export class GuestHub {
   }
 
   private create(vm: VmInstance): GuestRuntime {
-    if (vm.runtime === "docker") {
-      if (this.liveDocker) {
-        return new DockerGuestRuntime(vm);
-      }
-      return new MockGuestRuntime(vm.os, { cwd: DOCKER_WORKSPACE, root: vm.diskPath });
-    }
-    if (this.liveQemu && isWindows(vm.os) && (vm.ssh || vm.winrm)) {
-      return new WindowsGuestRuntime({
-        os: vm.os,
-        ssh: vm.ssh
-          ? {
-              host: vm.ssh.host,
-              port: vm.ssh.port,
-              username: vm.ssh.username,
-              identityFile: vm.ssh.identityFile ?? this.identityFile,
-            }
-          : undefined,
-        winrm: vm.winrm,
-      });
-    }
-    if (this.liveQemu && vm.ssh) {
-      return new SshGuestRuntime(vm.os, {
-        host: vm.ssh.host,
-        port: vm.ssh.port,
-        username: vm.ssh.username,
-        identityFile: vm.ssh.identityFile ?? this.identityFile,
-      });
-    }
-    return new MockGuestRuntime(vm.os);
+    return createGuestRuntime(vm, {
+      liveDocker: this.liveDocker,
+      liveQemu: this.liveQemu,
+      identityFile: this.identityFile,
+    });
   }
 }
 

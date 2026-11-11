@@ -5,8 +5,6 @@ import { resolveAgentDefaults } from "@/lib/lastAgent";
 import { useStore } from "@/state/store";
 import { EmptyHero } from "@/components/layout/EmptyHero";
 import { IconPlus } from "@/components/layout/Icons";
-import { FeatureHintRow } from "@/components/layout/FeatureHint";
-import { SECTION_FEATURE_HINTS } from "@/lib/discoverability";
 
 export function BoardEmpty() {
   const { state, dispatch } = useStore();
@@ -44,7 +42,6 @@ export function BoardEmpty() {
           title="Board"
           lead="A local planning canvas. Stickies, frames, diagrams, live cards, and Locus on the canvas — no guest."
         />
-        {SECTION_FEATURE_HINTS.board ? <FeatureHintRow hint={SECTION_FEATURE_HINTS.board} /> : null}
         <div className="design-start-layout">
           <form
             className="design-start-prompt"

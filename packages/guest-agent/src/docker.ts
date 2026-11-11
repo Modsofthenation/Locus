@@ -14,8 +14,8 @@ import { applyGuestPatch } from "./applyPatch.js";
 import { isHostFile, lexicalHostPath, resolveReadPath, resolveWritePath } from "./hostPath.js";
 import {
   CdpChromiumDriver,
-  DOCKER_BROWSER_TOOLS,
-  isBrowserUrl,
+  dispatchBrowserTool,
+  isBrowserToolRequest,
   type ChromiumDriver,
 } from "./chromium.js";
 import type { GuestRuntime, ToolRequest, ToolResult } from "./types.js";
@@ -67,15 +67,8 @@ export class DockerGuestRuntime implements GuestRuntime {
     }
     const cid = this.vm.containerId;
     if (!cid) return { ok: false, output: "Container is not running" };
-    if (
-      DOCKER_BROWSER_TOOLS.has(req.name) ||
-      (req.name === "exec" && isBrowserUrl(str(req.args, "command"))) ||
-      (req.name === "start_process" && isBrowserUrl(str(req.args, "command")))
-    ) {
-      const driver = this.browserFor(cid);
-      if (req.name === "exec" || req.name === "start_process")
-        return driver.navigate(str(req.args, "command").trim());
-      return driver.handle(req);
+    if (isBrowserToolRequest(req)) {
+      return dispatchBrowserTool(req, this.browserFor(cid));
     }
     if (req.name === "apply_patch") {
       const host = await this.applyPatchOnHost(req);

@@ -2,8 +2,8 @@ import { join } from "node:path";
 import type { Hono } from "hono";
 import { clearIntegrationCredentials, type LocusConfig } from "@locus/shared";
 import type { AutomationService } from "../automations/automations.js";
-import { mergeSecrets, redactConfig, redactVm } from "../core/redact.js";
-import { normalizeSavedConfig } from "../core/configSave.js";
+import { redactConfig, redactVm } from "../core/redact.js";
+import { prepareSavedConfig } from "../core/configSave.js";
 import {
   checkGithubRelease,
   downloadAndVerifyUpdate,
@@ -75,9 +75,7 @@ export function registerConfigRoutes(
   app.put("/api/config", async (c) => {
     const body = (await c.req.json()) as LocusConfig;
     const current = await opts.store.loadConfig();
-    const merged = mergeSecrets(current, body);
-    merged.managedPolicy = current.managedPolicy;
-    const saved = normalizeSavedConfig(merged, body.theme, opts.store.dataDir);
+    const saved = prepareSavedConfig(current, body, opts.store.dataDir);
     if (!saved.ok) return c.json({ error: saved.error }, 400);
     try {
       await opts.store.saveConfig(saved.config);

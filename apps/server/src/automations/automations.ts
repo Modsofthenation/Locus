@@ -178,6 +178,13 @@ export class AutomationService {
     return limit != null ? sorted.slice(offset, offset + limit) : sorted.slice(offset);
   }
 
+  /** The automation's linked repo id, or undefined when that linked repo has been removed. */
+  private async liveRepoId(repoId: string | undefined): Promise<string | undefined> {
+    if (!repoId) return undefined;
+    const repos = await this.store.loadRepos();
+    return repos.some((row) => row.id === repoId) ? repoId : undefined;
+  }
+
   private async assertNamedEnvironment(item: Automation): Promise<void> {
     if (!item.namedEnvironmentId) return;
     const config = await this.store.loadConfig();
@@ -208,12 +215,12 @@ export class AutomationService {
     if (runtime !== "host" && !template) throw new Error(`Unknown template: ${input.templateId}`);
     if (runtime === "docker") {
       if (isWindows(input.os) || isWindows(template!.os))
-        throw new Error("Docker automations are Linux-only");
+        throw new Error("Docker jobs are Linux-only");
       if (!parseDockerImage(input.dockerImage ?? "")) {
         throw new Error("Enter a Docker image such as ubuntu:24.04");
       }
     } else if (runtime === "vm" && template!.os !== input.os) {
-      throw new Error("Template OS does not match automation OS");
+      throw new Error("Template OS does not match job OS");
     }
     if (!input.name.trim()) throw new Error("Name is required");
     if (!input.prompt.trim()) throw new Error("Prompt is required");
@@ -305,7 +312,7 @@ export class AutomationService {
 
   async clone(id: string): Promise<Automation> {
     const item = await this.get(id);
-    if (!item) throw new Error("Automation not found");
+    if (!item) throw new Error("Job not found");
     const names = (await this.list()).map((row) => row.name);
     const copy = await this.create(cloneAutomationInput(item, nextCloneName(item.name, names)));
     if (item.slackSigningSecret) {
@@ -316,11 +323,11 @@ export class AutomationService {
 
   async testWebhook(id: string): Promise<AutomationRun> {
     const item = await this.get(id);
-    if (!item) throw new Error("Automation not found");
+    if (!item) throw new Error("Job not found");
     if (!isEventSchedule(item.schedule)) {
       throw new Error("This automation is not triggered by webhooks");
     }
-    if (!item.enabled) throw new Error("Automation is paused");
+    if (!item.enabled) throw new Error("Job is paused");
     const now = this.now();
     const trigger: AutomationTrigger =
       item.schedule.kind === "pull_request"
@@ -347,7 +354,7 @@ export class AutomationService {
 
   private async patchUnlocked(id: string, input: PatchAutomationInput): Promise<Automation> {
     const item = await this.get(id);
-    if (!item) throw new Error("Automation not found");
+    if (!item) throw new Error("Job not found");
     if (input.name !== undefined) {
       if (!input.name.trim()) throw new Error("Name is required");
       item.name = input.name.trim();
@@ -375,18 +382,31 @@ export class AutomationService {
     if (runtime !== "host" && !template) throw new Error(`Unknown template: ${item.templateId}`);
     if (runtime === "docker") {
       if (isWindows(item.os) || isWindows(template!.os))
-        throw new Error("Docker automations are Linux-only");
+        throw new Error("Docker jobs are Linux-only");
       if (!parseDockerImage(item.dockerImage ?? "")) {
         throw new Error("Enter a Docker image such as ubuntu:24.04");
       }
     } else if (runtime === "vm" && template!.os !== item.os) {
-      throw new Error("Template OS does not match automation OS");
+      throw new Error("Template OS does not match job OS");
     }
     if (input.providerId) item.providerId = input.providerId;
     if (input.model) item.model = input.model;
     if (input.repo !== undefined || input.repoId !== undefined) {
-      const attached = attachLinkedCheckout(await this.store.loadRepos(), {
-        repoId: input.repoId === undefined ? item.repoId : input.repoId || undefined,
+      const repos = await this.store.loadRepos();
+      // `repo: null` with no explicit repoId means "clear the repo" — do not re-attach the
+      // previously linked checkout. A stored repoId whose linked repo was since removed is
+      // dropped (the checkout is re-matched by URL) instead of failing every save.
+      const storedRepoId =
+        input.repo === null || !repos.some((row) => row.id === item.repoId)
+          ? undefined
+          : item.repoId;
+      // Older clients echo the stored (possibly stale) repoId back on every save.
+      const requestedRepoId =
+        input.repoId === undefined || input.repoId === item.repoId
+          ? storedRepoId
+          : input.repoId || undefined;
+      const attached = attachLinkedCheckout(repos, {
+        repoId: requestedRepoId,
         repo: input.repo === undefined ? item.repo : (input.repo ?? undefined),
       });
       item.repo = attached.repo;
@@ -719,8 +739,8 @@ export class AutomationService {
     let run: AutomationRun | undefined;
     try {
       const item = await this.get(id);
-      if (!item) throw new Error("Automation not found");
-      if (!item.enabled) throw new Error("Automation is paused");
+      if (!item) throw new Error("Job not found");
+      if (!item.enabled) throw new Error("Job is paused");
       const spent = automationLifetimeSpendUsd(await this.listRuns(id), id);
       if (overLifetimeCap(item.lifetimeMaxUsd, spent)) {
         if (!opts?.held) this.inFlight.delete(id);
@@ -776,7 +796,7 @@ export class AutomationService {
           providerId: item.providerId,
           model: item.model,
           repo: item.repo,
-          repoId: item.repoId,
+          repoId: await this.liveRepoId(item.repoId),
           hardware: runtime === "vm" ? item.hardware : undefined,
           imageId: needsGuest ? fields.imageId : undefined,
           startVm: needsGuest && item.startVm,
@@ -832,7 +852,7 @@ export class AutomationService {
   ): Promise<AutomationRun> {
     const item = await this.get(id);
     try {
-      if (!item) throw new Error("Automation not found");
+      if (!item) throw new Error("Job not found");
       if (this.cancelled.has(id) || this.removed.has(id)) throw new Error("Stopped");
       const live = (await this.listRuns(id)).find((row) => row.id === run.id);
       if (live && live.status !== "running" && live.status !== "queued") {
@@ -934,7 +954,7 @@ export class AutomationService {
         const skipped: AutomationRun = {
           ...follow.run,
           status: "skipped",
-          error: "Automation is paused",
+          error: "Job is paused",
           finishedAt: stamp(this.now()),
         };
         await this.persistRun(skipped);
@@ -1061,7 +1081,7 @@ export class AutomationService {
     const item = await this.get(id);
     if (!item) {
       if (!this.hookLimiter.allow(limitKey)) throw new Error("Too many webhook attempts");
-      throw new Error("Automation not found");
+      throw new Error("Job not found");
     }
     if (!isEventSchedule(item.schedule)) {
       throw new Error("This automation is not triggered by webhooks");
@@ -1080,7 +1100,7 @@ export class AutomationService {
       if (!this.hookLimiter.allow(limitKey)) throw new Error("Too many webhook attempts");
       throw new Error("Invalid webhook secret");
     }
-    if (!item.enabled) throw new Error("Automation is paused");
+    if (!item.enabled) throw new Error("Job is paused");
     const decision = decideWebhook({
       item,
       raw: input.raw,

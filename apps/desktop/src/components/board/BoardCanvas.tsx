@@ -2199,7 +2199,7 @@ function CardPicker(props: { onClose: () => void; onPick: (cite: BoardCite) => v
     { kind: "pull", label: "Pull request" },
     { kind: "slack", label: "Slack" },
     { kind: "file", label: "File" },
-    { kind: "automation", label: "Automation" },
+    { kind: "automation", label: "Job" },
     { kind: "jira", label: "Jira" },
     { kind: "linear", label: "Linear" },
     { kind: "brain", label: "Brain" },

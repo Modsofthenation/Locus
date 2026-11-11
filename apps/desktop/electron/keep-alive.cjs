@@ -7,6 +7,7 @@ const { homedir } = require("node:os");
 const { dirname, join } = require("node:path");
 
 const OWNER_RE = /^[A-Za-z0-9-]{8,80}$/;
+const BUILD_RE = /^[A-Za-z0-9.+-]{1,128}$/;
 
 /** What to do with the control-plane child when the desktop quits. */
 function serverQuitAction(input) {
@@ -37,7 +38,9 @@ async function rememberDesktopServer(path, record) {
   const owner = record && record.owner;
   if (!Number.isInteger(pid) || pid <= 1 || !OWNER_RE.test(owner || "")) return;
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await writeFile(path, `${JSON.stringify({ pid, owner })}\n`, { encoding: "utf8", mode: 0o600 });
+  const build = record && record.build;
+  const body = BUILD_RE.test(build || "") ? { pid, owner, build } : { pid, owner };
+  await writeFile(path, `${JSON.stringify(body)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
 async function readDesktopServer(path) {
@@ -46,7 +49,8 @@ async function readDesktopServer(path) {
     const pid = parsed && parsed.pid;
     const owner = parsed && parsed.owner;
     if (!Number.isInteger(pid) || pid <= 1 || !OWNER_RE.test(owner || "")) return undefined;
-    return { pid, owner };
+    const build = parsed.build;
+    return BUILD_RE.test(build || "") ? { pid, owner, build } : { pid, owner };
   } catch {
     return undefined;
   }

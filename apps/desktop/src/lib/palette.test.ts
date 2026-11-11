@@ -96,6 +96,7 @@ describe("paletteItems", () => {
     expect(items.some((i) => i.id === "theme:ruby")).toBe(true);
     expect(items.some((i) => i.id === "theme:canopy")).toBe(true);
     expect(items.some((i) => i.id === "theme:glaze")).toBe(true);
+    expect(items.some((i) => i.id === "theme:console")).toBe(true);
     expect(filterPaletteItems(items, "golden").map((i) => i.id)).toEqual(["guest-save-image"]);
     expect(filterPaletteItems(items, "ember")[0]?.id).toBe("theme:ember");
     expect(filterPaletteItems(items, "night city")[0]?.id).toBe("theme:tokyo");
@@ -123,6 +124,7 @@ describe("paletteItems", () => {
     expect(filterPaletteItems(items, "ruby")[0]?.id).toBe("theme:ruby");
     expect(filterPaletteItems(items, "forest wash")[0]?.id).toBe("theme:canopy");
     expect(filterPaletteItems(items, "porcelain wash")[0]?.id).toBe("theme:glaze");
+    expect(filterPaletteItems(items, "terminal window")[0]?.id).toBe("theme:console");
     const idle = paletteItems({ sessions: [current], session: current });
     expect(idle.some((i) => i.id === "guest-start")).toBe(true);
     expect(idle.some((i) => i.id === "guest-save-image")).toBe(false);
@@ -401,11 +403,11 @@ describe("paletteItems", () => {
         },
       ],
     });
-    expect(items.find((i) => i.id === "section:automations")?.group).toBe("Automations");
+    expect(items.find((i) => i.id === "section:automations")?.group).toBe("Jobs");
     expect(items.find((i) => i.id === "automation:auto-1")).toMatchObject({
       title: "Nightly",
       hint: "On · Every 30 minutes",
-      group: "Automations",
+      group: "Jobs",
     });
     expect(filterPaletteItems(items, "nightly").map((i) => i.id)).toEqual(["automation:auto-1"]);
   });
@@ -494,7 +496,7 @@ describe("paletteItems", () => {
     expect(items.find((i) => i.id === "section:board")?.group).toBe("Board");
     expect(items.find((i) => i.id === "new-board")?.group).toBe("Board");
     expect(items.find((i) => i.id === "new-workspace")?.group).toBe("IDE");
-    expect(items.find((i) => i.id === "new-automation")?.group).toBe("Automations");
+    expect(items.find((i) => i.id === "new-automation")?.group).toBe("Jobs");
     expect(items.find((i) => i.id === "finish-setup")).toMatchObject({
       title: "Finish setup",
       group: "Help",
@@ -639,6 +641,7 @@ describe("paletteItems", () => {
       "Ctrl/Cmd+,",
       "Ctrl/Cmd+F",
       "Ctrl/Cmd+1–9",
+      "Alt+1–9",
       "F12",
       "Alt+F12",
       "Ctrl/Cmd+.",

@@ -1107,7 +1107,21 @@ const DOCKER_ONLY_TOOLS = new Set<ComputerUseToolName>([
   "browser_download",
 ]);
 
-export const DOCKER_TOOLS: ComputerUseToolName[] = [
+function uniqueCatalog(...groups: ComputerUseToolName[][]): ComputerUseToolName[] {
+  const seen = new Set<ComputerUseToolName>();
+  const out: ComputerUseToolName[] = [];
+  for (const group of groups) {
+    for (const name of group) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      out.push(name);
+    }
+  }
+  return out;
+}
+
+/** File, git, forge, and integration tools Host and Docker catalogs share. */
+export const SHARED_RUNTIME_TOOLS: ComputerUseToolName[] = [
   "exec",
   "file_read",
   "file_write",
@@ -1207,27 +1221,8 @@ export const DOCKER_TOOLS: ComputerUseToolName[] = [
   "k8s_scale",
   "git_stash",
   "git_revert",
-  "start_process",
   "preview",
   "playwright",
-  "screenshot",
-  "mouse_move",
-  "mouse_click",
-  "mouse_drag",
-  "mouse_scroll",
-  "key",
-  "type_text",
-  "record_screen",
-  "browser_tabs",
-  "browser_navigate",
-  "browser_snapshot",
-  "browser_click",
-  "browser_type",
-  "browser_console",
-  "browser_network",
-  "browser_pdf",
-  "browser_trace",
-  "browser_download",
   "project_context_list",
   "project_context_read",
   "project_context_write",
@@ -1255,109 +1250,13 @@ export const HOST_BROWSER_TOOLS: ComputerUseToolName[] = [
   "browser_download",
 ];
 
-/** File, git, and shell tools that run on this machine, plus opt-in headed Chrome. */
-export const HOST_TOOLS: ComputerUseToolName[] = [
-  "exec",
-  "file_read",
-  "file_write",
-  "canvas_write",
-  "canvas_read",
-  "file_list",
-  "grep",
-  "glob",
-  "apply_patch",
-  "git_clone",
-  "git_fetch",
-  "git_status",
-  "git_diff",
-  "git_log",
-  "git_commit",
-  "git_branch",
-  "git_push",
-  "git_pr",
-  "git_pr_review",
-  "git_pr_list",
-  "git_pr_get",
-  "git_pr_loadpath",
-  "git_pr_comment",
-  "git_pr_checks",
-  "git_pr_merge",
-  "git_issue_list",
-  "git_issue_get",
-  "git_issue_comment",
-  "jira_search",
-  "jira_get",
-  "jira_comment",
-  "jira_create",
-  "jira_update",
-  "jira_transition",
-  "confluence_search",
-  "confluence_get",
-  "confluence_create",
-  "confluence_update",
-  "confluence_comment",
-  "linear_search",
-  "linear_get",
-  "linear_comment",
-  "linear_create",
-  "linear_update",
-  "slack_post",
-  "slack_upload",
-  "slack_channels",
-  "slack_history",
-  "slack_replies",
-  "grafana_search",
-  "grafana_get",
-  "grafana_query",
-  "sentry_projects",
-  "sentry_search",
-  "sentry_get",
-  "sentry_events",
-  "sentry_update",
-  "miro_list",
-  "miro_get",
-  "miro_import",
-  "miro_export",
-  "figma_list",
-  "figma_get",
-  "figma_images",
-  "figma_comment",
-  "incidentio_search",
-  "incidentio_get",
-  "incidentio_comment",
-  "incidentio_create",
-  "incidentio_update",
-  "aws_sts_identity",
-  "aws_iam_list",
-  "aws_iam_get",
-  "aws_iam_simulate",
-  "portainer_endpoints",
-  "portainer_containers",
-  "portainer_inspect",
-  "portainer_logs",
-  "portainer_stacks",
-  "portainer_container_action",
-  "portainer_stack_action",
-  "gmail_search",
-  "gmail_get",
-  "gmail_send",
-  "calendar_list",
-  "calendar_get",
-  "calendar_create",
-  "drive_list",
-  "drive_get",
-  "drive_upload",
-  "k8s_list",
-  "k8s_get",
-  "k8s_logs",
-  "k8s_events",
-  "k8s_apply",
-  "k8s_delete",
-  "k8s_scale",
-  "git_stash",
-  "git_revert",
-  "preview",
-  "playwright",
+const DOCKER_HEADED_TOOLS: ComputerUseToolName[] = [
+  "start_process",
+  "record_screen",
+  ...HOST_BROWSER_TOOLS,
+];
+
+const HOST_PLANNING_TOOLS: ComputerUseToolName[] = [
   "board_list",
   "board_get",
   "board_upsert",
@@ -1374,16 +1273,23 @@ export const HOST_TOOLS: ComputerUseToolName[] = [
   "project_collect",
   "project_propose_merge",
   "project_propose_rule",
-  "project_context_list",
-  "project_context_read",
-  "project_context_write",
-  "project_context_delete",
   "team_roster",
   "team_peer_status",
   "team_add_teammate",
   "team_message",
-  ...HOST_BROWSER_TOOLS,
 ];
+
+export const DOCKER_TOOLS: ComputerUseToolName[] = uniqueCatalog(
+  SHARED_RUNTIME_TOOLS,
+  DOCKER_HEADED_TOOLS,
+);
+
+/** File, git, and shell tools that run on this machine, plus opt-in headed Chrome. */
+export const HOST_TOOLS: ComputerUseToolName[] = uniqueCatalog(
+  SHARED_RUNTIME_TOOLS,
+  HOST_PLANNING_TOOLS,
+  HOST_BROWSER_TOOLS,
+);
 
 /** Host-only catalog for planning-board chat. No guest file/exec tools. */
 export const BOARD_CHAT_TOOLS: ComputerUseToolName[] = [

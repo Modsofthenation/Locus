@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatRemoteError, isForgeAuthError } from "./remoteError.js";
+import {
+  forgeAccessMessage,
+  forgeAccessProblem,
+  formatRemoteError,
+  isForgeAuthError,
+} from "./remoteError.js";
 
 const BITBUCKET =
   '{"type": "error", "error": {"message": "Token is invalid, expired, or not supported for this endpoint."}}';
@@ -45,5 +50,24 @@ describe("isForgeAuthError", () => {
     );
     expect(isForgeAuthError("Bad credentials")).toBe(true);
     expect(isForgeAuthError("Could not link repo")).toBe(false);
+  });
+});
+
+describe("forgeAccessProblem", () => {
+  it("round-trips the server's needs-token and rate-limit sentences", () => {
+    const needs = forgeAccessMessage("GitHub", "needs_token");
+    const limited = forgeAccessMessage("GitHub", "rate_limited");
+    expect(forgeAccessProblem(needs)).toBe("needs_token");
+    expect(forgeAccessProblem(limited)).toBe("rate_limited");
+    expect(isForgeAuthError(needs)).toBe(true);
+    expect(isForgeAuthError(limited)).toBe(true);
+  });
+
+  it("treats the legacy sign-in sentence as needs-token and ignores other errors", () => {
+    expect(forgeAccessProblem("Sign in or add a GitHub token in Settings → Git")).toBe(
+      "needs_token",
+    );
+    expect(forgeAccessProblem("HTTP 500")).toBeNull();
+    expect(forgeAccessProblem(undefined)).toBeNull();
   });
 });

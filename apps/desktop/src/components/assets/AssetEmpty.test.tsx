@@ -39,6 +39,13 @@ const config = {
   workers: [],
 } as unknown as LocusConfig;
 
+/** Pick an entry from the composer "+" menu so its chip appears. */
+function reveal(id: string) {
+  act(() => {
+    (document.querySelector(`[data-testid='composer-add-${id}']`) as HTMLButtonElement).click();
+  });
+}
+
 describe("AssetEmpty", () => {
   let host: HTMLElement;
   let root: Root;
@@ -75,11 +82,23 @@ describe("AssetEmpty", () => {
     expect(host.querySelector("[aria-label='Front']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Side']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Back']")).toBeTruthy();
+    // One heading; wells read Front / Side / Back (optional), not file names.
+    expect(host.textContent?.match(/Drop a photo to reconstruct/g)).toHaveLength(1);
+    expect(host.textContent).not.toMatch(/source-side\.png/);
+    expect(host.querySelector("[aria-label='Back'] .asset-drop-slot-label")?.textContent).toBe(
+      "Backoptional",
+    );
     expect(host.querySelector("[aria-label='New asset']")).toBeTruthy();
     expect(host.textContent).not.toMatch(/Choose Host or Docker/);
     expect(host.querySelector("[data-testid='launch-workspace-toggle']")).toBeNull();
     expect(host.querySelector("[aria-label='Look']")).toBeNull();
     expect(host.querySelector("[aria-label='Color palette']")).toBeNull();
+    // Style and Build fold into the "+" menu until picked.
+    expect(host.querySelector("[aria-label='Style']")).toBeNull();
+    expect(host.querySelector("[aria-label='Build']")).toBeNull();
+    expect(host.querySelector("[aria-label='Asset kit']")).toBeNull();
+    reveal("style");
+    reveal("build");
     expect(host.querySelector("[aria-label='Style']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Asset style']")).toBeTruthy();
     expect(host.textContent).toContain("Image to 3D");
@@ -94,6 +113,7 @@ describe("AssetEmpty", () => {
     expect(host.textContent).toContain("Ultra 4x");
     expect(host.textContent).toContain("A-Pose");
     expect(host.textContent).toContain("Printability");
+    reveal("kit");
     expect(host.querySelector("[aria-label='Asset kit']")).toBeTruthy();
     expect(host.textContent).toContain("Sprite pack");
     expect(host.querySelector("[aria-label='Asset kit']")).toBeTruthy();
@@ -161,6 +181,7 @@ describe("AssetEmpty", () => {
     act(() => {
       cutout!.click();
     });
+    reveal("build");
     expect(host.textContent).toContain("Smart topology");
     expect(host.textContent).toContain("Texture");
     expect(host.textContent).not.toContain("A-Pose");
@@ -193,6 +214,7 @@ describe("AssetEmpty", () => {
         </Store.Provider>,
       );
     });
+    reveal("style");
     expect(host.querySelector("[aria-label='Asset style']")).toBeTruthy();
     expect(host.textContent).toContain("Clay hero");
     act(() => {

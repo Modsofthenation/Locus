@@ -181,6 +181,7 @@ export function HostWorkspace(props: { embedded?: boolean } = {}) {
     >
       <div className="vm-toolbar docker-ide">
         <div className="docker-ide-tabs">
+          {/* The terminal lives in the bottom panel only (its tab expands it). */}
           <button
             type="button"
             className={`btn small ghost ${view === "files" ? "on" : ""}`}
@@ -188,15 +189,6 @@ export function HostWorkspace(props: { embedded?: boolean } = {}) {
             onClick={() => setView("files")}
           >
             Files
-          </button>
-          <button
-            type="button"
-            className={`btn small ghost ${termCollapsed ? "" : "on"}`}
-            aria-pressed={!termCollapsed}
-            title="Terminal"
-            onClick={() => setTermCollapsed((current) => !current)}
-          >
-            Terminal
           </button>
           {session?.agentCanvases?.length ? (
             <button
@@ -356,7 +348,10 @@ export function HostWorkspace(props: { embedded?: boolean } = {}) {
                 type="button"
                 className={tab.id === activeTerm ? "active" : ""}
                 aria-pressed={tab.id === activeTerm}
-                onClick={() => setActiveTerm(tab.id)}
+                onClick={() => {
+                  setActiveTerm(tab.id);
+                  if (termCollapsed) setTermCollapsed(false);
+                }}
               >
                 {index === 0 ? "Terminal" : `Term ${index + 1}`}
                 {index > 0 ? (

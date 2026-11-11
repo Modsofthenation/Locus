@@ -3,7 +3,7 @@ import { posix } from "node:path";
 import type { GuestOs } from "@locus/shared";
 import { isWindows } from "@locus/shared";
 import { applyGuestPatch } from "./applyPatch.js";
-import { commandFor, isSupported, parseRecordScreenResult } from "./commands.js";
+import { commandFor, decorateRemoteToolResult, isSupported } from "./commands.js";
 import type { GuestRuntime, ToolRequest, ToolResult } from "./types.js";
 import { str } from "./types.js";
 import { powershellEncodedCommand } from "./winrm.js";
@@ -58,20 +58,7 @@ export class SshGuestRuntime implements GuestRuntime {
       isWindows(this.os) ? powershellEncodedCommand(remote) : remote,
     );
     const result = await this.runner(argv, signal, undefined, onOutput);
-    const output = (result.stdout || result.stderr).trim();
-    if (req.name === "screenshot" && result.code === 0 && output.length > 80) {
-      return {
-        ok: true,
-        output: "screenshot captured",
-        screenshotBase64: output.replace(/\s/g, ""),
-      };
-    }
-    if (req.name === "record_screen") {
-      const parsed = parseRecordScreenResult(output);
-      const cleaned = output.replace(/LOCUS_RECORDING:\S+\s*/g, "").trim();
-      return { ok: result.code === 0, output: cleaned || `(exit ${result.code})`, ...parsed };
-    }
-    return { ok: result.code === 0, output: output || `(exit ${result.code})` };
+    return decorateRemoteToolResult(req.name, result);
   }
 
   /**

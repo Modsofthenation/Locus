@@ -15,6 +15,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EmptyState } from "./EmptyState";
 import { NewSessionModal } from "@/components/chat/NewSession";
+import { NEW_AGENT_COPY } from "@/lib/launchCopy";
 import { Sidebar } from "./Sidebar";
 import { FINISH_SETUP_DISMISSED_KEY } from "@/components/settings/FinishSetupChecklist";
 import { api } from "@/lib/api";
@@ -204,6 +205,48 @@ describe("EmptyState recipes", () => {
     });
   }
 
+  it("creates from Send inside the composer, with matching heading and placeholder", () => {
+    render();
+    expect(host.querySelector(".empty-card h2")?.textContent).toBe(NEW_AGENT_COPY.heading);
+    expect(host.querySelector("textarea")?.getAttribute("placeholder")).toBe(
+      NEW_AGENT_COPY.placeholder,
+    );
+    const send = host.querySelector(".empty-composer .composer-send") as HTMLButtonElement;
+    expect(send.getAttribute("aria-label")).toBe("Start chat");
+    expect(send.textContent).toBe("Send");
+    // No second primary outside the composer.
+    expect(host.querySelector(".launch-footer .btn.primary")).toBeNull();
+  });
+
+  it("shows the missing-provider row as the shared setup banner", () => {
+    render(() => undefined, {
+      setup: {
+        hypervisorKind: "mock",
+        qemuFound: false,
+        qemuHint: "",
+        kvmLabel: "",
+        linuxImageReady: false,
+        dockerFound: false,
+        hasProvider: false,
+        hasGoldenImage: false,
+        setupCompleted: false,
+        ready: false,
+        needsWizard: false,
+        hostOs: { platform: "linux", label: "Linux" },
+        qemuInstall: {
+          method: "apt",
+          displayCommand: "",
+          canInstall: false,
+          packages: [],
+          manualHint: "",
+        },
+      },
+    });
+    const banner = host.querySelector("[data-testid='provider-setup-banner']");
+    expect(banner?.classList.contains("setup-banner")).toBe(true);
+    expect(banner?.textContent).toContain("Finish setup · Provider");
+  });
+
   it("hides installer QA without a Windows ISO and prefills a Docker recipe", async () => {
     const actions: Action[] = [];
     vi.mocked(api.createSession).mockResolvedValue(created);
@@ -213,7 +256,7 @@ describe("EmptyState recipes", () => {
     });
     expect(host.querySelector(".empty.agent-start")).toBeTruthy();
     expect(host.querySelector(".eyebrow")).toBeNull();
-    expect(host.querySelector(".empty-card h2")?.textContent).toBe("What should we talk about?");
+    expect(host.querySelector(".empty-card h2")?.textContent).toBe("What should the agent do?");
     expect(
       host.querySelector('[aria-label="Agent runtime"] [aria-selected="true"]')?.textContent,
     ).toBe("Host");
@@ -223,7 +266,7 @@ describe("EmptyState recipes", () => {
     act(() => {
       dockerTab!.click();
     });
-    expect(host.querySelector(".empty-card h2")?.textContent).toBe("What should we talk about?");
+    expect(host.querySelector(".empty-card h2")?.textContent).toBe("What should the agent do?");
     expect(host.textContent).toContain("PR reviewer");
     expect(host.textContent).toContain("Repo fixer");
     expect(host.textContent).toContain("Setup environment");
@@ -247,7 +290,7 @@ describe("EmptyState recipes", () => {
     expect(textarea.value).toContain("Review the current branch");
 
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Create agent",
+      (btn) => btn.getAttribute("aria-label") === "Create agent",
     );
     await act(async () => {
       create!.click();
@@ -335,7 +378,7 @@ describe("EmptyState recipes", () => {
     );
     expect(pill!.getAttribute("aria-pressed")).toBe("true");
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Start chat",
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
     );
     await act(async () => {
       create!.click();
@@ -400,7 +443,7 @@ describe("EmptyState recipes", () => {
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
     });
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Start chat",
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
     );
     await act(async () => {
       create!.click();
@@ -448,7 +491,7 @@ describe("EmptyState recipes", () => {
         .dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Start chat",
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
     );
     await act(async () => {
       create!.click();
@@ -495,7 +538,7 @@ describe("EmptyState recipes", () => {
         .dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Start chat",
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
     );
     await act(async () => {
       create!.click();
@@ -556,7 +599,7 @@ describe("EmptyState recipes", () => {
       "/home/me/src/app",
     );
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Start chat",
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
     );
     await act(async () => {
       create!.click();
@@ -616,7 +659,7 @@ describe("EmptyState recipes", () => {
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
     });
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Create agent",
+      (btn) => btn.getAttribute("aria-label") === "Create agent",
     );
     await act(async () => {
       create!.click();
@@ -676,7 +719,7 @@ describe("EmptyState recipes", () => {
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
     });
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Start chat",
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
     );
     await act(async () => {
       create!.click();
@@ -742,7 +785,7 @@ describe("EmptyState recipes", () => {
     act(() => xhigh.click());
 
     const create = [...host.querySelectorAll("button")].find(
-      (button) => button.textContent === "Start chat",
+      (button) => button.getAttribute("aria-label") === "Start chat",
     );
     await act(async () => {
       create!.click();
@@ -832,7 +875,7 @@ describe("EmptyState recipes", () => {
     expect(host.querySelector(".composer-repo-placeholder")?.textContent).toBe("No repo");
 
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Start chat",
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
     );
     await act(async () => {
       create!.click();
@@ -941,7 +984,7 @@ describe("EmptyState recipes", () => {
     });
     expect(host.querySelector(".composer-repo-chip-ref")?.textContent).toBe("feat");
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Start chat",
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
     );
     await act(async () => {
       create!.click();
@@ -987,7 +1030,7 @@ describe("EmptyState recipes", () => {
     expect(host.querySelector("[aria-label='Remove acme/app']")).not.toBeNull();
     expect(host.querySelector("[aria-label='Remove acme/lib']")).not.toBeNull();
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Start chat",
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
     );
     await act(async () => {
       create!.click();
@@ -1023,7 +1066,7 @@ describe("EmptyState recipes", () => {
     });
     expect(host.querySelector("[aria-label='Remove acme/lib']")).toBeNull();
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Start chat",
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
     );
     await act(async () => {
       create!.click();
@@ -1088,8 +1131,8 @@ describe("EmptyState recipes", () => {
         },
       ],
     });
-    const create = [...host.querySelectorAll("button")].find((btn) =>
-      btn.textContent?.includes("Create teammate"),
+    const create = [...host.querySelectorAll("button")].find(
+      (btn) => btn.getAttribute("aria-label") === "Create teammate",
     );
     expect(create).toBeTruthy();
     await act(async () => {
@@ -1155,7 +1198,7 @@ describe("EmptyState mock engine", () => {
     expect(host.textContent).toContain("Agents cannot run on a mock engine");
     expect(host.textContent).not.toContain("Using a mock Docker engine until the Docker CLI");
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Create agent",
+      (btn) => btn.getAttribute("aria-label") === "Create agent",
     ) as HTMLButtonElement;
     expect(create.disabled).toBe(true);
     const more = [...host.querySelectorAll("button")].find(
@@ -1165,11 +1208,12 @@ describe("EmptyState mock engine", () => {
     const install = [...host.querySelectorAll("button")].find(
       (btn) => btn.textContent === "Install Docker",
     );
-    const finish = [...host.querySelectorAll(".setup-callout button")].find(
-      (btn) => btn.textContent === "Finish setup",
-    );
-    expect(install).toBeTruthy();
-    expect(finish).toBeTruthy();
+    // One shared setup banner; no second "Finish setup" button beside Install.
+    const banner = host.querySelector("[data-testid='engine-setup-banner']");
+    expect(banner?.contains(install!)).toBe(true);
+    expect(
+      [...banner!.querySelectorAll("button")].some((btn) => btn.textContent === "Finish setup"),
+    ).toBe(false);
     act(() => {
       install!.click();
     });
@@ -1182,7 +1226,7 @@ describe("EmptyState mock engine", () => {
     });
     expect(host.textContent).not.toContain("Agents cannot run on a mock engine");
     const start = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Start chat",
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
     ) as HTMLButtonElement;
     expect(start.disabled).toBe(false);
     expect(
@@ -1232,7 +1276,7 @@ describe("EmptyState mock engine", () => {
     expect(host.textContent).not.toContain("Optional · VM desktop");
     expect(host.textContent).not.toContain("Optional · GitHub token");
     expect(host.textContent).not.toContain("Use Host instead");
-    expect(host.querySelectorAll(".setup-callout")).toHaveLength(0);
+    expect(host.querySelector("[data-testid='provider-setup-banner']")).toBeNull();
     act(() => {
       [...host.querySelectorAll("button")].find((btn) => btn.textContent === "Continue")!.click();
     });
@@ -1292,7 +1336,7 @@ describe("EmptyState mock engine", () => {
     expect(host.textContent).toContain("VM agents cannot run on a mock hypervisor");
     expect(host.textContent).not.toContain("Using a mock hypervisor until QEMU");
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Create agent",
+      (btn) => btn.getAttribute("aria-label") === "Create agent",
     ) as HTMLButtonElement;
     expect(create.disabled).toBe(true);
     const install = [...host.querySelectorAll("button")].find(
@@ -1329,7 +1373,7 @@ describe("EmptyState mock engine", () => {
     });
     expect(host.textContent).not.toContain("Agents cannot run on a mock engine");
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Create agent",
+      (btn) => btn.getAttribute("aria-label") === "Create agent",
     ) as HTMLButtonElement;
     expect(create.disabled).toBe(false);
     await act(async () => {
@@ -1392,7 +1436,7 @@ describe("EmptyState worker placement", () => {
     });
     expect(host.textContent).toContain("The host workspace runs on Studio PC");
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Start chat",
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
     );
     await act(async () => {
       create!.click();
@@ -1447,7 +1491,7 @@ describe("EmptyState worker placement", () => {
     ).toBe("Host");
     expect(host.textContent).not.toContain("The host workspace runs on Studio PC");
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Start chat",
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
     );
     await act(async () => {
       create!.click();
@@ -1509,7 +1553,7 @@ describe("EmptyState worker placement", () => {
     });
     expect(host.textContent).toContain("The container runs on Studio PC");
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Create agent",
+      (btn) => btn.getAttribute("aria-label") === "Create agent",
     );
     await act(async () => {
       create!.click();
@@ -1561,7 +1605,7 @@ describe("EmptyState worker placement", () => {
     });
     expect(host.textContent).toContain("The host workspace runs on Studio PC");
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Start chat",
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
     );
     await act(async () => {
       create!.click();
@@ -1678,7 +1722,7 @@ describe("New agent entry", () => {
     expect(host.querySelector(".empty.agent-start")).toBeTruthy();
     expect(host.querySelector(".eyebrow")).toBeNull();
     expect(host.querySelector(".empty-card")).toBeTruthy();
-    expect(host.querySelector(".empty-card h2")?.textContent).toBe("What should we talk about?");
+    expect(host.querySelector(".empty-card h2")?.textContent).toBe("What should the agent do?");
     expect(
       host.querySelector('[aria-label="Agent runtime"] [aria-selected="true"]')?.textContent,
     ).toBe("Host");
@@ -1786,7 +1830,7 @@ describe("EmptyState named environment", () => {
         .dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     const create = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Create agent",
+      (btn) => btn.getAttribute("aria-label") === "Create agent",
     );
     await act(async () => {
       create!.click();

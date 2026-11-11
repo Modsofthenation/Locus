@@ -1557,13 +1557,10 @@ describe("WorkspaceEditor", () => {
     expect(css).toMatch(/\.workspace-status \{[\s\S]*?height:\s*24px/);
     expect(css).toMatch(/\.workspace-status-start,\n\.workspace-status-end \{/);
     expect(css).toMatch(
-      /@container workspace-status \(max-width: 900px\) \{[\s\S]*?\.workspace-status-indent/,
+      /@container workspace-status \(max-width: 760px\) \{[\s\S]*?\.workspace-status-git/,
     );
     expect(css).toMatch(
-      /@container workspace-status \(max-width: 760px\) \{[\s\S]*?\.workspace-status-run/,
-    );
-    expect(css).toMatch(
-      /@container workspace-status \(max-width: 560px\) \{[\s\S]*?\.workspace-status-cursor/,
+      /@container workspace-status \(max-width: 560px\) \{[\s\S]*?\.workspace-status-lang/,
     );
     expect(css).toMatch(/\.workspace-status-more \{[\s\S]*?flex:\s*0 0 auto/);
     expect(css).toMatch(/\.workspace-editor-more \{[\s\S]*?flex:\s*0 0 auto/);
@@ -1579,7 +1576,7 @@ describe("WorkspaceEditor", () => {
     expect(status).toBeTruthy();
     expect(status.previousElementSibling).toBe(live);
     expect(host.querySelector(".workspace-code-head")?.contains(status)).toBe(false);
-    expect(status.querySelector(".workspace-status-path")?.textContent).toBe("Open a file to edit");
+    expect(status.querySelector(".workspace-status-path")).toBeNull();
     expect(host.querySelector(".workspace-code-meta .meta")?.textContent).toBe("Open a file");
   });
 
@@ -1734,6 +1731,35 @@ describe("WorkspaceEditor", () => {
     expect((host.querySelector("textarea") as HTMLTextAreaElement).value).toContain("# Hello");
     expect(host.querySelector("[data-html-view]")?.textContent).toBe("Preview");
     expect(host.querySelector("[data-html-view]")?.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("shows README badge images as alt text behind one Load control", async () => {
+    vi.mocked(api.workspaceFile).mockResolvedValueOnce({
+      path: "README.md",
+      content:
+        "# Hono\n\n[![CI](https://img.shields.io/ci.svg)](https://x.dev) ![npm](https://img.shields.io/npm.svg)\n",
+      mtime: "t",
+    });
+    render(<WorkspaceEditor sessionId="s1" />);
+    await flush();
+    await act(async () => {
+      (host.querySelector('[data-path="README.md"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const preview = host.querySelector(".workspace-markdown") as HTMLElement;
+    expect(preview.querySelectorAll("img")).toHaveLength(0);
+    expect([...preview.querySelectorAll(".md-img-alt")].map((el) => el.textContent)).toEqual([
+      "CI",
+      "npm",
+    ]);
+    const bar = host.querySelector(".workspace-md-images") as HTMLElement;
+    expect(bar.textContent).toContain("External images blocked (2)");
+    act(() => {
+      (bar.querySelector("button") as HTMLButtonElement).click();
+    });
+    expect(host.querySelector(".workspace-md-images")).toBeNull();
+    expect(host.querySelectorAll(".workspace-markdown img.md-img")).toHaveLength(2);
   });
 
   it("opens a markdown hit at a line in source instead of preview", async () => {
@@ -2113,7 +2139,16 @@ describe("WorkspaceEditor", () => {
       /export|function|main/,
     );
     expect(host.querySelector(".workspace-code-meta")?.textContent).toMatch(/TypeScript \(TSX\)/);
-    expect(host.querySelector(".workspace-run-hint")?.textContent).toBe("npm run dev");
+    expect(host.querySelector(".workspace-status-run")?.textContent).toBe("Run npm run dev");
+    expect(
+      host.querySelector(".workspace-status-run")?.closest(".workspace-status-more"),
+    ).toBeTruthy();
+    const start = host.querySelector(".workspace-status-start") as HTMLElement;
+    expect(start.querySelector(".workspace-status-cursor")?.textContent).toMatch(
+      /^Ln \d+, Col \d+$/,
+    );
+    expect(start.querySelector(".workspace-status-lang")?.textContent).toBe("TypeScript (TSX)");
+    expect(host.querySelector(".workspace-status-end")?.textContent).not.toMatch(/Debug|Indexed/);
   });
 
   it("opens completions with Ctrl+Space and Tab inserts the selected item", async () => {
@@ -2318,7 +2353,8 @@ describe("WorkspaceEditor", () => {
       /Indexed 9/.test(row.textContent ?? ""),
     );
     expect(btn).toBeTruthy();
-    expect(btn?.getAttribute("aria-label")).toBe("Re-index workspace");
+    expect(btn?.closest(".workspace-status-more")).toBeTruthy();
+    expect(btn?.textContent).toMatch(/Re-index workspace/);
     vi.mocked(api.workspaceIndex).mockClear();
     vi.mocked(api.workspaceIndex).mockImplementation(() => new Promise(() => undefined));
     await act(async () => {
@@ -3954,6 +3990,7 @@ describe("WorkspaceEditor", () => {
           status: "Up 2 hours",
           createdAt: "2020-01-01T00:00:00.000Z",
           containerId: "abc123def456",
+          sessionId: "s1",
           locus: false,
         },
       ],
@@ -3973,6 +4010,7 @@ describe("WorkspaceEditor", () => {
                 status: "Up 2 hours",
                 createdAt: "2020-01-01T00:00:00.000Z",
                 containerId: "abc123def456",
+                sessionId: "s1",
                 locus: false,
               },
             ],

@@ -196,7 +196,7 @@ describe("DesignEmpty", () => {
 
   function openLook() {
     act(() => {
-      (host.querySelector('[aria-label="Look"]') as HTMLElement).click();
+      (host.querySelector('[aria-label="Style"]') as HTMLElement).click();
     });
   }
 
@@ -220,7 +220,7 @@ describe("DesignEmpty", () => {
     expect(host.querySelector(".recipe-grid.pills")).toBeTruthy();
     expect(host.querySelector(".recipe-grid.pills kbd")?.textContent).toBe("L");
     expect(host.querySelector(".recipe-tile")).toBeNull();
-    expect(host.querySelector("[aria-label='Look']")).toBeTruthy();
+    expect(host.querySelector("[aria-label='Style']")).toBeTruthy();
     openLook();
     expect(host.querySelector("[aria-label='Color palette']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Design system']")).toBeTruthy();
@@ -453,7 +453,7 @@ describe("DesignEmpty", () => {
       );
     });
     act(() => {
-      (host.querySelector('[aria-label="Look"]') as HTMLElement).click();
+      (host.querySelector('[aria-label="Style"]') as HTMLElement).click();
     });
     act(() => {
       setSelectValue(host, "Design system", second.id);
@@ -475,7 +475,7 @@ describe("DesignEmpty", () => {
       );
     });
     act(() => {
-      (host.querySelector('[aria-label="Look"]') as HTMLElement).click();
+      (host.querySelector('[aria-label="Style"]') as HTMLElement).click();
     });
     expect(selectValue(host, "Design system")).toBe(second.id);
   });
@@ -525,13 +525,62 @@ describe("DesignEmpty", () => {
     );
   });
 
+  it("shows VM as unavailable with a reason on the design container card", () => {
+    render();
+    const vm = [...host.querySelectorAll('[aria-label="Agent runtime"] button')].find(
+      (btn) => btn.textContent === "VM",
+    ) as HTMLButtonElement;
+    expect(vm).toBeTruthy();
+    expect(vm.getAttribute("aria-disabled")).toBe("true");
+    expect(vm.title).toBe("Design canvases need Docker or Host");
+    act(() => vm.click());
+    expect(
+      host.querySelector('[aria-label="Agent runtime"] [aria-selected="true"]')?.textContent,
+    ).not.toBe("VM");
+  });
+
+  it("labels the look chip as Style with its current value", () => {
+    render();
+    expect(host.querySelector("[aria-label='Style']")?.textContent).toMatch(/^Style: /);
+    expect(host.querySelector("[aria-label='Look']")).toBeNull();
+  });
+
+  it("uses the shared setup banner for a missing provider", () => {
+    render(() => undefined, {
+      setup: {
+        hypervisorKind: "mock",
+        qemuFound: false,
+        qemuHint: "",
+        kvmLabel: "",
+        linuxImageReady: false,
+        dockerFound: false,
+        hasProvider: false,
+        hasGoldenImage: false,
+        setupCompleted: false,
+        ready: false,
+        needsWizard: false,
+        hostOs: { platform: "linux", label: "Linux" },
+        qemuInstall: {
+          method: "apt",
+          displayCommand: "",
+          canInstall: false,
+          packages: [],
+          manualHint: "",
+        },
+      },
+    });
+    const banner = host.querySelector("[data-testid='provider-setup-banner']");
+    expect(banner?.classList.contains("setup-banner")).toBe(true);
+    expect(host.querySelector(".setup-callout")).toBeNull();
+  });
+
   it("keeps model and Send on the composer footer", () => {
     render();
     const composer = host.querySelector(".empty-composer") as HTMLDivElement;
     const textarea = composer.querySelector("textarea") as HTMLTextAreaElement;
     const bar = composer.querySelector(".empty-composer-bar") as HTMLDivElement;
     expect(textarea.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(bar.querySelector("[aria-label='Look']")).toBeTruthy();
+    expect(bar.querySelector("[aria-label='Style']")).toBeTruthy();
     expect(bar.querySelector(".composer-toolbar-end .model-picker")).toBeTruthy();
     expect(bar.querySelector(".composer-toolbar-end .composer-send")).toBeTruthy();
     expect(bar.querySelector(".composer-send-label")?.textContent).toBe("Send");

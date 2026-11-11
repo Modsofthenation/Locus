@@ -14,6 +14,28 @@ export function isForgeAuthError(message: string): boolean {
   );
 }
 
+/** Why a forge read was refused when Locus had no token for it. */
+export type ForgeAccessProblem = "needs_token" | "rate_limited";
+
+const NEEDS_TOKEN_PHRASE = "needs a token to read this repo";
+const RATE_LIMIT_PHRASE = "rate limit reached for reads without a token";
+
+/** One sentence the server sends and the UI matches with `forgeAccessProblem`. */
+export function forgeAccessMessage(forge: string, problem: ForgeAccessProblem): string {
+  return problem === "rate_limited"
+    ? `${forge} ${RATE_LIMIT_PHRASE}. Add a token in Settings → Git, or try again later.`
+    : `${forge} ${NEEDS_TOKEN_PHRASE}. It may be private — add a token in Settings → Git.`;
+}
+
+/** Classify a forge error as a missing-token or anonymous rate-limit refusal. */
+export function forgeAccessProblem(message: string | null | undefined): ForgeAccessProblem | null {
+  if (!message) return null;
+  if (message.includes(RATE_LIMIT_PHRASE)) return "rate_limited";
+  if (message.includes(NEEDS_TOKEN_PHRASE) || /^Sign in or add an? .*token/i.test(message))
+    return "needs_token";
+  return null;
+}
+
 function unwrapRemoteError(raw: unknown, depth: number): string {
   if (raw == null || depth <= 0) return "";
   if (typeof raw === "number" || typeof raw === "boolean") return String(raw);

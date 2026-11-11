@@ -2,6 +2,7 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Topbar } from "./Topbar";
+import { JobRunNotice, setJobNotice } from "@/components/automations/jobRun";
 import { Store, initialState } from "@/state/store";
 import { api } from "@/lib/api";
 import { exportSessionChat } from "@/lib/chatExport";
@@ -24,6 +25,7 @@ vi.mock("@/lib/api", () => ({
     clearChat: vi.fn(),
     dockerContainerAction: vi.fn(),
     dockerContainers: vi.fn(),
+    dockerStatus: vi.fn(),
     runAutomation: vi.fn(),
     stopAutomation: vi.fn(),
     patchAutomation: vi.fn(),
@@ -141,6 +143,86 @@ describe("Topbar", () => {
     expect(meta).not.toMatch(/·\s*·/);
   });
 
+  function renderTopbar(state: Partial<typeof initialState>, dispatch = vi.fn()) {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root.render(
+        <Store.Provider value={{ state: { ...initialState, ...state }, dispatch }}>
+          <Topbar />
+        </Store.Provider>,
+      );
+    });
+    return dispatch;
+  }
+
+  const designSession = {
+    id: "d1",
+    title: "A very long design session title that used to truncate at about 25 characters",
+    kind: "design" as const,
+    os: "ubuntu" as const,
+    templateId: "ubuntu-24.04",
+    runtime: "docker" as const,
+    providerId: "p",
+    model: "gpt-4.1",
+    status: "idle" as const,
+    messages: [],
+    createdAt: "2020-01-01T00:00:00.000Z",
+    updatedAt: "2020-01-01T00:00:00.000Z",
+  };
+
+  it("shows the full session title on hover", () => {
+    renderTopbar({ section: "design", selectedId: "d1", sessions: [designSession] });
+    const title = host.querySelector("input.session-title") as HTMLInputElement;
+    expect(title.title).toBe(designSession.title);
+  });
+
+  it("labels the canvas Start as Start preview and hides it once the chat is running", () => {
+    renderTopbar({ section: "design", selectedId: "d1", sessions: [designSession] });
+    const labels = [...host.querySelectorAll("button")].map((btn) => btn.textContent?.trim());
+    expect(labels).toContain("Start preview");
+    expect(labels).not.toContain("Start");
+    act(() => root.unmount());
+    host.remove();
+    renderTopbar({
+      section: "design",
+      selectedId: "d1",
+      sessions: [{ ...designSession, status: "running" as never }],
+    });
+    expect(
+      [...host.querySelectorAll("button")].some((btn) => btn.textContent?.includes("Start")),
+    ).toBe(false);
+  });
+
+  it("toggles the canvas from a labelled topbar button", () => {
+    const dispatch = renderTopbar({
+      section: "design",
+      selectedId: "d1",
+      vmCollapsed: true,
+      sessions: [designSession],
+    });
+    const toggle = host.querySelector("[data-testid='topbar-panel-toggle']") as HTMLButtonElement;
+    expect(toggle.textContent).toContain("Canvas");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    act(() => toggle.click());
+    expect(dispatch).toHaveBeenCalledWith({ type: "toggleVmPane" });
+  });
+
+  it("toggles a host chat's Files panel from the topbar", () => {
+    renderTopbar({
+      section: "agents",
+      selectedId: "h1",
+      vmCollapsed: false,
+      sessions: [
+        { ...designSession, id: "h1", kind: undefined, runtime: "host" as const, title: "Host" },
+      ],
+    });
+    const toggle = host.querySelector("[data-testid='topbar-panel-toggle']") as HTMLButtonElement;
+    expect(toggle.textContent).toContain("Files");
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("says starting instead of the VM running label while a design boot note is live", () => {
     host = document.createElement("div");
     document.body.appendChild(host);
@@ -206,7 +288,7 @@ describe("Topbar", () => {
       );
     });
     expect(host.querySelector(".topbar-meta")?.textContent).toMatch(
-      /cursor-grok-4\.6-high · starting/,
+      /cursor-grok-4\.6-high · No provider · starting/,
     );
     expect(host.querySelector(".topbar-meta")?.textContent).not.toMatch(/ · running/);
     expect(host.querySelector(".dot.provisioning")).toBeTruthy();
@@ -277,7 +359,7 @@ describe("Topbar", () => {
       );
     });
     expect(host.querySelector(".topbar-meta")?.textContent).toMatch(
-      /cursor-grok-4\.6-high · starting/,
+      /cursor-grok-4\.6-high · No provider · starting/,
     );
     expect(host.querySelector(".topbar-meta")?.textContent).not.toMatch(/ · working/);
     expect(host.querySelector(".dot.provisioning")).toBeTruthy();
@@ -316,6 +398,94 @@ describe("Topbar", () => {
       root.render(node);
     });
     expect(host.querySelector("h2")?.textContent).toBe("web");
+  });
+
+  it.each([
+    ["brain", "Brain", "Shared across agents"],
+    ["grafana", "Grafana", "Logs · traces · investigate"],
+    ["docker", "Docker", ""],
+    ["slack", "Slack", ""],
+    ["board", "Board", ""],
+    ["project", "Projects", ""],
+  ] as const)("titles the %s topbar with the surface name", (section, title, kicker) => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root.render(
+        <Store.Provider
+          value={{
+            state: {
+              ...initialState,
+              section,
+              brain: {
+                id: "default",
+                title: "Brain",
+                nodeCount: 0,
+                edgeCount: 0,
+                memoryCount: 0,
+                inboxCount: 0,
+                updatedAt: "2020-01-01T00:00:00.000Z",
+                empty: true,
+              },
+            },
+            dispatch: () => undefined,
+          }}
+        >
+          <Topbar />
+        </Store.Provider>,
+      );
+    });
+    expect(host.querySelector("h2")?.textContent).toBe(title);
+    expect(host.querySelector(".topbar-kicker")?.textContent ?? "").toBe(kicker);
+    expect(host.textContent).not.toContain("0 nodes");
+  });
+
+  it("names the Docker services view Docker and links Brain settings from the Brain menu", () => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root.render(
+        <Store.Provider
+          value={{
+            state: { ...initialState, section: "docker", dockerView: "swarm" },
+            dispatch: () => undefined,
+          }}
+        >
+          <Topbar />
+        </Store.Provider>,
+      );
+    });
+    expect(host.querySelector("h2")?.textContent).toBe("Docker");
+    expect(host.querySelector(".topbar-kicker")?.textContent).toBe("Services");
+    act(() => root.unmount());
+    host.remove();
+
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const dispatch = vi.fn();
+    act(() => {
+      root.render(
+        <Store.Provider value={{ state: { ...initialState, section: "brain" }, dispatch }}>
+          <Topbar />
+        </Store.Provider>,
+      );
+    });
+    const trigger = host.querySelector('[title="Brain menu"]') as HTMLElement;
+    expect(trigger).toBeTruthy();
+    act(() => {
+      trigger.click();
+    });
+    const item = [...host.querySelectorAll(".menu-item")].find((btn) =>
+      btn.textContent?.includes("Brain settings"),
+    ) as HTMLButtonElement;
+    act(() => {
+      item.click();
+    });
+    expect(dispatch).toHaveBeenCalledWith({ type: "settings", open: true });
+    expect(dispatch).toHaveBeenCalledWith({ type: "settingsTab", tab: "advanced" });
   });
 
   it("titles the workspace Slack instead of the last agent", () => {
@@ -403,7 +573,8 @@ describe("Topbar", () => {
     act(() => {
       root.render(node);
     });
-    expect(host.textContent).toContain("Host · grok-4 · idle");
+    // Same label as the composer model chip: flags the missing provider.
+    expect(host.textContent).toContain("Host · grok-4 · No provider · idle");
     expect(
       [...host.querySelectorAll("button")].some((btn) => btn.textContent?.includes("Start")),
     ).toBe(false);
@@ -1149,6 +1320,64 @@ describe("Topbar", () => {
       await Promise.resolve();
     });
     expect(api.runAutomation).toHaveBeenCalledWith("auto-1");
+  });
+
+  it("checks Docker before Run now and shows a plain notice instead of a socket error", async () => {
+    vi.mocked(api.dockerStatus).mockResolvedValue({ kind: "docker", available: false });
+    vi.mocked(api.runAutomation).mockResolvedValue({} as never);
+    const item = {
+      id: "auto-1",
+      name: "Nightly tests",
+      enabled: true,
+      prompt: "check the build",
+      os: "ubuntu" as const,
+      templateId: "ubuntu-24.04",
+      runtime: "docker" as const,
+      dockerImage: "ubuntu:24.04",
+      providerId: "p1",
+      model: "gpt-4.1",
+      startVm: true,
+      persistMemory: false,
+      schedule: { kind: "interval" as const, everyMinutes: 30 },
+      createdAt: "2020-01-01T00:00:00.000Z",
+      updatedAt: "2020-01-01T00:00:00.000Z",
+    };
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root.render(
+        <Store.Provider
+          value={{
+            state: {
+              ...initialState,
+              section: "automations",
+              selectedAutomationId: "auto-1",
+              automations: [item],
+            },
+            dispatch: () => undefined,
+          }}
+        >
+          <Topbar />
+          <JobRunNotice item={item} />
+        </Store.Provider>,
+      );
+    });
+    expect(host.querySelector("h2")?.textContent).toBe("Nightly tests");
+    const run = host.querySelector("[data-testid='auto-topbar-run-now']") as HTMLButtonElement;
+    await act(async () => {
+      run.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(api.dockerStatus).toHaveBeenCalled();
+    expect(api.runAutomation).not.toHaveBeenCalled();
+    const notice = host.querySelector("[data-testid='auto-docker-down']");
+    expect(notice?.textContent).toContain("Docker isn't running — switch to Host or start Docker");
+    const labels = [...notice!.querySelectorAll("button")].map((el) => el.textContent);
+    expect(labels).toEqual(expect.arrayContaining(["Switch to Host", "Start Docker"]));
+    expect(host.querySelector(".topbar")?.textContent).not.toMatch(/docker\.sock/);
+    act(() => setJobNotice(null));
   });
 
   it("pauses the selected automation from the topbar", async () => {

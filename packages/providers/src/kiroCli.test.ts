@@ -314,7 +314,7 @@ describe("kiro cli adapter", () => {
           toolCallId: "s1",
           kind: "search",
           status: "pending",
-          rawInput: { query: "UserProfile" },
+          rawInput: { query: "UserProfile", includePattern: "src/**/*.ts" },
         }),
       ),
     ).toEqual([
@@ -323,7 +323,12 @@ describe("kiro cli adapter", () => {
         id: "s1",
         name: "grep",
         status: "running",
-        arguments: { query: "UserProfile" },
+        arguments: {
+          query: "UserProfile",
+          includePattern: "src/**/*.ts",
+          pattern: "UserProfile",
+          glob: "src/**/*.ts",
+        },
       },
     ]);
     expect(
@@ -754,6 +759,175 @@ describe("kiro cli adapter", () => {
       if (ev.type === "tool_call") events.push({ status: ev.status, name: ev.name, id: ev.id });
     }
     expect(events).toEqual([
+      { status: "running", name: "exec", id: "e1" },
+      { status: "running", name: "exec", id: "e1" },
+      { status: "completed", name: "exec", id: "e1" },
+    ]);
+  });
+
+  it("unwraps ACP content/diff results and maps search query onto grep", () => {
+    expect(
+      parseKiroCliEvents(
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "r1",
+              status: "completed",
+              rawInput: { path: "src/app.ts", offset: 10 },
+              content: [
+                {
+                  type: "content",
+                  content: { type: "text", text: "Output:\nexport const x = 1\n\nExit Code: 0" },
+                },
+              ],
+            },
+          },
+        }),
+      ),
+    ).toEqual([
+      {
+        type: "tool_call",
+        id: "r1",
+        name: "file_read",
+        status: "completed",
+        arguments: { path: "src/app.ts", offset: 10 },
+        result: "Output:\nexport const x = 1\n\nExit Code: 0",
+      },
+    ]);
+    expect(
+      parseKiroCliEvents(
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "p1",
+              kind: "edit",
+              status: "completed",
+              rawInput: { path: "file:///tmp/app/src/store.py", oldStr: "a", newStr: "b" },
+              content: [
+                {
+                  type: "diff",
+                  path: "file:///tmp/app/src/store.py",
+                  oldText: "from __future__ import annotations\na\n",
+                  newText: "from __future__ import annotations\nb\n",
+                },
+              ],
+            },
+          },
+        }),
+      ),
+    ).toEqual([
+      {
+        type: "tool_call",
+        id: "p1",
+        name: "apply_patch",
+        status: "completed",
+        arguments: { path: "/tmp/app/src/store.py", oldStr: "a", newStr: "b" },
+        result: "updated /tmp/app/src/store.py",
+      },
+    ]);
+    expect(
+      parseKiroCliEvents(
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "f1",
+              status: "failed",
+              rawInput: { command: "npx tsc --noEmit" },
+              content: [{ type: "content", content: { type: "text", text: "error TS2322" } }],
+            },
+          },
+        }),
+      ),
+    ).toEqual([
+      {
+        type: "tool_call",
+        id: "f1",
+        name: "exec",
+        status: "completed",
+        arguments: { command: "npx tsc --noEmit" },
+        result: JSON.stringify({ isError: true, output: "error TS2322" }),
+      },
+    ]);
+  });
+
+  it("reattaches nameless tool_call_update clones onto the original chip", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-kiro-cli-fingerprint-"));
+    const events: Array<{ status?: string; name?: string; id?: string }> = [];
+    for await (const ev of streamKiroCli({
+      provider,
+      prompt: "test",
+      workspace: dir,
+      spawnFn: spawner([
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call",
+              toolCallId: "e1",
+              kind: "execute",
+              status: "pending",
+              rawInput: { command: "npx jest src/app.test.ts" },
+              _meta: { kiro: { toolName: "executeCommand" } },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              id: "msg-1",
+              status: "in_progress",
+              rawInput: {
+                command: "npx jest src/app.test.ts",
+                description: "Run unit tests",
+              },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              id: "msg-2",
+              status: "in_progress",
+              rawInput: { command: "npx jest src/app.test.ts" },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "sessionUpdate",
+          data: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "e1",
+              status: "completed",
+              content: [
+                {
+                  type: "content",
+                  content: { type: "text", text: "Output:\nPASS\n\nExit Code: 0" },
+                },
+              ],
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "runFinished",
+          data: { status: "success", sessionId: "sess-fp" },
+        }),
+      ]),
+    })) {
+      if (ev.type === "tool_call") events.push({ status: ev.status, name: ev.name, id: ev.id });
+    }
+    expect(events).toEqual([
+      { status: "running", name: "exec", id: "e1" },
       { status: "running", name: "exec", id: "e1" },
       { status: "running", name: "exec", id: "e1" },
       { status: "completed", name: "exec", id: "e1" },

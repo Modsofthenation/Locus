@@ -6,7 +6,7 @@ import {
   type BrowserTab,
 } from "@locus/shared";
 import type { ChromiumDriver, ScreencastFrame } from "@locus/guest-agent";
-import type { DockerEngine } from "@locus/hypervisor";
+import type { MachineLifecycle } from "@locus/hypervisor";
 import type { VmInstance } from "@locus/shared";
 import type { WorkerGuestHub } from "./guests.js";
 
@@ -22,7 +22,7 @@ export class WorkerBrowserHub {
 
   constructor(
     private readonly guests: WorkerGuestHub,
-    private readonly engine: DockerEngine,
+    private readonly engine: Pick<MachineLifecycle, "get">,
     private readonly lookupGuest?: (id: string) => VmInstance | undefined,
   ) {}
 

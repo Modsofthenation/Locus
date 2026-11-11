@@ -1810,7 +1810,7 @@ process.stdin.on("data", (chunk) => {
 });
 
 describe("mockAssistantReply", () => {
-  it("mentions the guest OS and repo", () => {
+  it("is one short line naming the guest OS and the prompt", () => {
     const text = mockAssistantReply("hello", {
       id: "1",
       title: "t",
@@ -1825,8 +1825,8 @@ describe("mockAssistantReply", () => {
       repo: { forge: "bitbucket", url: "https://bitbucket.org/acme/app.git", ref: "main" },
     });
     expect(text).toContain("Windows 11");
-    expect(text).toContain("bitbucket.org/acme/app.git");
     expect(text).toContain("hello");
+    expect(text.split("\n")).toHaveLength(1);
     expect(text).toContain("**Demo reply**");
     expect(text).toContain("no provider key is configured");
   });
@@ -2370,7 +2370,7 @@ describe("docker agents", () => {
       expect(
         fresh?.messages.some((m) => m.role === "system" && m.content === EMPTY_CANVAS_NOTE),
       ).toBe(false);
-      expect(fresh?.needsHuman).toMatch(/last-resort host draft/);
+      expect(fresh?.needsHuman).toMatch(/starter draft on this canvas/);
     } finally {
       await sessions.abortChat(created.id).catch(() => undefined);
       hypervisor.shutdown();
@@ -2433,7 +2433,7 @@ describe("docker agents", () => {
       expect(
         fresh?.messages.some((m) => m.role === "system" && m.content === EMPTY_CANVAS_NOTE),
       ).toBe(false);
-      expect(fresh?.needsHuman).toMatch(/last-resort host draft/);
+      expect(fresh?.needsHuman).toMatch(/starter draft on this canvas/);
     } finally {
       await sessions.abortChat(created.id).catch(() => undefined);
       hypervisor.shutdown();
@@ -3429,6 +3429,14 @@ describe("docker agents", () => {
     const badStats = await ctx.app.request("/api/docker/containers/bad%3Bid/stats");
     expect(badStats.status).toBe(400);
     ctx.hypervisor.shutdown();
+  });
+
+  it("reports Docker daemon status for job preflight", async () => {
+    const ctx = await setup();
+    cleanup.push(ctx.dir);
+    const res = await ctx.app.request("/api/docker/status");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ kind: "mock", available: true });
   });
 
   it("exposes Docker Swarm inventory on the mock engine", async () => {
@@ -6683,7 +6691,7 @@ describe("golden images, media, and abort", () => {
         return new Response("Not Found", { status: 404 });
       }) as typeof fetch,
     });
-    const res = await app.request("/api/updates?current=0.18.0");
+    const res = await app.request("/api/updates?current=0.19.0");
     expect(res.status).toBe(200);
     const body = (await res.json()) as { status: string; message?: string };
     expect(body.status).toBe("unavailable");

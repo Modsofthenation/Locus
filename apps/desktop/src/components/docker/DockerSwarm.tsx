@@ -147,9 +147,9 @@ export function DockerSwarmPane() {
           <EmptyHero
             pose="rest"
             size={76}
-            eyebrow="Docker Swarm"
-            title="Swarm inactive"
-            lead="This Docker engine is not in Swarm mode. Initialize a swarm with the Docker CLI, or point DOCKER_HOST at a manager. This is the local engine — not Locus Swarm teams, and not the Portainer integration."
+            eyebrow="Docker services"
+            title="Swarm mode is off"
+            lead="Services show up here once this Docker engine runs in Swarm mode (docker swarm init) or DOCKER_HOST points at a manager. This is Docker's Swarm mode — not Locus Swarm teams, and not the Portainer integration."
           />
           <div className="empty-actions">
             <button className="btn" onClick={() => void refresh().catch(() => undefined)}>
