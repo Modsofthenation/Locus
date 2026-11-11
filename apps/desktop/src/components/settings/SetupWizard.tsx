@@ -285,10 +285,14 @@ export function SetupWizard() {
             {PRODUCT_MODE_LABELS.swarm} is teammate-first (avatars, Teams, Routines).{" "}
             {PRODUCT_MODE_LABELS.developer} is the full control plane. You can switch anytime.
           </span>
-          <div className="setup-provider" role="radiogroup" aria-label="Product mode">
+          <div
+            className="runtime-toggle setup-mode-toggle"
+            role="radiogroup"
+            aria-label="Product mode"
+          >
             <button
               type="button"
-              className={`btn small${productMode === "swarm" ? " primary" : ""}`}
+              className={productMode === "swarm" ? "active" : ""}
               role="radio"
               aria-checked={productMode === "swarm"}
               data-testid="setup-mode-swarm"
@@ -298,7 +302,7 @@ export function SetupWizard() {
             </button>
             <button
               type="button"
-              className={`btn small${productMode === "developer" ? " primary" : ""}`}
+              className={productMode === "developer" ? "active" : ""}
               role="radio"
               aria-checked={productMode === "developer"}
               data-testid="setup-mode-developer"

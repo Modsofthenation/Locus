@@ -75,7 +75,7 @@ vi.mock("@/lib/api", () => ({
     rotateChromeExtension: vi.fn(),
     checkUpdates: vi.fn(async () => ({
       status: "unavailable",
-      current: "0.19.0",
+      current: "0.20.0",
       message: "No GitHub release found yet. Check for updates works after a v* tag is published.",
     })),
     refreshCursorCli: vi.fn(async () => ({ changed: false, models: [] })),

@@ -1,6 +1,6 @@
 {
   "name": "@locus/guest-agent",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "private": true,
   "description": "Guest tool catalog and SSH/WinRM/docker-exec adapters",
   "type": "module",

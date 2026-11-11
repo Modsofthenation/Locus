@@ -222,7 +222,9 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
   const [branchLock, setBranchLock] = useState(false);
   /** Games / Assets keep unset context (repo, asset, kit, style, build) in the "+" menu. */
   const [revealed, setRevealed] = useState<ReadonlySet<string>>(() => new Set());
-  const canCreate = Boolean(state.config);
+  const dockerDown =
+    runtime === "docker" && state.dockerKind === "docker" && !state.dockerReady && !backendId;
+  const canCreate = Boolean(state.config) && !dockerDown;
   const workers = state.config?.workers ?? [];
   const selectedWorker = workers.find((row) => row.id === backendId);
   const launch = CANVAS_LAUNCH[surface];
@@ -276,6 +278,17 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
           : ""
       }`
     : "";
+
+  // Docker CLI installed but the daemon is down: start on Host instead of a launch that fails.
+  useEffect(() => {
+    if (
+      state.dockerKind === "docker" &&
+      !state.dockerReady &&
+      policyAllowsHostAgents(state.config?.managedPolicy)
+    ) {
+      setRuntime((current) => (current === "docker" ? "host" : current));
+    }
+  }, [state.dockerKind, state.dockerReady, state.config?.managedPolicy]);
 
   useEffect(() => {
     const defaults = resolveAgentDefaults(state.config, "ubuntu", loadLastAgent());
@@ -576,6 +589,17 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                   testId="engine-setup-banner"
                 />
               ) : null}
+              {dockerDown ? (
+                <SetupBanner
+                  title="Docker isn't running"
+                  detail="Start the Docker daemon, or switch to Host"
+                  testId="engine-setup-banner"
+                >
+                  <button type="button" className="btn small" onClick={() => setRuntime("host")}>
+                    Use Host instead
+                  </button>
+                </SetupBanner>
+              ) : null}
 
               {workers.length ? (
                 <div className="launch-env-bar">
@@ -719,7 +743,7 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                 files={files}
                 placeholder={
                   surface === "game"
-                    ? `${launch.placeholder.replace(/…$/, "")}  @asset to reference an asset…`
+                    ? `${launch.placeholder.replace(/[.…]+$/, "")}. Type @ to reference an asset…`
                     : launch.placeholder
                 }
                 onChange={(value) => {

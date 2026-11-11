@@ -286,7 +286,10 @@ async function rememberMutatedIssue(
 }
 
 export const api = {
-  health: () => json<{ ok: boolean; hypervisor: string; docker?: string }>("/api/health"),
+  health: () =>
+    json<{ ok: boolean; hypervisor: string; docker?: string; dockerReady?: boolean }>(
+      "/api/health",
+    ),
   hypervisor: () => json<HypervisorStatus>("/api/hypervisor"),
   setup: () => json<SetupStatus>("/api/setup"),
   installHypervisor: () =>

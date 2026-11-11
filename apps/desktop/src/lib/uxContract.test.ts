@@ -22,7 +22,7 @@ describe("quiet shell contract", () => {
 
   it("pins a short featured theme set and keeps the rest as extras", () => {
     expect([...FEATURED_THEME_IDS]).toEqual(["ember", "midnight", "paper", "contrast"]);
-    expect(THEME_OPTIONS).toHaveLength(98);
+    expect(THEME_OPTIONS).toHaveLength(106);
   });
 
   it("ships the quiet-shell screenshot contract in ux.css", () => {

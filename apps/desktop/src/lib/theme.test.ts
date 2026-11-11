@@ -133,11 +133,17 @@ describe("applyTheme", () => {
     expect(document.documentElement.dataset.theme).toBe("console");
     expect(document.documentElement.style.colorScheme).toBe("dark");
     expect(document.documentElement.dataset.themeGradient).toBeUndefined();
+    expect(document.documentElement.dataset.themeTerminal).toBe("");
+
+    expect(applyTheme("teletype")).toBe("teletype");
+    expect(document.documentElement.dataset.themeTerminal).toBe("");
+    expect(document.documentElement.style.colorScheme).toBe("light");
 
     expect(applyTheme("not-a-theme")).toBe("ember");
     expect(document.documentElement.dataset.theme).toBe("ember");
     expect(document.documentElement.dataset.chatScene).toBeUndefined();
     expect(document.documentElement.dataset.themeGradient).toBeUndefined();
+    expect(document.documentElement.dataset.themeTerminal).toBeUndefined();
   });
 
   it("defines a CSS palette for every selectable theme", () => {
@@ -152,12 +158,19 @@ describe("applyTheme", () => {
     }
   });
 
-  it("styles console as a terminal window", () => {
-    expect(css).toMatch(/\[data-theme="console"\][\s\S]*?IBM Plex Mono/);
-    expect(css).toContain('html[data-theme="console"] #root::before');
+  it("styles terminal themes as a terminal window", () => {
+    expect(css).toMatch(/\[data-theme-terminal\] \{[\s\S]*?IBM Plex Mono/);
+    expect(css).toContain("html[data-theme-terminal] #root::before");
     expect(css).toContain("locus \\2014 tty");
-    expect(css).toMatch(/html\[data-theme="console"\]::after[\s\S]*?repeating-linear-gradient/);
-    expect(css).toContain('.theme-preview[data-theme="console"] .theme-preview-chrome em::before');
+    expect(css).toMatch(/html\[data-theme-terminal\]::after[\s\S]*?repeating-linear-gradient/);
+    expect(css).toContain(".theme-preview[data-theme-terminal] .theme-preview-chrome em::before");
+    const terminals = THEME_OPTIONS.filter((t) => t.terminal);
+    expect(terminals.length).toBeGreaterThan(1);
+    for (const opt of terminals) {
+      expect(css).toMatch(
+        new RegExp(`\\[data-theme="${opt.id}"\\] \\{[^}]*--term-glow:[^}]*--term-title:`),
+      );
+    }
   });
 
   it("wires photo themes to a chat-pane scene image", () => {

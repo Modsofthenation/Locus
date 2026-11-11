@@ -191,6 +191,7 @@ describe("EmptyState recipes", () => {
             ...initialState,
             config,
             dockerKind: "docker",
+            dockerReady: true,
             hypervisorKind: "qemu",
             ...extra,
           },
@@ -359,6 +360,20 @@ describe("EmptyState recipes", () => {
     expect(
       host.querySelector('[aria-label="Agent runtime"] [aria-selected="true"]')?.textContent,
     ).toBe("Docker");
+  });
+
+  it("starts on Host and explains when the Docker daemon is not running", () => {
+    render(() => undefined, { dockerReady: false });
+    expect(
+      host.querySelector('[aria-label="Agent runtime"] [aria-selected="true"]')?.textContent,
+    ).toBe("Host");
+    const docker = [...host.querySelectorAll('[aria-label="Agent runtime"] button')].find(
+      (btn) => btn.textContent === "Docker",
+    ) as HTMLButtonElement;
+    act(() => {
+      docker.click();
+    });
+    expect(host.textContent).toContain("Docker isn't running");
   });
 
   it("fills the composer from a first-task pill when there are no agent sessions", async () => {
@@ -1533,6 +1548,7 @@ describe("EmptyState worker placement", () => {
             state: {
               ...initialState,
               dockerKind: "docker",
+              dockerReady: true,
               config: {
                 ...config,
                 workers: [{ id: "w1", name: "Studio PC", url: "http://192.168.1.8:7421" }],
@@ -1808,7 +1824,7 @@ describe("EmptyState named environment", () => {
       root.render(
         <Store.Provider
           value={{
-            state: { ...initialState, config: envConfig, dockerKind: "docker" },
+            state: { ...initialState, config: envConfig, dockerKind: "docker", dockerReady: true },
             dispatch: () => undefined,
           }}
         >
@@ -1873,7 +1889,13 @@ describe("EmptyState named environment", () => {
       root.render(
         <Store.Provider
           value={{
-            state: { ...initialState, config: envConfig, newOpen: true, dockerKind: "docker" },
+            state: {
+              ...initialState,
+              config: envConfig,
+              newOpen: true,
+              dockerKind: "docker",
+              dockerReady: true,
+            },
             dispatch: () => undefined,
           }}
         >
@@ -1934,7 +1956,13 @@ describe("EmptyState named environment", () => {
       root.render(
         <Store.Provider
           value={{
-            state: { ...initialState, config: envConfig, newOpen: true, dockerKind: "docker" },
+            state: {
+              ...initialState,
+              config: envConfig,
+              newOpen: true,
+              dockerKind: "docker",
+              dockerReady: true,
+            },
             dispatch: () => undefined,
           }}
         >

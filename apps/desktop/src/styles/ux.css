@@ -198,8 +198,27 @@
   min-width: 0;
 }
 
+/* The combined picker shrinks with the composer instead of painting over Stop/Queue/Send. */
+.model-picker.compact > .ui-tooltip,
+.model-picker.compact > .model-picker-combined,
+.model-picker.compact > .ui-tooltip > .model-picker-combined {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .model-picker-combined-toggle {
-  max-width: 240px;
+  max-width: min(240px, 100%);
+  min-width: 0;
+}
+
+.model-picker-combined-label {
+  min-width: 0;
+}
+
+.composer-actions > .btn,
+.composer-actions > .ui-tooltip {
+  flex: 0 0 auto;
 }
 
 .model-picker-combined.on .model-picker-combined-label {
@@ -577,4 +596,131 @@ mark {
   flex-shrink: 0;
   font-size: var(--type-sm);
   color: var(--muted);
+}
+
+/* The scroll tick rail spans the first ~11px of the thread; keep message text clear of it. */
+@media (max-width: 1100px) {
+  .thread {
+    padding-left: var(--space-3-5);
+  }
+}
+
+/* Phone-width chat top bar: give the title room. Compare stays in the ⋯ menu,
+   and the panel toggle keeps its icon (the label is in its tooltip and aria-label). */
+@media (max-width: 600px) {
+  .topbar .topbar-compare {
+    display: none;
+  }
+  .topbar .topbar-panel-toggle-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* Touch: keep the small composer and top-bar controls at least 36px to tap. */
+@media (pointer: coarse) {
+  .composer-bar .btn.small,
+  .composer-bar summary.btn,
+  .composer-actions .btn,
+  .topbar .btn.small,
+  .topbar .btn.icon,
+  .feature-nudge .btn {
+    min-height: 36px;
+    min-width: 36px;
+  }
+}
+
+/* Starter chips: the Alt-shortcut hint floats as a badge instead of reserving
+   hidden space, so Design/Games/Assets chips centre like Agents/Jobs/Board. */
+.recipe-grid.pills .os-card {
+  justify-content: center;
+}
+.recipe-grid.pills .os-card:has(kbd) {
+  position: relative;
+}
+.recipe-grid.pills .os-card kbd {
+  position: absolute;
+  top: -8px;
+  right: -6px;
+  background: var(--bg-1);
+  line-height: 1.3;
+  pointer-events: none;
+}
+
+/* Board and Projects use a bare textarea in .empty-composer; match the launch composers' text inset. */
+.design-start-prompt .empty-composer > textarea {
+  padding: var(--chat-composer-text-pad);
+  font-size: var(--chat-composer-font);
+  line-height: var(--chat-composer-line);
+}
+
+/* Team / group-chat name sits inside the composer as its title line, not as a
+   second boxed field stacked on the textarea. */
+.empty-composer > .project-team-name-input,
+.empty-composer > .group-chat-title {
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  padding: var(--chat-composer-text-pad);
+  font-weight: var(--weight-semibold);
+}
+.empty-composer > .project-team-name-input:focus-visible,
+.empty-composer > .group-chat-title:focus-visible {
+  outline: none;
+  border-bottom-color: var(--accent);
+}
+
+/* Settings polish. */
+/* Providers filter reuses the sidebar .search input; drop its 10px sidebar inset. */
+.provider-filter > .search,
+.provider-filter .search {
+  margin: 0;
+  width: 100%;
+}
+/* Phone pairing card header lines up with the body rows below it. */
+.phone-card > .provider-card-head {
+  padding: var(--space-2-5) var(--space-4) var(--space-2);
+}
+/* Theme filter pills never wrap a label ("High contrast") onto two lines. */
+.theme-filter-pills {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.theme-filter-pills button {
+  white-space: nowrap;
+}
+/* Machine status reads as UI text; only an image file name stays monospace. */
+.machine-row-status:not(.is-file) {
+  font-family: inherit;
+}
+
+/* Setup wizard: Developer / Swarm is a choice, not two competing primary buttons. */
+.setup-mode-toggle {
+  margin: var(--space-2) 0 0;
+}
+
+/* Settings → Integrations: connected Git accounts, one per line. */
+.integration-forge-list {
+  list-style: none;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.integration-forge-list li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--type-sm);
+}
+.integration-forge-list .hint {
+  margin: 0;
 }

@@ -374,7 +374,7 @@ export function GrafanaPane() {
             <div className="empty-actions">
               <button
                 type="button"
-                className="btn primary"
+                className="btn"
                 onClick={() => openSettings(dispatch, "integrations")}
               >
                 Add Grafana

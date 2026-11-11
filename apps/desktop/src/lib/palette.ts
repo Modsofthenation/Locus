@@ -577,7 +577,7 @@ export function paletteItems(input: {
       title: `Theme · ${opt.name}`,
       hint: opt.summary,
       group: "Appearance",
-      keywords: `theme ${opt.name} ${opt.id} appearance${opt.chatScene ? " space photo chat" : ""}${opt.gradient ? " gradient" : ""}${opt.contrast ? " contrast" : ""}`,
+      keywords: `theme ${opt.name} ${opt.id} appearance${opt.chatScene ? " space photo chat" : ""}${opt.gradient ? " gradient" : ""}${opt.contrast ? " contrast" : ""}${opt.terminal ? " terminal console tty crt" : ""}`,
     });
   }
   items.push({

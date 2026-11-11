@@ -22,6 +22,8 @@ export function applyTheme(value?: string): ThemeId {
   else delete root.dataset.chatScene;
   if (opt.gradient) root.dataset.themeGradient = "";
   else delete root.dataset.themeGradient;
+  if (opt.terminal) root.dataset.themeTerminal = "";
+  else delete root.dataset.themeTerminal;
   return id;
 }
 

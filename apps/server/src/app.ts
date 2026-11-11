@@ -144,12 +144,13 @@ export function createApp(opts: {
     }),
   );
 
-  app.get("/api/health", (c) =>
+  app.get("/api/health", async (c) =>
     c.json({
       ok: true,
       name: "locus",
       hypervisor: hypervisor.kind,
       docker: opts.sessions.dockerKind(),
+      dockerReady: await opts.sessions.dockerReady(),
     }),
   );
 

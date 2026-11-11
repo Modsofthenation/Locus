@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  supersededPlainErrorIds,
   automationAllowlistOptions,
   automationFleetExtras,
   automationFunnelHint,
@@ -359,5 +360,26 @@ describe("plainJobError", () => {
     expect(plainJobError("boom")).toBeNull();
     expect(plainJobError(undefined)).toBeNull();
     expect(isDockerDownError("Docker image not found")).toBe(false);
+  });
+});
+
+describe("supersededPlainErrorIds", () => {
+  const sock =
+    "ERROR: failed to connect to the docker API at unix:///var/run/docker.sock; check if the daemon is running";
+  it("hides earlier back-to-back system notes that map to the same plain error", () => {
+    const hide = supersededPlainErrorIds([
+      { id: "u", role: "user", content: "hi" },
+      { id: "a", role: "system", content: sock },
+      { id: "b", role: "system", content: `The container did not become ready. ${sock}` },
+    ]);
+    expect([...hide]).toEqual(["a"]);
+  });
+  it("keeps repeats that are separated by other messages", () => {
+    const hide = supersededPlainErrorIds([
+      { id: "a", role: "system", content: sock },
+      { id: "u", role: "user", content: "retry" },
+      { id: "b", role: "system", content: sock },
+    ]);
+    expect(hide.size).toBe(0);
   });
 });

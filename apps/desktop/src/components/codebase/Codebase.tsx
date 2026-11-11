@@ -1219,7 +1219,6 @@ export function CodebasePane() {
           <div className={`empty-card codebase-empty${importing || accounts ? " has-import" : ""}`}>
             <EmptyHero
               pose="rest"
-              eyebrow="Codebase"
               title="Link a repository"
               lead="Catalog a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps repo, then review pulls here."
             />

@@ -197,6 +197,8 @@ export interface UiState {
   connected: boolean;
   hypervisorKind: "mock" | "qemu";
   dockerKind: "mock" | "docker";
+  /** The Docker CLI is installed and its daemon answered `docker info`. */
+  dockerReady: boolean;
   setup: SetupStatus | null;
   setupOpen: boolean;
   unreadIds: string[];
@@ -305,6 +307,7 @@ export const initialState: UiState = {
   connected: false,
   hypervisorKind: "mock",
   dockerKind: "mock",
+  dockerReady: false,
   setup: null,
   setupOpen: false,
   unreadIds: [],
@@ -336,6 +339,7 @@ export type Action =
       vms: VmInstance[];
       hypervisorKind?: "mock" | "qemu";
       dockerKind?: "mock" | "docker";
+      dockerReady?: boolean;
       automations?: Automation[];
       boards?: BoardSummary[];
       projects?: ProjectSummary[];
@@ -353,6 +357,7 @@ export type Action =
       vms?: VmInstance[];
       hypervisorKind?: "mock" | "qemu";
       dockerKind?: "mock" | "docker";
+      dockerReady?: boolean;
       setup?: SetupStatus;
     }
   | { type: "session"; session: AgentSession }
@@ -604,6 +609,9 @@ function reduceUiState(state: UiState, action: Action): UiState {
           state.selectedContainerId ?? action.containers?.[0]?.id ?? state.selectedContainerId,
         hypervisorKind: action.hypervisorKind ?? state.hypervisorKind,
         dockerKind: action.dockerKind ?? state.dockerKind,
+        dockerReady:
+          action.dockerReady ??
+          (action.dockerKind ? action.dockerKind === "docker" : state.dockerReady),
         setup: action.setup ?? state.setup,
         setupOpen: action.setup?.needsWizard ?? state.setupOpen,
       };
@@ -616,6 +624,7 @@ function reduceUiState(state: UiState, action: Action): UiState {
         vms: action.vms ?? [],
         hypervisorKind: action.hypervisorKind ?? "mock",
         dockerKind: action.dockerKind ?? "mock",
+        dockerReady: action.dockerReady ?? action.dockerKind === "docker",
         setup: action.setup ?? null,
         setupOpen: action.setup?.needsWizard ?? false,
       };

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  altKeyDisplay,
   SHORTCUTS,
   matchAltDigit,
   matchModDigit,
@@ -81,5 +82,12 @@ describe("shortcuts", () => {
     expect(
       matchAltDigit({ key: "2", altKey: true, metaKey: true, ctrlKey: false, shiftKey: false }),
     ).toBe(null);
+  });
+});
+
+describe("altKeyDisplay", () => {
+  it("uses the Option glyph on Mac and Alt+ elsewhere", () => {
+    expect(altKeyDisplay("MacIntel")).toBe("⌥");
+    expect(altKeyDisplay("Linux x86_64")).toBe("Alt+");
   });
 });

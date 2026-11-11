@@ -143,7 +143,7 @@
 }
 .desktop-shell[data-product-mode="swarm"] .app.collapsed {
   /* Keep the teammate list usable even if the collapsed flag is set. */
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
 }
 .desktop-shell[data-product-mode="swarm"] .app.collapsed .sidebar {
   width: var(--sidebar-w, 300px);
@@ -184,8 +184,10 @@
 }
 
 /* Locus Swarm messenger shell */
+/* Size the first column from the sidebar itself (rail + resizable list) so the
+   chat never starts underneath it. A fixed 300px column overlapped it by 40px+. */
 .desktop-shell[data-product-mode="swarm"] .app:not(.collapsed) {
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
 }
 .desktop-shell[data-product-mode="swarm"] .session-item.hub-session-item {
   border-radius: var(--radius-lg);
@@ -233,6 +235,43 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+/* Teammate rows: the name and preview get the full width. The ⋯ menu floats
+   over the preview's end and only shows on hover/focus, so names stop
+   truncating to "Chief of …" in a 340px sidebar. */
+.desktop-shell[data-product-mode="swarm"] .session-item.hub-session-item.has-menu {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr);
+}
+.desktop-shell[data-product-mode="swarm"] .hub-session-item.has-menu > .menu,
+.desktop-shell[data-product-mode="swarm"] .hub-session-item.has-menu > .ui-tooltip {
+  position: absolute;
+  right: var(--space-1-5);
+  bottom: var(--space-1-5);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-standard);
+}
+.desktop-shell[data-product-mode="swarm"] .hub-session-item.has-menu:hover > .menu,
+.desktop-shell[data-product-mode="swarm"] .hub-session-item.has-menu:hover > .ui-tooltip,
+.desktop-shell[data-product-mode="swarm"] .hub-session-item.has-menu:focus-within > .menu,
+.desktop-shell[data-product-mode="swarm"] .hub-session-item.has-menu:focus-within > .ui-tooltip,
+.desktop-shell[data-product-mode="swarm"] .hub-session-item.has-menu > .menu[open],
+.desktop-shell[data-product-mode="swarm"]
+  .hub-session-item.has-menu
+  > .ui-tooltip:has(.menu[open]) {
+  opacity: 1;
+}
+.desktop-shell[data-product-mode="swarm"] .hub-session-item.has-menu .menu > summary.btn {
+  background: var(--bg-1);
+}
+@media (hover: none) {
+  .desktop-shell[data-product-mode="swarm"] .hub-session-item.has-menu > .menu,
+  .desktop-shell[data-product-mode="swarm"] .hub-session-item.has-menu > .ui-tooltip {
+    opacity: 1;
+  }
+}
+.desktop-shell[data-product-mode="swarm"] .hub-session-item .meta {
+  white-space: normal;
 }
 .desktop-shell[data-product-mode="swarm"] .hub-session-item .dot {
   position: absolute;
@@ -303,24 +342,26 @@
   max-width: 46ch;
   -webkit-line-clamp: 2;
 }
+/* Your bubble takes the theme's accent (with its paired ink, as on primary
+   buttons) instead of a fixed iOS blue that clashed with warm themes. */
 .desktop-shell[data-product-mode="swarm"] .chat .msg.user .bubble {
-  background: #0a84ff;
-  color: #ffffff;
+  background: var(--accent);
+  color: var(--accent-ink);
   border-radius: var(--radius-xl) var(--radius-xl) var(--radius-xs) var(--radius-xl);
 }
 .desktop-shell[data-product-mode="swarm"] .chat .msg.user .bubble,
 .desktop-shell[data-product-mode="swarm"] .chat .msg.user .bubble * {
-  color: #ffffff !important;
-  --text: #ffffff;
-  --muted: color-mix(in srgb, #ffffff 72%, transparent);
+  color: var(--accent-ink) !important;
+  --text: var(--accent-ink);
+  --muted: color-mix(in srgb, var(--accent-ink) 72%, transparent);
 }
 .desktop-shell[data-product-mode="swarm"] .chat .msg.user .bubble a {
-  color: #e8f3ff !important;
+  color: var(--accent-ink) !important;
   text-decoration: underline;
 }
 .desktop-shell[data-product-mode="swarm"] .chat .msg.user .msg-actions .btn {
-  color: #ffffff;
-  border-color: color-mix(in srgb, #fff 35%, transparent);
+  color: var(--accent-ink);
+  border-color: color-mix(in srgb, var(--accent-ink) 35%, transparent);
 }
 .desktop-shell[data-product-mode="swarm"] .chat .msg.assistant .bubble {
   background: color-mix(in srgb, var(--text) 12%, var(--bg-1));
@@ -869,4 +910,38 @@ button.linkish {
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
+}
+
+/* Narrow windows: Swarm uses the same rail + slide-over list drawer as Developer.
+   The desktop overrides above (fixed list width even when collapsed) would
+   otherwise reserve a 300px+ column and push the drawer half off-screen. */
+@media (max-width: 760px) {
+  .desktop-shell[data-product-mode="swarm"] .app,
+  .desktop-shell[data-product-mode="swarm"] .app.collapsed,
+  .desktop-shell[data-product-mode="swarm"] .app:not(.collapsed) {
+    grid-template-columns: var(--rail-w, 64px) minmax(0, 1fr);
+  }
+  .desktop-shell[data-product-mode="swarm"] .app.collapsed > .sidebar {
+    /* Beats the sidebar's inline resize width, as Developer does when the drawer is open. */
+    width: var(--rail-w, 64px) !important;
+  }
+  .desktop-shell[data-product-mode="swarm"] .app.collapsed .side-main {
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+/* The rail already has Settings (and Teammates); the footer copy was a second
+   Settings button on every Swarm screen. */
+.desktop-shell[data-product-mode="swarm"] .side-foot > .swarm-config-btn {
+  display: none;
+}
+.desktop-shell[data-product-mode="swarm"] .side-foot:has(> .swarm-config-btn:only-child) {
+  display: none;
+}
+
+/* "Teammates" is the longest rail label; fit it instead of "Teamma…". */
+.desktop-shell[data-product-mode="swarm"] .side-rail-nav .rail-label {
+  letter-spacing: -0.04em;
+  text-overflow: clip;
 }

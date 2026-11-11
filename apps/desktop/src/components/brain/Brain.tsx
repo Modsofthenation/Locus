@@ -304,9 +304,6 @@ export function BrainPane() {
                 <label>
                   Repo folder
                   <div className="host-folder-row">
-                    <span className="host-folder-icon" aria-hidden>
-                      <IconFolder />
-                    </span>
                     <input
                       value={path}
                       onChange={(e) => setPath(e.target.value)}
@@ -315,7 +312,7 @@ export function BrainPane() {
                       aria-label="Repo folder to index"
                     />
                     <button type="button" className="btn ghost" onClick={() => setPickerOpen(true)}>
-                      Browse
+                      <IconFolder /> Browse
                     </button>
                   </div>
                 </label>

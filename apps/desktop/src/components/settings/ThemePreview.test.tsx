@@ -61,6 +61,7 @@ describe("ThemePreview", () => {
     const preview = host.querySelector("[data-testid='theme-preview']");
     expect(preview?.getAttribute("data-theme")).toBe("console");
     expect(preview?.hasAttribute("data-theme-gradient")).toBe(false);
+    expect(preview?.hasAttribute("data-theme-terminal")).toBe(true);
     expect(host.textContent).toContain("Console");
   });
 });

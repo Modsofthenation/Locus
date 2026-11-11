@@ -961,7 +961,7 @@ export function MachineCard({
           <span className={`machine-dot ${ready ? "ready" : "pending"}`} />
           <span className="machine-row-copy">
             <strong>{template.name}</strong>
-            <span className="machine-row-status">{status}</span>
+            <span className={`machine-row-status${ready ? " is-file" : ""}`}>{status}</span>
           </span>
           <span className="machine-row-specs">
             {cpuCores} c · {memoryMb} MB · {diskSizeGb} GB

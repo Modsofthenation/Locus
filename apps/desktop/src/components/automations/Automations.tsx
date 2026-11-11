@@ -269,7 +269,6 @@ export function AutomationsPane() {
         <div className="empty-card">
           <EmptyHero
             pose="rest"
-            eyebrow="Jobs"
             title="When should an agent run?"
             lead="Pick a trigger — clock, git push, pull request, or webhook — then a prompt. Each run executes on Docker, VM, or host and keeps a thread you can open."
           />

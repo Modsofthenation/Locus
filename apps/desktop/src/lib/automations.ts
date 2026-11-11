@@ -374,6 +374,25 @@ export function plainJobError(text: string | undefined): PlainJobError | null {
   return null;
 }
 
+/**
+ * Back-to-back system notes that map to the same plain error (Docker down twice in a row).
+ * Keep the latest; it usually carries the most context ("this turn did not run").
+ */
+export function supersededPlainErrorIds(
+  messages: Array<{ id: string; role: string; content: string }>,
+): Set<string> {
+  const hide = new Set<string>();
+  let prevId: string | undefined;
+  let prevSummary: string | undefined;
+  for (const message of messages) {
+    const summary = message.role === "system" ? plainJobError(message.content)?.summary : undefined;
+    if (summary && prevId && prevSummary === summary) hide.add(prevId);
+    prevId = summary ? message.id : undefined;
+    prevSummary = summary;
+  }
+  return hide;
+}
+
 export function spendChipTitle(args: {
   over: boolean;
   label: string;
