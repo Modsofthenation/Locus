@@ -1698,8 +1698,10 @@ function MobileChat(props: { session: AgentSession; onBack: () => void }) {
       ? (viewing.lastLine ?? "")
       : ""
     : (state.thinking[session.id] ?? "");
+  const lastMessage = messages[messages.length - 1];
+  const streamedText = lastMessage?.role === "assistant" && Boolean(lastMessage.content.trim());
   const localWait =
-    !viewing && turning && !waitingClone && !waitingBuild && !liveThought
+    !viewing && turning && !streamedText && !waitingClone && !waitingBuild && !liveThought
       ? localModelWaitLabel(provider)
       : undefined;
   const workingText = waitingBuild

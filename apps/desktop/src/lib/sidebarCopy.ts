@@ -35,9 +35,10 @@ export function sidebarBrandSubtitle(opts: {
     return `Docker · ${opts.dockerKind === "docker" ? "local" : "mock"}`;
   }
   if (opts.section === "slack") {
-    return opts.slackTeam?.trim() ? `Slack · ${opts.slackTeam.trim()}` : "Slack";
+    // Never repeat the section title as its own subtitle.
+    return opts.slackTeam?.trim() ? opts.slackTeam.trim() : "Not signed in";
   }
-  if (opts.section === "grafana") return "Grafana";
+  if (opts.section === "grafana") return "";
   const swarm = opts.mode === "swarm";
   if (opts.section === "agents") {
     const noun = swarm

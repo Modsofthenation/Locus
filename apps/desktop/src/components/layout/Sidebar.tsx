@@ -66,7 +66,6 @@ import { clampSplit, stepSplitValue } from "@/lib/splitter";
 import {
   IconAgents,
   IconChevron,
-  IconClock,
   IconGear,
   IconPlus,
   IconRefresh,
@@ -921,10 +920,8 @@ export function Sidebar() {
 
   const primaryAction =
     state.section === "automations" ? (
-      primaryButton(
-        swarmMode ? "New routine" : "New job",
-        () => dispatch({ type: "newAutomation", open: true }),
-        <IconClock />,
+      primaryButton(swarmMode ? "New routine" : "New job", () =>
+        dispatch({ type: "newAutomation", open: true }),
       )
     ) : state.section === "board" ? (
       primaryButton("New board", () => dispatch({ type: "selectBoard", id: null }))
@@ -991,7 +988,7 @@ export function Sidebar() {
     ) : state.section === "docker" ? (
       <>
         <button
-          className="btn icon ghost"
+          className="btn"
           title="Refresh containers"
           aria-label="Refresh containers"
           onClick={() => {
@@ -1019,7 +1016,7 @@ export function Sidebar() {
             );
           }}
         >
-          <IconRefresh />
+          <IconRefresh /> <span>Refresh</span>
         </button>
         {state.dockerView === "containers" && pickedLive.length ? (
           <button
@@ -2424,25 +2421,33 @@ export function Sidebar() {
               Show hidden ({hiddenTeammateCount})
             </label>
           ) : null}
+          {/* The header already shows the total; the footer only counts search matches. */}
           {state.section === "codebase" ? (
-            <span className="hint">
-              {repos.length} {repos.length === 1 ? "repo" : "repos"}
-            </span>
+            query.trim() ? (
+              <span className="hint">
+                {repos.length} of {state.repos.length} {state.repos.length === 1 ? "repo" : "repos"}
+              </span>
+            ) : null
           ) : state.section === "board" ? (
-            <span className="hint">
-              {boards.length} {boards.length === 1 ? "board" : "boards"}
-            </span>
+            query.trim() ? (
+              <span className="hint">
+                {boards.length} of {state.boards.length}{" "}
+                {state.boards.length === 1 ? "board" : "boards"}
+              </span>
+            ) : null
           ) : state.section === "project" ? (
-            <span className="hint">
-              {projects.length}{" "}
-              {swarmMode
-                ? projects.length === 1
-                  ? "team"
-                  : "teams"
-                : projects.length === 1
-                  ? "project"
-                  : "projects"}
-            </span>
+            !query.trim() ? null : (
+              <span className="hint">
+                {projects.length}{" "}
+                {swarmMode
+                  ? projects.length === 1
+                    ? "team"
+                    : "teams"
+                  : projects.length === 1
+                    ? "project"
+                    : "projects"}
+              </span>
+            )
           ) : state.section === "slack" ? (
             <span className="hint">
               {slackBooting
@@ -2453,8 +2458,20 @@ export function Sidebar() {
             </span>
           ) : state.section === "docker" ? (
             <span className="hint docker-daemon">
-              <span className={state.dockerKind === "docker" && state.connected ? "ok" : ""}>
-                {state.dockerKind === "docker" ? "daemon ok" : "daemon mock"}
+              <span
+                className={
+                  state.dockerKind === "docker" && state.dockerReady && state.connected
+                    ? "ok"
+                    : state.dockerKind === "docker"
+                      ? "warn-text"
+                      : ""
+                }
+              >
+                {state.dockerKind !== "docker"
+                  ? "daemon mock"
+                  : state.dockerReady
+                    ? "daemon ok"
+                    : "daemon down"}
               </span>
               {state.dockerView === "swarm" ? (
                 <span>

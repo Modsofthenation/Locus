@@ -350,3 +350,18 @@ describe("compareSessionsForList", () => {
     ]);
   });
 });
+
+describe("isWaitingOnGuestStart after a failed start", () => {
+  it("stops waiting once the thread records that the container never became ready", () => {
+    expect(
+      isWaitingOnGuestStart([
+        { role: "user", content: "go" },
+        { role: "system", content: "Starting the container." },
+        {
+          role: "system",
+          content: "The container did not become ready, so this turn did not run.",
+        },
+      ]),
+    ).toBe(false);
+  });
+});

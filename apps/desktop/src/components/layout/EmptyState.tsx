@@ -157,8 +157,13 @@ export function EmptyState() {
       : undefined;
   const launchHostDir = hostChat && workspace.kind === "host" ? workspace.path : undefined;
   const mockDocker = effectiveRuntime === "docker" && state.dockerKind === "mock" && !backendId;
+  const dockerDown =
+    effectiveRuntime === "docker" &&
+    state.dockerKind === "docker" &&
+    !state.dockerReady &&
+    !backendId;
   const mockHypervisor = effectiveRuntime === "vm" && !backendId && state.hypervisorKind === "mock";
-  const engineBlocked = mockDocker || mockHypervisor;
+  const engineBlocked = mockDocker || dockerDown || mockHypervisor;
   const canCreate =
     Boolean(state.config) &&
     !engineBlocked &&
@@ -191,6 +196,13 @@ export function EmptyState() {
   useEffect(() => {
     if (hostAgentsLocked && runtime === "host") setRuntime("docker");
   }, [hostAgentsLocked, runtime]);
+
+  // Docker CLI installed but the daemon is down: start on Host instead of a launch that fails.
+  useEffect(() => {
+    if (state.dockerKind === "docker" && !state.dockerReady && !hostAgentsLocked) {
+      setRuntime((current) => (current === "docker" ? "host" : current));
+    }
+  }, [state.dockerKind, state.dockerReady, hostAgentsLocked]);
 
   useEffect(() => {
     const defaults = resolveAgentDefaults(state.config, os, loadLastAgent());
@@ -579,21 +591,31 @@ export function EmptyState() {
           )}
           {showEngineCallout && (
             <SetupBanner
-              title={mockDocker ? "Docker isn't installed" : "QEMU isn't installed"}
+              title={
+                dockerDown
+                  ? "Docker isn't running"
+                  : mockDocker
+                    ? "Docker isn't installed"
+                    : "QEMU isn't installed"
+              }
               detail={
-                mockDocker
-                  ? "Agents cannot run on a mock engine"
-                  : "VM agents cannot run on a mock hypervisor"
+                dockerDown
+                  ? "Start the Docker daemon, or run this agent on Host"
+                  : mockDocker
+                    ? "Agents cannot run on a mock engine"
+                    : "VM agents cannot run on a mock hypervisor"
               }
               testId="engine-setup-banner"
             >
-              <button
-                type="button"
-                className="btn small primary"
-                onClick={() => dispatch({ type: "setupOpen", open: true })}
-              >
-                {mockDocker ? "Install Docker" : "Install QEMU"}
-              </button>
+              {dockerDown ? null : (
+                <button
+                  type="button"
+                  className="btn small primary"
+                  onClick={() => dispatch({ type: "setupOpen", open: true })}
+                >
+                  {mockDocker ? "Install Docker" : "Install QEMU"}
+                </button>
+              )}
               <button type="button" className="btn small" onClick={useHostInstead}>
                 Use Host instead
               </button>

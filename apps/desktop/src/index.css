@@ -610,21 +610,30 @@ button:disabled {
   text-transform: uppercase;
   color: var(--muted);
 }
-.rail-peek-item {
+/* Beat the 36px `.side-rail button` sizing: peek rows are full-width list items. */
+.rail-peek-item,
+.side-rail .rail-peek .rail-peek-item {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  place-items: initial;
   gap: 2px;
   width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 36px;
   padding: var(--space-1-5) var(--space-2-5);
   border: 0;
+  border-radius: 0;
   background: transparent;
-  color: inherit;
+  color: var(--text);
   text-align: left;
   cursor: pointer;
 }
 .rail-peek-item:hover,
-.rail-peek-item:focus-visible {
+.rail-peek-item:focus-visible,
+.side-rail .rail-peek .rail-peek-item:hover,
+.side-rail .rail-peek .rail-peek-item:focus-visible {
   background: var(--hover);
 }
 .rail-peek-item .title-text {
@@ -875,7 +884,8 @@ button:disabled {
   text-overflow: clip;
 }
 @container side-main (max-width: 300px) {
-  .brand-actions {
+  /* Only the product-mode toggle needs its own row; a lone ⋯ menu stays beside the title. */
+  .brand-actions:has(.product-mode-toggle) {
     flex-basis: 100%;
     margin-left: 0;
   }
@@ -2596,7 +2606,7 @@ label.search-wrap.chat-find-wrap > .search-icon {
   width: 16px;
   display: flex;
   justify-content: flex-start;
-  padding: 10px 0 10px 6px;
+  padding: 10px 0 10px 2px;
   cursor: pointer;
   touch-action: none;
   user-select: none;
@@ -2626,7 +2636,7 @@ label.search-wrap.chat-find-wrap > .search-icon {
   position: absolute;
   left: 0;
   top: 50%;
-  width: 11px;
+  width: 9px;
   height: 2px;
   margin-top: -1px;
   border-radius: 1px;
@@ -12222,15 +12232,15 @@ details.advanced > .hint {
 .feature-nudge {
   flex: none;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-2);
   margin: var(--space-2) var(--space-3) 0;
-  padding: var(--space-2) var(--space-2-5);
+  padding: var(--space-1-5) var(--space-1-5) var(--space-1-5) var(--space-2-5);
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: var(--bg-1);
-  font-size: var(--type-md);
+  font-size: var(--type-sm);
   color: var(--muted);
 }
 .chat > .net-banner {
@@ -12245,8 +12255,20 @@ details.advanced > .hint {
   white-space: nowrap;
 }
 .feature-nudge span {
-  flex: 1 1 12rem;
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feature-nudge .feature-nudge-dismiss {
+  padding: var(--space-1);
+  min-width: 28px;
+  min-height: 28px;
+}
+.feature-nudge .feature-nudge-dismiss svg {
+  width: 12px;
+  height: 12px;
 }
 
 .settings-page {
@@ -18446,6 +18468,27 @@ button.pill {
   --chrome: rgba(248, 250, 252, 0.82);
   --wash: linear-gradient(160deg, #f8fafc 0%, #d0e0f4 48%, #e0d4f0 100%);
 }
+/* Terminal family: every [data-theme-terminal] theme shares the window
+   chrome, scanlines, and mono type. Palettes tune it with --term-* vars. */
+[data-theme-terminal] {
+  --font: "IBM Plex Mono", "Cascadia Code", ui-monospace, monospace;
+  --term-scan: rgba(0, 0, 0, 0.18);
+  --term-scan-opacity: 0.45;
+  --term-frame: color-mix(in srgb, var(--accent) 32%, var(--line-strong));
+  --term-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 18px 50px rgba(0, 0, 0, 0.55);
+  --term-dot-close: #ff5f57;
+  --term-dot-min: #febc2e;
+  --term-dot-max: #28c840;
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --radius-control: 3px;
+  --radius-pane: 4px;
+}
+
 [data-theme="console"] {
   color-scheme: dark;
   --bg: #0c0a06;
@@ -18471,39 +18514,262 @@ button.pill {
   --term: #080604;
   --term-fg: #f6dca8;
   --chrome: rgba(12, 10, 6, 0.86);
+  --term-glow: rgba(255, 176, 32, 0.04);
+  --term-title: "locus \2014 tty";
   --font: "IBM Plex Mono", "Cascadia Code", ui-monospace, monospace;
-  --radius-xs: 2px;
-  --radius-sm: 3px;
-  --radius-md: 4px;
-  --radius: 4px;
-  --radius-lg: 6px;
-  --radius-xl: 8px;
-  --radius-control: 3px;
-  --radius-pane: 4px;
+}
+[data-theme="greenscreen"] {
+  color-scheme: dark;
+  --bg: #050a06;
+  --bg-1: #0a130b;
+  --bg-2: #0f1a10;
+  --bg-3: #18281a;
+  --line: rgba(77, 255, 124, 0.14);
+  --line-strong: rgba(77, 255, 124, 0.28);
+  --text: #b8ffc8;
+  --muted: #7ed49a;
+  --faint: #4e8a60;
+  --accent: #4dff7c;
+  --accent-2: #ffb020;
+  --accent-ink: #021a08;
+  --accent-deep: #2ed860;
+  --danger: #ff6e5a;
+  --ok: #4dff7c;
+  --warn: #ffcc66;
+  --brand-hi: #b8ffc8;
+  --brand-mid: #4dff7c;
+  --brand-lo: #ffb020;
+  --desktop: #030604;
+  --term: #030604;
+  --term-fg: #b8ffc8;
+  --chrome: rgba(5, 10, 6, 0.86);
+  --term-glow: rgba(77, 255, 124, 0.05);
+  --term-title: "locus \2014 tty1";
+}
+[data-theme="whitescreen"] {
+  color-scheme: dark;
+  --bg: #08090b;
+  --bg-1: #101216;
+  --bg-2: #16181c;
+  --bg-3: #22262c;
+  --line: rgba(232, 238, 246, 0.14);
+  --line-strong: rgba(232, 238, 246, 0.28);
+  --text: #e8eef6;
+  --muted: #aab4c2;
+  --faint: #707a88;
+  --accent: #e8eef6;
+  --accent-2: #7ab8ff;
+  --accent-ink: #0a0c10;
+  --accent-deep: #c4ccd8;
+  --danger: #ff7a6a;
+  --ok: #7edc9a;
+  --warn: #ffd27a;
+  --brand-hi: #ffffff;
+  --brand-mid: #e8eef6;
+  --brand-lo: #7ab8ff;
+  --desktop: #050608;
+  --term: #050608;
+  --term-fg: #e8eef6;
+  --chrome: rgba(8, 9, 11, 0.86);
+  --term-glow: rgba(232, 238, 246, 0.03);
+  --term-title: "locus \2014 tty2";
+}
+[data-theme="cathode"] {
+  color-scheme: dark;
+  --bg: #04090c;
+  --bg-1: #08131a;
+  --bg-2: #0c1a20;
+  --bg-3: #14282f;
+  --line: rgba(77, 232, 255, 0.14);
+  --line-strong: rgba(77, 232, 255, 0.28);
+  --text: #c8f6ff;
+  --muted: #84c8d8;
+  --faint: #508896;
+  --accent: #4de8ff;
+  --accent-2: #ff8ac8;
+  --accent-ink: #02141a;
+  --accent-deep: #20c4e0;
+  --danger: #ff6e7a;
+  --ok: #6ef0a8;
+  --warn: #ffd27a;
+  --brand-hi: #c8f6ff;
+  --brand-mid: #4de8ff;
+  --brand-lo: #ff8ac8;
+  --desktop: #02060a;
+  --term: #02060a;
+  --term-fg: #c8f6ff;
+  --chrome: rgba(4, 9, 12, 0.86);
+  --term-glow: rgba(77, 232, 255, 0.05);
+  --term-title: "locus \2014 crt";
+}
+[data-theme="darkroom"] {
+  color-scheme: dark;
+  --bg: #0a0404;
+  --bg-1: #120707;
+  --bg-2: #1a0a0a;
+  --bg-3: #2a1010;
+  --line: rgba(255, 90, 74, 0.14);
+  --line-strong: rgba(255, 90, 74, 0.28);
+  --text: #ffc8bc;
+  --muted: #e08a7c;
+  --faint: #a05a50;
+  --accent: #ff5a4a;
+  --accent-2: #ffb07a;
+  --accent-ink: #1a0402;
+  --accent-deep: #e03a2c;
+  --danger: #ff3a7a;
+  --ok: #d8e070;
+  --warn: #ffcc66;
+  --brand-hi: #ffc8bc;
+  --brand-mid: #ff5a4a;
+  --brand-lo: #ffb07a;
+  --desktop: #060202;
+  --term: #060202;
+  --term-fg: #ffc8bc;
+  --chrome: rgba(10, 4, 4, 0.86);
+  --term-glow: rgba(255, 90, 74, 0.06);
+  --term-title: "locus \2014 safelight";
+}
+[data-theme="cobalt"] {
+  color-scheme: dark;
+  --bg: #00186a;
+  --bg-1: #001e7a;
+  --bg-2: #002a8c;
+  --bg-3: #0838a0;
+  --line: rgba(200, 220, 255, 0.14);
+  --line-strong: rgba(255, 225, 74, 0.28);
+  --text: #f0f4ff;
+  --muted: #b8c8f0;
+  --faint: #8aa0d8;
+  --accent: #ffe14a;
+  --accent-2: #5ef0f0;
+  --accent-ink: #1a1400;
+  --accent-deep: #e8c420;
+  --danger: #ff8a7a;
+  --ok: #7ef09a;
+  --warn: #ffd27a;
+  --brand-hi: #fff4b0;
+  --brand-mid: #ffe14a;
+  --brand-lo: #5ef0f0;
+  --desktop: #000c40;
+  --term: #000c40;
+  --term-fg: #f0f4ff;
+  --chrome: rgba(0, 24, 106, 0.88);
+  --term-glow: rgba(255, 225, 74, 0.04);
+  --term-title: "locus \2014 edit";
+  --term-scan: rgba(0, 0, 30, 0.22);
+}
+[data-theme="uplink"] {
+  color-scheme: dark;
+  --bg: #0c0612;
+  --bg-1: #140a1c;
+  --bg-2: #1c1028;
+  --bg-3: #2a183a;
+  --line: rgba(255, 90, 216, 0.14);
+  --line-strong: rgba(255, 90, 216, 0.28);
+  --text: #f8d0f0;
+  --muted: #c890c0;
+  --faint: #8a6088;
+  --accent: #ff5ad8;
+  --accent-2: #7ae8ff;
+  --accent-ink: #1a0216;
+  --accent-deep: #e030b8;
+  --danger: #ff6e6e;
+  --ok: #7ef0a8;
+  --warn: #ffd27a;
+  --brand-hi: #ffc0f0;
+  --brand-mid: #ff5ad8;
+  --brand-lo: #7ae8ff;
+  --desktop: #08040c;
+  --term: #08040c;
+  --term-fg: #f8d0f0;
+  --chrome: rgba(12, 6, 18, 0.86);
+  --term-glow: rgba(255, 90, 216, 0.05);
+  --term-title: "locus \2014 dial-up";
+}
+[data-theme="mainframe"] {
+  color-scheme: dark;
+  --bg: #020604;
+  --bg-1: #06100a;
+  --bg-2: #0a140e;
+  --bg-3: #122218;
+  --line: rgba(60, 240, 140, 0.14);
+  --line-strong: rgba(60, 240, 140, 0.28);
+  --text: #9cf8c0;
+  --muted: #66c890;
+  --faint: #3e8a5e;
+  --accent: #3cf08c;
+  --accent-2: #5ec8ff;
+  --accent-ink: #021408;
+  --accent-deep: #20c870;
+  --danger: #ff6aa8;
+  --ok: #3cf08c;
+  --warn: #fff070;
+  --brand-hi: #9cf8c0;
+  --brand-mid: #3cf08c;
+  --brand-lo: #5ec8ff;
+  --desktop: #010402;
+  --term: #010402;
+  --term-fg: #9cf8c0;
+  --chrome: rgba(2, 6, 4, 0.86);
+  --term-glow: rgba(60, 240, 140, 0.04);
+  --term-title: "locus \2014 3270";
+}
+[data-theme="teletype"] {
+  color-scheme: light;
+  --bg: #f2eee2;
+  --bg-1: #fbf8ee;
+  --bg-2: #e6e0d0;
+  --bg-3: #d6cebc;
+  --line: rgba(28, 26, 22, 0.14);
+  --line-strong: rgba(176, 42, 32, 0.28);
+  --text: #1c1a16;
+  --muted: #4c463c;
+  --faint: #6e675a;
+  --accent: #b02a20;
+  --accent-2: #2a4a8a;
+  --accent-ink: #fbf8ee;
+  --accent-deep: #8c1e16;
+  --danger: #b3262e;
+  --ok: #2f7a45;
+  --warn: #8a5a00;
+  --shadow: 0 24px 80px rgba(28, 26, 22, 0.1);
+  --hover: rgba(28, 26, 22, 0.05);
+  --pill: rgba(28, 26, 22, 0.04);
+  --brand-hi: #e08a80;
+  --brand-mid: #b02a20;
+  --brand-lo: #2a4a8a;
+  --desktop: #d8d0bc;
+  --term: #1c1a16;
+  --term-fg: #f2eee2;
+  --chrome: rgba(251, 248, 238, 0.86);
+  --term-glow: rgba(176, 42, 32, 0.02);
+  --term-title: "locus \2014 tty33";
+  --term-scan: rgba(28, 26, 22, 0.05);
+  --term-shadow: 0 0 0 1px rgba(28, 26, 22, 0.18), 0 18px 50px rgba(28, 26, 22, 0.18);
 }
 
-html[data-theme="console"] {
+html[data-theme-terminal] {
   background: var(--desktop);
 }
-html[data-theme="console"] body {
+html[data-theme-terminal] body {
   padding: 10px;
   background: var(--desktop);
   letter-spacing: 0;
 }
-html[data-theme="console"] #root {
+html[data-theme-terminal] #root {
   position: relative;
   padding-top: 28px;
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line-strong));
+  border: 1px solid var(--term-frame);
   border-radius: 10px;
   overflow: hidden;
   background: var(--bg);
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.55),
-    0 18px 50px rgba(0, 0, 0, 0.55),
-    inset 0 0 80px rgba(255, 176, 32, 0.04);
+    var(--term-shadow),
+    inset 0 0 80px var(--term-glow);
 }
-html[data-theme="console"] #root::before {
-  content: "locus \2014 tty";
+html[data-theme-terminal] #root::before {
+  content: var(--term-title, "locus \2014 tty");
   position: absolute;
   top: 0;
   right: 0;
@@ -18515,74 +18781,74 @@ html[data-theme="console"] #root::before {
   justify-content: center;
   border-bottom: 1px solid var(--line);
   background:
-    radial-gradient(circle at 14px 14px, #ff5f57 4.5px, transparent 5px),
-    radial-gradient(circle at 32px 14px, #febc2e 4.5px, transparent 5px),
-    radial-gradient(circle at 50px 14px, #28c840 4.5px, transparent 5px), var(--bg-1);
+    radial-gradient(circle at 14px 14px, var(--term-dot-close) 4.5px, transparent 5px),
+    radial-gradient(circle at 32px 14px, var(--term-dot-min) 4.5px, transparent 5px),
+    radial-gradient(circle at 50px 14px, var(--term-dot-max) 4.5px, transparent 5px), var(--bg-1);
   color: var(--muted);
   font-family: var(--mono);
   font-size: var(--type-xs);
   font-weight: var(--weight-medium);
   letter-spacing: 0.06em;
 }
-html[data-theme="console"]::after,
-.theme-preview[data-theme="console"]::after,
-.theme-thumb[data-theme="console"]::after {
+html[data-theme-terminal]::after,
+.theme-preview[data-theme-terminal]::after,
+.theme-thumb[data-theme-terminal]::after {
   content: "";
   pointer-events: none;
   background: repeating-linear-gradient(
     to bottom,
     transparent 0,
     transparent 2px,
-    rgba(0, 0, 0, 0.18) 2px,
-    rgba(0, 0, 0, 0.18) 3px
+    var(--term-scan) 2px,
+    var(--term-scan) 3px
   );
 }
-html[data-theme="console"]::after {
+html[data-theme-terminal]::after {
   position: fixed;
   inset: 0;
   z-index: var(--z-crash);
-  opacity: 0.45;
+  opacity: var(--term-scan-opacity);
 }
-.theme-preview[data-theme="console"],
-.theme-thumb[data-theme="console"] {
+.theme-preview[data-theme-terminal],
+.theme-thumb[data-theme-terminal] {
   position: relative;
 }
-.theme-preview[data-theme="console"]::after,
-.theme-thumb[data-theme="console"]::after {
+.theme-preview[data-theme-terminal]::after,
+.theme-thumb[data-theme-terminal]::after {
   position: absolute;
   inset: 0;
   z-index: 1;
-  opacity: 0.55;
+  opacity: calc(var(--term-scan-opacity) + 0.1);
 }
-.theme-preview[data-theme="console"] .theme-preview-chrome em::before {
+.theme-preview[data-theme-terminal] .theme-preview-chrome em::before {
   content: "~/ ";
   color: var(--accent);
 }
 
 @media (max-width: 560px) {
-  html[data-theme="console"] body {
+  html[data-theme-terminal] body {
     padding: 0;
   }
-  html[data-theme="console"] #root {
+  html[data-theme-terminal] #root {
     padding-top: 0;
     border: 0;
     border-radius: 0;
     box-shadow: none;
   }
-  html[data-theme="console"] #root::before {
+  html[data-theme-terminal] #root::before {
     content: none;
   }
 }
-html[data-shell="mobile"][data-theme="console"] body {
+html[data-shell="mobile"][data-theme-terminal] body {
   padding: 0;
 }
-html[data-shell="mobile"][data-theme="console"] #root {
+html[data-shell="mobile"][data-theme-terminal] #root {
   padding-top: 0;
   border: 0;
   border-radius: 0;
   box-shadow: none;
 }
-html[data-shell="mobile"][data-theme="console"] #root::before {
+html[data-shell="mobile"][data-theme-terminal] #root::before {
   content: none;
 }
 

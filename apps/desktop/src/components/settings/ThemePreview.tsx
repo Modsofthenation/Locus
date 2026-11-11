@@ -26,6 +26,7 @@ export function ThemePreview({
         data-theme={id}
         data-testid="theme-preview"
         {...(opt.gradient ? { "data-theme-gradient": "" } : {})}
+        {...(opt.terminal ? { "data-theme-terminal": "" } : {})}
         inert
       >
         <div className="theme-preview-chrome">

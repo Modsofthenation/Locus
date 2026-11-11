@@ -2316,7 +2316,7 @@ describe("themes", () => {
     expect(resolveTheme("nord")).toBe("nord");
     expect(resolveTheme()).toBe("ember");
     expect(resolveTheme("not-a-theme")).toBe("ember");
-    expect(THEME_OPTIONS).toHaveLength(98);
+    expect(THEME_OPTIONS).toHaveLength(106);
     expect(THEME_OPTIONS.map((t) => t.id)).toEqual([
       "ember",
       "midnight",
@@ -2416,6 +2416,14 @@ describe("themes", () => {
       "peony",
       "glaze",
       "console",
+      "greenscreen",
+      "whitescreen",
+      "cathode",
+      "darkroom",
+      "cobalt",
+      "uplink",
+      "mainframe",
+      "teletype",
     ]);
     expect(THEME_OPTIONS.filter((t) => t.chatScene).map((t) => t.id)).toEqual([
       "cosmos",
@@ -2460,6 +2468,7 @@ describe("themes", () => {
       "grove",
       "peony",
       "glaze",
+      "teletype",
     ]);
     expect(THEME_OPTIONS.filter((t) => t.contrast).map((t) => t.id)).toEqual([
       "contrast",
@@ -2547,6 +2556,10 @@ describe("themes", () => {
     expect(themeFamily(themeOption("beacon"))).toBe("contrast");
     expect(themeFamily(themeOption("horizon"))).toBe("gradient");
     expect(themeFamily(themeOption("daybreak"))).toBe("gradient");
+    expect(themeFamily(themeOption("console"))).toBe("terminal");
+    expect(themeFamily(themeOption("teletype"))).toBe("terminal");
+    expect(themeFamilyLabel("terminal")).toBe("Terminal");
+    expect(filterThemeOptions("terminal").every((opt) => opt.terminal)).toBe(true);
     expect(themeFamilyLabel("contrast")).toBe("Contrast");
     expect(themeFamilyLabel("gradient")).toBe("Gradient");
   });

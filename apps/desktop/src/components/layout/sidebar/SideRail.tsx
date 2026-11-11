@@ -84,6 +84,8 @@ export function SideRail(props: {
 
   function showPeek(target: "inbox" | UiSection, el: HTMLElement) {
     if (!props.collapsed || props.swarmMode) return;
+    // Hover previews only: on touch a tap fires mouseenter and the flyout would cover the page.
+    if (!canHover()) return;
     clearHide();
     const rail = el.closest(".side-rail");
     const top = el.getBoundingClientRect().top - (rail?.getBoundingClientRect().top ?? 0);
@@ -404,6 +406,11 @@ export function SideRail(props: {
       ) : null}
     </div>
   );
+}
+
+function canHover(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
+  return window.matchMedia("(hover: hover)").matches;
 }
 
 export function shortcutCaption(index: number): string | undefined {

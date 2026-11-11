@@ -1628,3 +1628,21 @@ describe("formatWhen", () => {
     expect(formatWhen("2026-08-17T12:00:00.000Z")).not.toBe("—");
   });
 });
+
+describe("dockerReady", () => {
+  const hydrate = (extra: Partial<Extract<Action, { type: "hydrate" }>>) =>
+    reducer(initialState, {
+      type: "hydrate",
+      config: { ...initialState.config!, providers: [] } as never,
+      sessions: [],
+      vms: [],
+      ...extra,
+    });
+  it("treats an installed CLI whose daemon did not answer as not ready", () => {
+    expect(hydrate({ dockerKind: "docker", dockerReady: false }).dockerReady).toBe(false);
+  });
+  it("assumes ready when an older server only reports the docker kind", () => {
+    expect(hydrate({ dockerKind: "docker" }).dockerReady).toBe(true);
+    expect(hydrate({ dockerKind: "mock" }).dockerReady).toBe(false);
+  });
+});

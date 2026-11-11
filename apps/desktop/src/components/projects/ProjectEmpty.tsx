@@ -100,20 +100,28 @@ export function ProjectEmpty() {
           }
         />
         {hubMode ? (
-          <div className="swarm-start-modes" role="group" aria-label="Start a Swarm conversation">
+          <div
+            className="runtime-toggle swarm-start-modes"
+            role="tablist"
+            aria-label="Start a Swarm conversation"
+          >
             <button
               type="button"
-              className={`btn small${groupChat ? "" : " primary"}`}
+              role="tab"
+              aria-selected={!groupChat}
+              className={groupChat ? "" : "active"}
               onClick={() => {
                 setGroupChat(false);
                 setError(null);
               }}
             >
-              New team
+              Team
             </button>
             <button
               type="button"
-              className={`btn small${groupChat ? " primary" : ""}`}
+              role="tab"
+              aria-selected={groupChat}
+              className={groupChat ? "active" : ""}
               data-testid="new-group-chat"
               onClick={() => {
                 setGroupChat(true);
@@ -121,7 +129,7 @@ export function ProjectEmpty() {
                 setError(null);
               }}
             >
-              New group chat
+              Group chat
             </button>
           </div>
         ) : null}

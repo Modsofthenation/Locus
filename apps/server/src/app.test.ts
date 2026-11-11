@@ -6691,7 +6691,7 @@ describe("golden images, media, and abort", () => {
         return new Response("Not Found", { status: 404 });
       }) as typeof fetch,
     });
-    const res = await app.request("/api/updates?current=0.19.0");
+    const res = await app.request("/api/updates?current=0.20.0");
     expect(res.status).toBe(200);
     const body = (await res.json()) as { status: string; message?: string };
     expect(body.status).toBe("unavailable");

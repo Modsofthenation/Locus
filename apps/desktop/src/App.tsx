@@ -277,6 +277,7 @@ export function App() {
         gameStyles: gameCatalog.styles,
         hypervisorKind: health.hypervisor === "qemu" ? "qemu" : "mock",
         dockerKind: health.docker === "docker" ? "docker" : "mock",
+        dockerReady: health.docker === "docker" && health.dockerReady !== false,
         setup: setup ?? undefined,
       });
       seenGatesRef.current = new Set(sessions.flatMap((session) => needsYouKeys(session)));

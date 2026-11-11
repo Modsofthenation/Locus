@@ -1527,12 +1527,8 @@ export function Settings() {
             {(draft.workers ?? []).length === 0 ? (
               <SettingsEmpty
                 title="No workers yet"
-                hint="Paste a locus-worker:add line, or add a worker card."
-              >
-                <button type="button" className="btn small" onClick={addWorker}>
-                  Add worker
-                </button>
-              </SettingsEmpty>
+                hint="Paste a locus-worker:add line above, or use Add worker to fill one in by hand."
+              />
             ) : (
               (draft.workers ?? []).map((row, i) => (
                 <WorkerCard
@@ -1707,34 +1703,42 @@ export function Settings() {
             <p className="hint">
               Same accounts as Settings → Git. Restricted jail allowlists those hosts.
             </p>
+            {draft.forges.some((f) => f.token) ? (
+              <ul className="integration-forge-list">
+                {draft.forges
+                  .filter((f) => f.token)
+                  .map((f) => {
+                    const kind = forgeLabel(f.kind);
+                    // Built-in accounts are named after their forge; don't print "GitHub · GitHub".
+                    const name =
+                      f.name.trim() && f.name.trim().toLowerCase() !== kind.toLowerCase()
+                        ? `${kind} · ${f.name.trim()}`
+                        : kind;
+                    return (
+                      <li key={f.id}>
+                        <strong>{name}</strong>
+                        <span className="hint">
+                          {f.authMethod === "oauth" && f.username
+                            ? `Signed in as ${f.username}`
+                            : "Connected"}
+                        </span>
+                      </li>
+                    );
+                  })}
+              </ul>
+            ) : (
+              <p className="hint">
+                No Git accounts connected yet. Add GitHub, GitLab, Bitbucket, Gitea, Forgejo, or
+                Azure DevOps in Git.
+              </p>
+            )}
             <button
               type="button"
-              className="btn small"
+              className="btn small integration-forge-open"
               onClick={() => dispatch({ type: "settingsTab", tab: "git" })}
             >
               Open Git
             </button>
-            {draft.forges.length ? (
-              <p className="hint">
-                {draft.forges
-                  .map(
-                    (f) =>
-                      `${forgeLabel(f.kind)} · ${f.name}${
-                        f.token
-                          ? f.authMethod === "oauth" && f.username
-                            ? ` · signed in as ${f.username}`
-                            : " · connected"
-                          : ""
-                      }`,
-                  )
-                  .join(" · ")}
-              </p>
-            ) : (
-              <p className="hint">
-                No Git accounts yet. Add GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps
-                in Git.
-              </p>
-            )}
             <h3>Work tools</h3>
             {draft.managedPolicy?.policy.tokenFreeMode ? (
               <p className="hint">
@@ -2138,7 +2142,7 @@ export function Settings() {
                   <label>Distiller provider id</label>
                   <input
                     value={draft.brain?.distillerProviderId ?? ""}
-                    placeholder="openai / anthropic / … (empty = first usable)"
+                    placeholder="Empty uses the first usable provider"
                     disabled={policyControlLocked(draft, "brainDistiller")}
                     onChange={(e) =>
                       setDraft({

@@ -906,6 +906,21 @@ export class SessionService {
     return this.docker.kind;
   }
 
+  private dockerReadyCache: { at: number; ready: Promise<boolean> } | null = null;
+
+  /** Whether the container daemon answers (`docker info`), cached for a few seconds. */
+  dockerReady(): Promise<boolean> {
+    if (this.docker.kind !== "docker") return Promise.resolve(false);
+    const now = Date.now();
+    if (!this.dockerReadyCache || now - this.dockerReadyCache.at > 10_000) {
+      this.dockerReadyCache = {
+        at: now,
+        ready: this.docker.available().catch(() => false),
+      };
+    }
+    return this.dockerReadyCache.ready;
+  }
+
   async resetAll(): Promise<void> {
     const sessions = await this.list();
     await Promise.all(sessions.map((session) => this.abortChat(session.id).catch(() => undefined)));

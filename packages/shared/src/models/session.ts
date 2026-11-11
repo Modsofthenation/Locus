@@ -126,6 +126,15 @@ export function isWaitingOnGuestStart(
   for (const message of after) {
     if (message.role === "tool" || (message.toolCalls?.length ?? 0) > 0) return false;
     if (message.role === "system" && isGuestReadyNote(message.content)) return false;
+    // The guest failed to start; the thread has its error, so stop showing "Waiting for the guest".
+    if (
+      message.role === "system" &&
+      /did not become ready|failed to connect to the docker|Cannot connect to the Docker daemon/i.test(
+        message.content,
+      )
+    ) {
+      return false;
+    }
     if (
       message.role === "assistant" &&
       message.content.trim() &&

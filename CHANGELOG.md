@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.20.0 — 2026-11-11
+
+Eight new Terminal themes, a UI/UX polish pass on Swarm, the composer, and empty states, and launchers that check Docker is actually running before they start. Settings → About is **0.20.0**.
+
+**Terminal themes.** Settings → Appearance adds a **Terminal** filter and group. Console is joined by eight terminal-window themes that share its titlebar, scanlines, and monospace type: Green Screen, White Phosphor, Cathode, Darkroom, Cobalt, Uplink, Mainframe, and Teletype (light).
+
+**Docker readiness.** The Agents, Design, and Games launchers now check that the Docker daemon is answering before they start. When it isn't, they start on Host and say "Docker isn't running" instead of launching and failing, and the Docker footer reports when the daemon is down.
+
+**UI/UX pass.** The Swarm sidebar no longer runs under the chat, narrow windows get the same rail and slide-over list as Developer, and teammate rows show full names. In the composer, the model picker shrinks instead of covering Stop, Queue, and Send. Empty states, Settings spacing, and the setup screen are more consistent, and the phone top bar is tidier.
+
+**Fixes.** Repeated Docker errors and a stale "Waiting for the guest…" no longer linger in the thread, and "Loading local model…" no longer shows while a reply is streaming. The scroll tick rail no longer covers message text, collapsed-rail peek titles show in full, and Settings → Integrations lists each forge once.
+
 ## 0.19.0 — 2026-11-11
 
 Inbox and a resizable sidebar with pinnable rail sections, the Console theme, a UI/UX polish pass across every section, and more reliable Jobs, worker uploads, and desktop updates. Settings → About is **0.19.0**.

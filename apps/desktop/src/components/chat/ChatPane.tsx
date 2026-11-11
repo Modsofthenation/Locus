@@ -127,6 +127,7 @@ import {
   mergeComposerFiles,
 } from "./ComposerFiles";
 import { ModelPicker } from "@/components/settings/ModelPicker";
+import { supersededPlainErrorIds } from "@/lib/automations";
 import { SubagentPicker } from "./SubagentPicker";
 import { ContextMeter } from "./ContextMeter";
 import { PlanCard } from "./PlanCard";
@@ -297,7 +298,10 @@ export function ChatPane() {
     },
     [dispatch, state.selectedId, state.sessions],
   );
-  const hideLifecycleIds = useMemo(() => supersededGuestLifecycleIds(messages), [messages]);
+  const hideLifecycleIds = useMemo(
+    () => new Set([...supersededGuestLifecycleIds(messages), ...supersededPlainErrorIds(messages)]),
+    [messages],
+  );
   const findActiveId = findHits[Math.min(findIndex, Math.max(0, findHits.length - 1))];
   const newMarkerId = visitMarkerId(state.chatNewVisit, sessionId);
 
@@ -948,9 +952,12 @@ export function ChatPane() {
     : turning
       ? (state.thinking[session.id] ?? "")
       : "";
+  // Tokens already arrived: the local server has loaded the model.
+  const streamedText = last?.role === "assistant" && Boolean(last.content.trim());
   const localWaitLabel =
     !viewing &&
     turning &&
+    !streamedText &&
     !waitingGuest &&
     !waitingStartNote &&
     !waitingClone &&

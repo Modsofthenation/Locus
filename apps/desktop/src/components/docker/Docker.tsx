@@ -1,3 +1,4 @@
+import { altKeyDisplay, shortcutDisplay } from "@/lib/shortcuts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_DOCKER_LOG_TAIL, dockerContainerLive } from "@locus/shared";
 import { api } from "@/lib/api";
@@ -113,6 +114,7 @@ function DockerContainersPane() {
     });
   }, [parsed, grep, level]);
   const visibleLogText = visibleLines.map((line) => line.raw).join("\n");
+  const logsHaveTime = visibleLines.some((line) => Boolean(line.time));
 
   useEffect(() => {
     if (!follow) return;
@@ -320,10 +322,6 @@ function DockerContainersPane() {
           <dt>Session</dt>
           <dd>{item.sessionTitle || "—"}</dd>
         </div>
-        <div>
-          <dt>Status</dt>
-          <dd>{dockerStatusLabel(item)}</dd>
-        </div>
       </dl>
       {error ? <ErrorBanner message={error} onRetry={() => void refreshList()} /> : null}
       <div className="docker-tabs" role="tablist" aria-label="Container views">
@@ -388,7 +386,11 @@ function DockerContainersPane() {
                   key={`${index}-${line.raw.slice(0, 24)}`}
                   className={`docker-log-line ${line.level}`}
                 >
-                  {line.time ? <span className="time">{formatLogTime(line.time)}</span> : null}
+                  {line.time ? (
+                    <span className="time">{formatLogTime(line.time)}</span>
+                  ) : logsHaveTime ? (
+                    <span className="time" aria-hidden />
+                  ) : null}
                   {line.level !== "other" ? (
                     <span className="level">{levelLabel(line.level)}</span>
                   ) : null}
@@ -412,7 +414,9 @@ function DockerContainersPane() {
               <span>up {compactDockerAge(item.status, item.createdAt)}</span>
             ) : null}
             <span className="docker-log-keys">
-              <kbd>⌘C</kbd> copy <kbd>⌘S</kbd> save <kbd>⌥↑</kbd> jump to error
+              <kbd>{shortcutDisplay("Ctrl/Cmd+C")}</kbd> copy{" "}
+              <kbd>{shortcutDisplay("Ctrl/Cmd+S")}</kbd> save <kbd>{altKeyDisplay()}↑</kbd> jump to
+              error
             </span>
             <button type="button" className="linkish" onClick={() => void copyText(visibleLogText)}>
               Copy

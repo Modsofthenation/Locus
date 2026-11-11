@@ -278,7 +278,7 @@ describe("Sidebar", () => {
     );
     expect(css).toMatch(/\.side-main \{[\s\S]*?container: side-main \/ inline-size/);
     expect(css).toMatch(
-      /@container side-main \(max-width: 300px\) \{\s*\.brand-actions \{[\s\S]*?flex-basis: 100%/,
+      /@container side-main \(max-width: 300px\) \{[\s\S]*?\.brand-actions:has\(\.product-mode-toggle\) \{[\s\S]*?flex-basis: 100%/,
     );
   });
 
@@ -2050,7 +2050,8 @@ describe("Sidebar", () => {
     expect(host.querySelector(".repo-item.active .meta")?.textContent).toBe("acme/app · main");
     expect(host.querySelector(".repo-item.active .pr-count")?.textContent).toBe("3");
     expect(host.querySelector(".repo-item.active .repo-flag")?.textContent).toBe("auto");
-    expect(host.querySelector(".side-foot .hint")?.textContent).toBe("2 repos");
+    // The header shows the total; the footer only counts search matches.
+    expect(host.querySelector(".side-foot .hint")).toBeNull();
     expect(host.querySelector(".search")?.getAttribute("placeholder")).toBe("Search repos");
     expect(host.querySelector(".search-wrap .search-icon svg")).toBeTruthy();
     expect(host.querySelector(".repo-item.active [aria-label='More for acme/app']")).toBeTruthy();
@@ -2107,7 +2108,7 @@ describe("Sidebar", () => {
         },
       ],
     });
-    expect(host.querySelector(".brand p")?.textContent).toBe("Slack · Locus Dev");
+    expect(host.querySelector(".brand p")?.textContent).toBe("Locus Dev");
     expect(host.querySelector(".search")?.getAttribute("placeholder")).toBe("Search channels");
     expect([...host.querySelectorAll(".session-group-label")].map((el) => el.textContent)).toEqual([
       "Channels",
@@ -2593,9 +2594,9 @@ describe("Sidebar", () => {
     expect(
       host.querySelector(".side-actions [aria-label='Stop selected containers']"),
     ).toBeTruthy();
-    expect(host.querySelector(".side-actions [aria-label='Refresh containers']")?.textContent).toBe(
-      "",
-    );
+    expect(
+      host.querySelector(".side-actions [aria-label='Refresh containers']")?.textContent?.trim(),
+    ).toBe("Refresh");
   });
 
   it("makes Add Grafana the primary until Grafana is connected, then Investigate", () => {

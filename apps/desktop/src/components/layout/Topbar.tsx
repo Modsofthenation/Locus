@@ -30,11 +30,7 @@ import { showErrorNotice } from "@/lib/notice";
 import { askConfirm } from "@/lib/dialog";
 import { archiveOne, deleteSessionWithUndo } from "@/lib/sessionUndo";
 import { Tooltip } from "./Tooltip";
-import {
-  liveDockerContainers,
-  confirmDockerContainerAction,
-  dockerStatusLabel,
-} from "@/lib/docker";
+import { liveDockerContainers, confirmDockerContainerAction } from "@/lib/docker";
 import { canExportChat, exportSessionChat } from "@/lib/chatExport";
 import { exportBoardJson, exportBoardPdf, exportBoardPng } from "@/components/board/boardExport";
 import {
@@ -297,13 +293,9 @@ export function Topbar() {
     const liveCount = liveDockerContainers(state.containers).length;
     const stopped = Math.max(0, state.containers.length - liveCount);
     const live = item ? dockerContainerLive(item.state) : false;
-    const kicker = item
-      ? [dockerStatusLabel(item), `${liveCount} running · ${stopped} stopped`]
-          .filter(Boolean)
-          .join(" · ")
-      : state.containers.length
-        ? `${liveCount} running · ${stopped} stopped`
-        : "";
+    // The selected container's state lives in the status chip below; the header
+    // only summarises the whole list, so the state isn't printed twice.
+    const kicker = state.containers.length ? `${liveCount} running · ${stopped} stopped` : "";
     return (
       <header className="topbar">
         <div className="topbar-main">
@@ -1033,7 +1025,7 @@ export function Topbar() {
         {lastUserPrompt(session.messages) && !comparePeer(session, state.sessions) ? (
           <button
             type="button"
-            className="btn small"
+            className="btn small topbar-compare"
             title="Compare models"
             data-testid="topbar-compare"
             onClick={() => dispatch({ type: "compare", open: true })}
@@ -1215,7 +1207,7 @@ function PanelToggle({ label }: { label: string }) {
         data-testid="topbar-panel-toggle"
         onClick={() => dispatch({ type: "toggleVmPane" })}
       >
-        <IconPanelRight /> {label}
+        <IconPanelRight /> <span className="topbar-panel-toggle-label">{label}</span>
       </button>
     </Tooltip>
   );

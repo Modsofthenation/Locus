@@ -97,6 +97,14 @@ export const THEME_IDS = [
   "peony",
   "glaze",
   "console",
+  "greenscreen",
+  "whitescreen",
+  "cathode",
+  "darkroom",
+  "cobalt",
+  "uplink",
+  "mainframe",
+  "teletype",
 ] as const;
 
 export type ThemeId = (typeof THEME_IDS)[number];
@@ -118,12 +126,15 @@ export interface ThemeOption {
   contrast?: boolean;
   /** Gradient washes, filtered separately from dark/light/contrast. */
   gradient?: boolean;
+  /** Terminal-window chrome (titlebar, scanlines, mono type), grouped as Terminal. */
+  terminal?: boolean;
 }
 
-export type ThemeFamily = "dark" | "light" | "contrast" | "gradient";
+export type ThemeFamily = "dark" | "light" | "contrast" | "gradient" | "terminal";
 export type ThemeFilter = "all" | ThemeFamily;
 
 export function themeFamily(opt: ThemeOption): ThemeFamily {
+  if (opt.terminal) return "terminal";
   if (opt.contrast) return "contrast";
   if (opt.gradient) return "gradient";
   return opt.scheme;
@@ -132,6 +143,7 @@ export function themeFamily(opt: ThemeOption): ThemeFamily {
 export function themeFamilyLabel(family: ThemeFamily): string {
   if (family === "contrast") return "Contrast";
   if (family === "gradient") return "Gradient";
+  if (family === "terminal") return "Terminal";
   return family === "light" ? "Light" : "Dark";
 }
 
@@ -863,7 +875,72 @@ export const THEME_OPTIONS: ThemeOption[] = [
     name: "Console",
     summary: "A terminal window — amber phosphor, scanlines, and a titlebar.",
     scheme: "dark",
+    terminal: true,
     swatches: ["#0c0a06", "#1e1a12", "#ffb020", "#5ec8a8"],
+  },
+  {
+    id: "greenscreen",
+    name: "Green Screen",
+    summary: "A terminal window — P1 green phosphor on a black tube.",
+    scheme: "dark",
+    terminal: true,
+    swatches: ["#050a06", "#0f1a10", "#4dff7c", "#ffb020"],
+  },
+  {
+    id: "whitescreen",
+    name: "White Phosphor",
+    summary: "A terminal window — cool P4 white glow and a steel-blue cursor.",
+    scheme: "dark",
+    terminal: true,
+    swatches: ["#08090b", "#16181c", "#e8eef6", "#7ab8ff"],
+  },
+  {
+    id: "cathode",
+    name: "Cathode",
+    summary: "A terminal window — ice-cyan beam on a blue-black tube.",
+    scheme: "dark",
+    terminal: true,
+    swatches: ["#04090c", "#0c1a20", "#4de8ff", "#ff8ac8"],
+  },
+  {
+    id: "darkroom",
+    name: "Darkroom",
+    summary: "A terminal window — red safelight that keeps night vision.",
+    scheme: "dark",
+    terminal: true,
+    swatches: ["#0a0404", "#1a0a0a", "#ff5a4a", "#ffb07a"],
+  },
+  {
+    id: "cobalt",
+    name: "Cobalt",
+    summary: "A terminal window — a blue text-mode editor with yellow keys.",
+    scheme: "dark",
+    terminal: true,
+    swatches: ["#00186a", "#002a8c", "#ffe14a", "#5ef0f0"],
+  },
+  {
+    id: "uplink",
+    name: "Uplink",
+    summary: "A terminal window — magenta carrier on a violet dial-up night.",
+    scheme: "dark",
+    terminal: true,
+    swatches: ["#0c0612", "#1c1028", "#ff5ad8", "#7ae8ff"],
+  },
+  {
+    id: "mainframe",
+    name: "Mainframe",
+    summary: "A terminal window — block-mode green fields with cyan and pink.",
+    scheme: "dark",
+    terminal: true,
+    swatches: ["#020604", "#0a140e", "#3cf08c", "#5ec8ff"],
+  },
+  {
+    id: "teletype",
+    name: "Teletype",
+    summary: "A terminal window — printer paper, ribbon ink, and a red carriage.",
+    scheme: "light",
+    terminal: true,
+    swatches: ["#f2eee2", "#fbf8ee", "#b02a20", "#1c1a16"],
   },
 ];
 

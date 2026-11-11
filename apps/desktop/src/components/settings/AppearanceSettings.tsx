@@ -48,6 +48,7 @@ const FILTERS: { id: ThemeFilter; label: string }[] = [
   { id: "light", label: "Light" },
   { id: "contrast", label: "High contrast" },
   { id: "gradient", label: "Gradient" },
+  { id: "terminal", label: "Terminal" },
 ];
 
 const THEME_RECENTS_KEY = "locus.themeRecents";
@@ -288,7 +289,7 @@ export function AppearanceSettings(props: {
   );
 }
 
-const THEME_FAMILY_ORDER: ThemeFamily[] = ["dark", "light", "contrast", "gradient"];
+const THEME_FAMILY_ORDER: ThemeFamily[] = ["dark", "light", "contrast", "gradient", "terminal"];
 
 function groupedThemeFamilies(
   themes: ThemeOption[],
@@ -322,6 +323,7 @@ function ThemeCard(props: {
         className="theme-thumb"
         data-theme={props.opt.id}
         {...(props.opt.gradient ? { "data-theme-gradient": "" } : {})}
+        {...(props.opt.terminal ? { "data-theme-terminal": "" } : {})}
         aria-hidden="true"
       >
         <div className="theme-thumb-chrome">

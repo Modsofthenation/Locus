@@ -70,6 +70,11 @@ export function shortcutDisplay(keys: string, platform = defaultPlatform()): str
   return keys.replaceAll("Ctrl/Cmd+", "Ctrl+").replaceAll("Ctrl/Cmd", "Ctrl");
 }
 
+/** Alt/Option key label for the current platform ("⌥" on Mac, "Alt+" elsewhere). */
+export function altKeyDisplay(platform = defaultPlatform()): string {
+  return /Mac|iPhone|iPad/i.test(platform) ? "⌥" : "Alt+";
+}
+
 export function isModKey(event: Pick<KeyboardEvent, "metaKey" | "ctrlKey">): boolean {
   return event.metaKey || event.ctrlKey;
 }

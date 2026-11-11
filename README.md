@@ -6,7 +6,7 @@
 
 Locus is a desktop control plane for AI coding agents that run on hardware you own — a Docker container, a QEMU virtual machine, or a folder on disk. Chat on one side, the live guest on the other. Code, keys, sessions, and disks stay under `~/.locus`.
 
-This is **v0.19.0** (MIT). The API binds to loopback. Linux, macOS, and Windows. Bring any LLM provider you have a key for.
+This is **v0.20.0** (MIT). The API binds to loopback. Linux, macOS, and Windows. Bring any LLM provider you have a key for.
 
 ## Install
 
@@ -44,6 +44,8 @@ The runtime is chosen per agent and stays fixed. New agents default to Docker wh
 
 The icon rail starts with **Inbox** (everything waiting on you), then **Agents, Design, IDE, Codebase, Jobs** (Automations), then **More** for Games, Assets, Board, Projects, Brain, Slack, Grafana, and Docker. Pin a More surface onto the rail from that menu, then drag it or use Move up / down. Hover a collapsed rail icon to peek that list. Alt+1–9 jumps Inbox then pinned sections. Drag the sidebar edge to resize. Session lists share All / Needs you / Running / Unread chips and can group by day, repo, or status; Docker uses All / Running chips. Inbox rows are tagged and can Approve / Deny waiting tools. Settings is a full page. Developer / Swarm lives in Appearance (and the command palette) — Developer is this control plane; Swarm hides the rail and is teammate-first (Teammates, Teams, Routines).
 
+![Inbox](docs/screenshots/inbox.png)
+
 ### Setup
 
 First-run wizard: provider key, then Developer or Swarm. Docker and QEMU sit under **Set up later**. **Skip for now** leaves a one-line Finish setup hint until you Continue or Dismiss it. The command palette **Finish setup** reopens the wizard.
@@ -54,7 +56,7 @@ First-run wizard: provider key, then Developer or Swarm. Docker and QEMU sit und
 
 New agent is a full-page composer: Docker / VM / Host, a private folder or a folder you open, a repo (defaults to **No repo**; several linked remotes clone side by side under `/workspace/<name>`, then the repo is locked), then **More options** for image, jail, spend, named environment, and recipes. Recipes are **PR reviewer**, **Installer QA** (Windows VM), **Repo fixer**, **Setup environment** (install, start, verify, write `.locus/environment.json`), **Web QA** (headed Chromium), and **Ops loop** (Grafana, Jira, Confluence, Linear, Slack, incident.io, AWS IAM, Portainer, Kubernetes, Sentry). Sidebar overflow **Duplicate** forks the workspace into a new empty chat. Missing Docker or QEMU is a blocking callout — **Use Host instead**, or Finish setup.
 
-Chat sits on the left. The guest sits on the right (Docker opens on **Files**; Host uses the same editor on `/workspace`). `.html` has a Browser preview, `.md` / `.svg` open in Preview, and `.pdf` renders inline. A listening HTTP port stacks **Preview** under Files. Host agents also get a **Browser** tab on the isolated Chrome profile. A coding or review agent can `canvas_write` a self-contained HTML report on a **Canvas** tab, separate from the repo and from Design's canvas.
+Chat sits on the left. **Files** in the header opens the guest pane on the right (Docker opens on **Files**; Host uses the same editor on `/workspace`). `.html` has a Browser preview, `.md` / `.svg` open in Preview, and `.pdf` renders inline. A listening HTTP port stacks **Preview** under Files. Host agents also get a **Browser** tab on the isolated Chrome profile. A coding or review agent can `canvas_write` a self-contained HTML report on a **Canvas** tab, separate from the repo and from Design's canvas.
 
 Consecutive reads, searches, and commands collapse into one summary (`Explored 8 files, 4 searches, ran 1 command`). Expand the row for the per-call chips. Edits, questions, sub-agents, and pending approvals stay on their own rows.
 
@@ -123,9 +125,9 @@ Type `@file` in the composer to rank that path in the repo map. TypeScript gets 
 </tr>
 </table>
 
-### Automations
+### Jobs
 
-Interval, daily, weekly, cron, **Adaptive (by time of day)**, **On git push**, **On pull request**, or **On webhook** (Slack or any HTTP POST). Pick a named environment so overnight jobs reuse that machine. Jobs can store an IANA timezone, blackout dates, and a lifetime spend cap. Overlap can **Skip if busy**, **Run latest when free**, or **Queue one**. Optional **Remember facts between runs**. The card shows last run, last fact, and next fire. Docker, VM, or **Host**. Codebase can auto-review new pull requests. CLI and operator notes: [docs/webhook-automations.md](docs/webhook-automations.md).
+The **Jobs** rail holds automations. Interval, daily, weekly, cron, **Adaptive (by time of day)**, **On git push**, **On pull request**, or **On webhook** (Slack or any HTTP POST). Pick a named environment so overnight jobs reuse that machine. Jobs can store an IANA timezone, blackout dates, and a lifetime spend cap. Overlap can **Skip if busy**, **Run latest when free**, or **Queue one**. Optional **Remember facts between runs**. The card shows last run, last fact, and next fire. Docker, VM, or **Host**. Codebase can auto-review new pull requests. CLI and operator notes: [docs/webhook-automations.md](docs/webhook-automations.md).
 
 <table>
 <tr>
@@ -187,12 +189,12 @@ Settings → Integrations stores a Grafana API key or service account token. The
 
 The **Docker** sidebar lists every container on this engine. Running / stopped / exited groups, a detail pane with Logs / Inspect / Stats / Files, and bulk stop/restart. Locus agents stay linked. Check running rows and **Stop selected**, or use the command palette to stop the running set. The IDE explorer lists the same containers.
 
-**Swarm** on that rail lists nodes and services when this engine is in Docker Swarm mode (service logs and scale on a manager). That is the local Docker engine. Locus Swarm (the teammate shell) and the Portainer integration are separate. Agents get `docker_swarm`. CLI: `locus docker swarm`. Setup: [docs/docker-swarm.md](docs/docker-swarm.md).
+The **Services** tab on that rail lists Swarm nodes and services when this engine is in Docker Swarm mode (service logs and scale on a manager). That is the local Docker engine. Locus Swarm (the teammate shell) and the Portainer integration are separate. Agents get `docker_swarm`. CLI: `locus docker swarm`. Setup: [docs/docker-swarm.md](docs/docker-swarm.md).
 
 <table>
 <tr>
 <td align="center" valign="top" width="50%"><img src="docs/screenshots/docker_empty.png" alt="Docker containers"><br>Containers</td>
-<td align="center" valign="top" width="50%"><img src="docs/screenshots/docker_workspace.png" alt="Docker Swarm"><br>Swarm</td>
+<td align="center" valign="top" width="50%"><img src="docs/screenshots/docker_workspace.png" alt="Docker Swarm services"><br>Services (Swarm)</td>
 </tr>
 </table>
 
@@ -204,13 +206,13 @@ The **Docker** sidebar lists every container on this engine. Running / stopped /
 
 ### Settings
 
-Grouped as **Models** (Providers, MCP, Skills), **Workspace** (Machines, Workers, Environments, Git, Integrations), and **System** (Appearance, Notifications, Phone, Advanced, About). The page can find a provider, MCP server, skill, worker, environment, Git account, or integration by name.
+Grouped as **Models** (Providers, MCP, Skills), **Workspace** (Machines, Workers, Environments, Git, Integrations), and **System** (Appearance, Notifications, Phone, Chrome, Advanced, About). The page can find a provider, MCP server, skill, worker, environment, Git account, or integration by name.
 
 Git includes **Sign in with GitHub** / **Sign in with GitLab** / **Sign in with Bitbucket**. MCP defaults to deferred tool schemas (**Preload tool schemas** per server). HTTP MCP to an AWS API Gateway signs SigV4 when AWS keys are in that server's env. Traces live on the agent or design ⋯ menu → **View trace**.
 
 Settings → Phone mints a LAN pairing token (QR on that tab). Settings → Workers lists LAN / Cloud VM / Fargate hosts. Settings → Environments lists named boxes saved from New agent or Automations. Settings → Notifications toggles desktop alerts and quiet hours. Settings → Appearance filters themes and sets editor font size, format on save, and the minimap. Settings → Advanced **Tailscale Funnel** exposes **only** `/api/hooks` (never the whole control plane) so GitHub can reach forge webhooks; `locus config funnel enable|disable`.
 
-Integrations: Slack, Grafana, Jira, Confluence, Linear, Miro, Figma, incident.io, AWS IAM, Portainer, Kubernetes, Sentry, Gmail, Google Calendar, Google Drive, and agent-authored HTTP plugins. Settings → About is **0.19.0**.
+Integrations: Slack, Grafana, Jira, Confluence, Linear, Miro, Figma, incident.io, AWS IAM, Portainer, Kubernetes, Sentry, Gmail, Google Calendar, Google Drive, and agent-authored HTTP plugins. Settings → About is **0.20.0**.
 
 <table>
 <tr>
@@ -238,7 +240,8 @@ Integrations: Slack, Grafana, Jira, Confluence, Linear, Miro, Figma, incident.io
 <td align="center" valign="top"><img src="docs/screenshots/settings_advanced.png" alt="Advanced"><br>Advanced</td>
 </tr>
 <tr>
-<td align="center" valign="top" colspan="2"><img src="docs/screenshots/settings_about.png" alt="About"><br>About</td>
+<td align="center" valign="top"><img src="docs/screenshots/settings_chrome.png" alt="Chrome"><br>Chrome</td>
+<td align="center" valign="top"><img src="docs/screenshots/settings_about.png" alt="About"><br>About</td>
 </tr>
 </table>
 
@@ -303,7 +306,7 @@ Developer / Swarm in the sidebar switches the product shell. Developer keeps the
 
 **CLI.** `npx locus` / `npm run locus --` is a loopback client for the same control plane: agents, design, games, assets, IDE, projects, Codebase, Brain, Slack, Grafana, Docker, automations, workflows, Settings, phone remote, and Funnel. `locus serve` starts the server when the app is not running. `locus project keep` leaves that control plane up after the desktop quits. `locus workflow` imports and runs Agent Loop Builder graphs. `locus brain setup` writes personal editor hooks that send a redacted transcript tail to the local brain. Live VNC and canvas clicking stay in the desktop. Guide: [docs/cli.md](docs/cli.md).
 
-**App.** Ninety-eight themes (Ember default). Settings → About is **0.19.0**. Electron packages (Linux AppImage, macOS dmg, Windows NSIS), or `npm run dev` in the browser. **Ctrl/Cmd+K** command palette. **Ctrl/Cmd+N** new agent, new automation, or (on Design, Games, Assets) the empty composer. **Ctrl/Cmd+F** find in chat. **Ctrl/Cmd+,** settings.
+**App.** 106 themes (Ember default). Settings → About is **0.20.0**. Electron packages (Linux AppImage, macOS dmg, Windows NSIS), or `npm run dev` in the browser. **Ctrl/Cmd+K** command palette. **Ctrl/Cmd+N** new agent, new automation, or (on Design, Games, Assets) the empty composer. **Ctrl/Cmd+F** find in chat. **Ctrl/Cmd+,** settings.
 
 ## Security model
 

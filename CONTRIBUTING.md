@@ -48,8 +48,8 @@ First agent without Docker: Settings → Providers (Ollama needs no key) then Ne
 After merge to `main`:
 
 ```bash
-git tag v0.19.0
-git push origin v0.19.0
+git tag v0.20.0
+git push origin v0.20.0
 ```
 
 GitHub Releases are the distribution channel (`v*` tags). Pushing a `v*` tag publishes Linux, macOS, and Windows installers, then **Prune GitHub Releases** deletes older published releases so only the last three remain (git tags are kept). See [docs/public-release.md](docs/public-release.md) for listing settings this tree cannot change (visibility, vulnerability reporting, unsigned macOS/Windows). Keep the repository description as the README tagline and topics `ai-agents`, `qemu`, `docker`, `computer-use`, `electron`, `local-first`.

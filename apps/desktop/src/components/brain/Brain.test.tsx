@@ -201,9 +201,9 @@ describe("BrainPane", () => {
     });
     expect(host.querySelector(".brain-pane.brain-empty")).toBeTruthy();
     expect(host.querySelector(".brain-body-center .brain-start")).toBeTruthy();
-    expect([...host.querySelectorAll("button")].some((btn) => btn.textContent === "Browse")).toBe(
-      true,
-    );
+    expect(
+      [...host.querySelectorAll("button")].some((btn) => btn.textContent?.trim() === "Browse"),
+    ).toBe(true);
   });
 
   it("hides data actions and the extra index banner until the brain has data", async () => {

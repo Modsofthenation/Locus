@@ -6,6 +6,7 @@ import {
   type ChatNudgeId,
 } from "@/lib/discoverability";
 import { useStore } from "@/state/store";
+import { IconClose } from "./Icons";
 import type { AgentSession } from "@locus/shared";
 
 export function FeatureNudge({ session }: { session: AgentSession }) {
@@ -45,12 +46,18 @@ export function FeatureNudge({ session }: { session: AgentSession }) {
 
   return (
     <div className="feature-nudge" role="status" data-testid={`feature-nudge-${nudge.id}`}>
-      <span>{nudge.text}</span>
+      <span title={nudge.text}>{nudge.text}</span>
       <button type="button" className="btn small primary" onClick={run}>
         {nudge.actionLabel}
       </button>
-      <button type="button" className="btn small ghost" onClick={() => dismiss(nudge.id)}>
-        Dismiss
+      <button
+        type="button"
+        className="btn small ghost feature-nudge-dismiss"
+        aria-label="Dismiss"
+        title="Dismiss"
+        onClick={() => dismiss(nudge.id)}
+      >
+        <IconClose />
       </button>
     </div>
   );
