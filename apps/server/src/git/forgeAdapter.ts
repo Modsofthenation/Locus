@@ -8,6 +8,7 @@ import type {
   PullRequestDetail,
   PullRequestRef,
   RepoBranchList,
+  RepoAbout,
 } from "@locus/shared";
 
 export interface CreatePullInput {
@@ -51,6 +52,8 @@ export interface CreatedPull {
 
 export interface ForgeAdapter {
   listRepos(account: GitForgeAccount): Promise<ForgeRepoHint[]>;
+  /** Description, license, stars, README excerpt. Optional: only GitHub-compatible forges. */
+  about?(account: GitForgeAccount, owner: string, repo: string): Promise<RepoAbout>;
   listPulls(
     account: GitForgeAccount,
     owner: string,

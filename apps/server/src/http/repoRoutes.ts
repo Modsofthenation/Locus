@@ -44,6 +44,16 @@ export function registerRepoRoutes(app: Hono, repos: RepoService | undefined): v
     return c.json(repo);
   });
 
+  app.get("/api/repos/:id/about", async (c) => {
+    if (!repos) return c.json({ error: "Repos unavailable" }, 503);
+    try {
+      return c.json(await repos.about(c.req.param("id")));
+    } catch (err) {
+      const { message, status } = repoError(err);
+      return c.json({ error: message }, status);
+    }
+  });
+
   app.get("/api/repos/:id/branches", async (c) => {
     if (!repos) return c.json({ error: "Repos unavailable" }, 503);
     try {

@@ -307,10 +307,11 @@ export function formatRepoMap(
     return true;
   });
   const matched = tokens.length ? scoped.filter((file) => fileMatchesQuery(file, tokens)) : scoped;
-  let rows =
-    opts.rank && tokens.length
-      ? [...matched, ...scoped.filter((file) => !matched.includes(file))]
-      : matched;
+  let rows: RepoMapFile[] = matched;
+  if (opts.rank && tokens.length) {
+    const hit = new Set(matched);
+    rows = [...matched, ...scoped.filter((file) => !hit.has(file))];
+  }
   if (focus) rows = boostFocus(rows, focus);
   const lines: string[] = [];
   const focusNote = focus ? ` Open file ${focus} listed first.` : "";
@@ -329,18 +330,25 @@ export function formatRepoMap(
       `Repo map (${rows.length} files${map.truncated ? ", truncated" : ""}).${focusNote} Prefer grep/file_read on these paths instead of dumping files.`,
     );
   }
+  // Running length of lines.join("\n"), instead of re-joining every line on every row.
+  let length = lines.reduce((n, line) => n + line.length, 0) + Math.max(0, lines.length - 1);
   for (const file of rows) {
     const symbols = file.symbols.length ? `  ${file.symbols.slice(0, 12).join(", ")}` : "";
-    lines.push(`${file.path}${symbols}`);
-    if (lines.join("\n").length > maxChars) {
-      lines.pop();
+    const line = `${file.path}${symbols}`;
+    const next = length + (lines.length ? 1 : 0) + line.length;
+    if (next > maxChars) {
       lines.push("…[repo map truncated]");
       break;
     }
+    lines.push(line);
+    length = next;
   }
   if (rows.length === 0) lines.push("(no matching files)");
   return lines.join("\n");
 }
+
+/** Last Quick Open query per map, so each keystroke only rescans what still matched. */
+const lastSearch = new WeakMap<RepoMap, { query: string; files: RepoMapFile[] }>();
 
 /** Ranked file and symbol hits for Quick Open / Go to file. */
 export function searchRepoMap(
@@ -360,7 +368,15 @@ export function searchRepoMap(
       .map((file) => ({ path: file.path, kind: "file" as const, score: 1 }));
   }
   const hits: RepoIndexHit[] = [];
-  for (const file of map.files) {
+  // fuzzyScore > 0 means the query is a subsequence of the text, so files that matched a
+  // shorter prefix of this query are a superset of the files that can match it now.
+  const norm = q.toLowerCase().replace(/\s+/g, "");
+  const last = lastSearch.get(map);
+  const pool =
+    last && norm.startsWith(last.query) && norm.length > last.query.length ? last.files : map.files;
+  const matchedFiles: RepoMapFile[] = [];
+  for (const file of pool) {
+    const before = hits.length;
     const pathScore = fuzzyScore(file.path, q);
     const baseScore = fuzzyScore(basename(file.path), q);
     const fileScore = Math.max(pathScore, baseScore > 0 ? baseScore + 8 : 0);
@@ -377,7 +393,9 @@ export function searchRepoMap(
         score: symbolScore + 4 + searchPathBonus(file.path),
       });
     }
+    if (hits.length > before) matchedFiles.push(file);
   }
+  lastSearch.set(map, { query: norm, files: matchedFiles });
   hits.sort(
     (a, b) =>
       b.score - a.score ||

@@ -102,6 +102,13 @@ describe("workspace files", () => {
     expect(workspaceFindScript()).toContain("head -n 16000");
   });
 
+  it("never forks a process per listed entry", () => {
+    const script = workspaceFindScript("src");
+    expect(script).not.toContain("{} \\;");
+    expect(script).toContain("-printf 'f\\t%p\\n'");
+    expect(script).toContain("-exec printf 'f\\t%s\\n' {} +");
+  });
+
   it("skips the Chromium profile directory the same way as node_modules", async () => {
     const dir = await mkdtemp(join(tmpdir(), "locus-ws-chrome-"));
     cleanup.push(dir);

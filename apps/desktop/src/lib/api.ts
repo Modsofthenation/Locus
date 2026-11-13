@@ -1,5 +1,8 @@
 import type {
   AgentCanvasRef,
+  BenchmarkRun,
+  BenchmarkTarget,
+  BenchmarkTargetSummary,
   AgentSession,
   Automation,
   AutomationRun,
@@ -36,6 +39,7 @@ import type {
   ArchScope,
   ChangeStack,
   ChangeStackRevision,
+  RepoAbout,
   RepoBranchList,
   SlackConversation,
   SlackGifSearch,
@@ -284,6 +288,8 @@ async function rememberMutatedIssue(
   invalidateIssueLists(id);
   return issue;
 }
+
+export type BenchmarkRunView = BenchmarkRun & { summary: BenchmarkTargetSummary[] };
 
 export const api = {
   health: () =>
@@ -762,7 +768,7 @@ export const api = {
       "/api/providers/cursor-cli/refresh",
       { method: "POST" },
     ),
-  checkUpdates: (current: string) =>
+  checkUpdates: (current: string, opts: { refresh?: boolean } = {}) =>
     json<{
       status: "available" | "up-to-date" | "unavailable";
       current: string;
@@ -773,7 +779,8 @@ export const api = {
       asset?: { name: string; url: string };
       checksums?: { name: string; url: string };
       message?: string;
-    }>(`/api/updates?current=${encodeURIComponent(current)}`),
+      checkedAt?: string;
+    }>(`/api/updates?current=${encodeURIComponent(current)}${opts.refresh ? "&refresh=1" : ""}`),
   downloadUpdate: (
     asset: { name: string; url: string },
     checksums: { name: string; url: string },
@@ -782,6 +789,42 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ asset, checksums }),
     }),
+  backup: (body: {
+    passphrase: string;
+    out?: string;
+    includeDisks?: boolean;
+    appVersion?: string;
+  }) =>
+    json<{
+      path: string;
+      sizeBytes: number;
+      manifest: { files: number; bytes: number; includeDisks: boolean; skipped: string[] };
+    }>("/api/backup", { method: "POST", body: JSON.stringify(body) }),
+  inspectBackup: (path: string, passphrase: string) =>
+    json<{
+      createdAt: string;
+      appVersion?: string;
+      platform: string;
+      dataDir: string;
+      files: number;
+      bytes: number;
+      includeDisks: boolean;
+    }>("/api/backup/inspect", { method: "POST", body: JSON.stringify({ path, passphrase }) }),
+  restoreStatus: () => json<{ pending: { stagedAt: string; from: string } | null }>("/api/restore"),
+  stageRestore: (path: string, passphrase: string) =>
+    json<{ files: number; manifest: { createdAt: string }; restartRequired: true }>(
+      "/api/restore",
+      { method: "POST", body: JSON.stringify({ path, passphrase }) },
+    ),
+  cancelRestore: () => json<{ ok: true }>("/api/restore", { method: "DELETE" }),
+  benchmarkCases: () =>
+    json<{ cases: Array<{ id: string; title: string; prompt: string }> }>("/api/benchmarks/cases"),
+  benchmarkRuns: () => json<{ runs: BenchmarkRunView[] }>("/api/benchmarks"),
+  benchmarkRun: (id: string) => json<BenchmarkRunView>(`/api/benchmarks/${encodeURIComponent(id)}`),
+  startBenchmark: (body: { targets: BenchmarkTarget[]; caseIds?: string[]; repeat?: number }) =>
+    json<BenchmarkRunView>("/api/benchmarks", { method: "POST", body: JSON.stringify(body) }),
+  cancelBenchmark: (id: string) =>
+    json<BenchmarkRunView>(`/api/benchmarks/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
   openUpdate: (path: string) =>
     json<{ ok: true }>("/api/updates/open", {
       method: "POST",
@@ -831,9 +874,11 @@ export const api = {
     if (path) query.set("path", path);
     if (depth != null) query.set("depth", String(depth));
     const qs = query.toString();
-    return json<{ entries: WorkspaceEntry[]; changes?: WorkspaceFileChange[] }>(
-      `/api/sessions/${encodeURIComponent(id)}/workspace${qs ? `?${qs}` : ""}`,
-    );
+    return json<{
+      entries: WorkspaceEntry[];
+      changes?: WorkspaceFileChange[];
+      truncated?: boolean;
+    }>(`/api/sessions/${encodeURIComponent(id)}/workspace${qs ? `?${qs}` : ""}`);
   },
   workspaceFile: (id: string, path: string) =>
     json<{ path: string; content: string; mtime: string; baseline?: string }>(
@@ -1442,6 +1487,7 @@ export const api = {
     json<{ accounts: ForgeImportAccount[] }>("/api/repos/import", { method: "POST" }),
   repo: (id: string) => json<LinkedRepo>(`/api/repos/${id}`),
   repoBranches: (id: string) => json<RepoBranchList>(`/api/repos/${id}/branches`),
+  repoAbout: (id: string) => json<RepoAbout>(`/api/repos/${id}/about`),
   patchRepo: (id: string, input: PatchLinkedRepoInput) =>
     json<LinkedRepo>(`/api/repos/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   deleteRepo: async (id: string) => {

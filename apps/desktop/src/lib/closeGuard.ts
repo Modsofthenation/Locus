@@ -11,6 +11,30 @@ export type LocusDesktopBridge = {
   onCloseRequested: (callback: () => void) => () => void;
   ackClosePrompt: () => void;
   confirmClose: () => void;
+  /** Present in desktop builds with update install support. */
+  installUpdate?: (
+    path: string,
+  ) => Promise<{ ok: boolean; action?: "relaunching" | "installer" | "opened"; error?: string }>;
+  /** Quit and relaunch, stopping the control plane even when Keep running is on. */
+  restartApp?: () => Promise<{ ok: boolean }>;
+  /** Tray menu + dock/taskbar badge counts. */
+  setAmbientStatus?: (status: { running: number; needsYou: number }) => void;
+  /** System notification routed back through `onAmbientAction`. */
+  notify?: (request: {
+    title: string;
+    body: string;
+    sessionId?: string;
+    callId?: string;
+    approvable?: boolean;
+  }) => void;
+  onAmbientAction?: (callback: (payload: AmbientAction) => void) => () => void;
+};
+
+/** Tray menu or notification click, delivered from the desktop shell. */
+export type AmbientAction = {
+  action: "open" | "inbox" | "approve" | "deny";
+  sessionId?: string;
+  callId?: string;
 };
 
 declare global {

@@ -421,6 +421,35 @@ describe("EmptyState recipes", () => {
     );
   });
 
+  it("suggests a real first task on a linked repo and selects that repo", async () => {
+    vi.mocked(api.createSession).mockClear();
+    vi.mocked(api.createSession).mockResolvedValue(created);
+    render(undefined, {
+      config: { ...config, setupFirstTask: "pending" },
+      repos: [linkedRepo],
+    });
+    const card = host.querySelector("[data-testid='first-task-card']");
+    expect(card?.textContent).toContain("Try a first task on acme/app");
+    // Finish setup waits until the first task is done or skipped.
+    expect(host.textContent).not.toContain("Finish setup");
+    await act(async () => {
+      (host.querySelector("[data-testid='first-task-0']") as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+    expect((host.querySelector("textarea") as HTMLTextAreaElement).value).toMatch(
+      /Explain how the acme\/app repository is put together/,
+    );
+    const create = [...host.querySelectorAll("button")].find(
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
+    );
+    await act(async () => {
+      create!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({ repoId: "r1" }));
+  });
+
   it("hides the first-task pill after a couple of agent sessions", () => {
     render(undefined, { sessions: [created, { ...created, id: "s2" }] });
     expect(host.querySelector("[aria-label='Try a first task']")).toBeNull();
@@ -875,7 +904,29 @@ describe("EmptyState recipes", () => {
     expect(host.querySelector(".composer-attach")).toBeNull();
   });
 
-  it("defaults the composer to No repo and can attach a linked repo", async () => {
+  it("preselects the only linked repo", async () => {
+    vi.mocked(api.createSession).mockClear();
+    vi.mocked(api.createSession).mockResolvedValue(created);
+    render(() => undefined, { repos: [linkedRepo] });
+    expect(host.querySelector(".composer-repo-placeholder")).toBeNull();
+    expect(host.querySelector(".composer-repo-chip-name")).not.toBeNull();
+    const create = [...host.querySelectorAll("button")].find(
+      (btn) => btn.getAttribute("aria-label") === "Start chat",
+    );
+    await act(async () => {
+      create!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({ repoId: "r1" }));
+  });
+
+  it("hides the Connect GitHub banner once a repo is linked", () => {
+    render(() => undefined, { repos: [linkedRepo] });
+    expect(host.textContent).not.toContain("Connect GitHub");
+  });
+
+  it("defaults the composer to No repo with several linked repos and can attach one", async () => {
     vi.mocked(api.createSession).mockClear();
     vi.mocked(api.createSession).mockResolvedValue(created);
     const actions: Action[] = [];
@@ -883,7 +934,17 @@ describe("EmptyState recipes", () => {
       (action) => {
         actions.push(action);
       },
-      { repos: [linkedRepo] },
+      {
+        repos: [
+          linkedRepo,
+          {
+            ...linkedRepo,
+            id: "r2",
+            name: "acme/web",
+            checkout: { ...linkedRepo.checkout, url: "https://github.com/acme/web.git" },
+          },
+        ],
+      },
     );
     const picker = host.querySelector("[aria-label='Repository']") as HTMLButtonElement;
     expect(picker).not.toBeNull();

@@ -1798,17 +1798,17 @@ export function Sidebar() {
                                     </span>
                                   ) : null}
                                 </div>
-                                <div className="meta">
-                                  {row.name}
-                                  {row.checkout.ref ? ` · ${row.checkout.ref}` : ""}
-                                </div>
+                                <div className="meta">{repoRowMeta(row)}</div>
                               </span>
-                              <span
-                                className={`pr-count ${row.openPullCount ? "has-open" : ""}`}
-                                title={`${row.openPullCount ?? 0} open pull requests`}
-                              >
-                                {typeof row.openPullCount === "number" ? row.openPullCount : "—"}
-                              </span>
+                              {row.openPullCount ? (
+                                <span
+                                  className="pr-count has-open"
+                                  title={`${row.openPullCount} open pull request${row.openPullCount === 1 ? "" : "s"}`}
+                                  aria-label={`${row.openPullCount} open pull request${row.openPullCount === 1 ? "" : "s"}`}
+                                >
+                                  {row.openPullCount}
+                                </span>
+                              ) : null}
                             </button>
                             <OverflowMenu
                               title={`More for ${row.name}`}
@@ -2448,7 +2448,11 @@ export function Sidebar() {
                     : "projects"}
               </span>
             )
-          ) : state.section === "slack" ? (
+          ) : state.section === "slack" &&
+            // Signed out there is nothing to count; the list already says "Sign in".
+            (slackBooting ||
+              state.slackStatus?.connected ||
+              state.slackConversations.length > 0) ? (
             <span className="hint">
               {slackBooting
                 ? "Loading conversations"
@@ -2543,4 +2547,21 @@ export function Sidebar() {
       )}
     </aside>
   );
+}
+
+/**
+ * Second line of a Codebase sidebar row. The title already shows the repo
+ * name, so show the owner and ref instead of repeating `owner/name` (which
+ * got cut off as "Modsofthenation/Local-a…").
+ */
+export function repoRowMeta(row: { name: string; checkout: { url: string; ref?: string } }) {
+  const short = shortRepoName(row.checkout.url, row.name);
+  const slash = row.name.lastIndexOf("/");
+  const owner =
+    slash > 0 && row.name.slice(slash + 1) === short
+      ? row.name.slice(0, slash)
+      : row.name === short
+        ? ""
+        : row.name;
+  return [owner, row.checkout.ref].filter(Boolean).join(" · ");
 }

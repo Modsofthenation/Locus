@@ -21,7 +21,7 @@ export function runtimeNeedsGuest(runtime: AgentRuntime): boolean {
 /** Compat tag. `npm run images` also tags `locus/agent:<app version>`. */
 export const LOCUS_AGENT_IMAGE_TAG = "0.1";
 export const LOCUS_AGENT_IMAGE = `locus/agent:${LOCUS_AGENT_IMAGE_TAG}`;
-export const LOCUS_AGENT_IMAGE_VERSION = "0.20.0";
+export const LOCUS_AGENT_IMAGE_VERSION = "0.21.0";
 export const DEFAULT_DOCKER_IMAGE = "locus/agent";
 /** In-guest code-server bind. Host reaches it through a loopback docker-exec tunnel, never a published port. */
 export const LOCUS_CODE_SERVER_PORT = 3999;

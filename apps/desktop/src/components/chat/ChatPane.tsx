@@ -1,3 +1,4 @@
+import { DockerDownSessionNotice } from "@/components/layout/DockerDownCallout";
 import {
   useCallback,
   useEffect,
@@ -97,6 +98,7 @@ import {
 } from "@/lib/chatTurn";
 import { CHAT_RECOVERY_TIMEOUT_MS } from "@/lib/net";
 import { turnDiffByAssistantId } from "@/lib/artifacts";
+import { latestTurnOutcome } from "@/lib/turnOutcome";
 import { saveLastAgent } from "@/lib/lastAgent";
 import { chatFindHits, stepChatFindIndex } from "@/lib/chatFind";
 import { isStuckToBottom, pinThreadToLatest, schedulePinThreadToLatest } from "@/lib/threadScroll";
@@ -255,6 +257,10 @@ export function ChatPane() {
   draftRef.current = { text, files };
   const turnDiffs = useMemo(
     () => (session && !viewing ? turnDiffByAssistantId(session) : new Map()),
+    [session, viewing],
+  );
+  const turnOutcome = useMemo(
+    () => (session && !viewing ? latestTurnOutcome(session) : undefined),
     [session, viewing],
   );
 
@@ -1149,6 +1155,7 @@ export function ChatPane() {
           findHits={findHits}
           findActiveId={findActiveId}
           turnDiffs={turnDiffs}
+          turnOutcome={turnOutcome}
           cloneStartId={cloneStartId}
           cloneProgress={cloneProgress}
           buildStartId={buildStartId}
@@ -1172,6 +1179,8 @@ export function ChatPane() {
           onRetryLast={onRetryLast}
           onCopyText={onCopyText}
           onRemoveSubscription={onRemoveSubscription}
+          onContinue={() => box.current?.focus()}
+          onUndoTurn={(checkpointId) => setConfirmAction({ kind: "undo", checkpointId })}
         />
         {showJump ? (
           <button
@@ -1184,6 +1193,7 @@ export function ChatPane() {
           </button>
         ) : null}
       </div>
+      {docker && !viewing ? <DockerDownSessionNotice session={session} /> : null}
       {viewing ? (
         <div className="composer-wrap">
           <div className="subagent-readonly" data-testid="subagent-readonly">

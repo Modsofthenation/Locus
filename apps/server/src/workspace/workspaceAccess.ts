@@ -6,6 +6,7 @@ import {
   workspaceFindScript,
   WORKSPACE_FILE_MAX_BYTES,
   type WorkspaceEntry,
+  WORKSPACE_LIST_MAX_ENTRIES,
 } from "./workspaceFiles.js";
 
 export type WorkspaceAccessKind = "unsupported" | "worker" | "host" | "docker" | "vm";
@@ -165,6 +166,19 @@ export async function deleteGuestWorkspacePath(
   }
 }
 
+export type WorkspaceListing = {
+  entries: WorkspaceEntry[];
+  changes: WorkspaceFileChange[];
+  /** The listing stopped at the entry cap, so some paths are missing. */
+  truncated?: boolean;
+};
+
+function withTruncation(listing: Omit<WorkspaceListing, "truncated">): WorkspaceListing {
+  return listing.entries.length >= WORKSPACE_LIST_MAX_ENTRIES
+    ? { ...listing, truncated: true }
+    : listing;
+}
+
 export async function listWorkspaceAccess(input: {
   kind: WorkspaceAccessKind;
   hasVm: boolean;
@@ -174,16 +188,16 @@ export async function listWorkspaceAccess(input: {
   listHost: () => Promise<WorkspaceEntry[]>;
   gitChanges: () => Promise<WorkspaceFileChange[]>;
   skipGit?: boolean;
-}): Promise<{ entries: WorkspaceEntry[]; changes: WorkspaceFileChange[] }> {
+}): Promise<WorkspaceListing> {
   if (input.kind === "unsupported") throw new Error(WORKSPACE_UNSUPPORTED);
   if (input.kind === "worker") {
     if (!input.hasVm) return { entries: [], changes: input.messageChanges };
     try {
       const entries = await input.listWorker();
-      return { entries, changes: input.messageChanges };
+      return withTruncation({ entries, changes: input.messageChanges });
     } catch {
       const entries = (await input.listGuest()) ?? [];
-      return { entries, changes: input.messageChanges };
+      return withTruncation({ entries, changes: input.messageChanges });
     }
   }
   const gitPromise = input.skipGit ? undefined : input.gitChanges();
@@ -195,12 +209,12 @@ export async function listWorkspaceAccess(input: {
   } else if (workspaceUsesGuestFs(input.kind) && !hostEntries.length) {
     entries = (await input.listGuest()) ?? hostEntries;
   }
-  return {
+  return withTruncation({
     entries,
     changes: gitPromise
       ? mergeWorkspaceChanges(input.messageChanges, await gitPromise)
       : input.messageChanges,
-  };
+  });
 }
 
 export async function readWorkspaceAccess(input: {

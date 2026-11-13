@@ -23,8 +23,9 @@ export class ForgeAccessError extends Error {
   constructor(
     readonly problem: ForgeAccessProblem,
     forge: string,
+    readonly resetAt?: number,
   ) {
-    super(forgeAccessMessage(forge, problem));
+    super(forgeAccessMessage(forge, problem, resetAt));
     this.name = "ForgeAccessError";
   }
 }
@@ -37,6 +38,15 @@ function anonymousRefusal(res: Response, text: string): ForgeAccessProblem | und
   )
     return "rate_limited";
   if (res.status === 401 || res.status === 403 || res.status === 404) return "needs_token";
+  return undefined;
+}
+
+/** When an anonymous quota refills (ms epoch), from `x-ratelimit-reset` or `retry-after`. */
+export function rateLimitResetAt(res: Response, now = Date.now()): number | undefined {
+  const reset = Number(res.headers.get("x-ratelimit-reset"));
+  if (Number.isFinite(reset) && reset > 0) return reset * 1000;
+  const retry = Number(res.headers.get("retry-after"));
+  if (Number.isFinite(retry) && retry > 0) return now + retry * 1000;
   return undefined;
 }
 
@@ -183,7 +193,13 @@ export async function forgeJson<T>(
   const text = await readBody(res);
   if (!hasForgeToken(account)) {
     const problem = anonymousRefusal(res, text);
-    if (problem) throw new ForgeAccessError(problem, forgeLabel(account.kind));
+    if (problem) {
+      throw new ForgeAccessError(
+        problem,
+        forgeLabel(account.kind),
+        problem === "rate_limited" ? rateLimitResetAt(res) : undefined,
+      );
+    }
   }
   let json = {} as T;
   try {

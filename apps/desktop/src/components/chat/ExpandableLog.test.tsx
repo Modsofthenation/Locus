@@ -65,7 +65,7 @@ describe("ExpandableLog", () => {
       "ERROR: failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory";
     render(<ExpandableLog compact danger text={raw} />);
     expect(host.querySelector("summary")?.textContent).toBe(
-      "Docker isn't running — switch to Host or start Docker",
+      "Docker isn't running — start Docker, then Start",
     );
     expect(host.querySelector("pre")?.textContent).toBe(raw);
   });

@@ -39,6 +39,8 @@ const BOOLEAN_FLAGS = new Set([
   "printable",
   "no-texture",
   "no-enhance",
+  "include-disks",
+  "inspect",
 ]);
 
 const VALUE_FLAGS = new Set([
@@ -137,9 +139,15 @@ const VALUE_FLAGS = new Set([
   "notify",
   "node",
   "memory",
+  "case",
+  "repeat",
+  "out",
+  "current",
+  "passphrase-env",
+  "poll-ms",
 ]);
 
-const MULTI_VALUE_FLAGS = new Set(["arg", "repo"]);
+const MULTI_VALUE_FLAGS = new Set(["arg", "repo", "model", "case"]);
 
 function appendFlag(prev: FlagValue | undefined, name: string, next: string): string {
   if (MULTI_VALUE_FLAGS.has(name) && typeof prev === "string" && prev.length) {

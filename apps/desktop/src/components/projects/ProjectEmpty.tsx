@@ -15,7 +15,7 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/state/store";
 import { EmptyHero } from "@/components/layout/EmptyHero";
-import { IconPlus } from "@/components/layout/Icons";
+import { IconPlus, IconReturn } from "@/components/layout/Icons";
 import { PersonaAvatar } from "@/components/layout/PersonaAvatar";
 
 export function ProjectEmpty() {
@@ -175,7 +175,7 @@ export function ProjectEmpty() {
                   className="btn primary small composer-send"
                   type="submit"
                   disabled={busy}
-                  title={groupChat ? "Start group chat" : hubMode ? "New team" : "New project"}
+                  title={groupChat ? "Start group chat" : hubMode ? "New team" : "Create project"}
                   aria-label={
                     busy
                       ? groupChat
@@ -187,11 +187,11 @@ export function ProjectEmpty() {
                         ? "Start group chat"
                         : hubMode
                           ? "New team"
-                          : "New project"
+                          : "Create project"
                   }
                 >
-                  <IconPlus />
-                  <span>
+                  {groupChat || hubMode ? <IconPlus /> : null}
+                  <span className="composer-send-label">
                     {busy
                       ? groupChat
                         ? "Creating…"
@@ -202,8 +202,9 @@ export function ProjectEmpty() {
                         ? "Start group chat"
                         : hubMode
                           ? "New team"
-                          : "New project"}
+                          : "Create"}
                   </span>
+                  {groupChat || hubMode ? null : <IconReturn />}
                 </button>
               </div>
             </div>

@@ -18,6 +18,8 @@ vi.mock("@/lib/api", () => ({
   api: {
     saveConfig: vi.fn(),
     setup: vi.fn(),
+    providerModels: vi.fn(),
+    testProvider: vi.fn(),
   },
 }));
 
@@ -399,7 +401,7 @@ describe("SetupWizard", () => {
       root.render(<AppSlice />);
     });
     const enable = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Save key",
+      (btn) => btn.textContent === "Use Claude Code",
     );
     expect(enable).toBeTruthy();
     expect((enable as HTMLButtonElement).disabled).toBe(false);
@@ -469,7 +471,7 @@ describe("SetupWizard", () => {
       root.render(<AppSlice />);
     });
     const enable = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Save key",
+      (btn) => btn.textContent === "Use Kiro CLI",
     );
     expect(enable).toBeTruthy();
     expect((enable as HTMLButtonElement).disabled).toBe(false);
@@ -484,5 +486,73 @@ describe("SetupWizard", () => {
     expect(api.saveConfig).toHaveBeenCalled();
     const saved = vi.mocked(api.saveConfig).mock.calls.at(-1)?.[0] as LocusConfig;
     expect(saved.providers[0]).toMatchObject({ id: "kiro-cli", enabled: true });
+  });
+
+  it("picks a model the local server actually has and reports the test call", async () => {
+    const next = {
+      ...config,
+      providers: [
+        {
+          id: "ollama",
+          name: "Ollama",
+          kind: "openai-compatible" as const,
+          baseUrl: "http://127.0.0.1:11434/v1",
+          models: ["llama3.2"],
+          defaultModel: "llama3.2",
+          enabled: false,
+          extraHeaders: {},
+        },
+      ],
+    };
+    vi.mocked(api.providerModels).mockResolvedValue({ models: ["qwen3-coder", "phi4"] });
+    vi.mocked(api.testProvider).mockResolvedValue({ ok: true, models: 2 });
+    vi.mocked(api.saveConfig).mockImplementation(async (saved) => saved);
+    vi.mocked(api.setup).mockResolvedValue({ ...setup, hasProvider: true });
+    let state: UiState = {
+      ...initialState,
+      config: next,
+      setup: { ...setup, hasProvider: false },
+      setupOpen: true,
+    };
+
+    function AppSlice() {
+      return (
+        <Store.Provider
+          value={{
+            state,
+            dispatch: (action) => {
+              state = reducer(state, action);
+              act(() => {
+                root.render(<AppSlice />);
+              });
+            },
+          }}
+        >
+          <SetupWizard />
+        </Store.Provider>
+      );
+    }
+
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root.render(<AppSlice />);
+    });
+    const use = [...host.querySelectorAll("button")].find(
+      (btn) => btn.textContent === "Use Ollama",
+    );
+    expect(use).toBeTruthy();
+    await act(async () => {
+      use!.click();
+      for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    });
+    const saved = vi.mocked(api.saveConfig).mock.calls.at(-1)?.[0] as LocusConfig;
+    expect(saved.providers[0]).toMatchObject({
+      enabled: true,
+      defaultModel: "qwen3-coder",
+      models: ["qwen3-coder", "phi4"],
+    });
+    expect(host.textContent).toMatch(/Ollama · qwen3-coder · responded in \d+ ms/);
   });
 });

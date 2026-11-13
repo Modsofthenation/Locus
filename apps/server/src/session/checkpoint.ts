@@ -1,6 +1,7 @@
 import { rm, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import type { DockerEngine, Hypervisor } from "@locus/hypervisor";
 import {
@@ -69,6 +70,15 @@ export function checkpointGitRef(id: string): string {
   return `${LOCUS_CHECKPOINT_REF_PREFIX}${clean || "turn"}`;
 }
 
+/**
+ * Scratch index for one checkpoint write or restore. Each call gets its own
+ * file: a shared name let a concurrent write unlink a restore's index
+ * mid-checkout, so the restore wrote nothing and still reported success.
+ */
+function checkpointIndexFile(workspace: string): string {
+  return join(workspace, ".git", `locus-checkpoint-${randomUUID()}.index`);
+}
+
 async function git(
   cwd: string,
   args: string[],
@@ -88,7 +98,7 @@ export async function writeCheckpointRef(
   workspace: string,
   checkpointId: string,
 ): Promise<string | undefined> {
-  const indexFile = join(workspace, ".git", "locus-checkpoint.index");
+  const indexFile = checkpointIndexFile(workspace);
   try {
     const inside = await git(workspace, ["rev-parse", "--is-inside-work-tree"]);
     if (inside.stdout.trim() !== "true") return undefined;
@@ -157,7 +167,7 @@ export async function checkpointNeedsFullSnapshot(workspace: string): Promise<bo
 
 /** Restore the worktree to a hidden checkpoint ref without moving HEAD. */
 export async function restoreCheckpointRef(workspace: string, ref: string): Promise<boolean> {
-  const indexFile = join(workspace, ".git", "locus-checkpoint.index");
+  const indexFile = checkpointIndexFile(workspace);
   try {
     const inside = await git(workspace, ["rev-parse", "--is-inside-work-tree"]);
     if (inside.stdout.trim() !== "true") return false;

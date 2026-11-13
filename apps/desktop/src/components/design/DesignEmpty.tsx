@@ -405,7 +405,18 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
     selectWorkspace({ kind: "environment", env });
   }
 
+  // Design with exactly one linked repo: use it as read-only context by default.
+  const repoPickTouched = useRef(false);
+  const onlyRepoId = surface === "design" && state.repos.length === 1 ? state.repos[0]!.id : "";
+  useEffect(() => {
+    if (!onlyRepoId || repoPickTouched.current) return;
+    repoPickTouched.current = true;
+    setSelectedRepos([onlyRepoId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onlyRepoId]);
+
   function setSelectedRepos(ids: string[], refs?: Record<string, string>) {
+    repoPickTouched.current = true;
     const next = [...new Set(ids.filter(Boolean))];
     const hadRepos = repoIds.length > 0;
     setRepoIds(next);

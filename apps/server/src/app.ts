@@ -37,6 +37,9 @@ import { registerShareRoutes } from "./http/shareRoutes.js";
 import { registerDebugRoutes } from "./http/debugRoutes.js";
 import { registerMachineRoutes } from "./http/machineRoutes.js";
 import { registerTailscaleRoutes } from "./http/tailscaleRoutes.js";
+import { registerBackupRoutes } from "./http/backupRoutes.js";
+import { registerBenchmarkRoutes } from "./http/benchmarkRoutes.js";
+import { BenchmarkService } from "./evals/benchmark.js";
 import {
   attachPhoneGate,
   attachCanvasPreviewHostGate,
@@ -86,6 +89,7 @@ export function createApp(opts: {
   slack?: SlackGateway;
   brain?: BrainService;
   workflows?: WorkflowService;
+  benchmarks?: BenchmarkService;
   peerAddress?: (c: import("hono").Context) => string | undefined;
   phoneTls?: { fingerprint: string };
 }): Hono {
@@ -243,6 +247,8 @@ export function createApp(opts: {
   registerMachineRoutes(app, { store: opts.store, sessions: opts.sessions });
   registerDockerRoutes(app, opts.sessions.dockerInventory);
   registerTailscaleRoutes(app, { store: opts.store, runner });
+  registerBackupRoutes(app, { store: opts.store, peerAddress: opts.peerAddress });
+  registerBenchmarkRoutes(app, opts.benchmarks ?? new BenchmarkService(opts.store, opts.sessions));
 
   const grafana = new GrafanaExplorer(opts.store, opts.sessions, opts.fetchFn ?? fetch, brain);
   registerSlackRoutes(app, slack, slackOauth, opts.store);

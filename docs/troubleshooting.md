@@ -40,7 +40,7 @@ The composer queue holds 32 prompts (configurable in Settings → Advanced). Sen
 
 ## Image tag `locus/agent:0.1`
 
-The runtime tag stays `locus/agent:0.1` so existing guests keep working. `npm run images` also tags `locus/agent:0.20.0`. Rebuild after Dockerfile changes.
+The runtime tag stays `locus/agent:0.1` so existing guests keep working. `npm run images` also tags `locus/agent:0.21.0`. Rebuild after Dockerfile changes.
 
 ## Worker VNC is blank
 

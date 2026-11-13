@@ -468,8 +468,13 @@ import { persistIntegrationAccount } from "../integrations/googleOauth.js";
 import { runMcpCode } from "../integrations/mcpCode.js";
 import { IntegrationsClient } from "../integrations/integrations.js";
 import { SessionTraceLog, saveFailedEval } from "./traces.js";
-import { indexCacheDir, indexWorkspace, updateIndexPaths } from "../workspace/repoIndex.js";
-import { grepIndexedWorkspace, grepContextLines } from "../workspace/grepIndex.js";
+import {
+  dropWorkspaceIndex,
+  indexCacheDir,
+  indexWorkspace,
+  updateIndexPaths,
+} from "../workspace/repoIndex.js";
+import { dropGrepIndex, grepIndexedWorkspace, grepContextLines } from "../workspace/grepIndex.js";
 import { runIsolatedSubagent, subagentTimeoutMs } from "./subagent.js";
 import { gateToolRequest, type ToolGateDecision } from "./toolGates.js";
 import { sessionWorkflowCatalog } from "../workflows/catalog.js";
@@ -2321,6 +2326,8 @@ export class SessionService {
     );
     this.clearThinking(sessionId);
     this.repoMapCache.delete(sessionId);
+    dropWorkspaceIndex(indexCacheDir(this.store.dataDir, sessionId));
+    dropGrepIndex(indexCacheDir(this.store.dataDir, sessionId));
     await rm(indexCacheDir(this.store.dataDir, sessionId), { recursive: true, force: true }).catch(
       () => undefined,
     );
@@ -7791,6 +7798,11 @@ export class SessionService {
       let wroteCanvas = false;
       try {
         const listed = await this.workspace.listWorkspace(sessionId);
+        if (listed.truncated) {
+          console.warn(
+            `Golden image ${id}: workspace listing hit ${listed.entries.length} entries; files past the cap were not copied.`,
+          );
+        }
         for (const entry of listed.entries) {
           if (entry.type !== "file") continue;
           try {

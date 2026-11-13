@@ -170,8 +170,35 @@ export function BrainPane() {
             <div className="empty-card">
               <EmptyHero
                 title="Brain"
-                lead="Index a repo folder below so coding agents can orient on its services and APIs."
+                lead={
+                  state.repos.length
+                    ? "Index a linked repo, or a folder below, so coding agents can orient on its services and APIs."
+                    : "Index a repo folder below so coding agents can orient on its services and APIs."
+                }
               />
+              {state.repos.length ? (
+                <div className="empty-actions brain-linked-repos">
+                  {state.repos.slice(0, 3).map((row) => (
+                    <button
+                      key={row.id}
+                      type="button"
+                      className="btn"
+                      disabled={busy != null}
+                      title={`Index a Host checkout of ${row.checkout.url}`}
+                      onClick={() =>
+                        void run("build", async () => {
+                          const next = await api.brainBuild({ repo: row.checkout.url });
+                          setDoc(next);
+                          dispatch({ type: "brain", brain: next });
+                          setOutput(next.output ?? "");
+                        })
+                      }
+                    >
+                      Index {shortRepoName(row.checkout.url, row.name)}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
 

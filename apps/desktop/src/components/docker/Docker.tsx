@@ -19,6 +19,7 @@ import { useStore } from "@/state/store";
 import { DockerStatsPanel, useDockerStats } from "./DockerStatsPanel";
 import { IconArrowUpRight, IconClose, IconCopy, IconStop } from "@/components/layout/Icons";
 import { EmptyHero } from "@/components/layout/EmptyHero";
+import { dockerIsDown, recheckDocker } from "@/components/layout/DockerDownCallout";
 import { ErrorBanner } from "@/components/layout/Skeleton";
 import { SearchField } from "@/components/layout/SearchField";
 import { WorkspaceEditor } from "@/components/workspace/WorkspaceEditor";
@@ -52,6 +53,7 @@ function DockerContainersPane() {
   const livePicked = liveDockerContainers(picked);
   const [tab, setTab] = useState<DockerTab>("logs");
   const [logs, setLogs] = useState("");
+  const [checkingDocker, setCheckingDocker] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [grep, setGrep] = useState("");
@@ -208,6 +210,47 @@ function DockerContainersPane() {
     return () => window.removeEventListener("keydown", onKey);
   }, [tab, visibleLogText, logs, item?.name]);
 
+  if (!item && dockerIsDown(state)) {
+    return (
+      <div className="empty">
+        <div className="empty-card" data-testid="docker-daemon-down">
+          <EmptyHero
+            pose="rest"
+            size={76}
+            title="Docker isn't running"
+            lead="The Docker CLI is installed but the daemon isn't answering. Open Docker Desktop, or run sudo systemctl start docker on Linux, then check again. Host agents don't need Docker."
+          />
+          <div className="empty-actions">
+            <button
+              className="btn primary"
+              disabled={checkingDocker}
+              onClick={() => {
+                setCheckingDocker(true);
+                void recheckDocker(dispatch)
+                  .then((ready) => (ready ? refreshList() : undefined))
+                  .catch((err: unknown) =>
+                    setError(err instanceof Error ? err.message : "Check failed"),
+                  )
+                  .finally(() => setCheckingDocker(false));
+              }}
+            >
+              {checkingDocker ? "Checking…" : "Check again"}
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                dispatch({ type: "section", section: "agents" });
+                dispatch({ type: "select", id: null });
+              }}
+            >
+              New Host agent
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!item) {
     return (
       <div className="empty">
@@ -215,7 +258,6 @@ function DockerContainersPane() {
           <EmptyHero
             pose="rest"
             size={76}
-            eyebrow="Docker"
             title="No containers"
             lead={
               state.dockerKind === "docker"

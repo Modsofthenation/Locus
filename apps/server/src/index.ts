@@ -2,7 +2,12 @@ import { join } from "node:path";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { getRequestListener } from "@hono/node-server";
-import { ensureHostKey, guestReadyTimeoutMs, waitForGuest } from "@locus/guest-agent";
+import {
+  guestReadyTimeoutMs,
+  hostKeyWarning,
+  tryEnsureHostKey,
+  waitForGuest,
+} from "@locus/guest-agent";
 import {
   createDockerEngine,
   createHypervisor,
@@ -34,6 +39,7 @@ import {
 } from "./runtime/chromeExtensionInstall.js";
 import type { ControlPlane } from "./core/controlPlane.js";
 import { JsonStore } from "./core/store.js";
+import { applyPendingRestore } from "./core/backup.js";
 import { persistCursorCliModels } from "./integrations/cursorCliCatalog.js";
 import { setPythonInterpreterOverride } from "./workspace/workspacePython.js";
 import { BrainService } from "./brain/brain.js";
@@ -54,6 +60,13 @@ process.on("unhandledRejection", (err) => {
 });
 
 const dataDir = defaultDataDir();
+// A restore staged by POST /api/restore swaps in before anything reads the data dir.
+const restored = await applyPendingRestore(dataDir);
+if (restored.applied) {
+  console.log(`Restored a Locus backup. Previous files: ${restored.movedAsideTo}`);
+} else if (restored.error) {
+  console.error(`Restore failed: ${restored.error}. Previous files: ${restored.movedAsideTo}`);
+}
 const store = new JsonStore(dataDir);
 await store.init();
 const config = await store.loadConfig();
@@ -61,7 +74,8 @@ await syncChromeExtensionFiles(dataDir, {
   resourcesPath: electronResourcesPath(),
 });
 
-const hostKey = await ensureHostKey(config.advanced.dataDir);
+const { key: hostKey, error: hostKeyError } = await tryEnsureHostKey(config.advanced.dataDir);
+if (hostKeyError) console.warn(hostKeyWarning(hostKeyError));
 const ssh = {
   sshPublicKey: hostKey.publicKey,
   sshIdentityFile: hostKey.privateKeyPath,
@@ -160,7 +174,8 @@ const app = createApp({
     return bundle;
   },
   onReset: async () => {
-    const nextKey = await ensureHostKey(store.dataDir);
+    const { key: nextKey, error: nextKeyError } = await tryEnsureHostKey(store.dataDir);
+    if (nextKeyError) console.warn(hostKeyWarning(nextKeyError));
     ssh.sshPublicKey = nextKey.publicKey;
     ssh.sshIdentityFile = nextKey.privateKeyPath;
     const nextConfig = await store.loadConfig();

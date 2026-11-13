@@ -8,13 +8,16 @@ import { rm } from "node:fs/promises";
 import {
   buildGrepIndex,
   candidateFileIds,
+  chunkRgFiles,
   containedGrepPath,
+  dropGrepIndex,
   ensureGrepIndex,
   grepIndexedWorkspace,
   grepLiterals,
   hostGrepPath,
   isOpenGrepPattern,
   parsePorcelainZ,
+  settleGrepIndexBuilds,
   trigrams,
 } from "./grepIndex.js";
 import { resetRipgrepCache } from "./workspaceGrep.js";
@@ -33,6 +36,8 @@ if (process.env.CI && !HAS_RG) {
 }
 
 afterEach(async () => {
+  await settleGrepIndexBuilds();
+  dropGrepIndex();
   resetRipgrepCache();
   await Promise.all(cleanup.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
@@ -149,12 +154,9 @@ describe("grep index", () => {
 
   it.skipIf(!HAS_RG)("does not full-scan when the index has no candidates", async () => {
     const { root, cacheDir } = await fixture();
-    await writeFile(join(root, "hidden.ts"), "zzzHiddenTokenQq = 1;\n");
-    await execFileAsync("git", ["-C", root, "add", "hidden.ts"]);
-    await execFileAsync("git", ["-C", root, "commit", "-m", "hidden", "--no-gpg-sign"]);
     const missed = await grepIndexedWorkspace({
       root,
-      pattern: "zzzHiddenTokenQq",
+      pattern: "zzzNowhereTokenQq",
       regex: false,
       cacheDir,
     });
@@ -162,13 +164,65 @@ describe("grep index", () => {
     expect(missed?.output).toBe("");
   });
 
+  it.skipIf(!HAS_RG)(
+    "full-scans while a moved HEAD rebuilds the index in the background",
+    async () => {
+      const { root, cacheDir } = await fixture();
+      await writeFile(join(root, "hidden.ts"), "zzzHiddenTokenQq = 1;\n");
+      await execFileAsync("git", ["-C", root, "add", "hidden.ts"]);
+      await execFileAsync("git", ["-C", root, "commit", "-m", "hidden", "--no-gpg-sign"]);
+      const first = await grepIndexedWorkspace({
+        root,
+        pattern: "zzzHiddenTokenQq",
+        regex: false,
+        cacheDir,
+      });
+      expect(first?.usedIndex).toBe(false);
+      expect(first?.output).toMatch(/hidden\.ts:1:zzzHiddenTokenQq/);
+      await settleGrepIndexBuilds();
+      const second = await grepIndexedWorkspace({
+        root,
+        pattern: "zzzHiddenTokenQq",
+        regex: false,
+        cacheDir,
+      });
+      expect(second?.usedIndex).toBe(true);
+      expect(second?.output).toMatch(/hidden\.ts:1:zzzHiddenTokenQq/);
+    },
+  );
+
+  it.skipIf(!HAS_RG)("searches renamed files and skips deleted ones", async () => {
+    const { root, cacheDir } = await fixture();
+    await execFileAsync("git", ["-C", root, "mv", "src/fold.ts", "src/folded.ts"]);
+    await execFileAsync("git", ["-C", root, "rm", "-q", "src/other.ts"]);
+    const hit = await grepIndexedWorkspace({
+      root,
+      pattern: "foldOldTurns",
+      regex: false,
+      cacheDir,
+    });
+    expect(hit?.usedIndex).toBe(true);
+    expect(hit?.output).toMatch(/src\/folded\.ts:1:.*foldOldTurns/);
+    expect(hit?.output).not.toMatch(/src\/fold\.ts:/);
+  });
+
+  it("chunks rg file arguments under the command-line limit", () => {
+    const files = Array.from({ length: 100 }, (_, i) => `src/file-${i}.ts`);
+    const chunks = chunkRgFiles(files, 50, 300);
+    expect(chunks.flat()).toEqual(files);
+    for (const chunk of chunks) {
+      expect(chunk.reduce((n, f) => n + f.length + 3, 50)).toBeLessThanOrEqual(300);
+    }
+    expect(chunkRgFiles([], 50, 300)).toEqual([]);
+  });
+
   it("parses porcelain -z renames as the new path", () => {
-    expect(parsePorcelainZ("R  src/old.ts\0src/renamed.ts\0")).toEqual(["src/renamed.ts"]);
+    expect(parsePorcelainZ("R  src/renamed.ts\0src/old.ts\0")).toEqual(["src/renamed.ts"]);
     expect(parsePorcelainZ("?? src/fresh.ts\0")).toEqual(["src/fresh.ts"]);
     expect(parsePorcelainZ(" M src/a.ts\0")).toEqual(["src/a.ts"]);
   });
 
-  it("rebuilds when files.jsonl changes and still greps oversized files", async () => {
+  it("keeps the index across edits and rebuilds when HEAD moves", async () => {
     const { root, cacheDir, index } = await fixture();
     await writeFile(
       join(cacheDir, "files.jsonl"),
@@ -177,14 +231,25 @@ describe("grep index", () => {
     const first = await ensureGrepIndex(root, cacheDir);
     expect(first?.files).toContain("src/fold.ts");
 
+    // An agent edit rewrites files.jsonl; the index must not rebuild for that.
     await writeFile(join(root, "src", "extra.ts"), "export const extraTokenQ = 1;\n");
     await writeFile(
       join(cacheDir, "files.jsonl"),
       `${[...index.files, "src/extra.ts"].map((path) => JSON.stringify({ path })).join("\n")}\n`,
     );
+    expect(await ensureGrepIndex(root, cacheDir)).toBe(first);
+
+    await execFileAsync("git", ["-C", root, "add", "src/extra.ts"]);
+    await execFileAsync("git", ["-C", root, "commit", "-m", "extra", "--no-gpg-sign"]);
     const rebuilt = await ensureGrepIndex(root, cacheDir);
+    expect(rebuilt).not.toBe(first);
     const ids = candidateFileIds(rebuilt!, "extraTokenQ", false);
     expect(ids?.map((id) => rebuilt!.files[id])).toContain("src/extra.ts");
+
+    dropGrepIndex();
+    const fromDisk = await ensureGrepIndex(root, cacheDir);
+    expect(fromDisk?.files).toEqual(rebuilt?.files);
+    expect(candidateFileIds(fromDisk!, "extraTokenQ", false)).toEqual(ids);
 
     const huge = `${"export const hugeTokenZed = 1;\n"}${"x".repeat(1_500_100)}`;
     await writeFile(join(root, "src", "huge.ts"), huge);

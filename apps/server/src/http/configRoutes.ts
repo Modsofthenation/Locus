@@ -4,11 +4,7 @@ import { clearIntegrationCredentials, type LocusConfig } from "@locus/shared";
 import type { AutomationService } from "../automations/automations.js";
 import { redactConfig, redactVm } from "../core/redact.js";
 import { prepareSavedConfig } from "../core/configSave.js";
-import {
-  checkGithubRelease,
-  downloadAndVerifyUpdate,
-  openVerifiedUpdate,
-} from "../core/updates.js";
+import { UpdateChecker, downloadAndVerifyUpdate, openVerifiedUpdate } from "../core/updates.js";
 import type { JsonStore } from "../core/store.js";
 import type { SessionService } from "../session/sessions.js";
 import type { HostCapabilities, Hypervisor } from "@locus/hypervisor";
@@ -108,13 +104,15 @@ export function registerConfigRoutes(
     return c.json({ ok: true, config: redactConfig(await opts.store.loadConfig()) });
   });
 
+  const updateChecker = new UpdateChecker();
   app.get("/api/updates", async (c) => {
     const current = (c.req.query("current") ?? "").trim() || "0.0.0";
     return c.json(
-      await checkGithubRelease({
+      await updateChecker.get({
         current,
         platform: process.platform,
         fetchFn: opts.fetchFn,
+        refresh: c.req.query("refresh") === "1",
       }),
     );
   });

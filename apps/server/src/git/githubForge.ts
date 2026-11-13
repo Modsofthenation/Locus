@@ -1,5 +1,7 @@
 import {
   mergeRepoBranches,
+  readmeExcerpt,
+  type RepoAbout,
   parseIssueState,
   parsePullCheckRollup,
   type ForgeRepoHint,
@@ -767,6 +769,56 @@ export async function listGithubBranches(
   return mergeRepoBranches(names, meta.ok ? meta.json.default_branch : undefined);
 }
 
+export async function githubRepoAbout(
+  fetchFn: ForgeFetcher,
+  account: GitForgeAccount,
+  owner: string,
+  repo: string,
+): Promise<RepoAbout> {
+  const base = `/repos/${owner}/${repo}`;
+  const meta = await githubJson<{
+    description?: string | null;
+    homepage?: string | null;
+    license?: { spdx_id?: string | null; name?: string | null } | null;
+    language?: string | null;
+    stargazers_count?: number;
+    stars_count?: number;
+    forks_count?: number;
+    topics?: string[];
+  }>(fetchFn, account, base);
+  if (!meta.ok) throw fail({ status: meta.status } as Response, meta.text);
+  const m = meta.json;
+  const spdx = m.license?.spdx_id && m.license.spdx_id !== "NOASSERTION" ? m.license.spdx_id : "";
+  const about: RepoAbout = {
+    description: m.description?.trim() || undefined,
+    homepage: m.homepage?.trim() || undefined,
+    license: spdx || m.license?.name?.trim() || undefined,
+    language: m.language?.trim() || undefined,
+    stars: m.stargazers_count ?? m.stars_count,
+    forks: m.forks_count,
+    topics: m.topics?.length ? m.topics.slice(0, 8) : undefined,
+  };
+  if (githubCompatible(account)) return about;
+  const [readme, firstIssues] = await Promise.all([
+    githubJson<{ content?: string; encoding?: string }>(fetchFn, account, `${base}/readme`).catch(
+      () => null,
+    ),
+    githubJson<unknown[]>(
+      fetchFn,
+      account,
+      `${base}/issues?state=open&labels=${encodeURIComponent("good first issue")}&per_page=100`,
+    ).catch(() => null),
+  ]);
+  if (readme?.ok && readme.json.encoding === "base64" && readme.json.content) {
+    const text = Buffer.from(readme.json.content, "base64").toString("utf8");
+    about.readme = readmeExcerpt(text) || undefined;
+  }
+  if (firstIssues?.ok && Array.isArray(firstIssues.json)) {
+    about.goodFirstIssues = firstIssues.json.length;
+  }
+  return about;
+}
+
 export async function githubLatestCommitSha(
   fetchFn: ForgeFetcher,
   account: GitForgeAccount,
@@ -978,5 +1030,6 @@ export function createGithubForgeAdapter(fetchFn: ForgeFetcher): ForgeAdapter {
     latestOpenPullCursor: (account, owner, repo) =>
       githubLatestOpenPullCursor(fetchFn, account, owner, repo),
     listBranches: (account, owner, repo) => listGithubBranches(fetchFn, account, owner, repo),
+    about: (account, owner, repo) => githubRepoAbout(fetchFn, account, owner, repo),
   };
 }

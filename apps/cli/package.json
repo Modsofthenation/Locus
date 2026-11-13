@@ -1,6 +1,6 @@
 {
   "name": "@locus/cli",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "private": true,
   "description": "Locus CLI — control plane client for agents, Slack, Codebase, Docker, and automations",
   "type": "module",
@@ -22,6 +22,6 @@
     "@types/node": "^26.6.5",
     "@types/ws": "^8.18.2",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   }
 }

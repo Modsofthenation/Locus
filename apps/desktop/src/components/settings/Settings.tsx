@@ -27,6 +27,7 @@ import {
   promptQueueLimit,
   UBUNTU_DEFAULT_HARDWARE,
   defaultNetworking,
+  parseCheckForUpdates,
   parseProductMode,
   type AgentSkill,
   type AiProvider,
@@ -41,6 +42,7 @@ import {
   type WorkerBackend,
 } from "@locus/shared";
 import { api, type HypervisorStatus } from "@/lib/api";
+import { installAppUpdate, installOutcomeMessage, updateVersionLabel } from "@/lib/appUpdate";
 import {
   APP_DEVELOPER,
   APP_LICENSE,
@@ -85,6 +87,8 @@ import {
 import { PolicyBanner, policyControlLocked } from "./PolicyBanner";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { NotificationSettings } from "./NotificationSettings";
+import { BenchmarkSettings } from "./BenchmarkSettings";
+import { BackupSettings } from "./BackupSettings";
 import { HowItWorks, SettingsToggleRow } from "./SettingsBits";
 import { SearchField } from "@/components/layout/SearchField";
 import { BusyButton } from "@/components/layout/Skeleton";
@@ -968,7 +972,7 @@ export function Settings() {
   async function checkForUpdates() {
     setUpdateBusy(true);
     try {
-      const result = await api.checkUpdates(APP_VERSION);
+      const result = await api.checkUpdates(APP_VERSION, { refresh: true });
       setUpdate(result);
       setUpdateDownload(null);
     } catch (err) {
@@ -1247,6 +1251,13 @@ export function Settings() {
             showMinimap={draft.showMinimap !== false}
             onSelect={(id: ThemeId) => setDraft({ ...draft, theme: id })}
             onEditor={(patch) => setDraft((prev) => (prev ? { ...prev, ...patch } : prev))}
+          />
+        )}
+
+        {tab === "benchmark" && (
+          <BenchmarkSettings
+            providers={current.providers}
+            onOpenSession={(id) => dispatch({ type: "select", id })}
           />
         )}
 
@@ -1728,8 +1739,9 @@ export function Settings() {
               </ul>
             ) : (
               <p className="hint">
-                No Git accounts connected yet. Add GitHub, GitLab, Bitbucket, Gitea, Forgejo, or
-                Azure DevOps in Git.
+                No Git tokens yet. Public repos still link and load without one (GitHub allows 60
+                requests an hour). Add GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps in
+                Git for private repos and higher limits.
               </p>
             )}
             <button
@@ -2740,6 +2752,7 @@ export function Settings() {
                 </p>
               </div>
             </details>
+            <BackupSettings />
             <details className="advanced" open>
               <summary>Danger zone</summary>
               <div className="field">
@@ -2802,13 +2815,35 @@ export function Settings() {
                   GitHub releases
                 </a>
               </div>
+              <div className="notify-row about-auto-update">
+                <div className="notify-row-copy">
+                  <strong>Check automatically</strong>
+                  <span>Look for a new release at launch and every six hours.</span>
+                </div>
+                <button
+                  type="button"
+                  className={`settings-switch ${parseCheckForUpdates(draft.checkForUpdates) ? "on" : ""}`}
+                  role="switch"
+                  aria-checked={parseCheckForUpdates(draft.checkForUpdates)}
+                  aria-label="Check for updates automatically"
+                  data-testid="about-auto-update"
+                  onClick={() =>
+                    setDraft({
+                      ...draft,
+                      checkForUpdates: !parseCheckForUpdates(draft.checkForUpdates),
+                    })
+                  }
+                />
+              </div>
               {update ? (
                 <p className="hint">
-                  {update.status === "available"
-                    ? `Version ${update.latest?.replace(/^v/i, "")} is available.`
-                    : update.status === "up-to-date"
-                      ? "You are on the latest release."
-                      : (update.message ?? "Updates are not available yet.")}
+                  {update.status === "available" && update.message
+                    ? update.message
+                    : update.status === "available"
+                      ? `Version ${update.latest?.replace(/^v/i, "")} is available.`
+                      : update.status === "up-to-date"
+                        ? "You are on the latest release."
+                        : (update.message ?? "Updates are not available yet.")}
                 </p>
               ) : null}
               {update?.status === "available" ? (
@@ -2828,20 +2863,24 @@ export function Settings() {
                       type="button"
                       className="btn small"
                       busy={updateBusy}
-                      busyLabel="Verifying…"
+                      busyLabel="Installing…"
+                      data-testid="about-install-update"
                       onClick={() => {
                         void (async () => {
                           setUpdateBusy(true);
                           try {
-                            const result = await api.downloadUpdate(
-                              update.asset!,
-                              update.checksums!,
-                            );
-                            setUpdateDownload(result);
+                            const outcome = await installAppUpdate(update);
+                            if (outcome.action !== "download-only") {
+                              setUpdateDownload({ path: outcome.path, sha256: "" });
+                            }
+                            setUpdate({
+                              ...update,
+                              message: installOutcomeMessage(outcome, updateVersionLabel(update)),
+                            });
                           } catch (err) {
                             setUpdate({
                               ...update,
-                              message: err instanceof Error ? err.message : "Download failed",
+                              message: err instanceof Error ? err.message : "Install failed",
                             });
                           } finally {
                             setUpdateBusy(false);
@@ -2849,7 +2888,7 @@ export function Settings() {
                         })();
                       }}
                     >
-                      Download and verify
+                      Install update
                     </BusyButton>
                   ) : null}
                   {update.htmlUrl ? (
@@ -2861,7 +2900,7 @@ export function Settings() {
               ) : null}
               {updateDownload ? (
                 <p className="hint">
-                  Verified {updateDownload.sha256.slice(0, 12)}… Saved to {updateDownload.path}.
+                  Verified against SHA256SUMS. Saved to {updateDownload.path}.
                   <button
                     type="button"
                     className="btn small"

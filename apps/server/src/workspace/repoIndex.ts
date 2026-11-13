@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { extname, join, resolve } from "node:path";
 import type { Dirent } from "node:fs";
@@ -17,6 +17,7 @@ import {
 import { containedPath } from "@locus/guest-agent";
 import { parseIgnore, pathIgnored, type IgnoreRule } from "./repoIgnore.js";
 import { WORKSPACE_FILE_MAX_BYTES } from "./workspaceFiles.js";
+import { workspaceGitSnapshot } from "./gitPorcelain.js";
 
 const execFileAsync = promisify(execFile);
 const FILE_CONCURRENCY = 32;
@@ -135,6 +136,8 @@ export interface IndexedFile {
   bytes: number;
   mtimeMs: number;
   symbols: string[];
+  /** Set once symbols were extracted, so a file with none is not re-read on every build. */
+  sx?: 1;
 }
 
 export interface IndexMeta {
@@ -228,8 +231,18 @@ function setIndexProgress(key: string, next: WorkspaceIndexProgress): void {
   indexProgress.set(key, next);
 }
 
+/** Ready indexes kept in memory; a 20k-file repo map is tens of MB of heap. */
+const MAX_READY_INDEXES = 6;
+
 function rememberReadyIndex(key: string, result: IndexBuildResult): IndexBuildResult {
+  readyIndexes.delete(key);
   readyIndexes.set(key, result);
+  while (readyIndexes.size > MAX_READY_INDEXES) {
+    const oldest = readyIndexes.keys().next().value;
+    if (oldest === undefined) break;
+    readyIndexes.delete(oldest);
+    indexProgress.delete(oldest);
+  }
   setIndexProgress(key, {
     status: "ready",
     fileCount: result.meta.fileCount,
@@ -240,6 +253,12 @@ function rememberReadyIndex(key: string, result: IndexBuildResult): IndexBuildRe
     truncated: result.meta.truncated,
   });
   return result;
+}
+
+/** Forget one session's in-memory index (its disk cache is the caller's to delete). */
+export function dropWorkspaceIndex(cacheDir: string): void {
+  readyIndexes.delete(cacheDir);
+  indexProgress.delete(cacheDir);
 }
 
 /** Test hook: drop in-memory / in-flight index state. */
@@ -280,7 +299,7 @@ export async function getWorkspaceIndex(
   const key = progressKey(root, opts.cacheDir);
   if (!opts.force) {
     const ready = readyIndexes.get(key);
-    if (ready) return ready;
+    if (ready) return rememberReadyIndex(key, ready);
     const inflight = indexBuilds.get(key);
     if (inflight) return inflight;
     const disk = await hydrateReadyIndex(opts.cacheDir);
@@ -347,6 +366,7 @@ async function runWorkspaceIndexBuild(
   const heartbeat = setInterval(pulse, HEARTBEAT_MS);
   const deadline = Date.now() + INDEX_BUILD_MS;
   try {
+    const prevMeta = await loadIndexMeta(opts.cacheDir);
     const prev = await loadIndex(opts.cacheDir);
     const gitIgnore = await loadIgnoreFile(root, ".gitignore");
     const locusIgnore = await loadIgnoreFile(root, ".locusignore");
@@ -373,7 +393,8 @@ async function runWorkspaceIndexBuild(
     if (gitPlan) {
       seen += gitPlan.files.length + gitPlan.extraDirs.length;
       pulse();
-      await indexListedFiles(root, gitPlan.files, files, prev, locusIgnore, stats, budget);
+      const clean = await cleanTrackedFiles(root, prev, prevMeta, gitPlan, await headPromise);
+      await indexListedFiles(root, gitPlan.files, files, prev, locusIgnore, stats, budget, clean);
       for (const dir of gitPlan.extraDirs) {
         if (files.length >= MAX_INDEX_FILES || budget.timedOut()) break;
         await walkIndex(root, dir, files, prev, ignore, stats, budget);
@@ -463,12 +484,27 @@ async function indexListedFiles(
   ignore: IgnoreRule[],
   stats: IndexBuildStats,
   budget: IndexBudget,
+  clean?: Set<string>,
 ): Promise<void> {
   const limitFile = createLimiter(FILE_CONCURRENCY);
   const noteProgress = () => {
     if (out.length === 1 || out.length % PROGRESS_EVERY === 0) budget.onProgress?.();
   };
   let n = 0;
+  if (clean?.size) {
+    // Same HEAD and git reports no change: reuse the row without an lstat per file.
+    const rest: string[] = [];
+    for (const rel of rels) {
+      const row = clean.has(rel) ? prev.get(rel) : undefined;
+      if (row && out.length < MAX_INDEX_FILES) {
+        out.push(row);
+        stats.reused += 1;
+        budget.addSeen();
+      } else rest.push(rel);
+    }
+    rels = rest;
+    budget.onProgress?.();
+  }
   await Promise.all(
     rels.map((rel) =>
       limitFile(async () => {
@@ -614,29 +650,55 @@ async function walkIndex(
   await done;
 }
 
-async function ctagsSymbolMap(root: string): Promise<Map<string, string[]> | undefined> {
+/** Run ctags over just the files that still need symbols (never `-R .` over the whole tree). */
+async function ctagsSymbolMap(
+  root: string,
+  files: string[],
+): Promise<Map<string, string[]> | undefined> {
+  if (!files.length) return undefined;
   const bin = process.platform === "win32" ? "ctags.exe" : "ctags";
-  try {
-    const { stdout } = await execFileAsync(bin, ["-R", "-x", "."], {
+  const stdout = await new Promise<string | undefined>((done) => {
+    let out = "";
+    let settled = false;
+    const finish = (value?: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      done(value);
+    };
+    const child = spawn(bin, ["-x", "-L", "-"], {
       cwd: root,
-      maxBuffer: 8 * 1024 * 1024,
-      timeout: 8_000,
+      stdio: ["pipe", "pipe", "ignore"],
       windowsHide: true,
     });
-    const parsed = parseCtagsXOutput(stdout);
-    if (!parsed.size) return undefined;
-    const out = new Map<string, string[]>();
-    for (const [file, rows] of parsed) {
-      const names: string[] = [];
-      for (const row of rows) {
-        if (!names.includes(row.name)) names.push(row.name);
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      finish(undefined);
+    }, 8_000);
+    child.on("error", () => finish(undefined));
+    child.stdout?.on("data", (buf: Buffer) => {
+      out += buf.toString("utf8");
+      if (out.length > 8 * 1024 * 1024) {
+        child.kill("SIGTERM");
+        finish(undefined);
       }
-      out.set(file, names);
+    });
+    child.on("close", (code) => finish(code === 0 ? out : undefined));
+    child.stdin?.on("error", () => undefined);
+    child.stdin?.end(`${files.join("\n")}\n`);
+  });
+  if (!stdout) return undefined;
+  const parsed = parseCtagsXOutput(stdout);
+  if (!parsed.size) return undefined;
+  const out = new Map<string, string[]>();
+  for (const [file, rows] of parsed) {
+    const names: string[] = [];
+    for (const row of rows) {
+      if (!names.includes(row.name)) names.push(row.name);
     }
-    return out;
-  } catch {
-    return undefined;
+    out.set(file, names);
   }
+  return out;
 }
 
 async function fillIndexSymbols(
@@ -655,7 +717,7 @@ async function fillIndexSymbols(
     ),
   );
   const targets = candidates.filter((file) => chosen.has(file.path));
-  const missing = targets.filter((file) => !file.symbols.length);
+  const missing = targets.filter((file) => !file.symbols.length && !file.sx);
   if (!missing.length) {
     for (const file of targets) {
       if (!file.symbols.length) continue;
@@ -664,13 +726,16 @@ async function fillIndexSymbols(
     }
     return;
   }
-  const fromCtags = await ctagsSymbolMap(root);
+  const fromCtags = await ctagsSymbolMap(
+    root,
+    missing.map((file) => file.path),
+  );
   const limitFile = createLimiter(FILE_CONCURRENCY);
   await Promise.all(
     targets.map((file) =>
       limitFile(async () => {
         if (budget.timedOut()) return;
-        if (file.symbols.length) {
+        if (file.symbols.length || file.sx) {
           budget.noteSymbolFile();
           budget.addSymbols(file.symbols.length);
           return;
@@ -678,6 +743,7 @@ async function fillIndexSymbols(
         const tagged = fromCtags?.get(file.path);
         if (tagged?.length) {
           file.symbols = tagged;
+          file.sx = 1;
           budget.noteSymbolFile();
           budget.addSymbols(file.symbols.length);
           return;
@@ -687,6 +753,7 @@ async function fillIndexSymbols(
           const buf = await readFile(abs);
           if (buf.subarray(0, Math.min(BINARY_PEEK_BYTES, buf.length)).includes(0)) return;
           file.symbols = extractSymbols(file.path, buf.toString("utf8"));
+          file.sx = 1;
           stats.read += 1;
           budget.noteSymbolFile();
           budget.addSymbols(file.symbols.length);
@@ -736,6 +803,7 @@ async function readIndexedFile(
       bytes,
       mtimeMs,
       symbols: extractSymbols(rel, buf.toString("utf8")),
+      sx: 1,
     };
   }
   if (TEXT_META_EXT.has(ext) || SOURCE_EXT.has(ext) || bytes === 0) {
@@ -771,6 +839,39 @@ async function loadRootIgnore(root: string): Promise<IgnoreRule[]> {
     rules.push(...(await loadIgnoreFile(root, name)));
   }
   return rules;
+}
+
+async function loadIndexMeta(cacheDir?: string): Promise<IndexMeta | undefined> {
+  if (!cacheDir) return undefined;
+  try {
+    const meta = JSON.parse(await readFile(join(cacheDir, "meta.json"), "utf8")) as IndexMeta;
+    return meta?.version === INDEX_VERSION ? meta : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Tracked paths that cannot have changed since the last build: HEAD is the same and
+ * `git status` does not list them. Undefined when that cannot be proven.
+ */
+async function cleanTrackedFiles(
+  root: string,
+  prev: Map<string, IndexedFile>,
+  prevMeta: IndexMeta | undefined,
+  plan: { files: string[]; trackedCount: number },
+  head: string | undefined,
+): Promise<Set<string> | undefined> {
+  if (!prev.size || !head || prevMeta?.head !== head) return undefined;
+  const snap = await workspaceGitSnapshot(root, GIT_INDEX_TIMEOUT_MS);
+  if (!snap || snap.head !== head) return undefined;
+  const changed = new Set([...snap.dirty, ...snap.gone]);
+  const clean = new Set<string>();
+  for (let i = 0; i < plan.trackedCount; i += 1) {
+    const rel = plan.files[i]!;
+    if (!changed.has(rel)) clean.add(rel);
+  }
+  return clean;
 }
 
 async function loadIndex(cacheDir?: string): Promise<Map<string, IndexedFile>> {
@@ -829,7 +930,7 @@ async function gitHead(root: string): Promise<string | undefined> {
 async function gitIndexPlan(
   root: string,
   ignore: IgnoreRule[],
-): Promise<{ files: string[]; extraDirs: string[] } | undefined> {
+): Promise<{ files: string[]; extraDirs: string[]; trackedCount: number } | undefined> {
   try {
     const { stdout: topRaw } = await execFileAsync(
       "git",
@@ -852,6 +953,7 @@ async function gitIndexPlan(
       if (repoMapPathSkipped(rel) || pathIgnored(rel, false, ignore)) continue;
       files.push(rel);
     }
+    const trackedCount = files.length;
     for (const rel of others) {
       if (repoMapPathSkipped(rel) || pathIgnored(rel, false, ignore)) continue;
       try {
@@ -872,7 +974,7 @@ async function gitIndexPlan(
         /* skip */
       }
     }
-    return { files, extraDirs };
+    return { files, extraDirs, trackedCount };
   } catch {
     return undefined;
   }

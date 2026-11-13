@@ -58,7 +58,11 @@ import {
 import { applyChatDensity, applyEditorPrefs, applyTheme } from "@/lib/theme";
 import { resolveUiShell, setUiShell, type UiShell } from "@/lib/mobileShell";
 import { needsYouCount, needsYouKeys } from "@/lib/needsYou";
+import { ambientCounts, needsYouNotice, runAmbientAction, showNeedsYouNotice } from "@/lib/ambient";
+import { desktopBridge } from "@/lib/closeGuard";
+import { showErrorNotice } from "@/lib/notice";
 import { phoneToken } from "@/lib/phoneAuth";
+import { useBackgroundUpdateCheck } from "@/lib/appUpdate";
 import { Store, initialState, isIdeSession, reducer, sectionEnter } from "@/state/store";
 
 const AutomationsPane = lazy(async () => ({
@@ -134,6 +138,10 @@ const MobileShell = lazy(async () => ({
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [shell, setShell] = useState<UiShell>(() => resolveUiShell());
+  useBackgroundUpdateCheck({
+    enabled: Boolean(state.config) && shell !== "mobile" && !phoneToken(),
+    checkForUpdates: state.config?.checkForUpdates,
+  });
   const [shellReady, setShellReady] = useState(false);
   const [readyForShell, setReadyForShell] = useState(shell);
   const [slackToasts, setSlackToasts] = useState<SlackActivityItem[]>([]);
@@ -357,10 +365,14 @@ export function App() {
               if (shouldMarkUnread(event.session.id, selectedRef.current)) {
                 dispatch({ type: "unread", id: event.session.id });
               }
-              notifyTurnDone(
-                event.session.title,
-                "Needs you",
+              const sessionId = event.session.id;
+              showNeedsYouNotice(
+                needsYouNotice(event.session, fresh),
                 desktopNotifyAllowed(configRef.current, "needsYou"),
+                () => {
+                  dispatch({ type: "select", id: sessionId });
+                  dispatch({ type: "inbox", open: false });
+                },
               );
             }
             break;
@@ -500,10 +512,12 @@ export function App() {
               shouldNotifyTurn(event.sessionId, selectedId, document.hidden)
             ) {
               const title = session?.title ?? "Agent";
+              const doneId = event.sessionId;
               notifyTurnDone(
                 title,
                 "Turn finished",
                 desktopNotifyAllowed(configRef.current, "agents"),
+                () => dispatch({ type: "select", id: doneId }),
               );
             }
             break;
@@ -695,6 +709,26 @@ export function App() {
       unread: state.unreadIds.length,
     });
   }, [state.sessions, state.boards, state.brain, state.unreadIds]);
+
+  // Desktop shell: tray menu + dock/taskbar badge keep the counts visible in the background.
+  const ambient = ambientCounts(state.sessions, state.boards, state.brain);
+  useEffect(() => {
+    desktopBridge()?.setAmbientStatus?.(ambient);
+  }, [ambient.running, ambient.needsYou]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const subscribe = desktopBridge()?.onAmbientAction;
+    if (!subscribe) return;
+    return subscribe((payload) => {
+      void runAmbientAction(payload, {
+        dispatch,
+        resolveApproval: (sessionId, callId, decision) =>
+          api.resolveApproval(sessionId, callId, decision),
+        onError: (err, decision) =>
+          showErrorNotice(err, decision === "approved" ? "Could not approve" : "Could not deny"),
+      });
+    });
+  }, [dispatch]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {

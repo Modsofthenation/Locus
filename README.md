@@ -6,7 +6,7 @@
 
 Locus is a desktop control plane for AI coding agents that run on hardware you own — a Docker container, a QEMU virtual machine, or a folder on disk. Chat on one side, the live guest on the other. Code, keys, sessions, and disks stay under `~/.locus`.
 
-This is **v0.20.0** (MIT). The API binds to loopback. Linux, macOS, and Windows. Bring any LLM provider you have a key for.
+This is **v0.21.0** (MIT). The API binds to loopback. Linux, macOS, and Windows. Bring any LLM provider you have a key for.
 
 ## Install
 
@@ -206,13 +206,15 @@ The **Services** tab on that rail lists Swarm nodes and services when this engin
 
 ### Settings
 
-Grouped as **Models** (Providers, MCP, Skills), **Workspace** (Machines, Workers, Environments, Git, Integrations), and **System** (Appearance, Notifications, Phone, Chrome, Advanced, About). The page can find a provider, MCP server, skill, worker, environment, Git account, or integration by name.
+Grouped as **Models** (Providers, MCP, Skills, Benchmark), **Workspace** (Machines, Workers, Environments, Git, Integrations), and **System** (Appearance, Notifications, Phone, Chrome, Advanced, About). The page can find a provider, MCP server, skill, worker, environment, Git account, or integration by name.
 
 Git includes **Sign in with GitHub** / **Sign in with GitLab** / **Sign in with Bitbucket**. MCP defaults to deferred tool schemas (**Preload tool schemas** per server). HTTP MCP to an AWS API Gateway signs SigV4 when AWS keys are in that server's env. Traces live on the agent or design ⋯ menu → **View trace**.
 
+Settings → About checks GitHub Releases at launch and every six hours. **Install** verifies the download against `SHA256SUMS`, then swaps a Linux AppImage in place and relaunches, runs the Windows installer, or opens the dmg / deb / rpm. Settings → Advanced → **Back up and restore** writes one passphrase-encrypted `.locusbak` with sessions, settings, stored keys, boards, projects, Jobs and Brain, and restores it on another machine at the next start (`locus backup` / `locus restore`). Settings → **Benchmark** runs five small coding tasks as real Host turns against the models you pick and compares pass rate, cost and time (`locus eval run`).
+
 Settings → Phone mints a LAN pairing token (QR on that tab). Settings → Workers lists LAN / Cloud VM / Fargate hosts. Settings → Environments lists named boxes saved from New agent or Automations. Settings → Notifications toggles desktop alerts and quiet hours. Settings → Appearance filters themes and sets editor font size, format on save, and the minimap. Settings → Advanced **Tailscale Funnel** exposes **only** `/api/hooks` (never the whole control plane) so GitHub can reach forge webhooks; `locus config funnel enable|disable`.
 
-Integrations: Slack, Grafana, Jira, Confluence, Linear, Miro, Figma, incident.io, AWS IAM, Portainer, Kubernetes, Sentry, Gmail, Google Calendar, Google Drive, and agent-authored HTTP plugins. Settings → About is **0.20.0**.
+Integrations: Slack, Grafana, Jira, Confluence, Linear, Miro, Figma, incident.io, AWS IAM, Portainer, Kubernetes, Sentry, Gmail, Google Calendar, Google Drive, and agent-authored HTTP plugins. Settings → About is **0.21.0**.
 
 <table>
 <tr>
@@ -306,7 +308,7 @@ Developer / Swarm in the sidebar switches the product shell. Developer keeps the
 
 **CLI.** `npx locus` / `npm run locus --` is a loopback client for the same control plane: agents, design, games, assets, IDE, projects, Codebase, Brain, Slack, Grafana, Docker, automations, workflows, Settings, phone remote, and Funnel. `locus serve` starts the server when the app is not running. `locus project keep` leaves that control plane up after the desktop quits. `locus workflow` imports and runs Agent Loop Builder graphs. `locus brain setup` writes personal editor hooks that send a redacted transcript tail to the local brain. Live VNC and canvas clicking stay in the desktop. Guide: [docs/cli.md](docs/cli.md).
 
-**App.** 106 themes (Ember default). Settings → About is **0.20.0**. Electron packages (Linux AppImage, macOS dmg, Windows NSIS), or `npm run dev` in the browser. **Ctrl/Cmd+K** command palette. **Ctrl/Cmd+N** new agent, new automation, or (on Design, Games, Assets) the empty composer. **Ctrl/Cmd+F** find in chat. **Ctrl/Cmd+,** settings.
+**App.** 106 themes (Ember default). Settings → About is **0.21.0**. Electron packages (Linux AppImage, macOS dmg, Windows NSIS), or `npm run dev` in the browser. **Ctrl/Cmd+K** command palette. **Ctrl/Cmd+N** new agent, new automation, or (on Design, Games, Assets) the empty composer. **Ctrl/Cmd+F** find in chat. **Ctrl/Cmd+,** settings.
 
 ## Security model
 

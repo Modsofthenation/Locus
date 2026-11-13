@@ -44,13 +44,29 @@ export function shouldNotifyNeedsYou(
   return shouldNotifyTurn(sessionId, selectedId, hidden, enabled);
 }
 
-export function notifyTurnDone(title: string, body = "Turn finished", enabled = true): void {
+export function notifyTurnDone(
+  title: string,
+  body = "Turn finished",
+  enabled = true,
+  onClick?: () => void,
+): void {
   if (!enabled) return;
   if (typeof Notification === "undefined") return;
   if (Notification.permission === "denied") return;
   const show = () => {
     try {
-      new Notification(title, { body, silent: false });
+      const note = new Notification(title, { body, silent: false });
+      if (onClick) {
+        note.onclick = () => {
+          try {
+            window.focus();
+          } catch {
+            /* focus is best effort */
+          }
+          onClick();
+          note.close();
+        };
+      }
     } catch {
       /* ignore missing Notification support */
     }

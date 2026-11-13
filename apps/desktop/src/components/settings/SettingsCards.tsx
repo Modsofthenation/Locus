@@ -17,6 +17,7 @@ import {
   cursorModelSelectValue,
   forgeAccountHandle,
   forgeAccountInitials,
+  anonymousForgeLabel,
   forgeAccountStatus,
   forgeAccountSubtitle,
   forgeHostLabel,
@@ -446,7 +447,12 @@ export function ForgeAccountCard({
 }) {
   const tokenRef = useRef<HTMLInputElement>(null);
   const [tokenOpen, setTokenOpen] = useState(false);
-  const status = forgeAccountStatus(f);
+  const baseStatus = forgeAccountStatus(f);
+  // Linked public repos already use a token-less account; say what it can do.
+  const status =
+    baseStatus.kind === "signed-out" && linkedCount > 0
+      ? { ...baseStatus, label: anonymousForgeLabel(f.kind) }
+      : baseStatus;
   const handle = forgeAccountHandle(f);
   const sso = forgeSupportsSso(f.kind);
   const scopes = forgeOauthScopes(f.kind).split(/\s+/).filter(Boolean).join(" · ");

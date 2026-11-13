@@ -53,15 +53,18 @@ describe("ArchitecturePane", () => {
   it("analyses a checkout into repo, feature, and code sections and suggests improvements", async () => {
     vi.mocked(api.repoArchitecture).mockResolvedValueOnce(report);
     render();
-    expect(host.querySelector("[data-testid='architecture-repo']")).toBeTruthy();
-    expect(host.querySelector("[data-testid='architecture-feature']")).toBeTruthy();
-    expect(host.querySelector("[data-testid='architecture-code']")).toBeTruthy();
+    // One empty state until the first pass, not three empty section cards.
+    expect(host.querySelector("[data-testid='architecture-empty']")).toBeTruthy();
+    expect(host.querySelector("[data-testid='architecture-repo']")).toBeNull();
     expect(host.textContent).toContain("Not analysed yet");
 
     await act(async () => {
       host.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await Promise.resolve();
     });
+    expect(host.querySelector("[data-testid='architecture-repo']")).toBeTruthy();
+    expect(host.querySelector("[data-testid='architecture-feature']")).toBeTruthy();
+    expect(host.querySelector("[data-testid='architecture-code']")).toBeTruthy();
 
     expect(api.repoArchitecture).toHaveBeenCalledWith("r1");
     expect(host.textContent).toContain("Pass-through loadInvoice");
@@ -91,7 +94,7 @@ describe("ArchitecturePane", () => {
 
     await act(async () => {
       const improve = host.querySelector(
-        "[data-testid='architecture-repo'] button",
+        "[data-testid='architecture-improve-repo']",
       ) as HTMLButtonElement;
       improve.click();
       await Promise.resolve();

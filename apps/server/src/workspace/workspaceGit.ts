@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { sanitizeWorkspaceRel } from "./workspaceFiles.js";
+import { PORCELAIN_V2_ARGS, parsePorcelainV2, type PorcelainStatus } from "./gitPorcelain.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -131,76 +132,37 @@ export function gitCheckoutReady(root: string): boolean {
 
 export async function workspaceGitStatus(root: string): Promise<WorkspaceGitStatus> {
   const empty = (): WorkspaceGitStatus => ({ branch: "", ahead: 0, behind: 0, files: [] });
+  let status: PorcelainStatus;
   try {
-    const inside = await git(root, ["rev-parse", "--is-inside-work-tree"]);
-    if (inside.trim() !== "true") return empty();
+    // One process: branch, upstream, ahead/behind and every path (was four git calls).
+    status = parsePorcelainV2(await git(root, [...PORCELAIN_V2_ARGS, "-uall"]));
   } catch {
     return empty();
   }
-  try {
-    const porcelain = await git(root, ["status", "--porcelain=v1", "-b", "-uall"]);
-    let branch = "";
-    let ahead = 0;
-    let behind = 0;
-    const files: WorkspaceGitFile[] = [];
-    for (const line of porcelain.split("\n")) {
-      if (!line) continue;
-      if (line.startsWith("## ")) {
-        const head = line.slice(3);
-        const aheadMatch = head.match(/ahead (\d+)/);
-        const behindMatch = head.match(/behind (\d+)/);
-        ahead = aheadMatch ? Number(aheadMatch[1]) : 0;
-        behind = behindMatch ? Number(behindMatch[1]) : 0;
-        branch = head.split("...")[0]?.trim() || "";
-        const noCommits = branch.match(/^No commits yet on (.+)$/);
-        if (noCommits?.[1]) branch = noCommits[1];
-        if (branch === "HEAD (no branch)") branch = "detached";
-        continue;
-      }
-      const index = line[0] ?? " ";
-      const worktree = line[1] ?? " ";
-      let path = line.slice(3).replace(/\\/g, "/");
-      const renamed = path.match(/^.+ -> (.+)$/);
-      if (renamed?.[1]) path = renamed[1];
-      path = path.replace(/^"+|"+$/g, "");
-      const clean = sanitizeWorkspaceRel(path);
-      if (!clean) continue;
-      files.push({
-        path: clean,
-        index,
-        worktree,
-        staged: index !== " " && index !== "?" && index !== "U",
-        ...(isUnmerged(index, worktree) ? { conflicted: true } : {}),
-      });
-    }
-    if (!branch) {
-      try {
-        branch = (await git(root, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
-      } catch {
-        branch = "";
-      }
-    }
-    let upstream: string | undefined;
-    try {
-      const tracked = (await git(root, ["rev-parse", "--abbrev-ref", "@{upstream}"])).trim();
-      if (tracked) upstream = tracked;
-    } catch {
-      /* no upstream */
-    }
-    const rebasing = rebaseInProgress(root);
-    const merging = mergeInProgress(root);
-    return {
-      branch,
-      ahead,
-      behind,
-      files,
-      ...(upstream ? { upstream } : {}),
-      ...(rebasing ? { rebasing } : {}),
-      ...(merging ? { merging } : {}),
-    };
-  } catch {
-    return empty();
+  const files: WorkspaceGitFile[] = [];
+  for (const entry of status.entries) {
+    const clean = sanitizeWorkspaceRel(entry.path);
+    if (!clean) continue;
+    const { index, worktree } = entry;
+    files.push({
+      path: clean,
+      index,
+      worktree,
+      staged: index !== " " && index !== "?" && index !== "U",
+      ...(isUnmerged(index, worktree) ? { conflicted: true } : {}),
+    });
   }
+  const rebasing = rebaseInProgress(root);
+  const merging = mergeInProgress(root);
+  return {
+    branch: status.branch,
+    ahead: status.ahead,
+    behind: status.behind,
+    files,
+    ...(status.upstream ? { upstream: status.upstream } : {}),
+    ...(rebasing ? { rebasing } : {}),
+    ...(merging ? { merging } : {}),
+  };
 }
 
 export async function workspaceGitStage(

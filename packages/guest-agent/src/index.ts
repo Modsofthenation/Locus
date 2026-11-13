@@ -68,7 +68,7 @@ export {
 } from "./sshCli.js";
 export type { SshCliForward, SshCliHandle } from "./sshCli.js";
 export { authenticatedCloneUrl, gitAuthHeader } from "./git.js";
-export { ensureHostKey } from "./keys.js";
+export { ensureHostKey, hostKeyWarning, tryEnsureHostKey } from "./keys.js";
 export type { HostSshKey } from "./keys.js";
 export { waitForGuest, guestReadyTimeoutMs } from "./ready.js";
 export type { GuestWaitTarget } from "./ready.js";

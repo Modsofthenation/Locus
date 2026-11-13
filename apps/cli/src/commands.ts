@@ -60,6 +60,16 @@ import { helpFor } from "./help.js";
 import { isCompletionShell, renderCompletion } from "./completion.js";
 import { startServer } from "./serve.js";
 import { CLI_VERSION } from "./version.js";
+import {
+  cmdBackup,
+  cmdEvalCancel,
+  cmdEvalCases,
+  cmdEvalList,
+  cmdEvalRun,
+  cmdEvalShow,
+  cmdRestore,
+  cmdUpdate,
+} from "./maintenance.js";
 
 export interface Ctx {
   client: LocusClient;
@@ -387,6 +397,17 @@ const ROUTES: Array<{ path: string[]; run: Handler }> = [
   { path: ["image", "fetch"], run: cmdImageFetch },
   { path: ["image", "fetch-virtio"], run: cmdImageFetchVirtio },
   { path: ["image"], run: cmdImageList },
+
+  { path: ["backup"], run: (ctx) => cmdBackup(ctx) },
+  { path: ["restore"], run: (ctx) => cmdRestore(ctx) },
+  { path: ["update"], run: cmdUpdate },
+
+  { path: ["eval", "cases"], run: cmdEvalCases },
+  { path: ["eval", "run"], run: cmdEvalRun },
+  { path: ["eval", "list"], run: cmdEvalList },
+  { path: ["eval", "show"], run: cmdEvalShow },
+  { path: ["eval", "cancel"], run: cmdEvalCancel },
+  { path: ["eval"], run: cmdEvalList },
 
   { path: ["debug", "logs"], run: cmdDebugLogs },
   { path: ["debug", "log"], run: cmdDebugLog },

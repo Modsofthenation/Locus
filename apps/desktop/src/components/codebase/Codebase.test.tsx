@@ -2718,4 +2718,78 @@ describe("CodebasePane", () => {
     expect(host.querySelector(".pr-inbox-item")?.textContent).toContain("Cached issue");
     expect(api.repoIssues).not.toHaveBeenCalled();
   });
+
+  it("asks to start Docker instead of creating a repo agent that can only fail", async () => {
+    vi.mocked(api.startRepoAgent).mockClear();
+    render({
+      ...initialState,
+      section: "codebase",
+      repos: [repo],
+      selectedRepoId: "r1",
+      dockerKind: "docker",
+      dockerReady: false,
+    });
+    const start = [...host.querySelectorAll(".codebase-head button")].find(
+      (btn) => btn.textContent === "Start agent",
+    ) as HTMLButtonElement;
+    await act(async () => {
+      start.click();
+      await Promise.resolve();
+    });
+    expect(api.startRepoAgent).not.toHaveBeenCalled();
+    const callout = host.querySelector("[data-testid='docker-down-callout']");
+    expect(callout?.textContent).toContain("Docker isn’t running");
+    const labels = [...callout!.querySelectorAll("button")].map((btn) => btn.textContent);
+    expect(labels).toEqual(expect.arrayContaining(["Start on Host instead", "Check again"]));
+  });
+
+  it("leads with the change stack, not an agent review, on a merged pull request", () => {
+    render({
+      ...initialState,
+      section: "codebase",
+      repos: [repo],
+      selectedRepoId: "r1",
+      selectedPullNumber: 12,
+      activePull: { ...pull, state: "merged" },
+    });
+    const head = host.querySelector(".pr-detail-head") as HTMLElement;
+    const labels = [...head.querySelectorAll(".row-actions > button, .row-actions > a")].map(
+      (el) => el.textContent,
+    );
+    expect(labels).toContain("View change stack");
+    expect(labels).not.toContain("Fix with agent");
+    expect(labels).not.toContain("Review with agent");
+  });
+
+  it("points an empty open-PR list at All instead of an empty detail pane", async () => {
+    vi.mocked(api.repoPulls).mockResolvedValueOnce([]);
+    const actions: Action[] = [];
+    render(
+      {
+        ...initialState,
+        section: "codebase",
+        repos: [{ ...repo, openPullCount: 0 }],
+        selectedRepoId: "r1",
+      },
+      (action) => actions.push(action),
+    );
+    act(() => {
+      const tab = [...host.querySelectorAll(".codebase-tabs button")].find((btn) =>
+        btn.textContent?.startsWith("Pull requests"),
+      );
+      (tab as HTMLButtonElement).click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const empty = host.querySelector("[data-testid='pr-detail-empty']");
+    expect(empty?.textContent).toContain("Merged and closed pull requests are under All.");
+    expect(empty?.textContent).toContain("Show all pull requests");
+    // A zero count is not shown on the tab.
+    expect(host.querySelector(".codebase-tabs .tab-count")).toBeNull();
+    expect(
+      host.querySelector(".codebase-tabs [role='tab'][aria-selected='true']")?.textContent,
+    ).toBe("Pull requests");
+  });
 });
