@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   forgeAccessMessage,
   forgeAccessProblem,
+  forgeRateLimitResetMinutes,
   formatRemoteError,
   isForgeAuthError,
 } from "./remoteError.js";
@@ -69,5 +70,18 @@ describe("forgeAccessProblem", () => {
     );
     expect(forgeAccessProblem("HTTP 500")).toBeNull();
     expect(forgeAccessProblem(undefined)).toBeNull();
+  });
+});
+
+describe("forgeRateLimitResetMinutes", () => {
+  it("says when an anonymous rate limit resets and reads it back", () => {
+    const now = Date.UTC(2026, 10, 13, 12, 0, 0);
+    const limited = forgeAccessMessage("GitHub", "rate_limited", now + 22.5 * 60_000, now);
+    expect(limited).toContain("Resets in 23 minutes.");
+    expect(forgeAccessProblem(limited)).toBe("rate_limited");
+    expect(forgeRateLimitResetMinutes(limited)).toBe(23);
+    const unknown = forgeAccessMessage("GitHub", "rate_limited");
+    expect(unknown).toContain("Try again later.");
+    expect(forgeRateLimitResetMinutes(unknown)).toBeNull();
   });
 });

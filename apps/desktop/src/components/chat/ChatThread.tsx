@@ -44,6 +44,8 @@ import {
   type ListWindow,
 } from "@/lib/listWindow";
 import { TurnDiffChip } from "./ArtifactDrawer";
+import { TurnOutcomeCard } from "./TurnOutcomeCard";
+import type { TurnOutcome } from "@/lib/turnOutcome";
 import { ExpandableLog } from "./ExpandableLog";
 import { ShotCard, ToolActivity } from "./ChatToolActivity";
 import { SubagentFold } from "./SubagentCard";
@@ -272,6 +274,7 @@ export const ChatThread = memo(function ChatThread({
   findHits,
   findActiveId,
   turnDiffs,
+  turnOutcome,
   cloneStartId,
   cloneProgress,
   buildStartId,
@@ -295,6 +298,8 @@ export const ChatThread = memo(function ChatThread({
   onRetryLast,
   onCopyText,
   onRemoveSubscription,
+  onContinue,
+  onUndoTurn,
 }: {
   threadRef: RefObject<HTMLDivElement | null>;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
@@ -310,6 +315,8 @@ export const ChatThread = memo(function ChatThread({
   findHits: string[];
   findActiveId?: string;
   turnDiffs: ReadonlyMap<string, TurnDiff>;
+  /** Summary card for the latest finished turn (files, tests, next steps). */
+  turnOutcome?: TurnOutcome;
   cloneStartId?: string;
   cloneProgress?: CloneProgress;
   buildStartId?: string;
@@ -333,6 +340,8 @@ export const ChatThread = memo(function ChatThread({
   onRetryLast: () => void;
   onCopyText: (value: string) => void;
   onRemoveSubscription: (id: string) => void;
+  onContinue?: () => void;
+  onUndoTurn?: (checkpointId: string) => void;
 }) {
   const swarmWhoBase = { session, teamName, members: teamMembers };
   const workingWho = swarmMode
@@ -694,6 +703,15 @@ export const ChatThread = memo(function ChatThread({
                     path={turnDiff.path}
                     line={turnDiff.line}
                     onOpenPath={onOpenPath}
+                  />
+                ) : null}
+                {turnOutcome && m.id === turnOutcome.assistantId && !viewing && !turning ? (
+                  <TurnOutcomeCard
+                    sessionId={session.id}
+                    outcome={turnOutcome}
+                    onOpenPath={onOpenPath}
+                    onContinue={() => onContinue?.()}
+                    onUndo={onUndoTurn}
                   />
                 ) : null}
               </div>

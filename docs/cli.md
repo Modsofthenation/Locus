@@ -102,6 +102,9 @@ Exit codes: `0` ok, `1` usage or API error, `2` a tool call is waiting for Appro
 | Egress / approvals audit | `locus debug egress <id>` / `locus debug approvals [id]` |
 | Managed policy | `locus config policy` |
 | Revoke integration tokens | `locus config revoke-all --confirm REVOKE` |
+| Back up / restore `~/.locus` | `locus backup [file]` / `locus restore <file> --yes` |
+| Check for updates | `locus update [download]` |
+| Settings → Benchmark | `locus eval run --model provider/model` / `list` / `show <run>` |
 
 Shortcuts: `locus ls`, `locus new`, `locus chat <id> …`, `locus session …`, `locus codebase …`, `locus auto …`.
 
@@ -342,6 +345,41 @@ npx locus workflow delete <id>
 ```
 
 `templates` lists Locus-native graphs (`locus-file`, `locus-agent`) plus ALB patterns (Research Agent, ReAct, Plan-and-Execute, Human-in-the-Loop, Magentic-One, Tree of Thoughts, and the rest). `add` materializes one of those templates. `import` stores a `.alb.json` bundle. `run` needs a live coding session; a human gate pauses until `resume --approve` or `--deny`.
+
+## Backup, restore and updates
+
+```bash
+export LOCUS_BACKUP_PASSPHRASE='a long passphrase'
+npx locus backup ~/locus-2026-11.locusbak            # VM disks left out
+npx locus backup ~/locus-full.locusbak --include-disks
+npx locus restore ~/locus-2026-11.locusbak --inspect # check the passphrase, show the manifest
+npx locus restore ~/locus-2026-11.locusbak --yes     # stage it; restart Locus to apply
+npx locus restore status
+npx locus restore cancel
+npx locus update
+npx locus update download
+```
+
+A backup is one AES-256-GCM file (scrypt-derived key) holding sessions, settings, boards, projects, Jobs, Brain, workflows, agent workspaces and the decrypted vault. Logs, caches, `node_modules`, `.venv`, the Host Chrome profile and the machine-bound `master.key` / `master.key.safe` / `secrets.enc` are never included. VM disks, images and media need `--include-disks`.
+
+The passphrase comes from `LOCUS_BACKUP_PASSPHRASE` (or `--passphrase-env NAME`), or a hidden prompt on a terminal. It is never a plain flag. Without it the backup cannot be opened; Locus does not keep a copy.
+
+Restore never touches live state. The server decrypts into `~/.locus/.restore-staging`, re-encrypts the vault with this machine's master key, rewrites old data-dir paths in JSON state, and writes `restore-pending.json`. The next control-plane start swaps the staged tree in before anything loads, and moves the files it replaced to `~/.locus/.before-restore-<time>/`. Delete that folder once you are happy. Host agents that point at folders outside `~/.locus` keep their old paths. Backup and restore routes answer only on this machine, not to a paired phone.
+
+`locus update` asks the control plane, which caches GitHub Releases for an hour. `download` fetches the installer for this platform and verifies it against `SHA256SUMS-<platform>` into `~/.locus/updates`. The desktop checks at launch and every six hours (Settings → About → Check automatically). Install swaps a running Linux AppImage in place and relaunches, runs the Windows NSIS installer, and opens the dmg, deb or rpm elsewhere.
+
+## Model benchmark
+
+```bash
+npx locus eval cases
+npx locus eval run --model openai/gpt-5 --model ollama/qwen3-coder --wait
+npx locus eval run --model anthropic/claude-sonnet --case fix-add,off-by-one --repeat 3
+npx locus eval list
+npx locus eval show <run>
+npx locus eval cancel <run>
+```
+
+Each case is a small JavaScript project with failing tests (`fix-add`, `off-by-one`, `implement-slugify`, `missing-await`, `cross-file-feature`). Locus copies it to a temp folder, starts an autonomous Host agent there with the chosen provider and model, sends the task, then runs `npm test` itself. A case passes only when the tests pass and the test files are byte-identical. Results record tokens, estimated cost (provider rates), tool calls and wall time. One run at a time; cases run in order. The chats are archived so a failure can be opened. Results live in `~/.locus/benchmarks/<run>.json`. Settings → Benchmark is the same runner.
 
 ## Events and debug
 

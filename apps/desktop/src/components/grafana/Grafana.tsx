@@ -371,7 +371,8 @@ export function GrafanaPane() {
               title="Grafana explorer"
               lead="Open Grafana dashboards, query Elasticsearch logs, trace stack frames into linked repos, and start an Ops loop agent."
             />
-            <div className="empty-actions">
+            {/* Wide windows already show Add Grafana as the sidebar's primary button. */}
+            <div className="empty-actions narrow-only">
               <button
                 type="button"
                 className="btn"

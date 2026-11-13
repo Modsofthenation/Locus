@@ -271,14 +271,14 @@ describe("DesignEmpty", () => {
     expect(host.textContent).not.toMatch(/Try a sample landing page/i);
   });
 
-  it("attaches a linked repo when creating a design", async () => {
+  it("preselects the only linked repo as design context", async () => {
     vi.mocked(api.createSession).mockClear();
     vi.mocked(api.createSession).mockResolvedValue(created);
     render(undefined, { repos: [linkedRepo] });
     const picker = host.querySelector("[aria-label='Repository']") as HTMLButtonElement;
     expect(picker.title).toMatch(/design context/i);
-    expect(host.querySelector(".composer-repo-placeholder")?.textContent).toBe("No repo context");
-    await pickComposerRepoBranch(host, "acme/app", "main");
+    // The only linked repo is preselected as read-only context.
+    expect(host.querySelector(".composer-repo-placeholder")).toBeNull();
     expect(host.querySelector(".composer-repo-chip-name")?.textContent).toBe("app");
     expect(host.querySelector(".composer-repo-chip-ref")?.textContent).toBe("main");
     const create = [...host.querySelectorAll("button")].find(

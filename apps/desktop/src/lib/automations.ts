@@ -341,6 +341,8 @@ export function runOutcomeLabel(
 }
 
 export const DOCKER_DOWN_MESSAGE = "Docker isn't running — switch to Host or start Docker";
+/** Agent threads: the runtime is fixed, so no "switch to Host". */
+export const DOCKER_DOWN_AGENT_MESSAGE = "Docker isn't running — start Docker, then Start";
 
 export type PlainJobError = {
   /** One plain sentence for the run row / notice. */

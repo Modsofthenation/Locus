@@ -77,7 +77,7 @@ describe("session persist perf", () => {
 
     const stringifyPretty: number[] = [];
     const stringifyCompact: number[] = [];
-    for (let i = 0; i < 6; i += 1) {
+    for (let i = 0; i < 21; i += 1) {
       const prettyStart = performance.now();
       JSON.stringify(row, null, 2);
       stringifyPretty.push(performance.now() - prettyStart);
@@ -116,6 +116,9 @@ describe("session persist perf", () => {
     expect(second).toBe(first);
     expect(JSON.parse(first)).toEqual(row);
     expect(compact.length).toBeLessThan(pretty.length);
+    // Both stringify a ~260 KB payload in about half a millisecond, so their
+    // medians differ by noise on a loaded CI runner (it missed by 1–2%). Keep
+    // a guard against compact serialization getting materially slower.
     expect(median(stringifyCompact)).toBeLessThanOrEqual(median(stringifyPretty) * 1.5);
     expect(first.includes("\n  ")).toBe(false);
   });

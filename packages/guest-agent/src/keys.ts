@@ -28,6 +28,32 @@ export async function ensureHostKey(
   return { privateKeyPath, publicKey };
 }
 
+/**
+ * Like ensureHostKey, but a missing `ssh-keygen` (minimal Linux installs,
+ * containers) does not stop the control plane: Host and Docker agents never use
+ * this key. VM guests do, so the caller logs the reason and VMs can't be reached
+ * over SSH until the key exists.
+ */
+export async function tryEnsureHostKey(
+  dataDir: string,
+  keygen: Keygen = sshKeygen,
+): Promise<{ key: HostSshKey; error?: undefined } | { key: HostSshKey; error: string }> {
+  try {
+    return { key: await ensureHostKey(dataDir, keygen) };
+  } catch (err) {
+    const privateKeyPath = join(dataDir, "ssh", "id_ed25519");
+    return {
+      key: { privateKeyPath, publicKey: "" },
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/** One line for the server log when tryEnsureHostKey could not make the key. */
+export function hostKeyWarning(error: string): string {
+  return `Warning: ${error}. Host and Docker agents still work; VM agents need ssh-keygen (install openssh-client, then restart Locus).`;
+}
+
 async function exists(path: string): Promise<boolean> {
   try {
     await stat(path);

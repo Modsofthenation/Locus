@@ -7,18 +7,23 @@ import { afterEach, describe, expect, it } from "vitest";
 const { wrapMasterKey } = createRequire(import.meta.url)("./vault-key.cjs") as {
   wrapMasterKey: (
     safeStorage: {
-      isEncryptionAvailable?: () => boolean;
-      encryptString: (plain: string) => Buffer;
-      decryptString: (encrypted: Buffer) => string;
+      isAsyncEncryptionAvailable?: () => Promise<boolean>;
+      encryptStringAsync: (plain: string) => Promise<Buffer>;
+      decryptStringAsync: (
+        encrypted: Buffer,
+      ) => Promise<{ result: string; shouldReEncrypt: boolean }>;
     },
     opts?: { unlinkPlaintext?: boolean },
-  ) => { LOCUS_MASTER_KEY?: string };
+  ) => Promise<{ LOCUS_MASTER_KEY?: string }>;
 };
 
 const fakeStorage = {
-  isEncryptionAvailable: () => true,
-  encryptString: (plain: string) => Buffer.from(plain, "utf8"),
-  decryptString: (encrypted: Buffer) => Buffer.from(encrypted).toString("utf8"),
+  isAsyncEncryptionAvailable: async () => true,
+  encryptStringAsync: async (plain: string) => Buffer.from(plain, "utf8"),
+  decryptStringAsync: async (encrypted: Buffer) => ({
+    result: Buffer.from(encrypted).toString("utf8"),
+    shouldReEncrypt: false,
+  }),
 };
 
 describe("wrapMasterKey", () => {
@@ -32,36 +37,36 @@ describe("wrapMasterKey", () => {
     else process.env.LOCUS_MASTER_KEY = previousKey;
   });
 
-  it("keeps plaintext master.key in unpackaged mode", () => {
+  it("keeps plaintext master.key in unpackaged mode", async () => {
     const dir = mkdtempSync(join(tmpdir(), "locus-wrap-dev-"));
     delete process.env.LOCUS_MASTER_KEY;
     process.env.LOCUS_HOME = dir;
     writeFileSync(join(dir, "master.key"), `${"ab".repeat(32)}\n`, { mode: 0o600 });
-    const result = wrapMasterKey(fakeStorage, { unlinkPlaintext: false });
+    const result = await wrapMasterKey(fakeStorage, { unlinkPlaintext: false });
     expect(result.LOCUS_MASTER_KEY).toBe("ab".repeat(32));
     expect(existsSync(join(dir, "master.key"))).toBe(true);
     expect(existsSync(join(dir, "master.key.safe"))).toBe(true);
   });
 
-  it("deletes leftover plaintext master.key after wrapping", () => {
+  it("deletes leftover plaintext master.key after wrapping", async () => {
     const dir = mkdtempSync(join(tmpdir(), "locus-wrap-pkg-"));
     delete process.env.LOCUS_MASTER_KEY;
     process.env.LOCUS_HOME = dir;
     writeFileSync(join(dir, "master.key"), `${"cd".repeat(32)}\n`, { mode: 0o600 });
-    const result = wrapMasterKey(fakeStorage, { unlinkPlaintext: true });
+    const result = await wrapMasterKey(fakeStorage, { unlinkPlaintext: true });
     expect(result.LOCUS_MASTER_KEY).toBe("cd".repeat(32));
     expect(existsSync(join(dir, "master.key"))).toBe(false);
     expect(existsSync(join(dir, "master.key.safe"))).toBe(true);
   });
 
-  it("deletes leftover plaintext when a wrapped key already exists", () => {
+  it("deletes leftover plaintext when a wrapped key already exists", async () => {
     const dir = mkdtempSync(join(tmpdir(), "locus-wrap-left-"));
     delete process.env.LOCUS_MASTER_KEY;
     process.env.LOCUS_HOME = dir;
     writeFileSync(join(dir, "master.key"), `${"ef".repeat(32)}\n`, { mode: 0o600 });
-    wrapMasterKey(fakeStorage, { unlinkPlaintext: false });
+    await wrapMasterKey(fakeStorage, { unlinkPlaintext: false });
     expect(existsSync(join(dir, "master.key"))).toBe(true);
-    const result = wrapMasterKey(fakeStorage, { unlinkPlaintext: true });
+    const result = await wrapMasterKey(fakeStorage, { unlinkPlaintext: true });
     expect(result.LOCUS_MASTER_KEY).toBe("ef".repeat(32));
     expect(existsSync(join(dir, "master.key"))).toBe(false);
   });

@@ -104,8 +104,13 @@ export function PullTable(props: {
   );
 }
 
-export function PullSummaryCell(props: { row: PullRequestRef }) {
+export function PullSummaryCell(props: {
+  row: PullRequestRef;
+  /** The narrow PR list leaves branches to the detail header (they only fit as "cla… → m…"). */
+  branches?: boolean;
+}) {
   const row = props.row;
+  const showBranches = props.branches !== false;
   const badge = statusBadge(row);
   const updated = formatUpdatedPhrase(row.updatedAt);
   return (
@@ -122,7 +127,7 @@ export function PullSummaryCell(props: { row: PullRequestRef }) {
             <span className="pr-id">#{row.number}</span>
             {updated ? <span>{updated}</span> : null}
           </span>
-          {row.headRef || row.baseRef ? (
+          {showBranches && (row.headRef || row.baseRef) ? (
             <span className="pr-summary-branches">
               {row.headRef ? <code title={row.headRef}>{row.headRef}</code> : null}
               {row.headRef && row.baseRef ? (

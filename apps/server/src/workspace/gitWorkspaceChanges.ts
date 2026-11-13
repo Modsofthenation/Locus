@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { workspaceGitSnapshot } from "./gitPorcelain.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -20,10 +21,14 @@ const changesCache = new Map<string, { at: number; rows: WorkspaceFileChange[] }
 const inflightBaseline = new Map<string, Promise<string | undefined>>();
 let changesGen = 0;
 
-async function git(cwd: string, args: string[]): Promise<string> {
+/** Quick probes (rev-parse, show) keep a short timeout; whole-tree diffs get longer. */
+const QUICK_GIT_MS = 2_000;
+const TREE_GIT_MS = 10_000;
+
+async function git(cwd: string, args: string[], timeout = QUICK_GIT_MS): Promise<string> {
   const { stdout } = await execFileAsync("git", args, {
     cwd,
-    timeout: 2000,
+    timeout,
     maxBuffer: 8_000_000,
     windowsHide: true,
     env: {
@@ -133,31 +138,37 @@ async function loadGitWorkspaceChanges(root: string): Promise<WorkspaceFileChang
   const map = new Map<string, WorkspaceFileChange>();
   try {
     parseNumstat(
-      await git(root, ["-c", "core.quotepath=false", "diff", "--numstat", "HEAD"]),
+      await git(root, ["-c", "core.quotepath=false", "diff", "--numstat", "HEAD"], TREE_GIT_MS),
       map,
       ignore,
     );
-  } catch {
-    try {
-      parseNumstat(
-        await git(root, ["-c", "core.quotepath=false", "diff", "--numstat"]),
-        map,
-        ignore,
-      );
-    } catch {
-      /* empty repo or no commits */
+  } catch (err) {
+    if ((err as { killed?: boolean }).killed) {
+      // Line counts took too long (huge repo or cold disk): still list what changed.
+      for (const path of (await workspaceGitSnapshot(root, TREE_GIT_MS))?.dirty ?? []) {
+        if (!path.endsWith("/") && !skipPath(path, ignore)) {
+          map.set(path, { path, additions: 0, deletions: 0 });
+        }
+      }
+    } else {
+      try {
+        parseNumstat(
+          await git(root, ["-c", "core.quotepath=false", "diff", "--numstat"], TREE_GIT_MS),
+          map,
+          ignore,
+        );
+      } catch {
+        /* empty repo or no commits */
+      }
     }
   }
 
   try {
-    const others = await git(root, [
-      "-c",
-      "core.quotepath=false",
-      "ls-files",
-      "-z",
-      "--others",
-      "--exclude-standard",
-    ]);
+    const others = await git(
+      root,
+      ["-c", "core.quotepath=false", "ls-files", "-z", "--others", "--exclude-standard"],
+      TREE_GIT_MS,
+    );
     let extra = 0;
     for (const file of others.split("\0")) {
       const path = file.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");

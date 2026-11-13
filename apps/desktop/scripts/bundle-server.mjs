@@ -1,6 +1,6 @@
 import * as esbuild from "esbuild";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { cp, mkdir } from "node:fs/promises";
+import { chmod, cp, mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -113,6 +113,21 @@ export async function copyTypescriptPackage(destDir) {
   return destDir;
 }
 
+/** Platform ripgrep from `@vscode/ripgrep`, copied to `<server>/bin` so Files search never walks in JS. */
+export function ripgrepBinaryPath(platform = process.platform, arch = process.arch) {
+  const name = platform === "win32" ? "rg.exe" : "rg";
+  return require.resolve(`@vscode/ripgrep-${platform}-${arch}/bin/${name}`);
+}
+
+export async function copyRipgrep(serverDir) {
+  const src = ripgrepBinaryPath();
+  const dest = join(serverDir, "bin", process.platform === "win32" ? "rg.exe" : "rg");
+  await mkdir(dirname(dest), { recursive: true });
+  await cp(src, dest);
+  if (process.platform !== "win32") await chmod(dest, 0o755);
+  return dest;
+}
+
 export async function bundleControlPlane(
   outfile = join(desktopRoot, "build", "server", "index.mjs"),
 ) {
@@ -124,6 +139,7 @@ export async function bundleControlPlane(
     }),
   );
   await copyTypescriptPackage(join(desktopRoot, "build", "server-typescript-ls"));
+  await copyRipgrep(dirname(outfile));
   return outfile;
 }
 

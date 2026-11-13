@@ -63,6 +63,11 @@ import { OsPicker } from "@/components/settings/OsPicker";
 import { ComposerRepoPicker } from "@/components/codebase/RepoField";
 import { FirstTaskPills, RecipeCards } from "@/components/settings/RecipeCards";
 import {
+  recentHostFolders,
+  suggestFirstTasks,
+  type SuggestedFirstTask,
+} from "@/lib/firstTaskSuggest";
+import {
   FinishSetupChecklist,
   loadFinishSetupDismissed,
   saveFinishSetupDismissed,
@@ -182,6 +187,18 @@ export function EmptyState() {
   const hasProvider =
     setup?.hasProvider ?? Boolean(state.config?.providers.some((row) => row.enabled));
   const showSample = showFirstTaskPills({ sessions: state.sessions, hasProvider });
+  const firstTasks = useMemo(
+    () =>
+      suggestFirstTasks({
+        repos: state.repos,
+        hostFolders: hostAgentsLocked
+          ? []
+          : recentHostFolders(state.sessions, loadLastAgent().hostDir),
+      }),
+    [state.repos, state.sessions, hostAgentsLocked],
+  );
+  const firstTaskTarget = firstTasks[0]?.target;
+  const firstTaskPending = state.config?.setupFirstTask === "pending" && hasProvider;
   const primaryRepo = state.repos.find((row) => row.id === repoIds[0]);
 
   useEffect(() => {
@@ -218,8 +235,15 @@ export function EmptyState() {
     setVision(undefined);
   }
 
-  function applyFirstTask(task: FirstTask) {
+  function applyFirstTask(task: FirstTask | SuggestedFirstTask) {
     clearRecipeExtras();
+    const target = "target" in task ? task.target : undefined;
+    if (target?.kind === "repo") {
+      setSelectedRepos([target.repoId]);
+    } else if (target?.kind === "host") {
+      if (effectiveRuntime !== "host") changeRuntime("host");
+      selectWorkspace({ kind: "host", path: target.path });
+    }
     setPrompt(task.prompt);
     setError(null);
     if (state.config?.setupFirstTask === "pending") {
@@ -306,7 +330,19 @@ export function EmptyState() {
     selectWorkspace({ kind: "environment", env });
   }
 
+  // One linked repo: preselect it once, so "No repo" isn't the default next to
+  // first-task chips that already name the repo. Clearing it sticks.
+  const repoPickTouched = useRef(false);
+  const onlyRepoId = state.repos.length === 1 ? state.repos[0]!.id : "";
+  useEffect(() => {
+    if (!onlyRepoId || repoPickTouched.current) return;
+    repoPickTouched.current = true;
+    setSelectedRepos([onlyRepoId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onlyRepoId]);
+
   function setSelectedRepos(ids: string[], refs?: Record<string, string>) {
+    repoPickTouched.current = true;
     const next = [...new Set(ids.filter(Boolean))];
     const hadRepos = repoIds.length > 0;
     setRepoIds(next);
@@ -441,8 +477,15 @@ export function EmptyState() {
     !setup.linuxImageReady &&
     !checklistOpen,
   );
+  // A linked public repo already clones without a token, so the nudge only
+  // shows before the first repo is linked.
   const showGitCallout = Boolean(
-    state.config && !hasForge && !checklistOpen && !showEngineCallout && !setupHintDismissed,
+    state.config &&
+    !hasForge &&
+    state.repos.length === 0 &&
+    !checklistOpen &&
+    !showEngineCallout &&
+    !setupHintDismissed,
   );
 
   function useHostInstead() {
@@ -541,18 +584,46 @@ export function EmptyState() {
         ) : null}
 
         <section className="launch" aria-label={hubMode ? "New teammate" : "New chat"}>
-          {state.config?.setupFirstTask === "pending" && hasProvider ? (
+          {firstTaskPending ? (
             <div className="first-task-card" data-testid="first-task-card">
-              <h3>{t("empty.firstTask.title")}</h3>
-              <p>{t("empty.firstTask.body")}</p>
+              {firstTaskTarget && firstTaskTarget.kind !== "private" ? (
+                <>
+                  <h3>Try a first task on {firstTaskTarget.name}</h3>
+                  <p>
+                    {firstTaskTarget.kind === "repo"
+                      ? "Real work on a repo you linked. Nothing is pushed."
+                      : `Real work in ${firstTaskTarget.path} on this machine. Nothing is pushed.`}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h3>{t("empty.firstTask.title")}</h3>
+                  <p>{t("empty.firstTask.body")}</p>
+                </>
+              )}
               <div className="first-task-card-actions">
-                <button
-                  type="button"
-                  className="btn small primary"
-                  onClick={() => applyFirstTask(FIRST_TASKS[0]!)}
-                >
-                  {t("empty.firstTask.cta")}
-                </button>
+                {firstTaskTarget && firstTaskTarget.kind !== "private" ? (
+                  firstTasks.map((task, i) => (
+                    <button
+                      key={task.id}
+                      type="button"
+                      className={`btn small ${i === 0 ? "primary" : ""}`}
+                      title={task.blurb}
+                      data-testid={`first-task-${i}`}
+                      onClick={() => applyFirstTask(task)}
+                    >
+                      {task.title}
+                    </button>
+                  ))
+                ) : (
+                  <button
+                    type="button"
+                    className="btn small primary"
+                    onClick={() => applyFirstTask(firstTasks[0] ?? FIRST_TASKS[0]!)}
+                  >
+                    {t("empty.firstTask.cta")}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn small ghost"
@@ -563,7 +634,7 @@ export function EmptyState() {
               </div>
             </div>
           ) : null}
-          {setup ? (
+          {setup && !firstTaskPending ? (
             <FinishSetupChecklist
               setup={setup}
               dismissed={setupHintDismissed}
@@ -931,8 +1002,8 @@ export function EmptyState() {
                   </div>
                 ) : !hubMode && showSample ? (
                   <FirstTaskPills
-                    tasks={FIRST_TASKS}
-                    selectedId={FIRST_TASKS.find((task) => task.prompt === prompt)?.id ?? null}
+                    tasks={firstTasks}
+                    selectedId={firstTasks.find((task) => task.prompt === prompt)?.id ?? null}
                     onSelect={applyFirstTask}
                   />
                 ) : null}

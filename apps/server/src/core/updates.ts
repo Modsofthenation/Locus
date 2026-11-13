@@ -141,3 +141,42 @@ export async function checkGithubRelease(opts: {
     };
   }
 }
+
+const CHECK_TTL_MS = 60 * 60 * 1000;
+const UNAVAILABLE_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * Cache GitHub release checks so the desktop's background check, Settings → About, the
+ * phone and the CLI share one request an hour (GitHub allows 60 unauthenticated per hour).
+ */
+export class UpdateChecker {
+  private cache = new Map<string, { at: number; result: AppUpdate }>();
+
+  constructor(
+    private readonly check: typeof checkGithubRelease = checkGithubRelease,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  async get(opts: {
+    current: string;
+    platform: string;
+    fetchFn?: typeof fetch;
+    refresh?: boolean;
+  }): Promise<AppUpdate & { checkedAt: string }> {
+    const key = `${opts.platform}:${opts.current}`;
+    const hit = this.cache.get(key);
+    if (hit && !opts.refresh) {
+      const ttl = hit.result.status === "unavailable" ? UNAVAILABLE_TTL_MS : CHECK_TTL_MS;
+      if (this.now() - hit.at < ttl)
+        return { ...hit.result, checkedAt: new Date(hit.at).toISOString() };
+    }
+    const result = await this.check({
+      current: opts.current,
+      platform: opts.platform,
+      fetchFn: opts.fetchFn,
+    });
+    const at = this.now();
+    this.cache.set(key, { at, result });
+    return { ...result, checkedAt: new Date(at).toISOString() };
+  }
+}

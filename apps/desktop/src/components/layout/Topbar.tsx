@@ -49,6 +49,8 @@ import { CompareModal } from "@/components/chat/CompareModal";
 import { WorkersModal } from "@/components/settings/WorkersModal";
 import { TraceModal } from "@/components/chat/TraceModal";
 import { ExpandableLog } from "@/components/chat/ExpandableLog";
+import { dockerIsDown } from "./DockerDownCallout";
+import { isDockerDownError } from "@/lib/automations";
 import { PersonaAvatar } from "@/components/layout/PersonaAvatar";
 import { composerModelLabel } from "@/components/settings/ModelPicker";
 
@@ -209,7 +211,10 @@ export function Topbar() {
     const kicker = repo
       ? [
           forgeLabel(repo.checkout.forge),
-          typeof repo.openPullCount === "number" ? `${repo.openPullCount} open` : null,
+          typeof repo.openPullCount === "number"
+            ? `${repo.openPullCount} open PR${repo.openPullCount === 1 ? "" : "s"}`
+            : null,
+          repo.checkout.ref || null,
         ]
           .filter(Boolean)
           .join(" · ")
@@ -650,7 +655,9 @@ export function Topbar() {
           </div>
         </div>
         <div className="topbar-actions">
-          {session.error && <ExpandableLog compact danger text={session.error} />}
+          {session.error && !isDockerDownError(session.error) ? (
+            <ExpandableLog compact danger text={session.error} />
+          ) : null}
           <PanelToggle label="Canvas" />
           {vm && (vm.status === "running" || vm.status === "ready" || vm.status === "paused") ? (
             <div className="control-cluster">
@@ -905,7 +912,9 @@ export function Topbar() {
         </div>
       </div>
       <div className="topbar-actions">
-        {session.error && <ExpandableLog compact danger text={session.error} />}
+        {session.error && !isDockerDownError(session.error) ? (
+          <ExpandableLog compact danger text={session.error} />
+        ) : null}
         {hubMode ? (
           <Tooltip label={state.vmCollapsed ? "Show computer" : "Hide computer"}>
             <button
@@ -1000,8 +1009,12 @@ export function Topbar() {
         ) : (
           <button
             type="button"
-            className="btn small primary"
-            title="Start"
+            className={`btn small${sessionRuntime(session) === "docker" && dockerIsDown(state) ? "" : " primary"}`}
+            title={
+              sessionRuntime(session) === "docker" && dockerIsDown(state)
+                ? "Docker isn't running"
+                : "Start"
+            }
             onClick={() =>
               void api
                 .startVm(session.id)

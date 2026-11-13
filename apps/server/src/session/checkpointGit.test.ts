@@ -85,6 +85,36 @@ describe("checkpoint git refs", () => {
     },
   );
 
+  it.skipIf(process.platform === "win32")(
+    "restores correctly while another checkpoint is being written",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "locus-ckpt-race-"));
+      cleanup.push(dir);
+      await execFileAsync("git", ["init"], { cwd: dir, env: gitTestEnv() });
+      await execFileAsync("git", ["config", "user.email", "locus@test"], {
+        cwd: dir,
+        env: gitTestEnv(),
+      });
+      await execFileAsync("git", ["config", "user.name", "Locus"], { cwd: dir, env: gitTestEnv() });
+      await writeFile(join(dir, "a.txt"), "one\n");
+      await execFileAsync("git", ["add", "."], { cwd: dir, env: gitTestEnv() });
+      await execFileAsync("git", ["commit", "-m", "one"], { cwd: dir, env: gitTestEnv() });
+      const ref = await writeCheckpointRef(dir, "c1");
+      expect(ref).toBeTruthy();
+      // A shared scratch index let the concurrent write unlink the restore's
+      // index mid-checkout, so the restore wrote nothing yet returned true.
+      for (let i = 0; i < 10; i++) {
+        await writeFile(join(dir, "a.txt"), "two\n");
+        const [restored] = await Promise.all([
+          restoreCheckpointRef(dir, ref!),
+          writeCheckpointRef(dir, `c-concurrent-${i}`),
+        ]);
+        expect(restored).toBe(true);
+        expect(await readFile(join(dir, "a.txt"), "utf8")).toBe("one\n");
+      }
+    },
+  );
+
   it("needs a full snapshot when guest Chromium profile exists", async () => {
     const dir = await mkdtemp(join(tmpdir(), "locus-ckpt-chrome-"));
     cleanup.push(dir);

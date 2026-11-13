@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { lstat, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, extname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import {
   INDEX_DIR_ALLOWLIST,
   isRepoMapExtraSkipDir,
@@ -22,6 +24,9 @@ const MAX_REGEX_CHARS = 200;
 const GREP_LINE_CHARS = 240;
 const GREP_TIMEOUT_MS = 8_000;
 const FILE_CONCURRENCY = 32;
+/** Files scanned between event-loop yields in the no-ripgrep fallback. */
+const WALK_BATCH = 64;
+const yieldLoop = () => new Promise<void>((done) => setImmediate(done));
 /** Keep in lockstep with `WORKSPACE_FILE_MAX_BYTES` in workspaceFiles.ts. */
 const MAX_FILE_BYTES = 1_500_000;
 
@@ -252,17 +257,50 @@ function compileMatcher(
 
 let cachedRg: string | false | undefined;
 
+/** File name of the ripgrep binary on this platform. */
+export const RIPGREP_BINARY = process.platform === "win32" ? "rg.exe" : "rg";
+
+/**
+ * Where to look for ripgrep: an explicit override, then `rg` on PATH (distro builds measured
+ * ~1.5x faster than the static `@vscode/ripgrep` binary), then the binary the desktop build
+ * copies beside the bundled server (`bin/rg`), then the `@vscode/ripgrep` package (dev installs).
+ */
+export function ripgrepCandidates(): string[] {
+  const out: string[] = [];
+  const override = process.env.LOCUS_RG_PATH?.trim();
+  if (override) out.push(override);
+  out.push("rg");
+  try {
+    out.push(join(dirname(fileURLToPath(import.meta.url)), "bin", RIPGREP_BINARY));
+  } catch {
+    /* not a file: URL */
+  }
+  try {
+    const req = createRequire(import.meta.url);
+    out.push(
+      req.resolve(`@vscode/ripgrep-${process.platform}-${process.arch}/bin/${RIPGREP_BINARY}`),
+    );
+  } catch {
+    /* optional dependency not installed for this platform */
+  }
+  return out;
+}
+
 export async function resolveRipgrep(): Promise<string | undefined> {
   if (cachedRg === false) return undefined;
   if (cachedRg) return cachedRg;
-  try {
-    await execFileAsync("rg", ["--version"], { timeout: 2000, windowsHide: true });
-    cachedRg = "rg";
-    return cachedRg;
-  } catch {
-    cachedRg = false;
-    return undefined;
+  for (const bin of ripgrepCandidates()) {
+    if (bin !== "rg" && !existsSync(bin)) continue;
+    try {
+      await execFileAsync(bin, ["--version"], { timeout: 2000, windowsHide: true });
+      cachedRg = bin;
+      return cachedRg;
+    } catch {
+      /* try the next candidate */
+    }
   }
+  cachedRg = false;
+  return undefined;
 }
 
 /** Reset the rg lookup cache (tests). */
@@ -474,6 +512,14 @@ async function grepWithRipgrep(
   };
 }
 
+async function loadIgnoreFile(root: string, name: string): Promise<IgnoreRule[]> {
+  try {
+    return parseIgnore(await readFile(join(root, name), "utf8"));
+  } catch {
+    return [];
+  }
+}
+
 async function loadIgnore(root: string): Promise<IgnoreRule[]> {
   const rules: IgnoreRule[] = [];
   for (const name of [".gitignore", ".locusignore"]) {
@@ -486,10 +532,7 @@ async function loadIgnore(root: string): Promise<IgnoreRule[]> {
   return rules;
 }
 
-async function gitCandidateFiles(
-  root: string,
-  ignore: IgnoreRule[],
-): Promise<string[] | undefined> {
+async function gitCandidateFiles(root: string): Promise<string[] | undefined> {
   try {
     const { stdout: topRaw } = await execFileAsync(
       "git",
@@ -510,15 +553,22 @@ async function gitCandidateFiles(
       );
       return stdout.split("\0").filter(Boolean);
     };
+    // git applies .gitignore itself (matching it in JS cost ~7 s on a 20k-file repo);
+    // only .locusignore rules are evaluated here.
+    const [cached, trackedIgnored, others, locus] = await Promise.all([
+      list(["--cached"]),
+      list(["--cached", "--ignored", "--exclude-standard"]),
+      list(["--others", "--exclude-standard"]),
+      loadIgnoreFile(root, ".locusignore"),
+    ]);
+    const skip = new Set(trackedIgnored);
     const files: string[] = [];
-    for (const rel of [
-      ...(await list(["--cached"])),
-      ...(await list(["--others", "--exclude-standard"])),
-    ]) {
+    for (const rel of [...cached, ...others]) {
+      if (skip.has(rel)) continue;
       const path = rel.replace(/\\/g, "/").replace(/^\/+/, "");
       if (!path || path.split("/").some((part) => part === "." || part === "..")) continue;
-      if (repoMapPathSkipped(path) || pathIgnored(path, false, ignore) || isGeneratedGrepPath(path))
-        continue;
+      if (repoMapPathSkipped(path) || isGeneratedGrepPath(path)) continue;
+      if (locus.length && pathIgnored(path, false, locus)) continue;
       files.push(path);
       if (files.length >= GREP_MAX_FILES) break;
     }
@@ -619,8 +669,7 @@ async function grepByWalk(
   if (compiled.error) return { items: [], error: compiled.error };
   const ignore = await loadIgnore(root);
   const replacing = opts.replace != null;
-  const listed =
-    (await gitCandidateFiles(root, ignore)) ?? (await walkCandidateFiles(root, ignore));
+  const listed = (await gitCandidateFiles(root)) ?? (await walkCandidateFiles(root, ignore));
   const files = listed.filter((path) => pathMatchesGrepGlobs(path, opts.glob, opts.exclude));
   const source: string[] = [];
   const rest: string[] = [];
@@ -673,12 +722,26 @@ async function grepByWalk(
   };
 
   if (replacing) {
-    for (const rel of ordered) take(await scanOne(rel));
+    for (let i = 0; i < ordered.length; i += 1) {
+      if (i % WALK_BATCH === 0) await yieldLoop();
+      take(await scanOne(ordered[i]!));
+    }
   } else {
-    const rows = await Promise.all(ordered.map((rel) => limitFile(() => scanOne(rel))));
-    for (const row of rows) {
-      take(row);
+    // Ordered batches: stop as soon as the cap is met and give the event loop a turn between
+    // batches, so a repo without ripgrep cannot freeze the control plane for seconds.
+    for (let i = 0; i < ordered.length; i += WALK_BATCH) {
+      const batch = ordered.slice(i, i + WALK_BATCH);
+      const rows = await Promise.all(batch.map((rel) => limitFile(() => scanOne(rel))));
+      for (const row of rows) {
+        take(row);
+        if (truncated) break;
+      }
       if (truncated) break;
+      if (items.length >= cap) {
+        truncated = i + WALK_BATCH < ordered.length;
+        break;
+      }
+      await yieldLoop();
     }
   }
 

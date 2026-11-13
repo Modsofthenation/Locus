@@ -688,18 +688,133 @@ button:disabled {
   color: var(--muted);
   margin-bottom: var(--space-2) !important;
 }
+/* Actions sit under the title so the sidebar never cuts a chat name to "Fl…". */
 .inbox-row-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
-  padding: var(--space-1-5) var(--space-2) var(--space-1-5) 0;
-  align-self: center;
+  padding: 0 var(--space-2) var(--space-2) 28px;
 }
-.session-item.inbox-row {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+.session-item.has-menu.inbox-row {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
   padding: 0;
   gap: 0;
+}
+.inbox-decision-card {
+  width: min(640px, 100%);
+}
+.inbox-decision-card .inbox-next {
+  width: 100%;
+  box-sizing: border-box;
+}
+.inbox-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  font-size: var(--type-sm);
+  color: var(--muted);
+}
+.inbox-decision-body {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 var(--space-2);
+}
+.inbox-decision-what {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.inbox-risk {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid currentColor;
+  font-size: var(--type-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1.6;
+}
+.inbox-risk.low {
+  color: var(--ok);
+}
+.inbox-risk.medium {
+  color: var(--warn);
+}
+.inbox-risk.high {
+  color: var(--danger);
+}
+.inbox-decision-why {
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border-left: 2px solid var(--line-strong);
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+.inbox-decision-command,
+.inbox-decision-args pre {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  max-height: 200px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 6px);
+  background: var(--bg-2);
+  font-size: var(--type-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.inbox-decision-files {
+  margin: 0;
+  padding-left: var(--space-4);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: var(--type-xs);
+}
+.inbox-decision-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: var(--type-sm);
+}
+.inbox-decision-facts dt {
+  color: var(--muted);
+}
+.inbox-decision-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.inbox-decision-args summary {
+  cursor: pointer;
+  font-size: var(--type-sm);
+  color: var(--muted);
+}
+.inbox-decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.inbox-decision-actions kbd,
+.inbox-keys kbd {
+  font-size: var(--type-2xs);
+  opacity: 0.75;
+}
+.inbox-approve-all {
+  margin-top: var(--space-1);
+}
+.inbox-keys {
+  margin: var(--space-3) 0 0;
+  font-size: var(--type-xs);
+  color: var(--muted);
+}
+@media (pointer: coarse) {
+  .inbox-keys,
+  .inbox-decision-actions kbd {
+    display: none;
+  }
 }
 .side-rail .rail-label {
   max-width: 100%;
@@ -3788,6 +3903,89 @@ button.patch-path-open:hover {
   margin: var(--space-1-5) 0 0;
   max-width: 720px;
 }
+.turn-outcome {
+  max-width: 720px;
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.turn-outcome-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+.turn-outcome-title {
+  font-weight: var(--weight-semibold);
+}
+.turn-outcome-tests {
+  font-size: var(--type-sm);
+}
+.turn-outcome-tests.ok {
+  color: var(--ok);
+}
+.turn-outcome-tests.failed {
+  color: var(--danger);
+}
+.turn-outcome-meta {
+  font-size: var(--type-sm);
+  color: var(--muted);
+}
+.turn-outcome-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--type-sm);
+}
+.turn-outcome-files li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.turn-outcome-files button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: var(--type-xs);
+  cursor: pointer;
+  text-align: left;
+}
+.turn-outcome-files button:hover {
+  text-decoration: underline;
+}
+.turn-outcome-stat {
+  flex: 0 0 auto;
+  font-size: var(--type-xs);
+}
+.turn-outcome-stat .add {
+  color: var(--ok);
+}
+.turn-outcome-stat .del {
+  color: var(--danger);
+}
+.turn-outcome-more {
+  color: var(--muted);
+}
+.turn-outcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
 .task-list {
   max-width: 720px;
   margin: var(--chat-task-margin);
@@ -4860,6 +5058,10 @@ button.patch-path-open:hover {
   gap: var(--space-0-5);
   overflow-y: auto;
   text-align: left;
+}
+.composer-repo-pop.up {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 .composer-repo-search {
   width: 100%;
@@ -15327,6 +15529,11 @@ button.pill {
 .setup-wizard-modal {
   width: min(640px, calc(100vw - 32px));
 }
+/* Pin the wizard near the top so it doesn't jump when the provider card collapses. */
+.modal-backdrop:has(> .setup-wizard-modal) {
+  place-items: start center;
+  padding-top: max(var(--space-6), 10vh);
+}
 .setup-hero-lead {
   margin-top: 0;
 }
@@ -19223,11 +19430,19 @@ a.forge-badge.forge-link:hover {
   gap: var(--space-1);
   margin: 0;
   padding: 0 18px;
-  flex-wrap: wrap;
+  /* One row that scrolls sideways on narrow windows instead of wrapping to two. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
   flex-shrink: 0;
   border-bottom: 1px solid var(--line);
 }
+.codebase-tabs::-webkit-scrollbar {
+  display: none;
+}
 .codebase-tabs button {
+  white-space: nowrap;
+  flex-shrink: 0;
   background: transparent;
   border: 0;
   border-bottom: 2px solid transparent;
@@ -19716,9 +19931,69 @@ button.repo-stat:hover {
   border-radius: var(--radius-sm);
   padding: 1px var(--space-1-5);
 }
+@media (min-width: 761px) {
+  .empty-actions.narrow-only {
+    display: none;
+  }
+}
+.repo-danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--line));
+  border-radius: var(--radius-lg);
+}
+.repo-danger-zone .hint {
+  margin: var(--space-1) 0 0;
+}
 .pr-table-pane {
   min-height: 220px;
   flex: 1;
+}
+/* Nothing to review: one line, not half the page. */
+.pr-table-pane.is-empty {
+  min-height: 0;
+  flex: 0 0 auto;
+}
+.overview-about {
+  max-width: 760px;
+}
+.overview-about-lead {
+  margin: 0 0 var(--space-1-5);
+  font-size: var(--type-md, 15px);
+}
+.overview-about-facts {
+  margin: 0;
+  color: var(--muted);
+}
+.overview-about-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+}
+.overview-about-topics .chip {
+  padding: 1px var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  font-size: var(--type-xs);
+  color: var(--muted);
+}
+.overview-about-readme {
+  margin-top: var(--space-2);
+}
+.overview-about-readme > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--type-xs);
+}
+/* Only the review inbox flexes; a banner above must not squeeze the other cards. */
+.overview-panes > .surface-pane:not(.pr-table-pane),
+.overview-panes > .repo-stats {
+  flex-shrink: 0;
 }
 .pr-table-body {
   padding: 0;
@@ -23920,4 +24195,107 @@ img.slack-emoji {
 }
 .git-account-advanced .git-account-remove {
   margin-top: var(--space-1);
+}
+
+/* Settings → About: automatic update checks */
+.about-auto-update {
+  padding: var(--space-2) 0;
+}
+
+/* Settings → Benchmark */
+.benchmark-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.benchmark-settings .notify-card h4 {
+  margin: 0;
+  padding: 13px 18px 0;
+  font-size: var(--type-md);
+}
+.benchmark-settings .notify-card > .about-updates-actions,
+.benchmark-settings .notify-card > .hint,
+.benchmark-repeat {
+  padding: 0 18px 13px;
+}
+.benchmark-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.benchmark-repeat {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--type-sm);
+  color: var(--muted);
+}
+.benchmark-run-head {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 13px 18px;
+  background: none;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.benchmark-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--type-sm);
+}
+.benchmark-table th,
+.benchmark-table td {
+  padding: 6px 18px;
+  text-align: left;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.benchmark-table th {
+  color: var(--muted);
+  font-weight: var(--weight-semibold);
+}
+.benchmark-cases tr[data-status="passed"] td:nth-child(3) {
+  color: var(--ok, var(--accent));
+}
+.benchmark-cases tr[data-status="failed"] td:nth-child(3),
+.benchmark-cases tr[data-status="error"] td:nth-child(3) {
+  color: var(--danger);
+}
+
+/* Settings → Advanced → Back up and restore */
+.backup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.backup-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--type-sm);
+  color: var(--muted);
+}
+.backup-grid .backup-check {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+}
+.backup-restore-title {
+  margin: var(--space-4) 0 0;
+  font-size: var(--type-md);
+}
+
+/* "Open on GitHub" on a merged PR is a link styled as a button. */
+.pr-detail-head a.btn,
+.pr-detail-head a.btn:hover {
+  text-decoration: none;
+  color: var(--text);
 }

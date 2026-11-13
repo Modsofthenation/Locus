@@ -49,6 +49,7 @@ import {
   type PullListState,
   type PullRequestDetail,
   type PullRequestRef,
+  type RepoAbout,
   type RepoBranchList,
 } from "@locus/shared";
 import { ForgeClient, requireOwnerRepo, type ForgeFetcher } from "./forge.js";
@@ -237,6 +238,20 @@ export class RepoService {
     await this.store.replaceRepo(next);
     this.hub.broadcast({ type: "repo.updated", repo: next });
     return next;
+  }
+
+  private readonly aboutCache = new Map<string, { at: number; about: RepoAbout }>();
+
+  /** Description, license, stars, README excerpt. Cached 10 minutes: tokenless reads are scarce. */
+  async about(id: string): Promise<RepoAbout> {
+    const hit = this.aboutCache.get(id);
+    if (hit && Date.now() - hit.at < 10 * 60_000) return hit.about;
+    const repo = await this.require(id);
+    const account = await this.readAccountFor(repo);
+    const parsed = requireOwnerRepo(repo.checkout.url);
+    const about = (await this.forge.about(account, parsed.owner, parsed.repo)) ?? {};
+    this.aboutCache.set(id, { at: Date.now(), about });
+    return about;
   }
 
   async listBranches(id: string): Promise<RepoBranchList> {

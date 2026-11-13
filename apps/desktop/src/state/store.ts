@@ -360,6 +360,7 @@ export type Action =
       dockerReady?: boolean;
       setup?: SetupStatus;
     }
+  | { type: "dockerHealth"; dockerKind: "mock" | "docker"; dockerReady: boolean }
   | { type: "session"; session: AgentSession }
   | { type: "sessions"; sessions: AgentSession[] }
   | { type: "deleted"; id: string }
@@ -616,6 +617,11 @@ function reduceUiState(state: UiState, action: Action): UiState {
         setupOpen: action.setup?.needsWizard ?? state.setupOpen,
       };
     }
+    case "dockerHealth":
+      if (state.dockerKind === action.dockerKind && state.dockerReady === action.dockerReady) {
+        return state;
+      }
+      return { ...state, dockerKind: action.dockerKind, dockerReady: action.dockerReady };
     case "reset":
       return {
         ...initialState,

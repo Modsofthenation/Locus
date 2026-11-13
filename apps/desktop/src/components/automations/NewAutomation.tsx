@@ -218,25 +218,17 @@ export function NewAutomationModal() {
     setTemplateId(current?.templateId ?? templates.find((t) => t.os === nextOs)?.id ?? "");
     setProviderId(current?.providerId ?? pickProvider(providers)?.id ?? "");
     setModel(current?.model ?? pickProvider(providers)?.defaultModel ?? "");
-    setRepo(
-      current?.repo?.url ??
-        (state.section === "codebase"
-          ? (state.repos.find((row) => row.id === state.selectedRepoId)?.checkout.url ?? "")
-          : ""),
-    );
-    setRepoId(
-      current
-        ? liveRepoId(state.repos, current.repoId)
-        : state.section === "codebase"
-          ? (state.selectedRepoId ?? "")
-          : "",
-    );
-    setRef(
-      current?.repo?.ref ??
-        (state.section === "codebase"
-          ? (state.repos.find((row) => row.id === state.selectedRepoId)?.checkout.ref ?? "")
-          : ""),
-    );
+    // From Codebase, the selected repo. Elsewhere, a lone linked repo — except
+    // for starters that don't use git (Slack ops webhook).
+    const seedRepo =
+      state.section === "codebase"
+        ? state.repos.find((row) => row.id === state.selectedRepoId)
+        : !current && state.automationStarterId !== "slack-ops" && state.repos.length === 1
+          ? state.repos[0]
+          : undefined;
+    setRepo(current?.repo?.url ?? seedRepo?.checkout.url ?? "");
+    setRepoId(current ? liveRepoId(state.repos, current.repoId) : (seedRepo?.id ?? ""));
+    setRef(current?.repo?.ref ?? seedRepo?.checkout.ref ?? "");
     setStartVm(current?.startVm ?? true);
     setReuseSession(current?.reuseSession ?? false);
     setOwnerSessionId(

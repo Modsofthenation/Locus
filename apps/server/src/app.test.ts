@@ -4285,6 +4285,9 @@ describe("docker agents", () => {
         model: config.providers[0]!.defaultModel,
         startVm: true,
       });
+      // Boot first: a turn sent mid-boot can be auto-resumed once the guest is
+      // ready, adding a later checkpoint after this test writes v2.
+      await waitUntilDockerRunning(ctx.sessions, created.id);
       const vm = ctx.sessions.getMachine(created.vmId!);
       const ws = vm!.diskPath;
       await execFileAsync("git", ["init"], { cwd: ws });
@@ -6691,7 +6694,7 @@ describe("golden images, media, and abort", () => {
         return new Response("Not Found", { status: 404 });
       }) as typeof fetch,
     });
-    const res = await app.request("/api/updates?current=0.20.0");
+    const res = await app.request("/api/updates?current=0.21.0");
     expect(res.status).toBe(200);
     const body = (await res.json()) as { status: string; message?: string };
     expect(body.status).toBe("unavailable");

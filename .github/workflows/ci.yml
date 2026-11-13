@@ -23,10 +23,24 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: apps/desktop
       - run: npm run test:visual
+      - name: Upload visual diffs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: visual-diffs
+          path: apps/desktop/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+      # Run the remaining checks even when an earlier step failed, so a
+      # screenshot or test failure cannot hide a lint/type/format/build break.
       - run: npm run typecheck
+        if: ${{ !cancelled() }}
       - run: npm run lint
+        if: ${{ !cancelled() }}
       - run: npm run format:check
+        if: ${{ !cancelled() }}
       - run: npm run build --workspace=@locus/desktop
+        if: ${{ !cancelled() }}
 
   docker-image:
     runs-on: ubuntu-latest
@@ -41,7 +55,7 @@ jobs:
         run: |
           mkdir -p images/agent/vendor
           node scripts/prefetch-github-release-asset.mjs --owner coder --repo code-server --tag v4.96.4 --file code-server-4.96.4-linux-amd64.tar.gz --out images/agent/vendor/code-server.tar.gz
-      - run: docker build -t locus/agent:0.1 -t locus/agent:0.20.0 images/agent
+      - run: docker build -t locus/agent:0.1 -t locus/agent:0.21.0 images/agent
 
   android:
     runs-on: ubuntu-latest

@@ -118,6 +118,16 @@ Config / Settings:
   locus config revoke-all --confirm REVOKE
   locus config reset --confirm RESET
 
+Backup / updates:
+  locus backup [file.locusbak] [--include-disks]     Encrypted copy of ~/.locus
+  locus restore <file.locusbak> --yes [--inspect]   Applies at the next start
+  locus restore status|cancel
+  locus update [download]                            Check GitHub releases
+
+Model benchmark:
+  locus eval run --model provider/model[,…] [--case id,…] [--repeat N] [--wait]
+  locus eval cases|list|show <run>|cancel <run>
+
 Images / debug:
   locus image list|capture|delete|fetch|fetch-virtio
   locus debug logs|log|eval|egress|approvals
@@ -311,6 +321,41 @@ Agents flag bad claims with correct_graph; inbox Accept/Dismiss is the human gat
   locus config theme ember
   locus config workers add 'locus-worker:add?url=…'
   locus config reset --confirm RESET`,
+  backup: `Write an encrypted backup of ~/.locus (sessions, settings, vault, boards, projects, Brain).
+
+  locus backup [file.locusbak] [--include-disks]
+
+The passphrase comes from LOCUS_BACKUP_PASSPHRASE (or --passphrase-env NAME), or a hidden
+prompt. Stored secrets travel inside the encrypted file and are re-encrypted with the target
+machine's key on restore. VM disks and images are left out unless --include-disks.`,
+  restore: `Restore a backup made by \`locus backup\` or Settings → Advanced.
+
+  locus restore <file.locusbak> --inspect   Check the passphrase and show what is inside
+  locus restore <file.locusbak> --yes       Stage it; quit and reopen Locus to apply
+  locus restore status
+  locus restore cancel
+
+The swap happens at the next start, before anything loads. Current files move to
+~/.locus/.before-restore-<time>/. This machine's master key stays in place.`,
+  update: `Check GitHub Releases for a newer Locus.
+
+  locus update             Show the latest release for this platform
+  locus update download    Download the installer and verify it against SHA256SUMS
+
+The desktop app checks at launch and every six hours unless Settings → About →
+Check automatically is off. On a Linux AppImage, Install swaps the file and relaunches.`,
+  eval: `Benchmark models on small coding tasks as real Host agent turns.
+
+  locus eval cases
+  locus eval run --model openai/gpt-5 --model anthropic/claude-sonnet [--case fix-add,off-by-one]
+                 [--repeat 3] [--timeout 10] [--wait]
+  locus eval list
+  locus eval show <run>
+  locus eval cancel <run>
+
+Each case starts with failing tests. A case passes when \`npm test\` passes afterwards and the
+tests were not edited. Runs record tokens, estimated cost and time. Benchmark sessions are
+archived so you can open a failure. Results: ~/.locus/benchmarks/.`,
   debug: `JSONL traces under ~/.locus/traces, plus audit exports.
 
   locus debug logs

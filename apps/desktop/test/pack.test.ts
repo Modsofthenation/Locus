@@ -23,7 +23,7 @@ const pkg = JSON.parse(readFileSync(join(desktopRoot, "package.json"), "utf8")) 
     linux?: { target?: string[]; executableName?: string; packageName?: string };
     deb?: { artifactName?: string; packageName?: string };
     rpm?: { artifactName?: string; packageName?: string };
-    mac?: { target?: string[] };
+    mac?: { target?: string[]; binaries?: string[] };
     win?: { target?: string[] };
     extraResources?: Array<{ from?: string; to?: string }>;
     files?: string[];
@@ -433,6 +433,23 @@ describe("electron packaging", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it("ships a platform ripgrep beside the bundled server", async () => {
+    expect(pkg.build?.mac?.binaries).toContain("Contents/Resources/server/bin/rg");
+    const { copyRipgrep } = (await import(
+      pathToFileURL(join(desktopRoot, "scripts/bundle-server.mjs")).href
+    )) as { copyRipgrep: (serverDir: string) => Promise<string> };
+    const dir = mkdtempSync(join(tmpdir(), "locus-rg-bundle-"));
+    try {
+      const rg = await copyRipgrep(dir);
+      expect(rg).toBe(join(dir, "bin", process.platform === "win32" ? "rg.exe" : "rg"));
+      const probe = spawnSync(rg, ["--version"], { encoding: "utf8", timeout: 10_000 });
+      expect(probe.status).toBe(0);
+      expect(probe.stdout).toMatch(/^ripgrep \d+/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   it("bundles AWS IAM tools without the AWS SDK", async () => {
     const serverPkg = JSON.parse(

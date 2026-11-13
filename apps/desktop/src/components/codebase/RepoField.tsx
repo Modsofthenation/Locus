@@ -1,5 +1,11 @@
 import { forgeLabel, type LinkedRepo } from "@locus/shared";
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { IconClose } from "@/components/layout/Icons";
 import { Select } from "@/components/layout/Select";
 import { api } from "@/lib/api";
@@ -177,6 +183,15 @@ function ComposerRepoCombobox(props: {
   const [active, setActive] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
+  // Open upward when the list would run off the bottom of the window (and
+  // there is more room above), instead of covering what sits under the composer.
+  const [dropUp, setDropUp] = useState(false);
+  useLayoutEffect(() => {
+    if (!open || !root.current) return;
+    const rect = root.current.getBoundingClientRect();
+    const below = window.innerHeight - rect.bottom;
+    setDropUp(below < 300 && rect.top > below);
+  }, [open]);
   const showFilter = props.repos.length > 5;
   const needle = repoQuery.trim().toLowerCase();
   const visibleRepos = needle
@@ -439,7 +454,7 @@ function ComposerRepoCombobox(props: {
       {open ? (
         <div
           id="composer-repo-listbox"
-          className="composer-repo-pop"
+          className={`composer-repo-pop${dropUp ? " up" : ""}`}
           role="listbox"
           aria-multiselectable={picking ? undefined : "true"}
           aria-label={picking ? "Branches" : "Repositories"}

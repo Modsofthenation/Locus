@@ -8,6 +8,7 @@ import {
 import { api } from "@/lib/api";
 import { useStore } from "@/state/store";
 import { Select } from "@/components/layout/Select";
+import { EmptyHint } from "@/components/layout/EmptyHero";
 
 const SHOWN = 6;
 
@@ -75,6 +76,51 @@ export function ArchitecturePane({ repoId, repoName }: { repoId: string; repoNam
   const codeSection = report
     ? architectureSection(report, "code", file)
     : placeholder(file || "Code", "code");
+
+  // Before the first pass the three sections would all say "Not analysed yet";
+  // show one empty state with the action that fills them.
+  if (!report) {
+    return (
+      <div className="architecture-pane" data-testid="architecture-pane">
+        <EmptyHint
+          testId="architecture-empty"
+          title="Not analysed yet"
+          lead={`Analyse reads a Host or Docker checkout of ${repoName} on this machine (no model call) and splits it into repo, feature, and code sections. Suggest improvements then lists behaviour-preserving changes; Improve with agent applies the ones that still hold.`}
+          action={
+            <div className="row-actions architecture-empty-actions">
+              <button
+                className="btn primary"
+                disabled={busy !== null}
+                onClick={() => void analyse()}
+              >
+                {busy === "analyse" ? "Analysing…" : "Analyse"}
+              </button>
+              <button
+                className="btn"
+                disabled={busy !== null}
+                onClick={() => void analyse("suggest")}
+              >
+                Suggest improvements
+              </button>
+              <button
+                className="btn ghost"
+                data-testid="architecture-improve-repo"
+                disabled={busy !== null}
+                onClick={() => void improve("repo")}
+              >
+                {busy === "repo" ? "Starting…" : "Improve with agent"}
+              </button>
+            </div>
+          }
+        />
+        {error ? (
+          <p className="error-row" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="architecture-pane" data-testid="architecture-pane">

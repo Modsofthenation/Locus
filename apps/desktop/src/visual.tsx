@@ -127,7 +127,7 @@ function stubApi(): void {
   api.checkUpdates = async () =>
     ({
       status: "unavailable",
-      current: "0.20.0",
+      current: "0.21.0",
       message: "No GitHub release found yet.",
     }) as never;
 }

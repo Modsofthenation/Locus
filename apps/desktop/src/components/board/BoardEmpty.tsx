@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { resolveAgentDefaults } from "@/lib/lastAgent";
 import { useStore } from "@/state/store";
 import { EmptyHero } from "@/components/layout/EmptyHero";
-import { IconPlus } from "@/components/layout/Icons";
+import { IconReturn } from "@/components/layout/Icons";
 
 export function BoardEmpty() {
   const { state, dispatch } = useStore();
@@ -62,11 +62,12 @@ export function BoardEmpty() {
                   className="btn primary small composer-send"
                   type="submit"
                   disabled={busy}
-                  title="New board"
-                  aria-label={busy ? "Creating…" : "New board"}
+                  title="Create board"
+                  aria-label={busy ? "Creating…" : "Create board"}
                 >
-                  <IconPlus />
-                  <span>{busy ? "Creating…" : "New board"}</span>
+                  {/* Submit reads like every other composer's Send; "New board" is the sidebar's. */}
+                  <span className="composer-send-label">{busy ? "Creating…" : "Create"}</span>
+                  <IconReturn />
                 </button>
               </div>
             </div>

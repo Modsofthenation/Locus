@@ -1,0 +1,1737 @@
+{
+  "when": "2026-11-12T01:35:58.009Z",
+  "node": "v22.23.4",
+  "runs": 3,
+  "ripgrep": true,
+  "ctags": false,
+  "results": [
+    {
+      "repo": "express",
+      "trackedFiles": 216,
+      "checkoutMb": 0.7,
+      "samples": [
+        {
+          "op": "index: cold build",
+          "medianMs": 56.2,
+          "minMs": 50.5,
+          "maxMs": 76.6,
+          "maxLoopStallMs": 15.7,
+          "heapDeltaMb": 7.4,
+          "note": "216 files, read 132, truncated=false"
+        },
+        {
+          "op": "index: warm rebuild (force, mtime reuse)",
+          "medianMs": 45,
+          "minMs": 43.8,
+          "maxMs": 53.2,
+          "maxLoopStallMs": 9.8,
+          "heapDeltaMb": 5.1,
+          "note": "reused 216, read 101"
+        },
+        {
+          "op": "index: hydrate from disk (new process)",
+          "medianMs": 2.4,
+          "minMs": 1.8,
+          "maxMs": 3.2,
+          "maxLoopStallMs": 5.9,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "repo_map: formatRepoMap (no query)",
+          "medianMs": 1.8,
+          "minMs": 1.8,
+          "maxMs": 1.9,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 1.8,
+          "note": "7 KB output"
+        },
+        {
+          "op": "repo_map: per-turn ranked prompt (query+rank)",
+          "medianMs": 1.7,
+          "minMs": 1.7,
+          "maxMs": 1.8,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 2,
+          "note": "7 KB output"
+        },
+        {
+          "op": "quick open: searchRepoMap(\"index\")",
+          "medianMs": 0.5,
+          "minMs": 0.5,
+          "maxMs": 2,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.3,
+          "note": "40 hits"
+        },
+        {
+          "op": "quick open: searchRepoMap per keystroke x6",
+          "medianMs": 1.8,
+          "minMs": 1.5,
+          "maxMs": 2.9,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 1.4
+        },
+        {
+          "op": "grep index: build",
+          "medianMs": 79.3,
+          "minMs": 75.3,
+          "maxMs": 81.2,
+          "maxLoopStallMs": 14.2,
+          "heapDeltaMb": 11,
+          "note": "216 files, 4167 grams"
+        },
+        {
+          "op": "grep index: load from disk (every call)",
+          "medianMs": 5.6,
+          "minMs": 5.5,
+          "maxMs": 6.1,
+          "maxLoopStallMs": 5.9,
+          "heapDeltaMb": 2.8
+        },
+        {
+          "op": "agent grep (indexed): selective literal",
+          "medianMs": 20.2,
+          "minMs": 18.9,
+          "maxMs": 21.6,
+          "maxLoopStallMs": 7.6,
+          "heapDeltaMb": 3.3,
+          "note": "usedIndex=true candidates=28 27 KB"
+        },
+        {
+          "op": "agent grep (no index): selective literal",
+          "medianMs": 14.3,
+          "minMs": 13.2,
+          "maxMs": 14.5,
+          "maxLoopStallMs": 5.5,
+          "heapDeltaMb": 0.5,
+          "note": "28 KB"
+        },
+        {
+          "op": "baseline rg -l: selective literal",
+          "medianMs": 9.3,
+          "minMs": 8.5,
+          "maxMs": 9.5,
+          "maxLoopStallMs": 5.3,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): common word",
+          "medianMs": 18.3,
+          "minMs": 17.7,
+          "maxMs": 21.8,
+          "maxLoopStallMs": 10,
+          "heapDeltaMb": 3.7,
+          "note": "usedIndex=false candidates=- 47 KB"
+        },
+        {
+          "op": "agent grep (no index): common word",
+          "medianMs": 11.8,
+          "minMs": 11.5,
+          "maxMs": 13.1,
+          "maxLoopStallMs": 5.8,
+          "heapDeltaMb": 0.8,
+          "note": "47 KB"
+        },
+        {
+          "op": "baseline rg -l: common word",
+          "medianMs": 10.4,
+          "minMs": 9.5,
+          "maxMs": 10.7,
+          "maxLoopStallMs": 5.8,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): regex",
+          "medianMs": 23.9,
+          "minMs": 22.4,
+          "maxMs": 25.2,
+          "maxLoopStallMs": 8.5,
+          "heapDeltaMb": 3.4,
+          "note": "usedIndex=true candidates=41 4 KB"
+        },
+        {
+          "op": "agent grep (no index): regex",
+          "medianMs": 18.2,
+          "minMs": 16.5,
+          "maxMs": 18.2,
+          "maxLoopStallMs": 5.9,
+          "heapDeltaMb": 0.4,
+          "note": "8 KB"
+        },
+        {
+          "op": "baseline rg -l: regex",
+          "medianMs": 11.4,
+          "minMs": 11.2,
+          "maxMs": 12.7,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): no match",
+          "medianMs": 12.1,
+          "minMs": 12,
+          "maxMs": 12.3,
+          "maxLoopStallMs": 6.4,
+          "heapDeltaMb": 3.1,
+          "note": "usedIndex=true candidates=0 0 KB"
+        },
+        {
+          "op": "agent grep (no index): no match",
+          "medianMs": 15.1,
+          "minMs": 13.9,
+          "maxMs": 16.9,
+          "maxLoopStallMs": 5.6,
+          "heapDeltaMb": 0.4,
+          "note": "0 KB"
+        },
+        {
+          "op": "baseline rg -l: no match",
+          "medianMs": 8.8,
+          "minMs": 8.5,
+          "maxMs": 9,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "files search: selective literal",
+          "medianMs": 22.8,
+          "minMs": 20.8,
+          "maxMs": 26.3,
+          "maxLoopStallMs": 6.2,
+          "heapDeltaMb": 0.9,
+          "note": "80 hits truncated=true"
+        },
+        {
+          "op": "files search: common word",
+          "medianMs": 9.4,
+          "minMs": 9,
+          "maxMs": 10.5,
+          "maxLoopStallMs": 5.9,
+          "heapDeltaMb": 0.6,
+          "note": "80 hits truncated=true"
+        },
+        {
+          "op": "files search: common word (walk fallback)",
+          "medianMs": 58.4,
+          "minMs": 58.4,
+          "maxMs": 58.4,
+          "maxLoopStallMs": 11.5,
+          "heapDeltaMb": 3.6,
+          "note": "80 hits"
+        },
+        {
+          "op": "list: depth 1",
+          "medianMs": 2.5,
+          "minMs": 2.3,
+          "maxMs": 2.9,
+          "maxLoopStallMs": 5.6,
+          "heapDeltaMb": 0.1,
+          "note": "14 entries"
+        },
+        {
+          "op": "list: full tree (no depth)",
+          "medianMs": 9.2,
+          "minMs": 8.9,
+          "maxMs": 9.3,
+          "maxLoopStallMs": 5.8,
+          "heapDeltaMb": 1.2,
+          "note": "284 entries"
+        },
+        {
+          "op": "git: status (clean)",
+          "medianMs": 13,
+          "minMs": 12.7,
+          "maxMs": 13.6,
+          "maxLoopStallMs": 5.7,
+          "heapDeltaMb": 0.6,
+          "note": "0 files"
+        },
+        {
+          "op": "git: dirty stats (clean)",
+          "medianMs": 13.8,
+          "minMs": 13.8,
+          "maxMs": 15.2,
+          "maxLoopStallMs": 5.6,
+          "heapDeltaMb": 0.6
+        },
+        {
+          "op": "git: status (50 mod + 200 untracked)",
+          "medianMs": 14.4,
+          "minMs": 14.1,
+          "maxMs": 16.3,
+          "maxLoopStallMs": 6,
+          "heapDeltaMb": 0.8,
+          "note": "250 files"
+        },
+        {
+          "op": "git: dirty stats (50 mod + 200 untracked)",
+          "medianMs": 17.4,
+          "minMs": 17.2,
+          "maxMs": 18.5,
+          "maxLoopStallMs": 7.4,
+          "heapDeltaMb": 0.9,
+          "note": "250 rows"
+        },
+        {
+          "op": "index: incremental rebuild after edits",
+          "medianMs": 62.6,
+          "minMs": 59.6,
+          "maxMs": 63.5,
+          "maxLoopStallMs": 9.2,
+          "heapDeltaMb": 7.7,
+          "note": "read 101"
+        }
+      ],
+      "facts": {
+        "indexFiles": 216,
+        "indexTruncated": false,
+        "indexSymbols": 104,
+        "indexSymbolFiles": 31,
+        "indexCacheMb": 0,
+        "queryFile": "index",
+        "grepGrams": 4167,
+        "grepPostingsMb": 0.2
+      }
+    },
+    {
+      "repo": "flask",
+      "trackedFiles": 236,
+      "checkoutMb": 1.7,
+      "samples": [
+        {
+          "op": "index: cold build",
+          "medianMs": 50.5,
+          "minMs": 42,
+          "maxMs": 56,
+          "maxLoopStallMs": 8.8,
+          "heapDeltaMb": 8.2,
+          "note": "231 files, read 73, truncated=false"
+        },
+        {
+          "op": "index: warm rebuild (force, mtime reuse)",
+          "medianMs": 32.8,
+          "minMs": 29.3,
+          "maxMs": 38.2,
+          "maxLoopStallMs": 10,
+          "heapDeltaMb": 3.7,
+          "note": "reused 231, read 17"
+        },
+        {
+          "op": "index: hydrate from disk (new process)",
+          "medianMs": 2.4,
+          "minMs": 2.1,
+          "maxMs": 2.8,
+          "maxLoopStallMs": 5.7,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "repo_map: formatRepoMap (no query)",
+          "medianMs": 0.8,
+          "minMs": 0.7,
+          "maxMs": 0.8,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 1.2,
+          "note": "12 KB output"
+        },
+        {
+          "op": "repo_map: per-turn ranked prompt (query+rank)",
+          "medianMs": 1.2,
+          "minMs": 1.2,
+          "maxMs": 1.4,
+          "maxLoopStallMs": 5.3,
+          "heapDeltaMb": 1.8,
+          "note": "12 KB output"
+        },
+        {
+          "op": "quick open: searchRepoMap(\"ctx\")",
+          "medianMs": 1.1,
+          "minMs": 0.7,
+          "maxMs": 2.5,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.5,
+          "note": "50 hits"
+        },
+        {
+          "op": "quick open: searchRepoMap per keystroke x6",
+          "medianMs": 2.2,
+          "minMs": 2.2,
+          "maxMs": 2.6,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 1.4
+        },
+        {
+          "op": "grep index: build",
+          "medianMs": 128.1,
+          "minMs": 128,
+          "maxMs": 154.9,
+          "maxLoopStallMs": 22,
+          "heapDeltaMb": 16.8,
+          "note": "231 files, 8520 grams"
+        },
+        {
+          "op": "grep index: load from disk (every call)",
+          "medianMs": 10.5,
+          "minMs": 8.9,
+          "maxMs": 11.8,
+          "maxLoopStallMs": 11.8,
+          "heapDeltaMb": 5.5
+        },
+        {
+          "op": "agent grep (indexed): selective literal",
+          "medianMs": 23.6,
+          "minMs": 21.4,
+          "maxMs": 24.2,
+          "maxLoopStallMs": 11.8,
+          "heapDeltaMb": 6.1,
+          "note": "usedIndex=true candidates=28 47 KB"
+        },
+        {
+          "op": "agent grep (no index): selective literal",
+          "medianMs": 13,
+          "minMs": 12.5,
+          "maxMs": 13.1,
+          "maxLoopStallMs": 6,
+          "heapDeltaMb": 0.7,
+          "note": "47 KB"
+        },
+        {
+          "op": "baseline rg -l: selective literal",
+          "medianMs": 9.9,
+          "minMs": 8.7,
+          "maxMs": 10.6,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): common word",
+          "medianMs": 23.2,
+          "minMs": 21.3,
+          "maxMs": 27.3,
+          "maxLoopStallMs": 15.3,
+          "heapDeltaMb": 6.2,
+          "note": "usedIndex=false candidates=- 47 KB"
+        },
+        {
+          "op": "agent grep (no index): common word",
+          "medianMs": 11.7,
+          "minMs": 10.9,
+          "maxMs": 11.7,
+          "maxLoopStallMs": 6.8,
+          "heapDeltaMb": 0.6,
+          "note": "47 KB"
+        },
+        {
+          "op": "baseline rg -l: common word",
+          "medianMs": 10.5,
+          "minMs": 8.7,
+          "maxMs": 13.8,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): regex",
+          "medianMs": 25.8,
+          "minMs": 24.3,
+          "maxMs": 26.6,
+          "maxLoopStallMs": 10.8,
+          "heapDeltaMb": 6,
+          "note": "usedIndex=true candidates=41 0 KB"
+        },
+        {
+          "op": "agent grep (no index): regex",
+          "medianMs": 18.1,
+          "minMs": 16.6,
+          "maxMs": 19.4,
+          "maxLoopStallMs": 6.5,
+          "heapDeltaMb": 0.4,
+          "note": "0 KB"
+        },
+        {
+          "op": "baseline rg -l: regex",
+          "medianMs": 12.3,
+          "minMs": 11.7,
+          "maxMs": 12.4,
+          "maxLoopStallMs": 5.1,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): no match",
+          "medianMs": 18.8,
+          "minMs": 16.7,
+          "maxMs": 19.5,
+          "maxLoopStallMs": 13.3,
+          "heapDeltaMb": 5.8,
+          "note": "usedIndex=true candidates=0 0 KB"
+        },
+        {
+          "op": "agent grep (no index): no match",
+          "medianMs": 14.6,
+          "minMs": 13.5,
+          "maxMs": 18.4,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.4,
+          "note": "0 KB"
+        },
+        {
+          "op": "baseline rg -l: no match",
+          "medianMs": 8.9,
+          "minMs": 8.3,
+          "maxMs": 9.4,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "files search: selective literal",
+          "medianMs": 10.6,
+          "minMs": 10,
+          "maxMs": 10.7,
+          "maxLoopStallMs": 5.8,
+          "heapDeltaMb": 0.7,
+          "note": "80 hits truncated=true"
+        },
+        {
+          "op": "files search: common word",
+          "medianMs": 9.8,
+          "minMs": 9.7,
+          "maxMs": 11,
+          "maxLoopStallMs": 5.8,
+          "heapDeltaMb": 0.7,
+          "note": "80 hits truncated=true"
+        },
+        {
+          "op": "files search: common word (walk fallback)",
+          "medianMs": 57.2,
+          "minMs": 57.2,
+          "maxMs": 57.2,
+          "maxLoopStallMs": 10.2,
+          "heapDeltaMb": 5.9,
+          "note": "80 hits"
+        },
+        {
+          "op": "list: depth 1",
+          "medianMs": 2.5,
+          "minMs": 2.4,
+          "maxMs": 2.6,
+          "maxLoopStallMs": 5.6,
+          "heapDeltaMb": 0.1,
+          "note": "15 entries"
+        },
+        {
+          "op": "list: full tree (no depth)",
+          "medianMs": 9,
+          "minMs": 7.9,
+          "maxMs": 9.4,
+          "maxLoopStallMs": 5.9,
+          "heapDeltaMb": 1.2,
+          "note": "287 entries"
+        },
+        {
+          "op": "git: status (clean)",
+          "medianMs": 13.6,
+          "minMs": 13.2,
+          "maxMs": 13.6,
+          "maxLoopStallMs": 5.8,
+          "heapDeltaMb": 0.5,
+          "note": "0 files"
+        },
+        {
+          "op": "git: dirty stats (clean)",
+          "medianMs": 13,
+          "minMs": 11.8,
+          "maxMs": 13.4,
+          "maxLoopStallMs": 7.1,
+          "heapDeltaMb": 0.5
+        },
+        {
+          "op": "git: status (50 mod + 200 untracked)",
+          "medianMs": 13.6,
+          "minMs": 13.1,
+          "maxMs": 14.1,
+          "maxLoopStallMs": 5.6,
+          "heapDeltaMb": 0.7,
+          "note": "250 files"
+        },
+        {
+          "op": "git: dirty stats (50 mod + 200 untracked)",
+          "medianMs": 20.5,
+          "minMs": 18.8,
+          "maxMs": 27.5,
+          "maxLoopStallMs": 7.2,
+          "heapDeltaMb": 0.8,
+          "note": "250 rows"
+        },
+        {
+          "op": "index: incremental rebuild after edits",
+          "medianMs": 49.7,
+          "minMs": 46.4,
+          "maxMs": 51.3,
+          "maxLoopStallMs": 8.5,
+          "heapDeltaMb": 7.2,
+          "note": "read 17"
+        }
+      ],
+      "facts": {
+        "indexFiles": 231,
+        "indexTruncated": false,
+        "indexSymbols": 574,
+        "indexSymbolFiles": 56,
+        "indexCacheMb": 0,
+        "queryFile": "ctx",
+        "grepGrams": 8520,
+        "grepPostingsMb": 0.4
+      }
+    },
+    {
+      "repo": "react",
+      "trackedFiles": 7276,
+      "checkoutMb": 38.7,
+      "samples": [
+        {
+          "op": "index: cold build",
+          "medianMs": 456.9,
+          "minMs": 447,
+          "maxMs": 466.8,
+          "maxLoopStallMs": 35.3,
+          "heapDeltaMb": 18.6,
+          "note": "7195 files, read 800, truncated=false"
+        },
+        {
+          "op": "index: warm rebuild (force, mtime reuse)",
+          "medianMs": 357.5,
+          "minMs": 327.8,
+          "maxMs": 376.9,
+          "maxLoopStallMs": 32.2,
+          "heapDeltaMb": 18.3,
+          "note": "reused 7195, read 324"
+        },
+        {
+          "op": "index: hydrate from disk (new process)",
+          "medianMs": 12.9,
+          "minMs": 12.6,
+          "maxMs": 13.1,
+          "maxLoopStallMs": 13.1,
+          "heapDeltaMb": 6.4
+        },
+        {
+          "op": "repo_map: formatRepoMap (no query)",
+          "medianMs": 0.6,
+          "minMs": 0.6,
+          "maxMs": 0.7,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 1.1,
+          "note": "11 KB output"
+        },
+        {
+          "op": "repo_map: per-turn ranked prompt (query+rank)",
+          "medianMs": 12.3,
+          "minMs": 10.9,
+          "maxMs": 14,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 3.7,
+          "note": "12 KB output"
+        },
+        {
+          "op": "quick open: searchRepoMap(\"Suspense\")",
+          "medianMs": 16.5,
+          "minMs": 13.8,
+          "maxMs": 17.8,
+          "maxLoopStallMs": 5.3,
+          "heapDeltaMb": 10.1,
+          "note": "50 hits"
+        },
+        {
+          "op": "quick open: searchRepoMap per keystroke x6",
+          "medianMs": 91.3,
+          "minMs": 87.2,
+          "maxMs": 107.4,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 6.5
+        },
+        {
+          "op": "grep index: build",
+          "medianMs": 3311,
+          "minMs": 3154.3,
+          "maxMs": 3525.2,
+          "maxLoopStallMs": 121.8,
+          "heapDeltaMb": 87.5,
+          "note": "7195 files, 47916 grams"
+        },
+        {
+          "op": "grep index: load from disk (every call)",
+          "medianMs": 112.5,
+          "minMs": 106,
+          "maxMs": 113,
+          "maxLoopStallMs": 102.2,
+          "heapDeltaMb": 47.7
+        },
+        {
+          "op": "agent grep (indexed): selective literal",
+          "medianMs": 139,
+          "minMs": 137.7,
+          "maxMs": 153.4,
+          "maxLoopStallMs": 98.7,
+          "heapDeltaMb": 49.2,
+          "note": "usedIndex=true candidates=10 31 KB"
+        },
+        {
+          "op": "agent grep (no index): selective literal",
+          "medianMs": 58.2,
+          "minMs": 56.6,
+          "maxMs": 58.3,
+          "maxLoopStallMs": 10.4,
+          "heapDeltaMb": 0.4,
+          "note": "31 KB"
+        },
+        {
+          "op": "baseline rg -l: selective literal",
+          "medianMs": 31.5,
+          "minMs": 30.2,
+          "maxMs": 35.2,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): common word",
+          "medianMs": 161,
+          "minMs": 151.1,
+          "maxMs": 161.9,
+          "maxLoopStallMs": 114.5,
+          "heapDeltaMb": 51.4,
+          "note": "usedIndex=false candidates=- 47 KB"
+        },
+        {
+          "op": "agent grep (no index): common word",
+          "medianMs": 29.2,
+          "minMs": 27.6,
+          "maxMs": 31.6,
+          "maxLoopStallMs": 6,
+          "heapDeltaMb": 0.8,
+          "note": "47 KB"
+        },
+        {
+          "op": "baseline rg -l: common word",
+          "medianMs": 100.3,
+          "minMs": 63,
+          "maxMs": 110.6,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): regex",
+          "medianMs": 163.3,
+          "minMs": 157.6,
+          "maxMs": 165.3,
+          "maxLoopStallMs": 103,
+          "heapDeltaMb": 51.1,
+          "note": "usedIndex=false candidates=- 47 KB"
+        },
+        {
+          "op": "agent grep (no index): regex",
+          "medianMs": 41.5,
+          "minMs": 41.3,
+          "maxMs": 44.7,
+          "maxLoopStallMs": 8.6,
+          "heapDeltaMb": 0.6,
+          "note": "47 KB"
+        },
+        {
+          "op": "baseline rg -l: regex",
+          "medianMs": 37.4,
+          "minMs": 32.6,
+          "maxMs": 42.9,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): no match",
+          "medianMs": 142,
+          "minMs": 141.5,
+          "maxMs": 152.9,
+          "maxLoopStallMs": 103.8,
+          "heapDeltaMb": 48.3,
+          "note": "usedIndex=true candidates=3 0 KB"
+        },
+        {
+          "op": "agent grep (no index): no match",
+          "medianMs": 57.3,
+          "minMs": 55.1,
+          "maxMs": 73.4,
+          "maxLoopStallMs": 7.3,
+          "heapDeltaMb": 0.4,
+          "note": "0 KB"
+        },
+        {
+          "op": "baseline rg -l: no match",
+          "medianMs": 33.4,
+          "minMs": 29.1,
+          "maxMs": 33.9,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "files search: selective literal",
+          "medianMs": 62.4,
+          "minMs": 53.8,
+          "maxMs": 62.8,
+          "maxLoopStallMs": 8.5,
+          "heapDeltaMb": 0.7,
+          "note": "49 hits truncated=false"
+        },
+        {
+          "op": "files search: common word",
+          "medianMs": 14.8,
+          "minMs": 12.1,
+          "maxMs": 15.1,
+          "maxLoopStallMs": 8.3,
+          "heapDeltaMb": 0.8,
+          "note": "80 hits truncated=true"
+        },
+        {
+          "op": "files search: common word (walk fallback)",
+          "medianMs": 3525.4,
+          "minMs": 3525.4,
+          "maxMs": 3525.4,
+          "maxLoopStallMs": 2439,
+          "heapDeltaMb": 57.1,
+          "note": "80 hits"
+        },
+        {
+          "op": "list: depth 1",
+          "medianMs": 5.1,
+          "minMs": 2,
+          "maxMs": 7.1,
+          "maxLoopStallMs": 5.7,
+          "heapDeltaMb": 0.1,
+          "note": "35 entries"
+        },
+        {
+          "op": "list: full tree (no depth)",
+          "medianMs": 231.4,
+          "minMs": 213.7,
+          "maxMs": 348.2,
+          "maxLoopStallMs": 70.8,
+          "heapDeltaMb": 7.5,
+          "note": "7863 entries"
+        },
+        {
+          "op": "git: status (clean)",
+          "medianMs": 30.3,
+          "minMs": 28,
+          "maxMs": 32.6,
+          "maxLoopStallMs": 8.1,
+          "heapDeltaMb": 0.5,
+          "note": "0 files"
+        },
+        {
+          "op": "git: dirty stats (clean)",
+          "medianMs": 40.5,
+          "minMs": 34.1,
+          "maxMs": 42.6,
+          "maxLoopStallMs": 9.2,
+          "heapDeltaMb": 0.5
+        },
+        {
+          "op": "git: status (50 mod + 200 untracked)",
+          "medianMs": 33.5,
+          "minMs": 33.3,
+          "maxMs": 35.8,
+          "maxLoopStallMs": 7.1,
+          "heapDeltaMb": 0.7,
+          "note": "250 files"
+        },
+        {
+          "op": "git: dirty stats (50 mod + 200 untracked)",
+          "medianMs": 43.5,
+          "minMs": 41.1,
+          "maxMs": 51.5,
+          "maxLoopStallMs": 13,
+          "heapDeltaMb": 0.8,
+          "note": "226 rows"
+        },
+        {
+          "op": "index: incremental rebuild after edits",
+          "medianMs": 386.3,
+          "minMs": 372,
+          "maxMs": 426.1,
+          "maxLoopStallMs": 34.6,
+          "heapDeltaMb": 23,
+          "note": "read 324"
+        }
+      ],
+      "facts": {
+        "indexFiles": 7195,
+        "indexTruncated": false,
+        "indexSymbols": 3003,
+        "indexSymbolFiles": 476,
+        "indexCacheMb": 1.2,
+        "queryFile": "Suspense",
+        "grepGrams": 47916,
+        "grepPostingsMb": 12.2
+      }
+    },
+    {
+      "repo": "django",
+      "trackedFiles": 7100,
+      "checkoutMb": 44.2,
+      "samples": [
+        {
+          "op": "index: cold build",
+          "medianMs": 611.2,
+          "minMs": 578.2,
+          "maxMs": 630.2,
+          "maxLoopStallMs": 29.2,
+          "heapDeltaMb": 20.7,
+          "note": "5602 files, read 800, truncated=false"
+        },
+        {
+          "op": "index: warm rebuild (force, mtime reuse)",
+          "medianMs": 542,
+          "minMs": 481.6,
+          "maxMs": 575.5,
+          "maxLoopStallMs": 36.9,
+          "heapDeltaMb": 7,
+          "note": "reused 5602, read 298"
+        },
+        {
+          "op": "index: hydrate from disk (new process)",
+          "medianMs": 10.1,
+          "minMs": 10,
+          "maxMs": 14.7,
+          "maxLoopStallMs": 14.7,
+          "heapDeltaMb": 5.2
+        },
+        {
+          "op": "repo_map: formatRepoMap (no query)",
+          "medianMs": 1.3,
+          "minMs": 1.3,
+          "maxMs": 4.3,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 2.4,
+          "note": "12 KB output"
+        },
+        {
+          "op": "repo_map: per-turn ranked prompt (query+rank)",
+          "medianMs": 8.4,
+          "minMs": 6.5,
+          "maxMs": 22.3,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 2.7,
+          "note": "12 KB output"
+        },
+        {
+          "op": "quick open: searchRepoMap(\"jsonb\")",
+          "medianMs": 6.4,
+          "minMs": 6.2,
+          "maxMs": 8.1,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 5.7,
+          "note": "46 hits"
+        },
+        {
+          "op": "quick open: searchRepoMap per keystroke x6",
+          "medianMs": 43.9,
+          "minMs": 36.5,
+          "maxMs": 45.1,
+          "maxLoopStallMs": 7.1,
+          "heapDeltaMb": 0.4
+        },
+        {
+          "op": "grep index: build",
+          "medianMs": 2907,
+          "minMs": 2859,
+          "maxMs": 2972.8,
+          "maxLoopStallMs": 115.4,
+          "heapDeltaMb": 48.6,
+          "note": "5602 files, 19868 grams"
+        },
+        {
+          "op": "grep index: load from disk (every call)",
+          "medianMs": 82.2,
+          "minMs": 74.7,
+          "maxMs": 84.4,
+          "maxLoopStallMs": 74.3,
+          "heapDeltaMb": 52.6
+        },
+        {
+          "op": "agent grep (indexed): selective literal",
+          "medianMs": 133.4,
+          "minMs": 120.8,
+          "maxMs": 197.6,
+          "maxLoopStallMs": 133.4,
+          "heapDeltaMb": 54,
+          "note": "usedIndex=true candidates=40 16 KB"
+        },
+        {
+          "op": "agent grep (no index): selective literal",
+          "medianMs": 79.5,
+          "minMs": 77.1,
+          "maxMs": 86.1,
+          "maxLoopStallMs": 9.6,
+          "heapDeltaMb": 0.4,
+          "note": "16 KB"
+        },
+        {
+          "op": "baseline rg -l: selective literal",
+          "medianMs": 39.3,
+          "minMs": 34.8,
+          "maxMs": 46.4,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): common word",
+          "medianMs": 128.2,
+          "minMs": 123.8,
+          "maxMs": 136.1,
+          "maxLoopStallMs": 73.2,
+          "heapDeltaMb": 54.2,
+          "note": "usedIndex=false candidates=- 47 KB"
+        },
+        {
+          "op": "agent grep (no index): common word",
+          "medianMs": 46,
+          "minMs": 45.5,
+          "maxMs": 57.7,
+          "maxLoopStallMs": 8.3,
+          "heapDeltaMb": 1.2,
+          "note": "47 KB"
+        },
+        {
+          "op": "baseline rg -l: common word",
+          "medianMs": 48.8,
+          "minMs": 43,
+          "maxMs": 55.2,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): regex",
+          "medianMs": 130.5,
+          "minMs": 122.4,
+          "maxMs": 143.7,
+          "maxLoopStallMs": 80.5,
+          "heapDeltaMb": 54.7,
+          "note": "usedIndex=true candidates=679 0 KB"
+        },
+        {
+          "op": "agent grep (no index): regex",
+          "medianMs": 79.9,
+          "minMs": 76.4,
+          "maxMs": 80.8,
+          "maxLoopStallMs": 11.9,
+          "heapDeltaMb": 0.4,
+          "note": "0 KB"
+        },
+        {
+          "op": "baseline rg -l: regex",
+          "medianMs": 37.3,
+          "minMs": 35.9,
+          "maxMs": 37.4,
+          "maxLoopStallMs": 5.3,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): no match",
+          "medianMs": 115.6,
+          "minMs": 98.4,
+          "maxMs": 121.3,
+          "maxLoopStallMs": 61.1,
+          "heapDeltaMb": 53.2,
+          "note": "usedIndex=true candidates=0 0 KB"
+        },
+        {
+          "op": "agent grep (no index): no match",
+          "medianMs": 80.7,
+          "minMs": 76,
+          "maxMs": 87.8,
+          "maxLoopStallMs": 10.7,
+          "heapDeltaMb": 0.4,
+          "note": "0 KB"
+        },
+        {
+          "op": "baseline rg -l: no match",
+          "medianMs": 34.6,
+          "minMs": 33.6,
+          "maxMs": 35.7,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "files search: selective literal",
+          "medianMs": 75.8,
+          "minMs": 69.5,
+          "maxMs": 78.7,
+          "maxLoopStallMs": 8.6,
+          "heapDeltaMb": 0.8,
+          "note": "80 hits truncated=true"
+        },
+        {
+          "op": "files search: common word",
+          "medianMs": 13.5,
+          "minMs": 12.1,
+          "maxMs": 14.1,
+          "maxLoopStallMs": 8.2,
+          "heapDeltaMb": 0.9,
+          "note": "80 hits truncated=true"
+        },
+        {
+          "op": "files search: common word (walk fallback)",
+          "medianMs": 1677.1,
+          "minMs": 1677.1,
+          "maxMs": 1677.1,
+          "maxLoopStallMs": 533.7,
+          "heapDeltaMb": 46.5,
+          "note": "80 hits"
+        },
+        {
+          "op": "list: depth 1",
+          "medianMs": 4.1,
+          "minMs": 1.9,
+          "maxMs": 4.4,
+          "maxLoopStallMs": 5.5,
+          "heapDeltaMb": 0.1,
+          "note": "28 entries"
+        },
+        {
+          "op": "list: full tree (no depth)",
+          "medianMs": 260.8,
+          "minMs": 247,
+          "maxMs": 276.7,
+          "maxLoopStallMs": 10.5,
+          "heapDeltaMb": 13,
+          "note": "10244 entries"
+        },
+        {
+          "op": "git: status (clean)",
+          "medianMs": 48.2,
+          "minMs": 47,
+          "maxMs": 55.5,
+          "maxLoopStallMs": 8.2,
+          "heapDeltaMb": 0.5,
+          "note": "0 files"
+        },
+        {
+          "op": "git: dirty stats (clean)",
+          "medianMs": 47.2,
+          "minMs": 45.2,
+          "maxMs": 48.4,
+          "maxLoopStallMs": 8.2,
+          "heapDeltaMb": 0.5
+        },
+        {
+          "op": "git: status (50 mod + 200 untracked)",
+          "medianMs": 45.9,
+          "minMs": 44.2,
+          "maxMs": 51.5,
+          "maxLoopStallMs": 8.9,
+          "heapDeltaMb": 0.8,
+          "note": "250 files"
+        },
+        {
+          "op": "git: dirty stats (50 mod + 200 untracked)",
+          "medianMs": 50.4,
+          "minMs": 49.6,
+          "maxMs": 60.3,
+          "maxLoopStallMs": 8.6,
+          "heapDeltaMb": 0.8,
+          "note": "250 rows"
+        },
+        {
+          "op": "index: incremental rebuild after edits",
+          "medianMs": 437.6,
+          "minMs": 414.1,
+          "maxMs": 444.2,
+          "maxLoopStallMs": 26.7,
+          "heapDeltaMb": 14.8,
+          "note": "read 298"
+        }
+      ],
+      "facts": {
+        "indexFiles": 5602,
+        "indexTruncated": false,
+        "indexSymbols": 4209,
+        "indexSymbolFiles": 502,
+        "indexCacheMb": 0.7,
+        "queryFile": "jsonb",
+        "grepGrams": 19868,
+        "grepPostingsMb": 9.3
+      }
+    },
+    {
+      "repo": "vscode",
+      "trackedFiles": 21212,
+      "checkoutMb": 338.8,
+      "samples": [
+        {
+          "op": "index: cold build",
+          "medianMs": 1343.7,
+          "minMs": 1331.8,
+          "maxMs": 1366.2,
+          "maxLoopStallMs": 128.3,
+          "heapDeltaMb": 43.2,
+          "note": "19666 files, read 800, truncated=false"
+        },
+        {
+          "op": "index: warm rebuild (force, mtime reuse)",
+          "medianMs": 1052.8,
+          "minMs": 1022,
+          "maxMs": 1072.4,
+          "maxLoopStallMs": 96.4,
+          "heapDeltaMb": 41.8,
+          "note": "reused 19666, read 45"
+        },
+        {
+          "op": "index: hydrate from disk (new process)",
+          "medianMs": 27,
+          "minMs": 24.2,
+          "maxMs": 27.9,
+          "maxLoopStallMs": 28,
+          "heapDeltaMb": 15.9
+        },
+        {
+          "op": "repo_map: formatRepoMap (no query)",
+          "medianMs": 1.1,
+          "minMs": 1,
+          "maxMs": 1.2,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 2,
+          "note": "12 KB output"
+        },
+        {
+          "op": "repo_map: per-turn ranked prompt (query+rank)",
+          "medianMs": 78.2,
+          "minMs": 75.7,
+          "maxMs": 92.7,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 5.1,
+          "note": "12 KB output"
+        },
+        {
+          "op": "quick open: searchRepoMap(\"ThreadMe\")",
+          "medianMs": 40.7,
+          "minMs": 31.2,
+          "maxMs": 45.2,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 6.2,
+          "note": "50 hits"
+        },
+        {
+          "op": "quick open: searchRepoMap per keystroke x6",
+          "medianMs": 253.1,
+          "minMs": 233.8,
+          "maxMs": 261.5,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 10.2
+        },
+        {
+          "op": "grep index: build",
+          "medianMs": 17052.8,
+          "minMs": 17045.8,
+          "maxMs": 17111.7,
+          "maxLoopStallMs": 389,
+          "heapDeltaMb": 137.5,
+          "note": "19666 files, 49263 grams"
+        },
+        {
+          "op": "grep index: load from disk (every call)",
+          "medianMs": 325.2,
+          "minMs": 324.3,
+          "maxMs": 336.7,
+          "maxLoopStallMs": 277.6,
+          "heapDeltaMb": 208
+        },
+        {
+          "op": "agent grep (indexed): selective literal",
+          "medianMs": 413.5,
+          "minMs": 391.2,
+          "maxMs": 415.2,
+          "maxLoopStallMs": 262.8,
+          "heapDeltaMb": 212.5,
+          "note": "usedIndex=true candidates=13 2 KB"
+        },
+        {
+          "op": "agent grep (no index): selective literal",
+          "medianMs": 160.2,
+          "minMs": 151.9,
+          "maxMs": 161.9,
+          "maxLoopStallMs": 10.3,
+          "heapDeltaMb": 0.4,
+          "note": "2 KB"
+        },
+        {
+          "op": "baseline rg -l: selective literal",
+          "medianMs": 85.5,
+          "minMs": 81.4,
+          "maxMs": 86.1,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): common word",
+          "medianMs": 441.8,
+          "minMs": 438.8,
+          "maxMs": 460.8,
+          "maxLoopStallMs": 301.7,
+          "heapDeltaMb": 207.1,
+          "note": "usedIndex=false candidates=- 47 KB"
+        },
+        {
+          "op": "agent grep (no index): common word",
+          "medianMs": 78.5,
+          "minMs": 77.4,
+          "maxMs": 82.2,
+          "maxLoopStallMs": 9.2,
+          "heapDeltaMb": 0.7,
+          "note": "47 KB"
+        },
+        {
+          "op": "baseline rg -l: common word",
+          "medianMs": 237.3,
+          "minMs": 147.7,
+          "maxMs": 241.2,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): regex",
+          "medianMs": 503,
+          "minMs": 478.8,
+          "maxMs": 529.5,
+          "maxLoopStallMs": 281,
+          "heapDeltaMb": 210.6,
+          "note": "usedIndex=false candidates=- 47 KB"
+        },
+        {
+          "op": "agent grep (no index): regex",
+          "medianMs": 94.9,
+          "minMs": 94,
+          "maxMs": 98.1,
+          "maxLoopStallMs": 11.7,
+          "heapDeltaMb": 0.5,
+          "note": "47 KB"
+        },
+        {
+          "op": "baseline rg -l: regex",
+          "medianMs": 80.1,
+          "minMs": 79.1,
+          "maxMs": 83.3,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): no match",
+          "medianMs": 413.9,
+          "minMs": 402.6,
+          "maxMs": 436.7,
+          "maxLoopStallMs": 294.9,
+          "heapDeltaMb": 206.3,
+          "note": "usedIndex=true candidates=2 0 KB"
+        },
+        {
+          "op": "agent grep (no index): no match",
+          "medianMs": 161.8,
+          "minMs": 151.1,
+          "maxMs": 162.1,
+          "maxLoopStallMs": 9,
+          "heapDeltaMb": 0.4,
+          "note": "0 KB"
+        },
+        {
+          "op": "baseline rg -l: no match",
+          "medianMs": 72.6,
+          "minMs": 71.9,
+          "maxMs": 87.2,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "files search: selective literal",
+          "medianMs": 136.7,
+          "minMs": 133.5,
+          "maxMs": 153.8,
+          "maxLoopStallMs": 9.7,
+          "heapDeltaMb": 0.5,
+          "note": "3 hits truncated=false"
+        },
+        {
+          "op": "files search: common word",
+          "medianMs": 14.6,
+          "minMs": 12.9,
+          "maxMs": 16.5,
+          "maxLoopStallMs": 8.2,
+          "heapDeltaMb": 0.6,
+          "note": "80 hits truncated=true"
+        },
+        {
+          "op": "files search: common word (walk fallback)",
+          "medianMs": 12036.7,
+          "minMs": 12036.7,
+          "maxMs": 12036.7,
+          "maxLoopStallMs": 7751.1,
+          "heapDeltaMb": 334,
+          "note": "80 hits"
+        },
+        {
+          "op": "list: depth 1",
+          "medianMs": 5.7,
+          "minMs": 2.5,
+          "maxMs": 6.1,
+          "maxLoopStallMs": 5.8,
+          "heapDeltaMb": 0.1,
+          "note": "45 entries"
+        },
+        {
+          "op": "list: full tree (no depth)",
+          "medianMs": 364.3,
+          "minMs": 357.7,
+          "maxMs": 418.7,
+          "maxLoopStallMs": 31.9,
+          "heapDeltaMb": 12.6,
+          "note": "16010 entries"
+        },
+        {
+          "op": "git: status (clean)",
+          "medianMs": 78.4,
+          "minMs": 76.4,
+          "maxMs": 79.5,
+          "maxLoopStallMs": 9.2,
+          "heapDeltaMb": 0.5,
+          "note": "0 files"
+        },
+        {
+          "op": "git: dirty stats (clean)",
+          "medianMs": 82,
+          "minMs": 79.5,
+          "maxMs": 84.5,
+          "maxLoopStallMs": 8.4,
+          "heapDeltaMb": 0.5
+        },
+        {
+          "op": "git: status (50 mod + 200 untracked)",
+          "medianMs": 85,
+          "minMs": 78.1,
+          "maxMs": 89.9,
+          "maxLoopStallMs": 10.8,
+          "heapDeltaMb": 0.7,
+          "note": "250 files"
+        },
+        {
+          "op": "git: dirty stats (50 mod + 200 untracked)",
+          "medianMs": 99.5,
+          "minMs": 81.6,
+          "maxMs": 103.1,
+          "maxLoopStallMs": 10.3,
+          "heapDeltaMb": 0.8,
+          "note": "201 rows"
+        },
+        {
+          "op": "index: incremental rebuild after edits",
+          "medianMs": 1066.4,
+          "minMs": 1037.5,
+          "maxMs": 1076.3,
+          "maxLoopStallMs": 100.7,
+          "heapDeltaMb": 38.9,
+          "note": "read 45"
+        }
+      ],
+      "facts": {
+        "indexFiles": 19666,
+        "indexTruncated": false,
+        "indexSymbols": 3604,
+        "indexSymbolFiles": 755,
+        "indexCacheMb": 2.8,
+        "queryFile": "ThreadMe",
+        "grepGrams": 49263,
+        "grepPostingsMb": 56.9
+      }
+    },
+    {
+      "repo": "kubernetes",
+      "trackedFiles": 31757,
+      "checkoutMb": 269.7,
+      "samples": [
+        {
+          "op": "index: cold build",
+          "medianMs": 1224.5,
+          "minMs": 1221.6,
+          "maxMs": 1270.2,
+          "maxLoopStallMs": 94.6,
+          "heapDeltaMb": 41.7,
+          "note": "18975 files, read 800, truncated=false"
+        },
+        {
+          "op": "index: warm rebuild (force, mtime reuse)",
+          "medianMs": 1134.6,
+          "minMs": 1090.5,
+          "maxMs": 1171.1,
+          "maxLoopStallMs": 87.4,
+          "heapDeltaMb": 36.7,
+          "note": "reused 18975, read 101"
+        },
+        {
+          "op": "index: hydrate from disk (new process)",
+          "medianMs": 29.7,
+          "minMs": 29.4,
+          "maxMs": 29.8,
+          "maxLoopStallMs": 29.4,
+          "heapDeltaMb": 15.4
+        },
+        {
+          "op": "repo_map: formatRepoMap (no query)",
+          "medianMs": 1.3,
+          "minMs": 1.1,
+          "maxMs": 1.3,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 2.3,
+          "note": "12 KB output"
+        },
+        {
+          "op": "repo_map: per-turn ranked prompt (query+rank)",
+          "medianMs": 63.6,
+          "minMs": 59.8,
+          "maxMs": 71.1,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 4.7,
+          "note": "12 KB output"
+        },
+        {
+          "op": "quick open: searchRepoMap(\"create\")",
+          "medianMs": 40.4,
+          "minMs": 36.2,
+          "maxMs": 47.6,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 7.2,
+          "note": "50 hits"
+        },
+        {
+          "op": "quick open: searchRepoMap per keystroke x6",
+          "medianMs": 228.2,
+          "minMs": 197.1,
+          "maxMs": 261.1,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 7.8
+        },
+        {
+          "op": "grep index: build",
+          "medianMs": 12043.8,
+          "minMs": 11819.5,
+          "maxMs": 12084.1,
+          "maxLoopStallMs": 303.6,
+          "heapDeltaMb": 293.6,
+          "note": "18975 files, 47061 grams"
+        },
+        {
+          "op": "grep index: load from disk (every call)",
+          "medianMs": 246,
+          "minMs": 230,
+          "maxMs": 248,
+          "maxLoopStallMs": 206.7,
+          "heapDeltaMb": 165.6
+        },
+        {
+          "op": "agent grep (indexed): selective literal",
+          "medianMs": 390.6,
+          "minMs": 370.3,
+          "maxMs": 406.6,
+          "maxLoopStallMs": 218.8,
+          "heapDeltaMb": 149.4,
+          "note": "usedIndex=false candidates=- 47 KB"
+        },
+        {
+          "op": "agent grep (no index): selective literal",
+          "medianMs": 106,
+          "minMs": 103,
+          "maxMs": 107.4,
+          "maxLoopStallMs": 10.6,
+          "heapDeltaMb": 1,
+          "note": "47 KB"
+        },
+        {
+          "op": "baseline rg -l: selective literal",
+          "medianMs": 119.3,
+          "minMs": 117,
+          "maxMs": 133.9,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): common word",
+          "medianMs": 367.5,
+          "minMs": 342.6,
+          "maxMs": 382.3,
+          "maxLoopStallMs": 235.5,
+          "heapDeltaMb": 149.4,
+          "note": "usedIndex=false candidates=- 47 KB"
+        },
+        {
+          "op": "agent grep (no index): common word",
+          "medianMs": 102.8,
+          "minMs": 102.6,
+          "maxMs": 114.5,
+          "maxLoopStallMs": 15.5,
+          "heapDeltaMb": 0.8,
+          "note": "47 KB"
+        },
+        {
+          "op": "baseline rg -l: common word",
+          "medianMs": 227.5,
+          "minMs": 216.1,
+          "maxMs": 244.7,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): regex",
+          "medianMs": 405.3,
+          "minMs": 394.3,
+          "maxMs": 415.2,
+          "maxLoopStallMs": 209.7,
+          "heapDeltaMb": 151.7,
+          "note": "usedIndex=true candidates=2360 0 KB"
+        },
+        {
+          "op": "agent grep (no index): regex",
+          "medianMs": 234.6,
+          "minMs": 227.8,
+          "maxMs": 253.8,
+          "maxLoopStallMs": 13.2,
+          "heapDeltaMb": 0.4,
+          "note": "0 KB"
+        },
+        {
+          "op": "baseline rg -l: regex",
+          "medianMs": 109,
+          "minMs": 104.1,
+          "maxMs": 109.9,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "agent grep (indexed): no match",
+          "medianMs": 348.8,
+          "minMs": 346.4,
+          "maxMs": 371.2,
+          "maxLoopStallMs": 226.6,
+          "heapDeltaMb": 149.1,
+          "note": "usedIndex=true candidates=0 0 KB"
+        },
+        {
+          "op": "agent grep (no index): no match",
+          "medianMs": 213,
+          "minMs": 212.7,
+          "maxMs": 215.6,
+          "maxLoopStallMs": 12.5,
+          "heapDeltaMb": 0.4,
+          "note": "0 KB"
+        },
+        {
+          "op": "baseline rg -l: no match",
+          "medianMs": 95.9,
+          "minMs": 94,
+          "maxMs": 103.5,
+          "maxLoopStallMs": 5.2,
+          "heapDeltaMb": 0.2
+        },
+        {
+          "op": "files search: selective literal",
+          "medianMs": 14.5,
+          "minMs": 12.4,
+          "maxMs": 15.1,
+          "maxLoopStallMs": 6.8,
+          "heapDeltaMb": 0.8,
+          "note": "80 hits truncated=true"
+        },
+        {
+          "op": "files search: common word",
+          "medianMs": 13.4,
+          "minMs": 13.2,
+          "maxMs": 13.9,
+          "maxLoopStallMs": 8.2,
+          "heapDeltaMb": 0.9,
+          "note": "80 hits truncated=true"
+        },
+        {
+          "op": "files search: common word (walk fallback)",
+          "medianMs": 9515.6,
+          "minMs": 9515.6,
+          "maxMs": 9515.6,
+          "maxLoopStallMs": 5997.9,
+          "heapDeltaMb": 200.5,
+          "note": "80 hits"
+        },
+        {
+          "op": "list: depth 1",
+          "medianMs": 5.1,
+          "minMs": 1.7,
+          "maxMs": 5.2,
+          "maxLoopStallMs": 6,
+          "heapDeltaMb": 0.1,
+          "note": "33 entries"
+        },
+        {
+          "op": "list: full tree (no depth)",
+          "medianMs": 385.2,
+          "minMs": 373.2,
+          "maxMs": 408.1,
+          "maxLoopStallMs": 14.9,
+          "heapDeltaMb": 8.8,
+          "note": "16010 entries"
+        },
+        {
+          "op": "git: status (clean)",
+          "medianMs": 96.6,
+          "minMs": 92.6,
+          "maxMs": 101.4,
+          "maxLoopStallMs": 9.3,
+          "heapDeltaMb": 0.5,
+          "note": "0 files"
+        },
+        {
+          "op": "git: dirty stats (clean)",
+          "medianMs": 105.9,
+          "minMs": 94.3,
+          "maxMs": 123,
+          "maxLoopStallMs": 10.5,
+          "heapDeltaMb": 0.5
+        },
+        {
+          "op": "git: status (50 mod + 200 untracked)",
+          "medianMs": 113.1,
+          "minMs": 102.9,
+          "maxMs": 116.8,
+          "maxLoopStallMs": 11.1,
+          "heapDeltaMb": 0.7,
+          "note": "249 files"
+        },
+        {
+          "op": "git: dirty stats (50 mod + 200 untracked)",
+          "medianMs": 314.5,
+          "minMs": 288,
+          "maxMs": 339,
+          "maxLoopStallMs": 9.4,
+          "heapDeltaMb": 0.8,
+          "note": "249 rows"
+        },
+        {
+          "op": "index: incremental rebuild after edits",
+          "medianMs": 1200.8,
+          "minMs": 1179.3,
+          "maxMs": 1266.2,
+          "maxLoopStallMs": 87.1,
+          "heapDeltaMb": 36.2,
+          "note": "read 101"
+        }
+      ],
+      "facts": {
+        "indexFiles": 18975,
+        "indexTruncated": false,
+        "indexSymbols": 4577,
+        "indexSymbolFiles": 699,
+        "indexCacheMb": 2.7,
+        "queryFile": "create",
+        "grepGrams": 47061,
+        "grepPostingsMb": 41.5
+      }
+    }
+  ]
+}

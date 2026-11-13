@@ -171,6 +171,12 @@ export class ForgeClient {
     }
   }
 
+  /** Overview facts; undefined when this forge's adapter has none. */
+  async about(account: GitForgeAccount, owner: string, repo: string) {
+    const adapter = this.adapter(account);
+    return adapter.about ? adapter.about(account, owner, repo) : undefined;
+  }
+
   async listBranches(account: GitForgeAccount, owner: string, repo: string) {
     return this.adapter(account).listBranches(account, owner, repo);
   }

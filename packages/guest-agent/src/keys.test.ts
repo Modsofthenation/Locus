@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ensureHostKey, type Keygen } from "./keys.js";
+import { ensureHostKey, hostKeyWarning, tryEnsureHostKey, type Keygen } from "./keys.js";
 
 describe("ensureHostKey", () => {
   const dirs: string[] = [];
@@ -51,5 +51,17 @@ describe("ensureHostKey", () => {
     });
     expect(calls).toBe(0);
     expect(key.publicKey).toBe("ssh-ed25519 AAAAC3 existing");
+  });
+
+  it("keeps going without ssh-keygen and reports why", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-keys-"));
+    dirs.push(dir);
+    const result = await tryEnsureHostKey(dir, async () => {
+      throw new Error("ssh-keygen is required to create ~/.locus/ssh (spawn ssh-keygen ENOENT)");
+    });
+    expect(result.error).toMatch(/ssh-keygen is required/);
+    expect(result.key.publicKey).toBe("");
+    expect(result.key.privateKeyPath).toBe(join(dir, "ssh", "id_ed25519"));
+    expect(hostKeyWarning(result.error!)).toMatch(/Host and Docker agents still work/);
   });
 });

@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { parseIgnore, pathIgnored } from "./repoIgnore.js";
 import {
   buildWorkspaceIndex,
+  dropWorkspaceIndex,
+  getWorkspaceIndex,
   indexWorkspace,
   peekWorkspaceIndex,
   resetWorkspaceIndexCache,
@@ -119,6 +121,57 @@ describe("workspace index", () => {
     expect(forced.map.files.map((file) => file.path)).toEqual(["a.ts", "b.ts"]);
     expect(forced.map.files[0]?.symbols).toContain("alpha");
     expect(forced.map.files[1]?.symbols).toContain("beta");
+  });
+
+  it("does not re-read source files that have no symbols", async () => {
+    const { root, cache } = await fixture();
+    await writeFile(join(root, "a.ts"), "export function alpha() {}\n");
+    await writeFile(join(root, "empty.ts"), "// nothing exported here\n");
+    const first = await buildWorkspaceIndex(root, { cacheDir: cache });
+    expect(first.stats.read).toBe(2);
+    resetWorkspaceIndexCache();
+    const forced = await buildWorkspaceIndex(root, { cacheDir: cache, force: true });
+    expect(forced.stats.read).toBe(0);
+    expect(forced.map.files.find((file) => file.path === "a.ts")?.symbols).toContain("alpha");
+  });
+
+  it("skips per-file stats for clean tracked files and still sees edits", async () => {
+    const { root, cache } = await fixture();
+    await execFileAsync("git", ["init"], { cwd: root });
+    await execFileAsync("git", ["config", "user.email", "locus@test"], { cwd: root });
+    await execFileAsync("git", ["config", "user.name", "Locus"], { cwd: root });
+    await writeFile(join(root, "a.ts"), "export function alpha() {}\n");
+    await writeFile(join(root, "b.ts"), "export function beta() {}\n");
+    await execFileAsync("git", ["add", "."], { cwd: root });
+    await execFileAsync("git", ["commit", "-m", "init", "--no-gpg-sign"], { cwd: root });
+    await buildWorkspaceIndex(root, { cacheDir: cache });
+
+    await writeFile(join(root, "b.ts"), "export function betaTwo() {}\n");
+    await writeFile(join(root, "c.ts"), "export function gamma() {}\n");
+    resetWorkspaceIndexCache();
+    const rebuilt = await buildWorkspaceIndex(root, { cacheDir: cache, force: true });
+    const symbols = Object.fromEntries(rebuilt.map.files.map((f) => [f.path, f.symbols]));
+    expect(symbols["a.ts"]).toContain("alpha");
+    expect(symbols["b.ts"]).toContain("betaTwo");
+    expect(symbols["c.ts"]).toContain("gamma");
+    expect(rebuilt.stats.reused).toBe(1);
+
+    await execFileAsync("git", ["rm", "-q", "a.ts"], { cwd: root });
+    resetWorkspaceIndexCache();
+    const removed = await buildWorkspaceIndex(root, { cacheDir: cache, force: true });
+    expect(removed.map.files.map((f) => f.path)).toEqual(["b.ts", "c.ts"]);
+  });
+
+  it("drops one session's in-memory index and hydrates it again from disk", async () => {
+    const { root, cache } = await fixture();
+    await writeFile(join(root, "a.ts"), "export function alpha() {}\n");
+    const built = await buildWorkspaceIndex(root, { cacheDir: cache });
+    expect(await getWorkspaceIndex(root, { cacheDir: cache })).toBe(built);
+    dropWorkspaceIndex(cache);
+    const again = await getWorkspaceIndex(root, { cacheDir: cache });
+    expect(again).not.toBe(built);
+    expect(again.stats.read).toBe(0);
+    expect(again.map.files[0]?.symbols).toContain("alpha");
   });
 
   it("skips binary files and does not index symlink targets", async () => {

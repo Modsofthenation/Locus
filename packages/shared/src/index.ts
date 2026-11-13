@@ -52,6 +52,7 @@ export * from "./models/subagentKind.js";
 export * from "./models/queue.js";
 export * from "./compact.js";
 export * from "./codingEval.js";
+export * from "./benchmark.js";
 export * from "./generationEval.js";
 export * from "./contextWindow.js";
 export * from "./repoMap.js";

@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { DEFAULT_ADVANCED, DEFAULT_WORKER_PORT } from "@locus/shared";
 import { createDockerEngine, createHypervisor } from "@locus/hypervisor";
-import { ensureHostKey, guestReadyTimeoutMs, waitForGuest } from "@locus/guest-agent";
+import {
+  guestReadyTimeoutMs,
+  hostKeyWarning,
+  tryEnsureHostKey,
+  waitForGuest,
+} from "@locus/guest-agent";
 import type { GuestOs, VmInstance } from "@locus/shared";
 import { createWorkerApp } from "./app.js";
 import { WorkerBrowserHub } from "./browserHub.js";
@@ -24,7 +29,8 @@ const loaded = await loadOrCreateWorkerToken(dataDir);
 const token = loaded.token;
 const tls = await loadOrCreateWorkerTls(dataDir);
 const engine = await createDockerEngine(dataDir);
-const hostKey = await ensureHostKey(dataDir);
+const { key: hostKey, error: hostKeyError } = await tryEnsureHostKey(dataDir);
+if (hostKeyError) console.warn(hostKeyWarning(hostKeyError));
 const { hypervisor } = await createHypervisor({ ...DEFAULT_ADVANCED, dataDir }, undefined, {
   sshPublicKey: hostKey.publicKey,
   sshIdentityFile: hostKey.privateKeyPath,

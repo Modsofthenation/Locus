@@ -1,6 +1,6 @@
 {
   "name": "locus",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "private": true,
   "description": "Local AI coding agents that run in Ubuntu, Debian, Omarchy, and Windows VMs or Linux Docker containers on your machine",
   "repository": {
@@ -38,7 +38,7 @@
     "test:visual": "npm run test:visual --workspace=@locus/desktop",
     "capture:readme": "npm run capture:readme --workspace=@locus/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "images": "docker build -t locus/agent:0.1 -t locus/agent:0.20.0 images/agent",
+    "images": "docker build -t locus/agent:0.1 -t locus/agent:0.21.0 images/agent",
     "format:check": "prettier --check \"**/*.{ts,tsx,mjs,cjs,json,css}\"",
     "format:fix": "prettier --write \"**/*.{ts,tsx,mjs,cjs,json,css}\""
   },
@@ -49,11 +49,11 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "concurrently": "^10.0.6",
-    "eslint": "10.12.0",
+    "eslint": "10.14.0",
     "eslint-plugin-react-hooks": "7.1.1",
-    "globals": "17.13.0",
-    "prettier": "3.9.9",
-    "typescript-eslint": "8.71.2",
+    "globals": "17.14.0",
+    "prettier": "3.9.10",
+    "typescript-eslint": "8.72.2",
     "wait-on": "^9.5.1"
   },
   "overrides": {

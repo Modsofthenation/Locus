@@ -230,6 +230,35 @@ export function IdeEmpty() {
             <span className="ide-start-tile-desc">From GitHub, GitLab or a URL</span>
           </button>
         </div>
+        {mode !== "clone" && state.repos.length ? (
+          <div className="ide-recents" data-testid="ide-linked-repos">
+            <p className="ide-clone-label">Linked repos</p>
+            <div className="ide-recents-list">
+              {state.repos.slice(0, 3).map((repo) => (
+                <button
+                  key={repo.id}
+                  type="button"
+                  className="ide-clone-repo"
+                  disabled={busy}
+                  onClick={() => void cloneLinked(repo)}
+                >
+                  <span className={`forge-glyph ${repo.checkout.forge}`} aria-hidden>
+                    {forgeShort(repo.checkout.forge)}
+                  </span>
+                  <span>
+                    <span className="title-text">
+                      Open {shortRepoName(repo.checkout.url, repo.name)}
+                    </span>
+                    <span className="meta">
+                      {repo.name}
+                      {repo.checkout.ref ? ` · ${repo.checkout.ref}` : ""}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {recents.length ? (
           <div className="ide-recents" data-testid="ide-recents">
             <p className="ide-clone-label">Recent folders</p>

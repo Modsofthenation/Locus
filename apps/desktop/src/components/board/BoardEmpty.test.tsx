@@ -107,12 +107,12 @@ describe("BoardEmpty", () => {
     ]);
   });
 
-  it("uses the same primary New board chrome as New agent and New design", () => {
+  it("submits with the same Send-style chrome as New agent and New design", () => {
     render();
     const send = host.querySelector(".composer-send") as HTMLButtonElement;
     expect(send.className).toContain("btn");
     expect(send.className).toContain("primary");
-    expect(send.getAttribute("aria-label")).toBe("New board");
-    expect(send.textContent).toMatch(/New board/);
+    expect(send.getAttribute("aria-label")).toBe("Create board");
+    expect(send.textContent).toMatch(/Create/);
   });
 });

@@ -156,6 +156,8 @@ export interface LocusConfig {
   notifyQuietStart?: string;
   /** Quiet-hours end `HH:MM` local. Wraps overnight when start is later than end. */
   notifyQuietEnd?: string;
+  /** Check GitHub Releases for a newer Locus in the background. Default true. */
+  checkForUpdates?: boolean;
   /** Codebase / Stack diff layout. Default unified. */
   diffLayout?: DiffLayout;
   /** Shared knowledge brain (distiller model, auto-index, pause ingest). */
@@ -210,6 +212,11 @@ export interface DesktopNotifyPrefs {
 
 /** Missing or junk values stay on so existing configs keep notifying. */
 export function parseNotifyPref(raw: unknown): boolean {
+  return raw !== false;
+}
+
+/** Background update checks are on unless turned off. */
+export function parseCheckForUpdates(raw: unknown): boolean {
   return raw !== false;
 }
 

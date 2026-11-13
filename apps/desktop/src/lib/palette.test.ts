@@ -336,6 +336,7 @@ describe("paletteItems", () => {
       "providers",
       "mcp",
       "skills",
+      "benchmark",
       "machines",
       "workers",
       "environments",

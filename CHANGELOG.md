@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.21.0 — 2026-11-13
+
+Decide from the Inbox, a turn summary card, tray and actionable notifications, encrypted backup and restore, background update checks with one-click install, a model benchmark, a smoother first hour with a public repo, and much faster workspaces on large repos. Settings → About is **0.21.0**.
+
+**Inbox decisions.** The Inbox shows a decision card for each waiting item: what will run, where it runs, the agent's last words, and a risk hint. Approve, Deny, Always allow and Open chat sit on the card, with keyboard shortcuts (J/K, A, D, Enter) and **Approve all** when several chats wait on the same tool.
+
+**Turn summary and first task.** When a turn changes files, runs tests or opens a PR, a card under the reply lists the files changed, whether tests passed, and next steps: Review changes, Open PR, Continue, or Undo this turn. The first-task card on New agent now suggests real work on your most recent repo or folder.
+
+**Tray and notifications.** The desktop app has a tray icon and dock/taskbar badge with the needs-you count. Notifications say what the agent wants and open the chat when clicked; on macOS, approvals can be answered straight from the notification.
+
+**Backup and restore.** Settings → Advanced → Back up and restore, or `locus backup` / `locus restore`, writes one passphrase-encrypted file with your sessions, settings, boards, projects, Jobs, Brain, workspaces and stored keys. Machine-bound keys are never copied; the vault is re-encrypted for the new machine, so a restore on a new laptop keeps every provider key. A wrong passphrase or tampered file is refused.
+
+**Updates.** The desktop checks for new releases shortly after launch and every six hours, and **Install** downloads, verifies the checksum and installs (in place for Linux AppImage). Turn it off in Settings → About. CLI: `locus update`.
+
+**Model benchmark.** Settings → Benchmark, or `locus eval run`, runs five small coding tasks against the models you pick and records pass rate, tokens, cost, tool calls and time per model.
+
+**First hour with a public repo.** With Docker stopped, actions that need a container say so and offer to start on Host instead. A linked repo is preselected across New agent, Design, Jobs, Brain and IDE. No-token accounts show their rate limit and when it resets. Codebase gains an About card for the repo, and the setup wizard tests local servers such as Ollama with a real call.
+
+**Performance on large repos.** Agent search after an edit no longer rebuilds the whole index (seconds down to milliseconds on very large repos), VM file listings, search without ripgrep, repo index rebuilds, the repo map and Quick Open are all much faster, and the desktop app now ships ripgrep.
+
+**Fixes.** Undo on a git workspace reliably restores edited files. The desktop app uses Electron's async secure-storage API, so the deprecation warnings are gone and existing vault keys still unlock. The control plane and worker start without `ssh-keygen` (only VM agents need it).
+
 ## 0.20.0 — 2026-11-11
 
 Eight new Terminal themes, a UI/UX polish pass on Swarm, the composer, and empty states, and launchers that check Docker is actually running before they start. Settings → About is **0.20.0**.

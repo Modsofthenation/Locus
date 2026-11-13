@@ -8,10 +8,17 @@ import {
   type ReactNode,
 } from "react";
 import {
+  type RepoAbout,
+  DEFAULT_DOCKER_IMAGE,
+  anonymousForgeLabel,
+  forgeRateLimitResetMinutes,
+  policyAllowsHostAgents,
+  sessionRuntime,
   diffStats,
   fileDiffStats,
   findBoundAgent,
   forgeLabel,
+  forgeHasToken,
   forgesWithTokens,
   isDraftPull,
   isIdeSession,
@@ -57,6 +64,9 @@ import { peekIssueDetail, peekIssueList } from "@/lib/issueCache";
 import { formatMarkdown } from "@/lib/markdown";
 import { loadLastAgent, resolveAgentDefaults, saveLastAgent } from "@/lib/lastAgent";
 import { openSettings, useStore } from "@/state/store";
+import { startHostRepoAgent } from "@/lib/hostAgent";
+import { isDockerDownError } from "@/lib/automations";
+import { DockerDownCallout, dockerIsDown } from "@/components/layout/DockerDownCallout";
 import { firstHunkLine, prCommentMarks, requestWorkspaceOpenPr } from "@/lib/workspaceOpenPr";
 import {
   buildWorkspaceTree,
@@ -245,9 +255,24 @@ export function repoWebUrl(url: string): string | undefined {
   return /^https:\/\//i.test(https) ? https : undefined;
 }
 
+type DockerBlock = { detail: string; retry: () => void; host?: () => void };
+
+function aboutHasContent(about: RepoAbout): boolean {
+  return Boolean(
+    about.description ||
+    about.license ||
+    about.language ||
+    typeof about.stars === "number" ||
+    about.readme,
+  );
+}
+
 function ErrorBanner({ error }: { error: string }) {
   const { dispatch } = useStore();
-  const message = formatRemoteError(error);
+  // A raw docker.sock dial error is one plain sentence here; Check again lives on the callout.
+  const message = isDockerDownError(error)
+    ? "Docker isn't running. Start Docker, then try again."
+    : formatRemoteError(error);
   const auth = isForgeAuthError(message);
   return (
     <ErrorBannerView
@@ -335,6 +360,11 @@ export function CodebasePane() {
     [state.sessions, repo?.id],
   );
   const bound = repo ? findBoundAgent(state.sessions, { repoId: repo.id }) : undefined;
+  const [dockerBlock, setDockerBlock] = useState<DockerBlock | null>(null);
+  const [rateRetry, setRateRetry] = useState(0);
+  const [about, setAbout] = useState<RepoAbout | null>(null);
+  const hostAllowed = policyAllowsHostAgents(state.config?.managedPolicy);
+  useEffect(() => setDockerBlock(null), [repo?.id]);
   const automations = useMemo(
     () => state.automations.filter((item) => item.repoId === repo?.id),
     [state.automations, repo?.id],
@@ -468,7 +498,35 @@ export function CodebasePane() {
     return () => {
       cancelled = true;
     };
-  }, [repo?.id, pullState]);
+  }, [repo?.id, pullState, rateRetry]);
+
+  // Description, license, stars and a README excerpt for the Overview. Best effort:
+  // a failure just leaves the card out.
+  useEffect(() => {
+    setAbout(null);
+    if (!repo?.id || typeof api.repoAbout !== "function") return;
+    let cancelled = false;
+    void api
+      .repoAbout(repo.id)
+      .then((next) => {
+        if (!cancelled) setAbout(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [repo?.id]);
+
+  // Anonymous quota ran out: try again on our own once it resets (capped at an hour).
+  useEffect(() => {
+    const minutes = forgeRateLimitResetMinutes(pullsError ?? issuesError);
+    if (minutes == null) return;
+    const id = window.setTimeout(
+      () => setRateRetry((n) => n + 1),
+      Math.min(minutes, 60) * 60_000 + 5_000,
+    );
+    return () => window.clearTimeout(id);
+  }, [pullsError, issuesError]);
 
   useEffect(() => {
     if (!repo) {
@@ -503,7 +561,7 @@ export function CodebasePane() {
     return () => {
       cancelled = true;
     };
-  }, [repo?.id, issueState, tab]);
+  }, [repo?.id, issueState, tab, rateRetry]);
 
   useEffect(() => {
     if (prTab !== "files" || !jumpPath) return;
@@ -733,8 +791,51 @@ export function CodebasePane() {
     }
   }
 
+  /**
+   * Repo agents, setup, review and fix all boot a Docker container. When the
+   * daemon is down, say so before creating a session that can only fail.
+   */
+  function blockedOnDocker(block: DockerBlock): boolean {
+    if (!dockerIsDown(state)) return false;
+    setError(null);
+    setDockerBlock(block);
+    return true;
+  }
+
+  async function startHostAgent() {
+    if (!repo || !state.config) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const session = await startHostRepoAgent({
+        config: state.config,
+        repo,
+        title: shortRepoName(repo.checkout.url, repo.name),
+      });
+      setDockerBlock(null);
+      dispatch({ type: "session", session });
+      dispatch({ type: "select", id: session.id });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start a Host agent");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function startAgent(reuse = false) {
     if (!repo) return;
+    const reusesNonDocker = reuse && bound && sessionRuntime(bound) !== "docker";
+    if (
+      !reusesNonDocker &&
+      blockedOnDocker({
+        detail: "Start agent runs this repo in a Docker container.",
+        retry: () => void startAgent(reuse),
+        host: hostAllowed ? () => void startHostAgent() : undefined,
+      })
+    ) {
+      return;
+    }
+    setDockerBlock(null);
     setBusy(true);
     setError(null);
     try {
@@ -875,6 +976,15 @@ export function CodebasePane() {
 
   async function startSetup() {
     if (!repo) return;
+    if (
+      blockedOnDocker({
+        detail: "Setup environment installs and starts the app in a Docker container.",
+        retry: () => void startSetup(),
+      })
+    ) {
+      return;
+    }
+    setDockerBlock(null);
     setBusy(true);
     setError(null);
     try {
@@ -890,6 +1000,15 @@ export function CodebasePane() {
 
   async function startFix(number: number) {
     if (!repo) return;
+    if (
+      blockedOnDocker({
+        detail: "Fix with agent checks out the pull request in a Docker container.",
+        retry: () => void startFix(number),
+      })
+    ) {
+      return;
+    }
+    setDockerBlock(null);
     setBusy(true);
     setError(null);
     try {
@@ -910,6 +1029,15 @@ export function CodebasePane() {
 
   async function startReview(number: number) {
     if (!repo) return;
+    if (
+      blockedOnDocker({
+        detail: "Review with agent fetches the pull request into a Docker container.",
+        retry: () => void startReview(number),
+      })
+    ) {
+      return;
+    }
+    setDockerBlock(null);
     setBusy(true);
     setError(null);
     try {
@@ -1276,11 +1404,14 @@ export function CodebasePane() {
   const inbox = pulls.filter(isOpenInboxPull);
   const pullsProblem = fetchProblem(pullsError);
   const issuesProblem = fetchProblem(issuesError);
+  const rateResetMinutes = forgeRateLimitResetMinutes(pullsError);
   const blockedNote =
     pullsProblem === "needs_token"
       ? "Needs a token"
       : pullsProblem === "rate_limited"
-        ? "Rate limited"
+        ? rateResetMinutes != null
+          ? `Rate limited · resets in ${rateResetMinutes} min`
+          : "Rate limited"
         : pullsProblem
           ? "Couldn't load"
           : null;
@@ -1290,7 +1421,8 @@ export function CodebasePane() {
       : pullsReady && pullState === "open"
         ? inbox.length
         : undefined;
-  const topError = error ?? pullsError ?? issuesError;
+  // The open PR shows its own action error under the PR header; don't repeat it here.
+  const topError = (pullDetailOpen ? null : error) ?? pullsError ?? issuesError;
 
   return (
     <div className={prFocus ? "codebase-pane pr-focus" : "codebase-pane"}>
@@ -1357,10 +1489,24 @@ export function CodebasePane() {
         </div>
       </div>
       {topError ? <ErrorBanner error={topError} /> : null}
+      {dockerBlock ? (
+        <DockerDownCallout
+          detail={dockerBlock.detail}
+          hostLabel="Start on Host instead"
+          onHost={dockerBlock.host}
+          onReady={() => {
+            const retry = dockerBlock.retry;
+            setDockerBlock(null);
+            retry();
+          }}
+          onDismiss={() => setDockerBlock(null)}
+          busy={busy}
+        />
+      ) : null}
       {!pullDetailOpen && ideOpen ? (
         <IdeOpenBanner open={ideOpen} progress={repoCloneProgress} />
       ) : null}
-      <div className="codebase-tabs">
+      <div className="codebase-tabs" role="tablist" aria-label="Repo sections">
         {(
           [
             "overview",
@@ -1372,14 +1518,32 @@ export function CodebasePane() {
             "settings",
           ] as const
         ).map((id) => (
-          <button key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            className={tab === id ? "active" : ""}
+            onClick={() => setTab(id)}
+          >
             {id === "pulls"
-              ? `Pull requests${typeof repo.openPullCount === "number" ? ` ${repo.openPullCount}` : ""}`
+              ? "Pull requests"
               : id === "issues"
-                ? `Issues${typeof repo.openIssueCount === "number" ? ` ${repo.openIssueCount}` : ""}`
+                ? "Issues"
                 : id === "automations"
                   ? "Jobs"
                   : id[0]!.toUpperCase() + id.slice(1)}
+            {/* Counts are open-only; a 0 next to a list of merged PRs read as wrong. */}
+            {id === "pulls" && repo.openPullCount ? (
+              <span className="tab-count" title={`${repo.openPullCount} open`}>
+                {repo.openPullCount}
+              </span>
+            ) : null}
+            {id === "issues" && repo.openIssueCount ? (
+              <span className="tab-count" title={`${repo.openIssueCount} open`}>
+                {repo.openIssueCount}
+              </span>
+            ) : null}
           </button>
         ))}
       </div>
@@ -1424,7 +1588,67 @@ export function CodebasePane() {
               <span>Brain claims</span>
             </button>
           </div>
-          <section className="surface-pane overview-remote">
+          {about && aboutHasContent(about) ? (
+            <section className="surface-pane overview-about" data-testid="repo-about">
+              <header>
+                <span className="pane-label">About</span>
+                {about.homepage ? (
+                  <a
+                    className="btn small ghost"
+                    href={about.homepage}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Website
+                  </a>
+                ) : null}
+              </header>
+              <div className="surface-pane-body">
+                {about.description ? (
+                  <p className="overview-about-lead">{about.description}</p>
+                ) : null}
+                <p className="overview-about-facts">
+                  {[
+                    about.license ? `${about.license} license` : null,
+                    about.language ?? null,
+                    about.stars ? `★ ${about.stars.toLocaleString()}` : null,
+                    about.forks
+                      ? `${about.forks.toLocaleString()} fork${about.forks === 1 ? "" : "s"}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  {about.goodFirstIssues ? (
+                    <>
+                      {" · "}
+                      <button type="button" className="linkish" onClick={() => setTab("issues")}>
+                        {about.goodFirstIssues} good first issue
+                        {about.goodFirstIssues === 1 ? "" : "s"}
+                      </button>
+                    </>
+                  ) : null}
+                </p>
+                {about.topics?.length ? (
+                  <p className="overview-about-topics">
+                    {about.topics.map((topic) => (
+                      <span key={topic} className="chip">
+                        {topic}
+                      </span>
+                    ))}
+                  </p>
+                ) : null}
+                {about.readme ? (
+                  <details className="overview-about-readme">
+                    <summary>README</summary>
+                    <Markdown text={about.readme} />
+                  </details>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+          <section
+            className={`surface-pane overview-remote${repoBrain.nodeCount ? "" : " is-empty"}`}
+          >
             <header>
               <span className="pane-label">Brain</span>
               <BusyButton
@@ -1453,7 +1677,11 @@ export function CodebasePane() {
               <p className="hint">{brainHint}</p>
             </div>
           </section>
-          <section className="surface-pane pr-table-pane">
+          <section
+            className={`surface-pane pr-table-pane${
+              pullsReady && !pullsProblem && inbox.length === 0 ? " is-empty" : ""
+            }`}
+          >
             <header>
               <span className="pane-label">Review inbox</span>
               {pullsReady ? (
@@ -1675,7 +1903,12 @@ export function CodebasePane() {
                 { value: "", label: "Auto" },
                 ...(state.config?.forges ?? [])
                   .filter((row) => row.kind === repo.checkout.forge)
-                  .map((row) => ({ value: row.id, label: row.name })),
+                  .map((row) => ({
+                    value: row.id,
+                    label: forgeHasToken(row)
+                      ? row.name
+                      : `${row.name} · ${anonymousForgeLabel(row.kind)}`,
+                  })),
               ]}
               onChange={setAccountId}
             />
@@ -1685,7 +1918,7 @@ export function CodebasePane() {
             <input
               value={dockerImage}
               onChange={(e) => setDockerImage(e.target.value)}
-              placeholder="locus/node"
+              placeholder={`${DEFAULT_DOCKER_IMAGE} (default)`}
             />
           </div>
           <label className="check">
@@ -1713,10 +1946,19 @@ export function CodebasePane() {
             <button className="btn primary" disabled={busy} onClick={() => void saveSettings()}>
               Save
             </button>
-            <button className="btn danger ghost" disabled={busy} onClick={() => void unlink()}>
+          </div>
+          <section className="repo-danger-zone" aria-label="Unlink repository">
+            <div>
+              <strong>Unlink this repo</strong>
+              <p className="hint">
+                Removes it from Codebase. Existing agents keep their checkout; nothing changes on{" "}
+                {forgeLabel(repo.checkout.forge)}.
+              </p>
+            </div>
+            <button className="btn danger" disabled={busy} onClick={() => void unlink()}>
               Unlink
             </button>
-          </div>
+          </section>
         </div>
       ) : null}
     </div>
@@ -1812,6 +2054,12 @@ function PullInbox(
 ) {
   const openCount = props.pulls.filter(isOpenInboxPull).length;
   const draftCount = props.pulls.filter(isDraftPull).length;
+  const emptyPullsTitle =
+    props.pullState === "open"
+      ? "No open pull requests"
+      : props.pullState === "draft"
+        ? "No draft pull requests"
+        : "No pull requests";
 
   function onGutterDown(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -1870,7 +2118,7 @@ function PullInbox(
         ) : props.pullsLoading && props.pulls.length === 0 ? (
           <PullListSkeleton />
         ) : props.pulls.length === 0 ? (
-          <EmptyHint title="No pull requests." />
+          <EmptyHint title={emptyPullsTitle} />
         ) : (
           props.pulls.map((row) => {
             const active = props.selectedNumber === row.number;
@@ -1879,9 +2127,10 @@ function PullInbox(
                 key={row.number}
                 type="button"
                 className={`pr-inbox-item ${active ? "active" : ""}`}
+                title={row.headRef && row.baseRef ? `${row.headRef} → ${row.baseRef}` : undefined}
                 onClick={() => props.onSelect(row.number)}
               >
-                <PullSummaryCell row={row} />
+                <PullSummaryCell row={row} branches={false} />
               </button>
             );
           })
@@ -1920,6 +2169,26 @@ function PullInbox(
           <PullDetailSkeleton />
         ) : props.pullLoadError ? (
           <ErrorBanner error={props.pullLoadError} />
+        ) : props.pulls.length === 0 && !props.pullsLoading && !props.blocked ? (
+          <EmptyHint
+            title={
+              props.pullState === "all"
+                ? "This repo has no pull requests yet."
+                : "Merged and closed pull requests are under All."
+            }
+            action={
+              props.pullState === "all" ? null : (
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() => props.setPullState("all")}
+                >
+                  Show all pull requests
+                </button>
+              )
+            }
+            testId="pr-detail-empty"
+          />
         ) : (
           <EmptyHint title="Select a pull request." />
         )}
@@ -1970,6 +2239,13 @@ function IssueInbox(props: {
     window.addEventListener("pointerup", up);
   }
 
+  const emptyIssuesTitle =
+    props.issueState === "open"
+      ? "No open issues"
+      : props.issueState === "closed"
+        ? "No closed issues"
+        : "No issues";
+
   return (
     <div
       className={`pr-inbox-split issue-inbox-split ${props.focused ? "focused" : ""}`}
@@ -2003,7 +2279,7 @@ function IssueInbox(props: {
         ) : props.issuesLoading && props.issues.length === 0 ? (
           <PullListSkeleton />
         ) : props.issues.length === 0 ? (
-          <EmptyHint title="No issues." />
+          <EmptyHint title={emptyIssuesTitle} />
         ) : (
           props.issues.map((row) => {
             const active = props.selectedNumber === row.number;
@@ -2061,6 +2337,28 @@ function IssueInbox(props: {
           <PullDetailSkeleton />
         ) : props.issueLoadError ? (
           <ErrorBanner error={props.issueLoadError} />
+        ) : props.issues.length === 0 && !props.issuesLoading && !props.blocked ? (
+          <EmptyHint
+            title={
+              props.issueState === "all"
+                ? "This repo has no issues yet."
+                : props.issueState === "open"
+                  ? "Closed issues are under All."
+                  : "Open issues are under All."
+            }
+            action={
+              props.issueState === "all" ? null : (
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() => props.setIssueState("all")}
+                >
+                  Show all issues
+                </button>
+              )
+            }
+            testId="issue-detail-empty"
+          />
         ) : (
           <EmptyHint title="Select an issue." />
         )}
@@ -2525,6 +2823,9 @@ function PullDetail(props: PullDetailProps) {
     { id: "files", label: "Files", count: pull.files.length || undefined },
   ];
 
+  // Merged or closed: an agent review or fix can't change the outcome any more.
+  const pullClosed = pull.state === "merged" || pull.state === "closed";
+
   return (
     <div className="pr-detail" aria-busy={props.openingLabel ? true : undefined}>
       <div className="pr-detail-head">
@@ -2555,18 +2856,38 @@ function PullDetail(props: PullDetailProps) {
               {props.focused ? <IconCompress /> : <IconExpand />}
             </button>
           </Tooltip>
-          <button className="btn" disabled={props.busy} onClick={props.onFix}>
-            Fix with agent
-          </button>
-          <button className="btn primary" disabled={props.busy} onClick={props.onStartReview}>
-            Review with agent
-          </button>
+          {pullClosed ? (
+            <>
+              {pull.url ? (
+                <a className="btn" href={pull.url} target="_blank" rel="noreferrer">
+                  Open on {forgeLabel(pull.forge)}
+                </a>
+              ) : null}
+              <button type="button" className="btn primary" onClick={() => props.setPrTab("stack")}>
+                View change stack
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn" disabled={props.busy} onClick={props.onFix}>
+                Fix with agent
+              </button>
+              <button className="btn primary" disabled={props.busy} onClick={props.onStartReview}>
+                Review with agent
+              </button>
+            </>
+          )}
           <OverflowMenu
             label={<IconMore />}
             title="Pull request actions"
             toggleClassName="btn icon ghost"
             align="right"
           >
+            {pullClosed ? (
+              <MenuItem disabled={props.busy} onClick={props.onStartReview}>
+                Review with agent
+              </MenuItem>
+            ) : null}
             <MenuItem disabled={props.busy} onClick={() => props.onOpenInIde()}>
               {props.openingLabel ?? "Open PR in IDE"}
             </MenuItem>
@@ -2602,10 +2923,13 @@ function PullDetail(props: PullDetailProps) {
         </span>
       </p>
       {props.error ? <ErrorBanner error={props.error} /> : null}
-      <div className="codebase-tabs">
+      <div className="codebase-tabs" role="tablist" aria-label="Pull request sections">
         {tabs.map((row) => (
           <button
             key={row.id}
+            type="button"
+            role="tab"
+            aria-selected={props.prTab === row.id}
             className={props.prTab === row.id ? "active" : ""}
             onClick={() => {
               if (row.id === "stack") openStack(null);

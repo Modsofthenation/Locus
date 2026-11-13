@@ -100,12 +100,12 @@ describe("ProjectEmpty", () => {
     expect(labels).toEqual(["Feature", "Migration", "Gardening", "Blank"]);
   });
 
-  it("uses the same primary New project chrome as New board", () => {
+  it("submits with the same Send-style chrome as Board", () => {
     render();
     const send = host.querySelector(".composer-send") as HTMLButtonElement;
     expect(send.className).toContain("btn");
     expect(send.className).toContain("primary");
-    expect(send.getAttribute("aria-label")).toBe("New project");
-    expect(send.textContent).toMatch(/New project/);
+    expect(send.getAttribute("aria-label")).toBe("Create project");
+    expect(send.textContent).toMatch(/Create/);
   });
 });

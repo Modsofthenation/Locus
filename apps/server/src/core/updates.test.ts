@@ -3,7 +3,12 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkGithubRelease, downloadAndVerifyUpdate, githubReleaseToUpdate } from "./updates.js";
+import {
+  UpdateChecker,
+  checkGithubRelease,
+  downloadAndVerifyUpdate,
+  githubReleaseToUpdate,
+} from "./updates.js";
 
 const release = {
   tag_name: "v0.4.3",
@@ -88,5 +93,47 @@ describe("checkGithubRelease", () => {
     });
     expect(update.status).toBe("available");
     expect(update.asset?.name).toBe("Locus-0.4.3.dmg");
+  });
+});
+
+describe("UpdateChecker", () => {
+  it("serves repeat checks from cache for an hour and refreshes on demand", async () => {
+    let calls = 0;
+    let now = 1_000_000;
+    const checker = new UpdateChecker(
+      async ({ current }) => {
+        calls += 1;
+        return { status: "up-to-date" as const, current, latest: "v0.20.0" };
+      },
+      () => now,
+    );
+    await checker.get({ current: "0.20.0", platform: "linux" });
+    await checker.get({ current: "0.20.0", platform: "linux" });
+    expect(calls).toBe(1);
+    await checker.get({ current: "0.20.0", platform: "linux", refresh: true });
+    expect(calls).toBe(2);
+    now += 61 * 60 * 1000;
+    const fresh = await checker.get({ current: "0.20.0", platform: "linux" });
+    expect(calls).toBe(3);
+    expect(fresh.checkedAt).toBe(new Date(now).toISOString());
+  });
+
+  it("retries an unavailable result after ten minutes", async () => {
+    let calls = 0;
+    let now = 0;
+    const checker = new UpdateChecker(
+      async ({ current }) => {
+        calls += 1;
+        return { status: "unavailable" as const, current, message: "offline" };
+      },
+      () => now,
+    );
+    await checker.get({ current: "0.20.0", platform: "linux" });
+    now += 5 * 60 * 1000;
+    await checker.get({ current: "0.20.0", platform: "linux" });
+    expect(calls).toBe(1);
+    now += 6 * 60 * 1000;
+    await checker.get({ current: "0.20.0", platform: "linux" });
+    expect(calls).toBe(2);
   });
 });

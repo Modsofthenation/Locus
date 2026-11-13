@@ -11,7 +11,8 @@ const {
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { join } = require("node:path");
-const { installCloseGuard } = require("./close-guard.cjs");
+const { installAmbient } = require("./ambient.cjs");
+const { installCloseGuard, senderIsWindow } = require("./close-guard.cjs");
 const {
   controlPlaneKeepAlive,
   desktopServerRecordPath,
@@ -33,7 +34,8 @@ const {
 const { desktopCliInvocation } = require("./cli-argv.cjs");
 const { resolveLaunch, syncPackagedUi, uiBuildStamp } = require("./launch.cjs");
 const { loadUrlWithRetry, waitForUrl, waitUntilUrlDown } = require("./net-wait.cjs");
-const { wrapMasterKey } = require("./vault-key.cjs");
+const { locusHome, wrapMasterKey } = require("./vault-key.cjs");
+const { planUpdateInstall, swapAppImage } = require("./update-install.cjs");
 const { dropWindowsApplicationMenu, installWindowsInputGuard } = require("./windows-input.cjs");
 const { applyZoomLevel, zoomAction } = require("./zoom.cjs");
 
@@ -100,6 +102,55 @@ const closeGuard = installCloseGuard({
   ipcMain,
   getWindow: () => mainWindow,
 });
+installAmbient({
+  electron: require("electron"),
+  ipcMain,
+  getWindow: () => mainWindow,
+  icon: appIcon,
+  senderOk: (event) => senderIsWindow(event, () => mainWindow),
+});
+/** Set by restart-for-update / restart-after-restore: stop the plane even with Keep running. */
+let forceStopServer = false;
+
+function restartApp(opts = {}) {
+  forceStopServer = true;
+  app.relaunch(opts.execPath ? { execPath: opts.execPath } : undefined);
+  app.quit();
+}
+
+ipcMain.handle("locus:restart-app", (event) => {
+  if (!senderIsWindow(event, () => mainWindow)) return { ok: false };
+  restartApp();
+  return { ok: true };
+});
+
+ipcMain.handle("locus:install-update", async (event, file) => {
+  if (!senderIsWindow(event, () => mainWindow)) return { ok: false, error: "Not allowed" };
+  const plan = planUpdateInstall({
+    file,
+    updatesDir: join(locusHome(), "updates"),
+    platform: process.platform,
+    appImage: process.env.APPIMAGE,
+  });
+  try {
+    if (plan.kind === "reject") return { ok: false, error: plan.reason };
+    if (plan.kind === "appimage") {
+      swapAppImage(plan.source, plan.target);
+      restartApp({ execPath: plan.target });
+      return { ok: true, action: "relaunching" };
+    }
+    if (plan.kind === "windows") {
+      spawn(plan.source, [], { detached: true, stdio: "ignore", windowsHide: false }).unref();
+      forceStopServer = true;
+      app.quit();
+      return { ok: true, action: "installer" };
+    }
+    const error = await shell.openPath(plan.source);
+    return error ? { ok: false, error } : { ok: true, action: "opened" };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
 
 async function ensureServer() {
   const recordPath = desktopServerRecordPath();
@@ -127,7 +178,7 @@ async function ensureServer() {
   } else if (record) {
     await forgetDesktopServer(recordPath);
   }
-  startServer();
+  await startServer();
   if (child) ownsServer = true;
 }
 
@@ -171,7 +222,7 @@ async function reviveServer() {
     return;
   }
   dropDeadHandles();
-  startServer();
+  await startServer();
   if (child) ownsServer = true;
 }
 
@@ -229,7 +280,7 @@ async function checkControlPlane() {
   scheduleRestart();
 }
 
-function startServer() {
+async function startServer() {
   const launch = resolveLaunch({
     packaged: app.isPackaged,
     dev,
@@ -239,12 +290,15 @@ function startServer() {
     repoRoot: join(__dirname, "..", "..", ".."),
   });
   if (!launch) return;
+  const vaultEnv = await wrapMasterKey(safeStorage, { unlinkPlaintext: app.isPackaged });
+  // Quit may have started, or another start won, while the key was unwrapped.
+  if (quitPhase !== "idle" || child) return;
   child = spawn(launch.command, launch.args, {
     stdio: launch.stdio,
     env: {
       ...process.env,
       ...launch.env,
-      ...wrapMasterKey(safeStorage, { unlinkPlaintext: app.isPackaged }),
+      ...vaultEnv,
       LOCUS_DESKTOP_OWNER: desktopOwner,
     },
     cwd: launch.cwd,
@@ -258,7 +312,7 @@ function startServer() {
 
 async function releaseServer() {
   const recordPath = desktopServerRecordPath();
-  const keepAlive = await controlPlaneKeepAlive(fetch, KEEP_ALIVE_URL);
+  const keepAlive = forceStopServer ? false : await controlPlaneKeepAlive(fetch, KEEP_ALIVE_URL);
   const action = serverQuitAction({ ownsChild: ownsServer, keepAlive, adoptedPid });
   if (action === "detach") {
     if (child && child.pid) {

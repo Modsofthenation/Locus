@@ -373,6 +373,7 @@ describe("Sidebar", () => {
       "Providers",
       "MCP",
       "Skills",
+      "Benchmark",
       "Machines",
       "Workers",
       "Environments",
@@ -2047,7 +2048,7 @@ describe("Sidebar", () => {
       "GH",
     );
     expect(host.querySelector(".repo-item.active .title-text")?.textContent).toBe("app");
-    expect(host.querySelector(".repo-item.active .meta")?.textContent).toBe("acme/app · main");
+    expect(host.querySelector(".repo-item.active .meta")?.textContent).toBe("acme · main");
     expect(host.querySelector(".repo-item.active .pr-count")?.textContent).toBe("3");
     expect(host.querySelector(".repo-item.active .repo-flag")?.textContent).toBe("auto");
     // The header shows the total; the footer only counts search matches.
@@ -2075,9 +2076,7 @@ describe("Sidebar", () => {
     };
     render({ ...initialState, section: "codebase", selectedRepoId: "r3", repos: [repo] });
     expect(host.querySelector(".repo-item .title-text")?.textContent).toBe("Locus");
-    expect(host.querySelector(".repo-item .meta")?.textContent).toBe(
-      "Modsofthenation/Locus · main",
-    );
+    expect(host.querySelector(".repo-item .meta")?.textContent).toBe("Modsofthenation · main");
   });
 
   it("shows an empty catalog hint", () => {

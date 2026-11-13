@@ -12,8 +12,8 @@ body:
     id: version
     attributes:
       label: Version
-      description: Settings → About, or the GitHub Release tag (for example 0.20.0).
-      placeholder: 0.20.0
+      description: Settings → About, or the GitHub Release tag (for example 0.21.0).
+      placeholder: 0.21.0
     validations:
       required: true
   - type: dropdown

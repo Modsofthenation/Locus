@@ -463,7 +463,7 @@ async function handshakeStdio(
   await rpc(live, "initialize", {
     protocolVersion: "2024-11-05",
     capabilities: {},
-    clientInfo: { name: "locus", version: "0.20.0" },
+    clientInfo: { name: "locus", version: "0.21.0" },
   });
   notify(live, "notifications/initialized");
   const listed = (await rpc(live, "tools/list", {})) as { tools?: ListedTool[] };
@@ -539,7 +539,7 @@ async function bootHttpServer(config: McpServerConfig): Promise<LiveServer> {
   await rpc(live, "initialize", {
     protocolVersion: "2024-11-05",
     capabilities: {},
-    clientInfo: { name: "locus", version: "0.20.0" },
+    clientInfo: { name: "locus", version: "0.21.0" },
   });
   const listed = (await rpc(live, "tools/list", {})) as { tools?: ListedTool[] };
   addListedTools(live, listed.tools, live.config.name);

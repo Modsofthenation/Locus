@@ -21,10 +21,29 @@ const NEEDS_TOKEN_PHRASE = "needs a token to read this repo";
 const RATE_LIMIT_PHRASE = "rate limit reached for reads without a token";
 
 /** One sentence the server sends and the UI matches with `forgeAccessProblem`. */
-export function forgeAccessMessage(forge: string, problem: ForgeAccessProblem): string {
+export function forgeAccessMessage(
+  forge: string,
+  problem: ForgeAccessProblem,
+  resetAt?: number,
+  now = Date.now(),
+): string {
   return problem === "rate_limited"
-    ? `${forge} ${RATE_LIMIT_PHRASE}. Add a token in Settings → Git, or try again later.`
+    ? `${forge} ${RATE_LIMIT_PHRASE}. ${rateLimitResetPhrase(resetAt, now)} Add a token in Settings → Git to raise the limit.`
     : `${forge} ${NEEDS_TOKEN_PHRASE}. It may be private — add a token in Settings → Git.`;
+}
+
+const RESET_RE = /Resets in (\d+) minutes?\./;
+
+function rateLimitResetPhrase(resetAt: number | undefined, now: number): string {
+  if (!resetAt || !Number.isFinite(resetAt)) return "Try again later.";
+  const minutes = Math.max(1, Math.ceil((resetAt - now) / 60_000));
+  return `Resets in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+}
+
+/** Minutes until an anonymous rate limit resets, read back out of `forgeAccessMessage`. */
+export function forgeRateLimitResetMinutes(message: string | null | undefined): number | null {
+  const match = message ? RESET_RE.exec(message) : null;
+  return match ? Number(match[1]) : null;
 }
 
 /** Classify a forge error as a missing-token or anonymous rate-limit refusal. */

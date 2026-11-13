@@ -19,6 +19,8 @@ import { containedPath, ensureParentInside } from "@locus/guest-agent";
 export const WORKSPACE_SKIP_DIRS = WORKSPACE_SKIP_DIR_SET;
 export const WORKSPACE_LIST_MAX_ENTRIES = 16_000;
 export const WORKSPACE_FILE_MAX_BYTES = 1_500_000;
+/** Files stat'ed concurrently per directory while listing. */
+const LIST_STAT_BATCH = 32;
 const MAX_FILE_BYTES = WORKSPACE_FILE_MAX_BYTES;
 /** PDFs in the Files pane; matches worker static / kit write cap. */
 const MAX_RAW_BYTES = 8 * 1024 * 1024;
@@ -85,10 +87,18 @@ export function workspaceFindScript(rel = ""): string {
   const hidden = [...WORKSPACE_SKIP_DIRS].map((name) => `-name ${name}`).join(" -o ");
   const allow = INDEX_DIR_ALLOWLIST.map((name) => `! -name ${name}`).join(" ");
   const shallow = `-type d -name '.*' ${allow}`;
+  const prune = `find ${quoted} -mindepth 1 \\( ${hidden} \\) -prune -o `;
+  // One process per entry (`-exec printf … {} \;`) took 31 s on a vscode-sized tree.
+  // GNU `-printf` keeps find's walk order at 0.05 s; `-exec … {} +` is the POSIX fallback.
+  const gnu =
+    `${prune}\\( ${shallow} \\) -prune -printf 'd\\t%p\\n' -o ` +
+    `-type d -printf 'd\\t%p\\n' -o -type f -printf 'f\\t%p\\n'`;
+  const posix =
+    `${prune}\\( ${shallow} \\) -prune -exec printf 'd\\t%s\\n' {} + -o ` +
+    `-type d -exec printf 'd\\t%s\\n' {} + -o -type f -exec printf 'f\\t%s\\n' {} +`;
   return (
-    `find ${quoted} -mindepth 1 \\( ${hidden} \\) -prune -o ` +
-    `\\( ${shallow} \\) -prune -exec printf 'd\\t%s\\n' {} \\; -o ` +
-    `-type d -exec printf 'd\\t%s\\n' {} \\; -o -type f -exec printf 'f\\t%s\\n' {} \\; | head -n ${WORKSPACE_LIST_MAX_ENTRIES}`
+    `{ if find / -maxdepth 0 -printf '' >/dev/null 2>&1; then ${gnu}; else ${posix}; fi; } ` +
+    `| head -n ${WORKSPACE_LIST_MAX_ENTRIES}`
   );
 }
 
@@ -230,6 +240,7 @@ async function walk(
     } catch {
       return;
     }
+    const files: Array<{ name: string; abs: string; rel: string }> = [];
     for (const ent of entries) {
       if (out.length >= WORKSPACE_LIST_MAX_ENTRIES) return;
       if (WORKSPACE_SKIP_DIRS.has(ent.name) || ent.isSymbolicLink()) continue;
@@ -242,14 +253,27 @@ async function walk(
         visit(childAbs, childRel, depth + 1);
         continue;
       }
-      if (!ent.isFile()) continue;
-      let size: number | undefined;
-      try {
-        size = (await lstat(childAbs)).size;
-      } catch {
-        continue;
+      if (ent.isFile()) files.push({ name: ent.name, abs: childAbs, rel: childRel });
+    }
+    // Stat a directory's files together instead of one await per file.
+    for (let i = 0; i < files.length; i += LIST_STAT_BATCH) {
+      if (out.length >= WORKSPACE_LIST_MAX_ENTRIES) return;
+      const batch = files.slice(i, i + LIST_STAT_BATCH);
+      const sizes = await Promise.all(
+        batch.map((file) =>
+          lstat(file.abs).then(
+            (info) => info.size,
+            () => undefined,
+          ),
+        ),
+      );
+      for (let j = 0; j < batch.length; j += 1) {
+        if (out.length >= WORKSPACE_LIST_MAX_ENTRIES) return;
+        const size = sizes[j];
+        if (size === undefined) continue;
+        const file = batch[j]!;
+        out.push({ name: file.name, path: file.rel, type: "file", size });
       }
-      out.push({ name: ent.name, path: childRel, type: "file", size });
     }
   };
 

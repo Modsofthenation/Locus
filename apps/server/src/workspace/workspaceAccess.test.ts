@@ -65,6 +65,42 @@ describe("listWorkspaceAccess", () => {
     ).rejects.toThrow(WORKSPACE_UNSUPPORTED);
   });
 
+  it("flags a listing that stopped at the entry cap", async () => {
+    const many = Array.from({ length: 16_000 }, (_, i) => ({
+      name: `f${i}.ts`,
+      path: `f${i}.ts`,
+      type: "file" as const,
+    }));
+    const base = {
+      hasVm: true,
+      messageChanges: [],
+      listGuest: async () => undefined,
+      gitChanges: async () => [],
+      skipGit: true,
+    };
+    const full = await listWorkspaceAccess({
+      ...base,
+      kind: "host",
+      listWorker: async () => [],
+      listHost: async () => many,
+    });
+    expect(full.truncated).toBe(true);
+    const worker = await listWorkspaceAccess({
+      ...base,
+      kind: "worker",
+      listWorker: async () => many,
+      listHost: async () => [],
+    });
+    expect(worker.truncated).toBe(true);
+    const small = await listWorkspaceAccess({
+      ...base,
+      kind: "host",
+      listWorker: async () => [],
+      listHost: async () => many.slice(0, 3),
+    });
+    expect(small.truncated).toBeUndefined();
+  });
+
   it("lists nothing on a worker session before the guest exists", async () => {
     const listed = await listWorkspaceAccess({
       kind: "worker",
@@ -387,7 +423,7 @@ describe("writeWorkspaceBytesAccess", () => {
 describe("guest workspace adapters", () => {
   it("lists via find, reads via head, writes via file_write", async () => {
     const execute = vi.fn(async (req: { name: string; args: Record<string, unknown> }) => {
-      if (req.name === "exec" && String(req.args.command).startsWith("find ")) {
+      if (req.name === "exec" && String(req.args.command).includes("find '/workspace")) {
         return { ok: true, output: "f\t/workspace/src/app.ts\n" };
       }
       if (req.name === "exec" && String(req.args.command).startsWith("head ")) {

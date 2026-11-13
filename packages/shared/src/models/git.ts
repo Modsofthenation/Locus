@@ -214,6 +214,50 @@ export function forgeAccountSubtitle(account: Pick<GitForgeAccount, "kind" | "na
   return `${label} — ${name}`;
 }
 
+/** Public facts about a linked repo for the Codebase Overview (GitHub-compatible forges). */
+export interface RepoAbout {
+  description?: string;
+  homepage?: string;
+  license?: string;
+  language?: string;
+  stars?: number;
+  forks?: number;
+  topics?: string[];
+  /** First part of the README as markdown, clipped. */
+  readme?: string;
+  /** Open issues labelled "good first issue". */
+  goodFirstIssues?: number;
+}
+
+/** Keep a README excerpt short: drop badge-only lines and HTML, stop at ~1200 chars. */
+export function readmeExcerpt(markdown: string, max = 1200): string {
+  const lines = markdown
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*<\/?[a-z][^>]*>\s*$/i.test(line))
+    .filter(
+      (line) => !/^\s*(\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*|!\[[^\]]*\]\([^)]*\)\s*)+$/.test(line),
+    );
+  const text = lines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const para = cut.lastIndexOf("\n\n");
+  return `${(para > max / 2 ? cut.slice(0, para) : cut).trimEnd()}\n\n…`;
+}
+
+/**
+ * What a forge account without a token can do. A public repo links and loads
+ * through it, so "Not signed in" alone reads like it is broken.
+ */
+export function anonymousForgeLabel(kind: GitForgeAccount["kind"]): string {
+  return kind === "github"
+    ? "No token · public repos only (60 requests/hour)"
+    : "No token · public repos only";
+}
+
 export type ForgeAccountStatusKind = "signed-in" | "expiring" | "expired" | "signed-out";
 
 const TOKEN_EXPIRY_WARN_MS = 7 * 24 * 60 * 60 * 1000;

@@ -11,13 +11,14 @@ export type SettingsTab =
   | "integrations"
   | "mcp"
   | "skills"
+  | "benchmark"
   | "phone"
   | "chrome"
   | "advanced"
   | "about";
 
 export const SETTINGS_NAV_GROUPS: { label: string; items: SettingsTab[] }[] = [
-  { label: "Models", items: ["providers", "mcp", "skills"] },
+  { label: "Models", items: ["providers", "mcp", "skills", "benchmark"] },
   { label: "Workspace", items: ["machines", "workers", "environments", "git", "integrations"] },
   {
     label: "System",

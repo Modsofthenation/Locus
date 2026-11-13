@@ -20,6 +20,8 @@ export function SetupWizard() {
   const [error, setError] = useState<string | null>(null);
   const [restartNote, setRestartNote] = useState<string | null>(null);
   const [productMode, setProductMode] = useState<"developer" | "swarm">("developer");
+  /** Result of the test call after saving: what answered, or why it didn't. */
+  const [verified, setVerified] = useState<{ ok: boolean; text: string } | null>(null);
 
   if (!state.setupOpen || !setup || !config) return null;
   const current = config;
@@ -80,12 +82,60 @@ export function SetupWizard() {
     if (!provider) return;
     setBusy("save");
     setError(null);
+    setVerified(null);
     try {
+      const key = apiKey.trim();
+      const local = isLocalOpenAiBase(provider.baseUrl);
+      // A local server (Ollama, LM Studio) only has the models someone pulled.
+      // Ask it, so the default isn't a model that isn't there.
+      let models: string[] | null = null;
+      if (local) {
+        models = await api
+          .providerModels(provider.id, key ? { apiKey: key } : {})
+          .then((res) => res.models)
+          .catch(() => null);
+      }
+      const defaultModel =
+        models?.length && !models.includes(provider.defaultModel)
+          ? models[0]!
+          : provider.defaultModel;
       const providers = current.providers.map((p) =>
-        p.id === provider.id ? { ...p, apiKey: apiKey.trim() || p.apiKey, enabled: true } : p,
+        p.id === provider.id
+          ? {
+              ...p,
+              apiKey: key || p.apiKey,
+              enabled: true,
+              defaultModel,
+              ...(models?.length ? { models } : {}),
+            }
+          : p,
       );
       await persist({ ...current, providers });
       setApiKey("");
+      if (local && models && models.length === 0) {
+        setVerified({
+          ok: false,
+          text: `${provider.name} is running but has no models yet. Pull one (for example \`ollama pull llama3.2\`), then pick it in the composer.`,
+        });
+        return;
+      }
+      const started = performance.now();
+      try {
+        const result = await api.testProvider(provider.id);
+        const ms = Math.round(performance.now() - started);
+        setVerified(
+          result.ok
+            ? { ok: true, text: `${provider.name} · ${defaultModel} · responded in ${ms} ms` }
+            : { ok: false, text: `${provider.name} saved, but the test call failed.` },
+        );
+      } catch (err) {
+        setVerified({
+          ok: false,
+          text: `${provider.name} saved, but the test call failed: ${
+            err instanceof Error ? err.message : "no response"
+          }`,
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save provider");
     } finally {
@@ -141,6 +191,13 @@ export function SetupWizard() {
 
   const hostLabel = setup.hostOs?.label ?? "this computer";
   const keyOptional = hasUsableKey("", provider?.baseUrl, provider?.kind);
+  const enabledProvider = current.providers.find((p) => p.enabled);
+  // Order: free tier, then no-key local servers and CLIs, then cloud keys; the
+  // hint says what each needs instead of one flat list of 18 names.
+  const providerOptions = [...current.providers]
+    .map((p, index) => ({ p, index, group: providerGroup(p) }))
+    .sort((a, b) => a.group.rank - b.group.rank || a.index - b.index)
+    .map(({ p, group }) => ({ value: p.id, label: p.name, hint: group.hint }));
 
   return (
     <Modal
@@ -154,8 +211,11 @@ export function SetupWizard() {
         <div>
           <h2 id="setup-wizard-title">Set up Locus</h2>
           <p className="scrim-note setup-hero-lead">
-            Detected {hostLabel}. Add a provider key, then start chatting on this machine. Docker
-            and QEMU are optional if you want a container or a full guest desktop later.
+            Detected {hostLabel}.{" "}
+            {setup.hasProvider
+              ? "A provider is ready, so you can start chatting on this machine."
+              : "Pick a model provider, then start chatting on this machine."}{" "}
+            Docker and QEMU are optional if you want a container or a full guest desktop later.
           </p>
           <p className="hint">{t("setup.firstTask.hint")}</p>
         </div>
@@ -163,9 +223,12 @@ export function SetupWizard() {
       <ol className="setup-list">
         <li className={setup.hasProvider ? "ok" : "todo"}>
           <strong>Provider</strong>
-          <span>
+          <span className={verified && !verified.ok ? "hint warn-text" : undefined}>
             {setup.hasProvider
-              ? "An enabled provider can answer chat."
+              ? (verified?.text ??
+                (enabledProvider
+                  ? `${enabledProvider.name} · ${enabledProvider.defaultModel} is enabled.`
+                  : "An enabled provider can answer chat."))
               : "Paste an OpenCode Zen key for the free tier, or another provider key. Local servers such as Ollama, and CLI providers (Cursor CLI, Claude Code, Codex CLI, Kiro CLI), do not need a key."}
           </span>
           {!setup.hasProvider && (
@@ -173,10 +236,7 @@ export function SetupWizard() {
               <Select
                 ariaLabel="Provider"
                 value={provider?.id ?? ""}
-                options={current.providers.map((p: AiProvider) => ({
-                  value: p.id,
-                  label: p.name,
-                }))}
+                options={providerOptions}
                 onChange={(id) => {
                   setProviderId(id);
                   setApiKey("");
@@ -205,7 +265,11 @@ export function SetupWizard() {
                 disabled={busy !== null || (!apiKey.trim() && !keyOptional)}
                 onClick={() => void saveProvider()}
               >
-                Save key
+                {busy === "save"
+                  ? "Checking…"
+                  : keyOptional
+                    ? `Use ${provider?.name ?? "provider"}`
+                    : "Save key"}
               </button>
             </div>
           )}
@@ -343,4 +407,12 @@ export function SetupWizard() {
       </div>
     </Modal>
   );
+}
+
+function providerGroup(p: AiProvider): { rank: number; hint: string } {
+  if (p.kind === "opencode") return { rank: 0, hint: "Free tier · key" };
+  if (p.kind.endsWith("-cli")) return { rank: 2, hint: "CLI login · no key" };
+  if (p.kind === "claude-code") return { rank: 2, hint: "CLI login · no key" };
+  if (isLocalOpenAiBase(p.baseUrl)) return { rank: 1, hint: "Local · no key" };
+  return { rank: 3, hint: "API key" };
 }
