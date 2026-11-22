@@ -1,6 +1,11 @@
 export { createWorkerApp, type WorkerAppOptions } from "./app.js";
 export { packDirectory, unpackDirectory } from "./archive.js";
-export { WorkerClient, WorkerGuestRuntime } from "./client.js";
+export {
+  WorkerClient,
+  WorkerCliStartError,
+  WorkerGuestRuntime,
+  WorkerHealthError,
+} from "./client.js";
 export {
   parseWorkerCliMcpLine,
   workerLoopbackMcpUrls,
@@ -19,6 +24,7 @@ export {
   loadOrCreateWorkerTls,
   pinnedHttpsFetch,
   pinnedHttpsWebSocket,
+  workerTlsFromEnv,
 } from "./tls.js";
 export { loadOrCreateWorkerToken, workerTokenMatches, workerTokenPath } from "./token.js";
 export {
@@ -27,3 +33,4 @@ export {
   workerAddStdout,
   workerAdvertiseUrls,
 } from "./advertise.js";
+export { WORKER_CLI_HEARTBEAT, WORKER_CLI_STREAM_END } from "./cliReplay.js";

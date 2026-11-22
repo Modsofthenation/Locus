@@ -1,6 +1,7 @@
 import { createContext, useContext, type Dispatch } from "react";
 import type {
   AgentRuntime,
+  CustomTheme,
   AgentSession,
   ChatMessage,
   Automation,
@@ -31,6 +32,7 @@ import type {
   VmInstance,
   CloneProgress,
   ImageBuildProgress,
+  BootProgress,
   ProductMode,
   QemuInstallProgress,
 } from "@locus/shared";
@@ -45,7 +47,11 @@ import {
   isProjectSession,
   isDesignSession,
   isGameSession,
+  isUnityProjectSession,
+  isGodotProjectSession,
+  isUnrealProjectSession,
   isAssetSession,
+  isBlenderProjectSession,
   isIdeSession,
   mergeSlackMessageRows,
 } from "@locus/shared";
@@ -62,6 +68,7 @@ export type UiSection =
   | "design"
   | "games"
   | "assets"
+  | "android"
   | "board"
   | "project"
   | "ide"
@@ -83,6 +90,7 @@ export const UI_SECTIONS: UiSection[] = [
   "design",
   "games",
   "assets",
+  "android",
   "board",
   "project",
   "ide",
@@ -163,6 +171,8 @@ export interface UiState {
   section: UiSection;
   /** Rail Inbox is showing in the list and main pane instead of the section. */
   inboxOpen: boolean;
+  /** Home's focused Needs-you row, shared by the sidebar list and the decision card. */
+  inboxFocusKey: string | null;
   /** One-shot: IDE start screen should open this choice when it mounts. */
   ideStart: "open" | "clone" | null;
   queries: Partial<Record<UiSection, string>>;
@@ -211,6 +221,8 @@ export interface UiState {
   timelineSeek: { sessionId: string; stopId: string } | null;
   replayOpen: boolean;
   compareOpen: boolean;
+  /** Plan usage dialog; `providerId` is listed first (the provider the composer is using). */
+  planUsage: { providerId?: string } | null;
   composerDraft: string | null;
   findChatOpen: boolean;
   workspaceOpen: WorkspaceOpen | null;
@@ -220,6 +232,7 @@ export interface UiState {
   thinking: Record<string, string>;
   cloneProgress: Record<string, CloneProgress>;
   imageProgress: Record<string, ImageBuildProgress>;
+  bootProgress: Record<string, BootProgress>;
   qemuInstall: QemuInstallProgress | null;
   productModeTransition: ProductModeTransition | null;
 }
@@ -275,6 +288,7 @@ export const initialState: UiState = {
   brain: null,
   section: "agents",
   inboxOpen: false,
+  inboxFocusKey: null,
   ideStart: null,
   queries: {},
   collapsed: false,
@@ -318,6 +332,7 @@ export const initialState: UiState = {
   timelineSeek: null,
   replayOpen: false,
   compareOpen: false,
+  planUsage: null,
   composerDraft: null,
   findChatOpen: false,
   workspaceOpen: null,
@@ -327,6 +342,7 @@ export const initialState: UiState = {
   thinking: {},
   cloneProgress: {},
   imageProgress: {},
+  bootProgress: {},
   qemuInstall: null,
   productModeTransition: null,
 };
@@ -396,6 +412,7 @@ export type Action =
   | { type: "ideStart"; intent: "open" | "clone" | null }
   | { type: "query"; query: string }
   | { type: "toggleSidebar" }
+  | { type: "inboxFocus"; key: string | null }
   | { type: "sidebarCollapsed"; collapsed: boolean }
   | { type: "toggleVmPane" }
   | { type: "showVmPane" }
@@ -456,6 +473,7 @@ export type Action =
   | { type: "thinkingDelta"; sessionId: string; messageId: string; delta: string }
   | { type: "cloneProgress"; sessionId: string; progress: CloneProgress | null }
   | { type: "imageProgress"; sessionId: string; progress: ImageBuildProgress | null }
+  | { type: "bootProgress"; sessionId: string; progress: BootProgress | null }
   | { type: "qemuInstall"; progress: QemuInstallProgress | null }
   | { type: "unread"; id: string }
   | { type: "unreadAutomation"; id: string }
@@ -463,6 +481,7 @@ export type Action =
   | { type: "seekTimeline"; seek: { sessionId: string; stopId: string } | null }
   | { type: "replay"; open: boolean }
   | { type: "compare"; open: boolean }
+  | { type: "planUsage"; open: boolean; providerId?: string }
   | { type: "compose"; text: string | null }
   | { type: "findChat"; open: boolean }
   | { type: "openWorkspace"; open: WorkspaceOpen | null }
@@ -470,7 +489,8 @@ export type Action =
   | { type: "canvas"; sessionId: string; html: string | null }
   | { type: "gameShot"; sessionId: string; image: string | null }
   | { type: "productModeTransition"; transition: ProductModeTransition | null }
-  | { type: "config"; config: LocusConfig };
+  | { type: "config"; config: LocusConfig }
+  | { type: "themeUpdated"; theme: LocusConfig["theme"]; customThemes: CustomTheme[] };
 
 /** Open Settings, optionally landing on a named tab (Git, Integrations, …). */
 export function openSettings(dispatch: Dispatch<Action>, tab?: SettingsTab): void {
@@ -504,6 +524,7 @@ export function reducer(state: UiState, action: Action): UiState {
 
 function sectionShowsChatThread(section: UiSection): boolean {
   return (
+    section === "android" ||
     section === "agents" ||
     section === "design" ||
     section === "games" ||
@@ -664,6 +685,8 @@ function reduceUiState(state: UiState, action: Action): UiState {
       delete cloneProgress[action.id];
       const imageProgress = { ...state.imageProgress };
       delete imageProgress[action.id];
+      const bootProgress = { ...state.bootProgress };
+      delete bootProgress[action.id];
       return {
         ...state,
         sessions: state.sessions.filter((s) => s.id !== action.id),
@@ -674,6 +697,7 @@ function reduceUiState(state: UiState, action: Action): UiState {
         thinking,
         cloneProgress,
         imageProgress,
+        bootProgress,
         workspaceFocus: state.workspaceFocus?.sessionId === action.id ? null : state.workspaceFocus,
       };
     }
@@ -1076,6 +1100,8 @@ function reduceUiState(state: UiState, action: Action): UiState {
         : { ...state, collapsed: action.collapsed };
     case "inbox":
       return action.open === state.inboxOpen ? state : { ...state, inboxOpen: action.open };
+    case "inboxFocus":
+      return action.key === state.inboxFocusKey ? state : { ...state, inboxFocusKey: action.key };
     case "ideStart":
       return action.intent === state.ideStart ? state : { ...state, ideStart: action.intent };
     case "toggleVmPane":
@@ -1227,6 +1253,13 @@ function reduceUiState(state: UiState, action: Action): UiState {
       return { ...state, error: action.error };
     case "connected":
       return { ...state, connected: action.connected };
+    case "themeUpdated":
+      return state.config
+        ? {
+            ...state,
+            config: { ...state.config, theme: action.theme, customThemes: action.customThemes },
+          }
+        : state;
     case "config":
       return { ...state, config: action.config };
     case "productModeTransition":
@@ -1300,6 +1333,18 @@ function reduceUiState(state: UiState, action: Action): UiState {
         imageProgress: { ...state.imageProgress, [action.sessionId]: action.progress },
       };
     }
+    case "bootProgress": {
+      if (!action.progress) {
+        if (!state.bootProgress[action.sessionId]) return state;
+        const bootProgress = { ...state.bootProgress };
+        delete bootProgress[action.sessionId];
+        return { ...state, bootProgress };
+      }
+      return {
+        ...state,
+        bootProgress: { ...state.bootProgress, [action.sessionId]: action.progress },
+      };
+    }
     case "qemuInstall":
       if (!action.progress) {
         if (!state.qemuInstall) return state;
@@ -1312,6 +1357,15 @@ function reduceUiState(state: UiState, action: Action): UiState {
       return { ...state, replayOpen: action.open };
     case "compare":
       return { ...state, compareOpen: action.open };
+    case "planUsage":
+      return {
+        ...state,
+        planUsage: action.open
+          ? action.providerId
+            ? { providerId: action.providerId }
+            : {}
+          : null,
+      };
     default:
       return state;
   }
@@ -1324,9 +1378,16 @@ export function sortSessions(a: AgentSession, b: AgentSession): number {
 export { isIdeSession };
 
 export function sectionForSession(session: AgentSession): UiSection {
+  if (session.playbook?.includes("LOCUS_ANDROID_WORKFLOW")) return "android";
   if (isDesignSession(session)) return "design";
-  if (isGameSession(session)) return "games";
-  if (isAssetSession(session)) return "assets";
+  if (
+    isGameSession(session) ||
+    isUnityProjectSession(session) ||
+    isGodotProjectSession(session) ||
+    isUnrealProjectSession(session)
+  )
+    return "games";
+  if (isAssetSession(session) || isBlenderProjectSession(session)) return "assets";
   if (isBoardSession(session)) return "board";
   if (isProjectSession(session)) return "project";
   if (isIdeSession(session)) return "ide";

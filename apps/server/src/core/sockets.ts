@@ -15,6 +15,7 @@ import type { Hub } from "./hub.js";
 import {
   allowPhoneAccess,
   normalizePeer,
+  operatorCredentialFromHeaders,
   tokenFromHeaders,
   tokensMatch,
 } from "../runtime/phoneRemote.js";
@@ -26,6 +27,7 @@ import {
   spawnHostShell,
 } from "../workspace/hostShell.js";
 import { sanitizeWorkspaceRel } from "../workspace/workspaceFiles.js";
+import type { AgentTerminalRegistry } from "../workspace/agentTerminals.js";
 
 export interface DisplaySource {
   get(id: string):
@@ -276,12 +278,16 @@ export function attachSockets(opts: {
   pty?: PtyFactory;
   heartbeatMs?: number;
   phoneRemote?: () => PhoneRemote | undefined;
+  /** Required on loopback upgrades (see `allowPhoneAccess`). Unset leaves loopback trusted. */
+  operatorToken?: string;
   browsers?: { attach: (sessionId: string, ws: WebSocket) => void };
   chromeExtension?: {
     attach: (ws: WebSocket, token: string | undefined) => void;
     token?: () => string | undefined;
   };
   workspaceShell?: WorkspaceShellSource;
+  /** Terminal mode: agent CLIs in the session workspace (`/ws/sessions/:id/terminal`). */
+  agentTerminals?: AgentTerminalRegistry;
 }): void {
   const events = new WebSocketServer({ noServer: true });
   const display = new WebSocketServer({ noServer: true, perMessageDeflate: false });
@@ -292,7 +298,10 @@ export function attachSockets(opts: {
   const pty = opts.pty ?? defaultPty;
   const heartbeatMs = opts.heartbeatMs ?? 20_000;
   const workspaceTerminals = new WorkspaceTerminalPool(opts.workspaceShell);
-  opts.server.on("close", () => workspaceTerminals.dispose());
+  opts.server.on("close", () => {
+    workspaceTerminals.dispose();
+    opts.agentTerminals?.dispose();
+  });
 
   opts.server.on("upgrade", (req, socket, head) => {
     const originHeader = req.headers.origin;
@@ -335,6 +344,8 @@ export function attachSockets(opts: {
         remote: opts.phoneRemote?.(),
         method: req.method,
         path: pathname,
+        operatorToken: opts.operatorToken,
+        operatorCredential: operatorCredentialFromHeaders(req.headers, req.url),
       })
     ) {
       const host = normalizePeer(peer);
@@ -373,6 +384,21 @@ export function attachSockets(opts: {
       const terminalId = terminalQuery(req.url);
       workspace.handleUpgrade(req, socket, head, (ws) => {
         bindWorkspaceTerminal(ws, sessionId, workspaceTerminals, terminalId, cwd);
+      });
+      return;
+    }
+    const agentTermMatch = /^\/ws\/sessions\/([^/]+)\/terminal$/.exec(pathname);
+    if (agentTermMatch?.[1]) {
+      const sessionId = decodeURIComponent(agentTermMatch[1]);
+      const terminalId = terminalQuery(req.url);
+      const command = commandQuery(req.url);
+      const agentTerminals = opts.agentTerminals;
+      workspace.handleUpgrade(req, socket, head, (ws) => {
+        if (!sessionId.trim() || !agentTerminals) {
+          ws.close(1011, "no terminal");
+          return;
+        }
+        void agentTerminals.attach(ws, sessionId, terminalId, command);
       });
       return;
     }
@@ -484,6 +510,14 @@ function bindWorkspaceTerminal(
 function cwdQuery(url?: string): string {
   try {
     return new URL(url ?? "", "http://127.0.0.1").searchParams.get("cwd") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function commandQuery(url?: string): string {
+  try {
+    return new URL(url ?? "", "http://127.0.0.1").searchParams.get("command") ?? "";
   } catch {
     return "";
   }

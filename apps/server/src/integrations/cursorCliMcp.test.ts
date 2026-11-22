@@ -8,6 +8,8 @@ import {
   mergeClaudeMcpJson,
   mergeLocusMcpJson,
   mergeKiroMcpJson,
+  mergeGeminiSettingsJson,
+  writeLocusGeminiMcpConfig,
   writeLocusClaudeMcpConfig,
   writeLocusKiroMcpConfig,
   writeLocusCursorMcpConfig,
@@ -84,6 +86,44 @@ describe("cursor cli mcp config", () => {
     const exclude = await readFile(join(workspace, ".git", "info", "exclude"), "utf8");
     expect(exclude).toContain(".mcp.json");
     expect(mergeClaudeMcpJson({}, url).mcpServers.locus).toEqual({ type: "http", url });
+  });
+
+  it("merges Locus into Gemini CLI settings and keeps other keys", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-gemini-mcp-"));
+    cleanup.push(dir);
+    const workspace = join(dir, "ws");
+    await mkdir(join(workspace, ".git"), { recursive: true });
+    await mkdir(join(workspace, ".gemini"), { recursive: true });
+    await writeFile(
+      join(workspace, ".gemini", "settings.json"),
+      JSON.stringify({ theme: "Dracula", mcpServers: { other: { command: "echo" } } }),
+    );
+    const url = "http://127.0.0.1:7420/mcp/sessions/sess-1";
+    expect(await writeLocusGeminiMcpConfig({ workspace, url })).toBe(
+      join(workspace, ".gemini", "settings.json"),
+    );
+    const settings = JSON.parse(
+      await readFile(join(workspace, ".gemini", "settings.json"), "utf8"),
+    ) as { theme?: string; mcpServers: Record<string, unknown> };
+    expect(settings.theme).toBe("Dracula");
+    expect(settings.mcpServers.other).toEqual({ command: "echo" });
+    expect(settings.mcpServers.locus).toEqual({ httpUrl: url, trust: true });
+    const exclude = await readFile(join(workspace, ".git", "info", "exclude"), "utf8");
+    expect(exclude).toContain(".gemini/settings.json");
+    expect(mergeGeminiSettingsJson(undefined, url)).toEqual({
+      mcpServers: { locus: { httpUrl: url, trust: true } },
+    });
+  });
+
+  it("leaves an unparseable Gemini settings file alone", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-gemini-bad-"));
+    cleanup.push(dir);
+    await mkdir(join(dir, ".gemini"), { recursive: true });
+    await writeFile(join(dir, ".gemini", "settings.json"), "{ // hand edited\n}");
+    expect(await writeLocusGeminiMcpConfig({ workspace: dir, url: "http://x/mcp" })).toBe(
+      undefined,
+    );
+    expect(await readFile(join(dir, ".gemini", "settings.json"), "utf8")).toContain("hand edited");
   });
 
   it("writes Kiro CLI workspace MCP without secrets", async () => {

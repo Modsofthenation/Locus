@@ -1,4 +1,5 @@
 import { isLoopbackHost } from "../security.js";
+import type { CliAgentConfig } from "./cliAgent.js";
 
 export type ProviderKind =
   | "openai"
@@ -10,6 +11,7 @@ export type ProviderKind =
   | "claude-code"
   | "codex-cli"
   | "kiro-cli"
+  | "cli-agent"
   | "opencode"
   | "openrouter"
   | "openai-compatible";
@@ -28,6 +30,8 @@ export interface AiProvider {
   outputUsdPerMillion?: number;
   /** AWS access key id when the base URL needs SigV4 (Bedrock / API Gateway). Secret is `apiKey`. */
   accessKeyId?: string;
+  /** Custom CLI agent (kind `cli-agent`): command, argv template, and output format. */
+  cli?: CliAgentConfig;
 }
 
 export const OPENCODE_ZEN_BASE_URL = "https://opencode.ai/zen/v1";
@@ -48,6 +52,8 @@ export const CURSOR_CLI_BASE_URL = "cursor-cli://local";
 export const CLAUDE_CODE_BASE_URL = "claude-code://local";
 export const CODEX_CLI_BASE_URL = "codex-cli://local";
 export const KIRO_CLI_BASE_URL = "kiro-cli://local";
+/** Placeholder base for Custom CLI agents; the command lives on `provider.cli`. */
+export const CLI_AGENT_BASE_URL = "cli-agent://local";
 /** Models Kiro CLI currently exposes for Auto and the active Claude catalog. */
 export const KIRO_CLI_MODELS = [
   "auto",
@@ -277,6 +283,7 @@ export function hasUsableKey(apiKey?: string, baseUrl?: string, kind?: string): 
   if (kind === "claude-code" || isClaudeCodeBase(baseUrl)) return true;
   if (kind === "codex-cli" || isCodexCliBase(baseUrl)) return true;
   if (kind === "kiro-cli" || isKiroCliBase(baseUrl)) return true;
+  if (kind === "cli-agent" || isGenericCliBase(baseUrl)) return true;
   if (isLocalOpenAiBase(baseUrl)) return true;
   return Boolean(apiKey && apiKey.trim() && !apiKey.includes("•"));
 }
@@ -401,19 +408,39 @@ export function isKiroCliProvider(provider: { kind?: string; baseUrl?: string })
   return provider.kind === "kiro-cli" || isKiroCliBase(provider.baseUrl);
 }
 
+export function isGenericCliBase(baseUrl?: string): boolean {
+  if (!baseUrl) return false;
+  const trimmed = baseUrl.trim();
+  if (!trimmed) return false;
+  try {
+    return new URL(trimmed).protocol === "cli-agent:";
+  } catch {
+    return false;
+  }
+}
+
+/** Custom CLI agent (kind `cli-agent`) — any coding-agent CLI configured as data. */
+export function isGenericCliProvider(provider: { kind?: string; baseUrl?: string }): boolean {
+  return provider.kind === "cli-agent" || isGenericCliBase(provider.baseUrl);
+}
+
 export function isLocalAgentCliProvider(provider: { kind?: string; baseUrl?: string }): boolean {
   return (
     isCursorCliProvider(provider) ||
     isClaudeCodeProvider(provider) ||
     isCodexCliProvider(provider) ||
-    isKiroCliProvider(provider)
+    isKiroCliProvider(provider) ||
+    isGenericCliProvider(provider)
   );
 }
 
+/** Kinds that may appear more than once in Settings (keyed by name, not kind). */
+function multiInstanceKind(kind: ProviderKind): boolean {
+  return kind === "openai-compatible" || kind === "cli-agent";
+}
+
 export function builtinProviderKey(provider: Pick<AiProvider, "kind" | "name">): string {
-  return provider.kind === "openai-compatible"
-    ? `${provider.kind}:${provider.name}`
-    : provider.kind;
+  return multiInstanceKind(provider.kind) ? `${provider.kind}:${provider.name}` : provider.kind;
 }
 
 export function mergeBuiltinProviders(
@@ -433,7 +460,7 @@ export function mergeBuiltinProviders(
   const seen = new Set<string>();
   for (const provider of next) {
     const key = builtinProviderKey(provider);
-    if (provider.kind !== "openai-compatible" && seen.has(key)) continue;
+    if (!multiInstanceKind(provider.kind) && seen.has(key)) continue;
     seen.add(key);
     unique.push(provider);
   }
@@ -508,4 +535,43 @@ function mergeOpenCodeFreeModels(provider: AiProvider): AiProvider {
     ? provider.defaultModel
     : (models[0] ?? provider.defaultModel);
   return { ...provider, models, defaultModel };
+}
+
+/**
+ * Providers a one-shot completion (no agent loop) can call directly: API-key
+ * and local HTTP providers. CLI agents and Cursor run their own loop and are
+ * left out. Used for theme generation and Change Stack summaries.
+ */
+export function supportsOneShotCompletion(provider: { kind?: string; baseUrl?: string }): boolean {
+  return !(
+    isCursorProvider(provider) ||
+    isCursorCliProvider(provider) ||
+    isClaudeCodeProvider(provider) ||
+    isCodexCliProvider(provider) ||
+    isKiroCliProvider(provider) ||
+    isGenericCliProvider(provider)
+  );
+}
+
+/**
+ * Providers that can answer a single prompt, including local CLI agents run
+ * read-only in a scratch directory. Only Cursor Cloud is left out: it needs a
+ * repository to run against. Used for theme generation.
+ */
+export function supportsPromptCompletion(provider: { kind?: string; baseUrl?: string }): boolean {
+  return !isCursorProvider(provider);
+}
+
+/** A local CLI agent that can answer one prompt (Claude Code, Codex, Cursor CLI, Kiro, custom). */
+export function isPromptCliProvider(provider: { kind?: string; baseUrl?: string }): boolean {
+  return supportsPromptCompletion(provider) && !supportsOneShotCompletion(provider);
+}
+
+/**
+ * Longest one-shot prompt a CLI agent is handed. Most CLIs take the prompt as one argv entry:
+ * Linux caps a single argument at 128 KiB and Windows caps the whole command line at 32,767
+ * characters, so stay under both with room for the other flags.
+ */
+export function cliPromptCharLimit(platform: string): number {
+  return platform === "win32" ? 30_000 : 120_000;
 }

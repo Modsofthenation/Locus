@@ -1368,14 +1368,81 @@ describe("Fargate compute adapter", () => {
     expect(created.remoteGuestId).toMatch(/task\/locus\//);
     expect(created.instanceSize).toBe("0.25-0.5");
     expect(created.quotedUsdPerHour).toBeGreaterThan(0);
+    // Fargate cannot run Docker: the task is the sandbox and the agent runs as Host in it.
+    expect(created.runtime).toBe("host");
+    expect(created.dockerImage).toBeUndefined();
+    expect(created.vmId).toBeTruthy();
     expect(localDocker.list()).toHaveLength(0);
-    expect(workerEngine.list()).toHaveLength(1);
+    expect(workerEngine.list()).toHaveLength(0);
+    // The control plane minted the worker's TLS identity, so the cert is pinned up front.
+    expect(compute.provisions[0]?.workerTls?.fingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
 
     const remoteId = created.remoteGuestId;
     await sessions.stopVm(created.id);
     expect(compute.destroyed).toEqual([remoteId]);
-    expect(workerEngine.list()).toHaveLength(0);
     expect((await sessions.get(created.id))?.remoteGuestId).toBeUndefined();
+  });
+
+  it("returns from create at once and boots the cloud task in the background", async () => {
+    const compute = new MockComputeBackend({ url: "http://127.0.0.1:7421", token: "secret" });
+    const { sessions, config } = await setupWorkerPlane({
+      workers: [fargateWorker],
+      compute,
+    });
+    const created = await sessions.create(
+      {
+        os: "ubuntu",
+        templateId: config.templates[0]!.id,
+        runtime: "docker",
+        dockerImage: "node:22-bookworm",
+        hostDir: "/Users/me/secret-project",
+        providerId: config.providers[0]!.id,
+        model: config.providers[0]!.defaultModel,
+        startVm: true,
+        placement: "worker",
+        backendId: "w1",
+      },
+      { waitUntilStarted: false },
+    );
+    expect(created.runtime).toBe("host");
+    expect(created.status).toBe("provisioning");
+    expect(created.hostDir).toBeUndefined();
+    await sessions.startVm(created.id);
+    const live = await sessions.get(created.id);
+    expect(live?.vmId).toBeTruthy();
+    expect(live?.remoteGuestId).toMatch(/task\/locus\//);
+    const progress = sessions.bootProgress(created.id);
+    expect(progress?.kind).toBe("cloud");
+    expect(progress?.steps.map((row) => row.id)).toEqual(["provision", "connect", "ready"]);
+    expect(progress?.done).toBe(true);
+  });
+
+  it("stops the task when the worker never answers", async () => {
+    const compute = new MockComputeBackend({ url: "http://127.0.0.1:7421", token: "secret" });
+    const { sessions, config } = await setupWorkerPlane({
+      workers: [fargateWorker],
+      compute,
+    });
+    const reach = sessions.fetchFn;
+    sessions.fetchFn = (async (input, init) => {
+      if (String(input).includes("/v1/info")) throw new Error("connect ECONNREFUSED");
+      return reach(input, init);
+    }) as typeof fetch;
+    sessions.computeReadyTimeoutMs = 50;
+    await expect(
+      sessions.create({
+        os: "ubuntu",
+        templateId: config.templates[0]!.id,
+        runtime: "host",
+        providerId: config.providers[0]!.id,
+        model: config.providers[0]!.defaultModel,
+        startVm: true,
+        placement: "worker",
+        backendId: "w1",
+      }),
+    ).rejects.toThrow(/did not come up/);
+    expect(compute.provisions).toHaveLength(1);
+    expect(compute.destroyed).toHaveLength(1);
   });
 
   it("does not provision when the size allowlist is empty", async () => {

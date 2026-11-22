@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { GuestOs } from "@locus/shared";
 import { commandFor, decorateRemoteToolResult, isSupported } from "./commands.js";
+import { windowsDesktopCommand } from "./windowsDesktop.js";
 import type { GuestRuntime, ToolRequest, ToolResult } from "./types.js";
 
 export interface WinRmTarget {
@@ -57,7 +58,7 @@ export class WinRmGuestRuntime implements GuestRuntime {
     if (!isSupported(this.os, req.name)) {
       return { ok: false, output: `${req.name} is not available on ${this.os}` };
     }
-    const script = commandFor(this.os, req);
+    const script = windowsDesktopCommand(req.name, commandFor(this.os, req));
     try {
       const result = await winrmRun(this.target, script, this.post);
       return decorateRemoteToolResult(req.name, result);

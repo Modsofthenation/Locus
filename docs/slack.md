@@ -244,7 +244,7 @@ User scopes (the product): `channels:history`, `channels:read`, `groups:history`
 
 Bot scopes: **`commands`**, **`chat:write`**, **`chat:write.public`**, **`files:write`**. No `app_mentions:read`. No `channels:join`.
 
-Socket Mode: on. Subscribe to slash command / shortcut interactivity, not `message.channels` bot events (those need a bot in the room).
+Socket Mode: on. Subscribe to slash command / shortcut interactivity. `message.channels` / `message.groups` bot events are optional: they need the bot in the room, and only Slack PR reviewers use them, to react to posts and thread replies straight away instead of on the next poll (see [slack-pr-reviewer.md](slack-pr-reviewer.md#re-review-after-feedback)).
 
 Slash command: `/locus` → `{text}` is the instruction. Exact `stop` or `stop now` (`/locus stop`, `/locus stop now`) aborts the bound thread. The slash line already appears in Slack as the operator. Message shortcut: **Run with Locus**. Replies go through `slack_post` after approval (user token by default, or `as="bot"`).
 

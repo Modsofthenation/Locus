@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   loadMobileAgentFilter,
   loadSidebarPrefs,
+  railDefaultsFromSaved,
   MOBILE_AGENT_FILTER_KEY,
   saveMobileAgentFilter,
   saveSidebarPrefs,
@@ -23,9 +24,29 @@ describe("sidebarPrefs", () => {
       showHiddenTeammates: false,
       queries: { agents: "fix" },
       width: SIDEBAR_WIDTH_DEFAULT,
+      railDefaults: "current",
+      railHintsDone: [],
       listFilter: "all",
       groupBy: "day",
     });
+  });
+
+  it("marks prefs saved before the slim rail as legacy and new installs as current", () => {
+    expect(railDefaultsFromSaved(null)).toBe("current");
+    expect(railDefaultsFromSaved({})).toBe("legacy");
+    expect(railDefaultsFromSaved({ railDefaults: "current" })).toBe("current");
+    expect(loadSidebarPrefs().railDefaults).toBe("current");
+    localStorage.setItem(SIDEBAR_PREFS_KEY, JSON.stringify({ width: 300 }));
+    expect(loadSidebarPrefs().railDefaults).toBe("legacy");
+    saveSidebarPrefs({ width: 320 });
+    expect(loadSidebarPrefs().railDefaults).toBe("legacy");
+  });
+
+  it("persists answered rail pin suggestions", () => {
+    saveSidebarPrefs({ railHintsDone: ["design", "grafana"] });
+    expect(loadSidebarPrefs().railHintsDone).toEqual(["design", "grafana"]);
+    saveSidebarPrefs({ width: 300 });
+    expect(loadSidebarPrefs().railHintsDone).toEqual(["design", "grafana"]);
   });
 
   it("persists width, rail pins, list filter, and grouping", () => {

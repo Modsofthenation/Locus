@@ -22,13 +22,14 @@ import {
   pullFlags,
   type ForgeFetcher,
 } from "./forgeHttp.js";
-import type {
-  CreatePullInput,
-  CreatedPull,
-  ForgeAdapter,
-  PostCommentInput,
-  PostIssueCommentInput,
-  PostReviewInput,
+import {
+  READ_FILE_MAX_BYTES,
+  type CreatePullInput,
+  type CreatedPull,
+  type ForgeAdapter,
+  type PostCommentInput,
+  type PostIssueCommentInput,
+  type PostReviewInput,
 } from "./forgeAdapter.js";
 
 function bitbucketJson<T>(
@@ -443,12 +444,7 @@ function bitbucketFilePatches(diff: string): Map<string, string> {
   return map;
 }
 
-function bitbucketFiles(
-  rows:
-    | Array<{ status?: string; old?: { path?: string } | null; new?: { path?: string } | null }>
-    | undefined,
-  diff: string,
-): PullFile[] {
+function bitbucketFiles(rows: BitbucketDiffstatRow[] | undefined, diff: string): PullFile[] {
   const patches = bitbucketFilePatches(diff);
   return (rows ?? []).flatMap((row) => {
     const path = row.new?.path || row.old?.path || "";
@@ -690,6 +686,84 @@ export async function commentBitbucketIssue(
   return { ok, output: text.slice(0, 4000) };
 }
 
+type BitbucketDiffstatRow = {
+  status?: string;
+  old?: { path?: string } | null;
+  new?: { path?: string } | null;
+};
+
+/**
+ * Changed files from `base` to `head`; undefined unless `base` is a strict ancestor of `head`
+ * (their merge base is `base`), so a force-push or rebase reads as undefined. Bitbucket's
+ * two-commit spec is `head..base`: the changes on `head` since it left `base`.
+ */
+export async function compareBitbucketCommits(
+  fetchFn: ForgeFetcher,
+  account: GitForgeAccount,
+  owner: string,
+  repo: string,
+  base: string,
+  head: string,
+): Promise<PullFile[] | undefined> {
+  if (sameSha(head, base)) return undefined;
+  const spec = `${encodeURIComponent(head)}..${encodeURIComponent(base)}`;
+  const root = `/repositories/${owner}/${repo}`;
+  const mergeBase = await bitbucketJson<{ hash?: string }>(
+    fetchFn,
+    account,
+    `${root}/merge-base/${spec}`,
+  );
+  const baseHash = mergeBase.json.hash;
+  if (!mergeBase.ok || typeof baseHash !== "string" || !sameSha(baseHash, base)) return undefined;
+  const [diffstat, diff] = await Promise.all([
+    bitbucketJson<{ values?: BitbucketDiffstatRow[] }>(
+      fetchFn,
+      account,
+      `${root}/diffstat/${spec}?pagelen=100`,
+    ),
+    bitbucketJson<unknown>(fetchFn, account, `${root}/diff/${spec}`),
+  ]);
+  if (!diffstat.ok || !Array.isArray(diffstat.json.values)) return undefined;
+  return bitbucketFiles(diffstat.json.values, diff.ok ? diff.text : "");
+}
+
+/** Full and abbreviated SHAs match when one is a prefix of the other. */
+function sameSha(a: string, b: string): boolean {
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  if (x.length < 7 || y.length < 7) return x === y;
+  return x.startsWith(y) || y.startsWith(x);
+}
+
+/** A file's text at `ref`; undefined when missing, a directory, or over `READ_FILE_MAX_BYTES`. */
+export async function readBitbucketFile(
+  fetchFn: ForgeFetcher,
+  account: GitForgeAccount,
+  owner: string,
+  repo: string,
+  path: string,
+  ref: string,
+): Promise<string | undefined> {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const { ok, json, text } = await bitbucketJson<{ values?: Array<{ type?: string }> }>(
+    fetchFn,
+    account,
+    `/repositories/${owner}/${repo}/src/${encodeURIComponent(ref)}/${encodedPath}`,
+  );
+  if (!ok) return undefined;
+  // A directory answers with a JSON listing of commit_file / commit_directory entries.
+  const values = json.values;
+  if (
+    Array.isArray(values) &&
+    values.length > 0 &&
+    values.every((row) => /^commit_(file|directory)$/.test(row?.type ?? ""))
+  ) {
+    return undefined;
+  }
+  if (Buffer.byteLength(text, "utf8") > READ_FILE_MAX_BYTES) return undefined;
+  return text;
+}
+
 export function createBitbucketForgeAdapter(fetchFn: ForgeFetcher): ForgeAdapter {
   return {
     listRepos: (account) => listBitbucketRepos(fetchFn, account),
@@ -715,5 +789,9 @@ export function createBitbucketForgeAdapter(fetchFn: ForgeFetcher): ForgeAdapter
     latestOpenPullCursor: (account, owner, repo) =>
       bitbucketLatestOpenPullCursor(fetchFn, account, owner, repo),
     listBranches: (account, owner, repo) => listBitbucketBranches(fetchFn, account, owner, repo),
+    compareCommits: (account, owner, repo, base, head) =>
+      compareBitbucketCommits(fetchFn, account, owner, repo, base, head),
+    readFile: (account, owner, repo, path, ref) =>
+      readBitbucketFile(fetchFn, account, owner, repo, path, ref),
   };
 }

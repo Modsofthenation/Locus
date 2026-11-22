@@ -1,4 +1,5 @@
 import type { SessionCompare } from "./compare.js";
+import type { SessionWorktree } from "./worktree.js";
 import type { SessionPreview } from "./preview.js";
 import type { DesignPalette } from "./designPalette.js";
 import type { DesignComment } from "./designComment.js";
@@ -23,6 +24,7 @@ import type { ContextBreakdown } from "../contextWindow.js";
 import type { SubagentKind } from "./subagentKind.js";
 import type { SessionPersona } from "./persona.js";
 import type { CodexReasoningEffort } from "./provider.js";
+import type { SessionViewMode } from "./agentTerminal.js";
 
 export interface CursorCloudState {
   agentId: string;
@@ -34,6 +36,8 @@ export interface CursorCliState {
   sessionId: string;
   /** Frozen `--exclude-tools` for this CLI thread. Empty means no exclude flag. */
   excludeTools?: string;
+  /** Locus MCP instructions (git / canvas / review) already sent on this CLI thread. */
+  mcpPrompt?: string;
 }
 
 export function parseCursorCloudState(raw: unknown): CursorCloudState | undefined {
@@ -56,6 +60,9 @@ export function parseCursorCliState(raw: unknown): CursorCliState | undefined {
   return {
     sessionId,
     ...(typeof value.excludeTools === "string" ? { excludeTools: value.excludeTools } : {}),
+    ...(typeof value.mcpPrompt === "string" && value.mcpPrompt
+      ? { mcpPrompt: value.mcpPrompt }
+      : {}),
   };
 }
 
@@ -191,6 +198,58 @@ export function isDesignSession(session: { kind?: SessionKind }): boolean {
   return sessionKind(session) === "design";
 }
 
+/** Native Blender Assets use a Host coding session rather than the HTML studio. */
+export function isBlenderProjectSession(session: {
+  kind?: SessionKind;
+  runtime?: AgentRuntime;
+  playbook?: string;
+}): boolean {
+  return (
+    sessionKind(session) === "agent" &&
+    session.runtime === "host" &&
+    session.playbook?.includes("LOCUS_BLENDER_WORKFLOW") === true
+  );
+}
+
+/** Unity Games use a Host coding session rather than the HTML game canvas. */
+export function isUnityProjectSession(session: {
+  kind?: SessionKind;
+  runtime?: AgentRuntime;
+  playbook?: string;
+}): boolean {
+  return (
+    sessionKind(session) === "agent" &&
+    session.runtime === "host" &&
+    session.playbook?.includes("LOCUS_UNITY_WORKFLOW") === true
+  );
+}
+
+/** Godot Games sessions use Host coding tools rather than the HTML canvas. */
+export function isGodotProjectSession(session: {
+  kind?: SessionKind;
+  runtime?: AgentRuntime;
+  playbook?: string;
+}): boolean {
+  return (
+    sessionKind(session) === "agent" &&
+    session.runtime === "host" &&
+    session.playbook?.includes("LOCUS_GODOT_WORKFLOW") === true
+  );
+}
+
+/** Unreal Engine Games sessions use Host coding tools rather than the HTML canvas. */
+export function isUnrealProjectSession(session: {
+  kind?: SessionKind;
+  runtime?: AgentRuntime;
+  playbook?: string;
+}): boolean {
+  return (
+    sessionKind(session) === "agent" &&
+    session.runtime === "host" &&
+    session.playbook?.includes("LOCUS_UNREAL_WORKFLOW") === true
+  );
+}
+
 export function isGameSession(session: { kind?: SessionKind }): boolean {
   return sessionKind(session) === "game";
 }
@@ -278,10 +337,20 @@ export interface ToolCall {
   finishedAt?: string;
 }
 
+/**
+ * `inputTokens` is every prompt token the model read, cached or not.
+ * `cachedInputTokens` (cache reads) and `cacheWriteTokens` (cache writes) are subsets of it.
+ */
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens?: number;
+  cacheWriteTokens?: number;
+  /**
+   * Counted from prompt and reply characters (~4 per token) because the provider reported no
+   * tokens, e.g. Kiro CLI, which meters in credits. Misses whatever a CLI agent read on its own.
+   */
+  estimated?: boolean;
 }
 
 export interface UsageRates {
@@ -504,6 +573,8 @@ export interface SubagentLive {
   toolCallId?: string;
   /** explore | implement | review. Missing means the spawn-time default. */
   kind?: SubagentKind;
+  /** "Provider · model" when the child ran on a model other than its session's. */
+  model?: string;
   /** Operator transcript. Not fed back to the parent model. */
   messages?: ChatMessage[];
 }
@@ -636,7 +707,38 @@ export function parseSessionPull(raw: unknown): SessionPull | undefined {
   };
 }
 
+export interface StorageEntry {
+  id: string;
+  category: "worktrees" | "disks" | "images" | "recordings" | "visual-reviews";
+  name: string;
+  bytes: number;
+  pinned: boolean;
+  reclaimableBytes: number;
+}
+
+export interface StorageInventory {
+  complete: boolean;
+  entries: StorageEntry[];
+}
+
+export type VisualViewport = "desktop" | "mobile";
+export interface VisualBaseline {
+  id: string;
+  name: string;
+  path: string;
+  capturedAt: string;
+  comparison?: {
+    id: string;
+    capturedAt: string;
+    percentages: Record<VisualViewport, number>;
+  };
+}
+
 export interface AgentSession {
+  /** This project session uses a loopback model and an isolated workspace. */
+  offline?: boolean;
+  /** The worker output stream was interrupted before the turn completed. */
+  workerInterrupted?: boolean;
   id: string;
   title: string;
   os: GuestOs;
@@ -650,6 +752,8 @@ export interface AgentSession {
   dockerImage?: string;
   /** Absolute host folder mapped to `/workspace` for host agents. */
   hostDir?: string;
+  /** Set when `hostDir` is a git worktree Locus created for this agent. Removed with the session. */
+  worktree?: SessionWorktree;
   vmId?: string;
   providerId: string;
   model: string;
@@ -764,6 +868,8 @@ export interface AgentSession {
   claudeCode?: CursorCliState;
   /** Kiro CLI chat id for `--resume-id` (provider kind `kiro-cli`). */
   kiroCli?: CursorCliState;
+  /** Custom CLI agent session id for its resume args / ACP `session/load` (kind `cli-agent`). */
+  genericCli?: { sessionId?: string };
   checkpoint?: SessionCheckpoint;
   checkpoints?: SessionCheckpoint[];
   control?: SessionControl;
@@ -790,6 +896,8 @@ export interface AgentSession {
   persona?: SessionPersona;
   /** Why this session is waiting on a person. Cleared on the next user turn. */
   needsHuman?: string;
+  /** Chat or the Terminal tab (an interactive agent CLI in this workspace). Missing is chat. */
+  viewMode?: SessionViewMode;
   /** Slack / pull / timer subscriptions that wake this chat. */
   subscriptions?: SessionSubscription[];
   /**
@@ -1094,19 +1202,35 @@ export function canShowTimeline(
 export function addUsage(a?: TokenUsage, b?: TokenUsage): TokenUsage | undefined {
   if (!a && !b) return undefined;
   const cached = (a?.cachedInputTokens ?? 0) + (b?.cachedInputTokens ?? 0);
+  const cacheWrite = (a?.cacheWriteTokens ?? 0) + (b?.cacheWriteTokens ?? 0);
   return {
     inputTokens: (a?.inputTokens ?? 0) + (b?.inputTokens ?? 0),
     outputTokens: (a?.outputTokens ?? 0) + (b?.outputTokens ?? 0),
     ...(cached > 0 ? { cachedInputTokens: cached } : {}),
+    ...(cacheWrite > 0 ? { cacheWriteTokens: cacheWrite } : {}),
   };
 }
+
+/** Cache reads bill at about a tenth of the input rate (Anthropic, current OpenAI models). */
+export const CACHE_READ_RATE_MULTIPLIER = 0.1;
+/** Anthropic 5-minute cache writes bill at 1.25x the input rate. */
+export const CACHE_WRITE_RATE_MULTIPLIER = 1.25;
 
 export function estimateUsd(usage: TokenUsage, rates?: UsageRates): number | undefined {
   const inputRate = finiteRate(rates?.inputUsdPerMillion);
   const outputRate = finiteRate(rates?.outputUsdPerMillion);
   if (inputRate == null && outputRate == null) return undefined;
+  const input = Math.max(0, usage.inputTokens);
+  const cacheRead = Math.min(input, Math.max(0, usage.cachedInputTokens ?? 0));
+  const cacheWrite = Math.min(input - cacheRead, Math.max(0, usage.cacheWriteTokens ?? 0));
+  const billedInput =
+    input -
+    cacheRead -
+    cacheWrite +
+    cacheRead * CACHE_READ_RATE_MULTIPLIER +
+    cacheWrite * CACHE_WRITE_RATE_MULTIPLIER;
   return (
-    (usage.inputTokens / 1_000_000) * (inputRate ?? 0) +
+    (billedInput / 1_000_000) * (inputRate ?? 0) +
     (usage.outputTokens / 1_000_000) * (outputRate ?? 0)
   );
 }
@@ -1154,6 +1278,10 @@ export interface CreateSessionInput {
   instanceSize?: string;
   /** Existing absolute folder the host agent uses as `/workspace`. */
   hostDir?: string;
+  /** Host only: add a `git worktree` of `hostDir` (or of `worktreeFrom`'s checkout) on a new branch and work there. */
+  worktree?: boolean;
+  /** Host only: session whose checkout the worktree branches from (instead of `hostDir`). */
+  worktreeFrom?: string;
   providerId: string;
   model: string;
   reasoningEffort?: CodexReasoningEffort;
@@ -1255,5 +1383,7 @@ export interface PatchSessionInput {
   persona?: SessionPersona | null;
   /** Pass `null` to dismiss a Needs you gate. Client strings are ignored. */
   needsHuman?: string | null;
+  /** Pass `null` to go back to chat. */
+  viewMode?: SessionViewMode | null;
   subscriptions?: SessionSubscription[] | null;
 }

@@ -252,10 +252,20 @@ export function toolChipBits(
     bits[0] = "repo map";
     const query = strArg(args, "query") || strArg(args, "path");
     if (query) bits.push(clip(query, 48));
+  } else if (CODE_INTEL_CHIP[name]) {
+    bits[0] = CODE_INTEL_CHIP[name]!;
+    const target = codeIntelChipTarget(name, args);
+    if (target) bits.push(clip(target, 56));
   } else if (name === "git_pr_loadpath") {
     bits[0] = "load path";
     const number = args.pull_number;
     if (number != null && String(number).trim()) bits.push(`#${clip(String(number), 8)}`);
+  } else if (name === "git_ci_logs") {
+    bits[0] = "CI logs";
+    const number = args.pr ?? args.pull_number;
+    if (number != null && String(number).trim()) bits.push(`#${clip(String(number), 8)}`);
+    const check = strArg(args, "check");
+    if (check) bits.push(clip(check, 32));
   } else if (
     name === "git_pr_get" ||
     name === "git_pr_list" ||
@@ -498,6 +508,18 @@ export function toolChipBits(
     if (target) bits.push(clip(target, 48));
   } else if (name === "mcp_code") {
     bits[0] = "mcp code";
+  } else if (name === "manage_theme") {
+    bits[0] = "theme";
+    const action = strArg(args, "action") || strArg(args, "id");
+    if (action) bits.push(clip(action, 32));
+  } else if (name === "manage_skill") {
+    bits[0] = "skill";
+    const action = strArg(args, "action") || strArg(args, "name");
+    if (action) bits.push(clip(action, 32));
+  } else if (name === "manage_mcp_server") {
+    bits[0] = "mcp server";
+    const action = strArg(args, "action") || strArg(args, "name");
+    if (action) bits.push(clip(action, 32));
   } else if (name === "manage_integration_plugin") {
     bits[0] = "plugin";
     const action = strArg(args, "action") || strArg(args, "slug") || strArg(args, "name");
@@ -580,6 +602,7 @@ export function toolActivityLabel(name: string, args: Record<string, unknown> = 
     const query = strArg(args, "query");
     return query ? `Searched the web for ${clip(query, 40)}` : "Searched the web";
   }
+  if (CODE_INTEL_CHIP[name]) return codeIntelActivityLabel(name, args);
   if (name === "repo_map")
     return strArg(args, "query") || strArg(args, "path")
       ? `Mapped ${clip(strArg(args, "query") || strArg(args, "path"), 40)}`
@@ -641,6 +664,30 @@ export function toolActivityLabel(name: string, args: Record<string, unknown> = 
     return tool ? `Called MCP ${clip(tool, 32)}` : "Called MCP";
   }
   if (name === "mcp_code") return "Ran MCP code";
+  if (name === "manage_theme") {
+    const action = strArg(args, "action");
+    if (action === "list") return "Listed themes";
+    if (action === "apply") return "Switched theme";
+    if (action === "delete") return "Deleted a theme";
+    if (action === "update") return "Updated a theme";
+    return "Created a theme";
+  }
+  if (name === "manage_skill") {
+    const action = strArg(args, "action");
+    const label = strArg(args, "name");
+    if (action === "list") return "Listed skills";
+    if (action && label) return `${titleName(action)} skill /${clip(label, 24)}`;
+    if (action) return `${titleName(action)} a skill`;
+    return "Updated a skill";
+  }
+  if (name === "manage_mcp_server") {
+    const action = strArg(args, "action");
+    const label = strArg(args, "name") || strArg(args, "id");
+    if (action === "list") return "Listed MCP servers";
+    if (action && label) return `${titleName(action)} MCP server ${clip(label, 24)}`;
+    if (action) return `${titleName(action)} an MCP server`;
+    return "Updated an MCP server";
+  }
   if (name === "manage_integration_plugin") {
     const action = strArg(args, "action");
     const label = strArg(args, "name") || strArg(args, "slug");
@@ -742,6 +789,48 @@ export function toolActivityStatus(calls: ToolActivityCall[]): string | undefine
 
 export function toolActivityOpen(calls: ToolActivityCall[]): boolean {
   return calls.some((call) => call.approval === "needed" && !call.finishedAt);
+}
+
+const CODE_INTEL_CHIP: Record<string, string> = {
+  code_definition: "definition",
+  code_references: "references",
+  code_symbols: "symbols",
+  code_diagnostics: "diagnostics",
+  code_rename: "rename",
+};
+
+/** `symbol`, or `file.ts:12:5`, or the query / path list the code-intel call targets. */
+function codeIntelChipTarget(name: string, args: Record<string, unknown>): string {
+  if (name === "code_diagnostics") {
+    const paths = Array.isArray(args.paths)
+      ? args.paths.filter((item): item is string => typeof item === "string" && Boolean(item))
+      : [];
+    if (paths.length > 1) return `${paths.length} files`;
+    return paths[0] ? leaf(paths[0]) : "changed files";
+  }
+  if (name === "code_symbols") return strArg(args, "query") || leaf(strArg(args, "path"));
+  const symbol = strArg(args, "symbol");
+  const path = leaf(strArg(args, "path"));
+  const line = args.line != null && String(args.line).trim() ? String(args.line).trim() : "";
+  const column =
+    args.column != null && String(args.column).trim() ? String(args.column).trim() : "";
+  const at = path ? [path, line, line ? column : ""].filter(Boolean).join(":") : "";
+  const target = symbol || at;
+  if (name === "code_rename") {
+    const next = strArg(args, "newName");
+    return next ? `${target || "symbol"} → ${next}` : target;
+  }
+  return target;
+}
+
+function codeIntelActivityLabel(name: string, args: Record<string, unknown>): string {
+  const target = clip(codeIntelChipTarget(name, args), 48);
+  if (name === "code_definition") return target ? `Went to ${target}` : "Went to a definition";
+  if (name === "code_references")
+    return target ? `Found references to ${target}` : "Found references";
+  if (name === "code_symbols") return target ? `Listed symbols in ${target}` : "Listed symbols";
+  if (name === "code_diagnostics") return `Checked diagnostics for ${target || "changed files"}`;
+  return target ? `Renamed ${target}` : "Renamed a symbol";
 }
 
 function leaf(path: string): string {

@@ -39,6 +39,34 @@ describe("secrets vault", () => {
     expect(loaded.providers[0]?.apiKey).toBe("sk-live-secret");
   });
 
+  it("vaults secret-named Custom CLI agent env and keeps the rest in config", () => {
+    const config = defaultConfig("/tmp/locus");
+    config.providers.push({
+      id: "cli-agent:Amp",
+      name: "Amp",
+      kind: "cli-agent",
+      baseUrl: "cli-agent://local",
+      models: [],
+      defaultModel: "",
+      enabled: true,
+      extraHeaders: {},
+      cli: {
+        command: "amp",
+        args: ["-x", "{prompt}"],
+        output: "text",
+        env: { AMP_API_KEY: "amp-secret-value", AMP_LOG_LEVEL: "info" },
+      },
+    });
+    const { config: stripped, secrets } = extractSecrets(config);
+    const row = stripped.providers.find((p) => p.id === "cli-agent:Amp");
+    expect(row?.cli?.env).toEqual({ AMP_LOG_LEVEL: "info" });
+    expect(secrets.providerCliEnv["cli-agent:Amp"]).toEqual({ AMP_API_KEY: "amp-secret-value" });
+    const restored = applySecrets(stripped, secrets).providers.find(
+      (p) => p.id === "cli-agent:Amp",
+    );
+    expect(restored?.cli?.env).toEqual({ AMP_API_KEY: "amp-secret-value", AMP_LOG_LEVEL: "info" });
+  });
+
   it("extracts guest passwords into the secret bundle", () => {
     const config = defaultConfig("/tmp/locus");
     config.templates[0]!.cloudInit!.password = "Locus.secretpass!";

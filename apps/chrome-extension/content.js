@@ -3,6 +3,8 @@
   const INTERACTIVE = new Set(["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA", "SUMMARY", "OPTION"]);
 
   let refs = new Map();
+  let sequence = 0;
+  const documentId = crypto.randomUUID();
 
   function showBanner(on) {
     let el = document.getElementById("locus-live-chrome-banner");
@@ -59,6 +61,7 @@
 
   function collect() {
     refs = new Map();
+    sequence++;
     const lines = [];
     let used = 0;
     let index = 0;
@@ -71,9 +74,8 @@
         continue;
       }
       index += 1;
-      const ref = `@e${index}`;
+      const ref = `@${documentId}s${sequence}e${index}`;
       refs.set(ref, el);
-      el.setAttribute("data-locus-ref", ref.slice(1));
       const name = nameOf(el);
       const line = name ? `${ref} ${roleOf(el)} "${name}"` : `${ref} ${roleOf(el)}`;
       if (used + line.length + (lines.length ? 1 : 0) > MAX_SNAPSHOT) break;
@@ -88,15 +90,23 @@
 
   function resolve(ref) {
     const key = String(ref || "").startsWith("@") ? String(ref) : `@${ref}`;
-    return refs.get(key) || document.querySelector(`[data-locus-ref="${key.slice(1)}"]`);
+    const el = refs.get(key);
+    return el?.isConnected ? el : undefined;
   }
 
   function clickRef(ref) {
     const el = resolve(ref);
     if (!el) return { ok: false, output: `unknown ref ${ref}` };
     el.scrollIntoView({ block: "center", inline: "nearest" });
+    const rect = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    if (
+      el.disabled ||
+      el.getAttribute("aria-disabled") === "true" ||
+      !(hit === el || el.contains(hit))
+    )
+      return { ok: false, output: "Control is disabled or obstructed; observe again" };
     if (el instanceof HTMLElement) el.focus();
-    el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
     if (typeof el.click === "function") el.click();
     return { ok: true, output: `clicked ${ref}` };
   }
@@ -120,6 +130,50 @@
     }
     document.execCommand("insertText", false, String(text ?? ""));
     return { ok: true, output: `typed into ${ref}` };
+  }
+
+  function semanticAction(msg) {
+    const el = resolve(msg.ref);
+    if (!el || el.disabled)
+      return { ok: false, output: "Stale or disabled ref; take a fresh snapshot" };
+    if (msg.action === "invoke") return clickRef(msg.ref);
+    if (msg.action === "fill") {
+      if (
+        !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) ||
+        el.readOnly ||
+        typeof msg.value !== "string"
+      )
+        return { ok: false, output: "Expected an editable text field and string value" };
+      const proto =
+        el instanceof HTMLTextAreaElement
+          ? HTMLTextAreaElement.prototype
+          : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, "value").set.call(el, msg.value);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return { ok: el.value === msg.value, output: "Field value verified" };
+    }
+    if (msg.action === "select" && el instanceof HTMLSelectElement) {
+      if (![...el.options].some((o) => o.value === msg.value && !o.disabled))
+        return { ok: false, output: "Option unavailable" };
+      el.value = msg.value;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return { ok: el.value === msg.value, output: "Selection verified" };
+    }
+    if (
+      msg.action === "check" &&
+      el instanceof HTMLInputElement &&
+      ["checkbox", "radio"].includes(el.type)
+    ) {
+      const wanted = msg.checked !== false;
+      if (el.checked !== wanted) {
+        const clicked = clickRef(msg.ref);
+        if (!clicked.ok) return clicked;
+      }
+      return { ok: el.checked === wanted, output: `checked=${el.checked}` };
+    }
+    return { ok: false, output: "Unsupported semantic action for this control" };
   }
 
   function mouseAt(kind, x, y, extra = {}) {
@@ -166,12 +220,30 @@
     return { ok: true, output: "type_text" };
   }
 
-  function key(kind, keyName) {
+  function key(kind, keyName, modifiers = 0) {
+    if (["Control", "Alt", "Meta", "Shift"].includes(keyName))
+      return { ok: true, output: "Modifier state forwarded" };
+    const el = document.activeElement;
+    if (
+      modifiers & 6 &&
+      String(keyName).toLowerCase() === "a" &&
+      (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
+    ) {
+      el.select();
+      return { ok: true, output: "Selected field text" };
+    }
+    if (modifiers & 7)
+      return {
+        ok: false,
+        output:
+          "This shortcut needs trusted browser input. Use isolated host-chrome or human takeover.",
+      };
     document.activeElement?.dispatchEvent(
       new KeyboardEvent(kind === "keyUp" ? "keyup" : "keydown", {
         key: keyName,
         bubbles: true,
         cancelable: true,
+        shiftKey: Boolean(modifiers & 8),
       }),
     );
     return { ok: true, output: `key ${keyName}` };
@@ -207,6 +279,19 @@
         sendResponse(collect());
         return;
       }
+      if (msg.type === "action") {
+        sendResponse(semanticAction(msg));
+        return;
+      }
+      if (msg.type === "ready") {
+        sendResponse({
+          ok:
+            document.readyState !== "loading" &&
+            (!msg.text || document.body?.innerText.includes(msg.text)),
+          output: location.href,
+        });
+        return;
+      }
       if (msg.type === "click") {
         sendResponse(clickRef(msg.ref));
         return;
@@ -224,7 +309,7 @@
         return;
       }
       if (msg.type === "key") {
-        sendResponse(key(msg.kind, msg.key));
+        sendResponse(key(msg.kind, msg.key, msg.modifiers));
         return;
       }
       if (msg.type === "console") {

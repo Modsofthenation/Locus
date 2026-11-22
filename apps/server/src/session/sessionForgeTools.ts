@@ -1,6 +1,8 @@
 import type { ToolResult } from "@locus/guest-agent";
 import {
   buildLoadPath,
+  clampCiLogChars,
+  formatCiFailures,
   formatIssueCard,
   formatIssueComments,
   formatPrCard,
@@ -90,6 +92,8 @@ async function runForgeTool(
       return commentPullRequest(deps, session, args);
     case "git_pr_checks":
       return checksPullRequest(deps, session, args);
+    case "git_ci_logs":
+      return ciLogsPullRequest(deps, session, args);
     case "git_pr_merge":
       return mergePullRequest(deps, session, args);
     case "git_issue_list":
@@ -340,6 +344,52 @@ async function checksPullRequest(
     };
   } catch (err) {
     return { ok: false, output: err instanceof Error ? err.message : "Checks failed" };
+  }
+}
+
+/** Default total budget for git_ci_logs (the untrusted fence clips tool output near 16k). */
+const CI_LOGS_DEFAULT_CHARS = 8_000;
+const CI_LOGS_MAX_CHARS = 16_000;
+
+async function ciLogsPullRequest(
+  deps: SessionForgeDeps,
+  session: AgentSession,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const ready = await deps.requireForge(session, args);
+  if (failed(ready)) return ready;
+  const explicit = Number(args.pr ?? args.pull_number);
+  let number: number | undefined =
+    Number.isInteger(explicit) && explicit > 0 ? explicit : session.pull?.number;
+  if (!number) {
+    const branch = (await deps.resolveGitHeadBranch(session, args))?.trim();
+    const head = branch && branch !== "HEAD" ? branch : session.compare?.branch;
+    if (head) {
+      const rows = await deps.forge
+        .listPulls(ready.account, ready.owner, ready.repo, "open")
+        .catch(() => []);
+      number = rows.find((row) => row.headRef === head)?.number;
+    }
+    if (!number) {
+      return {
+        ok: false,
+        output: `No open pull request for ${head ? `branch ${head}` : "this session"}. Pass pr=<number>.`,
+      };
+    }
+  }
+  const raw = Number(args.maxChars);
+  const maxChars = Number.isFinite(raw)
+    ? Math.min(CI_LOGS_MAX_CHARS, clampCiLogChars(raw))
+    : CI_LOGS_DEFAULT_CHARS;
+  try {
+    const report = await deps.forge.ciReport(ready.account, ready.owner, ready.repo, {
+      number,
+      check: typeof args.check === "string" ? args.check : undefined,
+      maxChars,
+    });
+    return { ok: true, output: `PR #${number}\n${formatCiFailures(report)}` };
+  } catch (err) {
+    return { ok: false, output: err instanceof Error ? err.message : "CI logs failed" };
   }
 }
 

@@ -3,12 +3,18 @@ import {
   benchmarkTargetKey,
   formatUsd,
   type AiProvider,
+  type BenchmarkComparison,
+  type BenchmarkHistoryRow,
   type BenchmarkTarget,
 } from "@locus/shared";
 import { api, type BenchmarkRunView } from "@/lib/api";
 import { HowItWorks } from "./SettingsBits";
 
-type Case = { id: string; title: string };
+type Case = { id: string; title: string; kind?: "toy" | "spec"; language?: string };
+
+function percent(rate?: number): string {
+  return rate === undefined ? "–" : `${Math.round(rate * 100)}%`;
+}
 
 function seconds(ms?: number): string {
   return ms ? `${Math.max(1, Math.round(ms / 1000))}s` : "–";
@@ -31,9 +37,37 @@ export function BenchmarkSettings(props: {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [history, setHistory] = useState<BenchmarkHistoryRow[]>([]);
+  const [compareIds, setCompareIds] = useState<{ a: string; b: string }>({ a: "", b: "" });
+  const [comparison, setComparison] = useState<BenchmarkComparison | null>(null);
 
   const running = runs.find((run) => run.status === "running");
   const runningId = running?.id;
+  const finished = runs.filter((run) => run.status !== "running");
+
+  // History refreshes on mount and whenever a run stops.
+  useEffect(() => {
+    if (runningId) return;
+    let cancelled = false;
+    void api
+      .benchmarkHistory()
+      .then((r) => {
+        if (!cancelled) setHistory(r.rows);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [runningId]);
+
+  async function compare() {
+    setError(null);
+    try {
+      setComparison(await api.compareBenchmarks(compareIds.a, compareIds.b));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not compare the runs");
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -86,12 +120,15 @@ export function BenchmarkSettings(props: {
     <div className="benchmark-settings" data-testid="benchmark-settings">
       <HowItWorks lead="Run the same small coding tasks against several models and compare pass rate, cost and time.">
         <p>
-          Each case is a tiny JavaScript project with failing tests. Locus starts an autonomous Host
-          agent on a fresh copy, sends the task, then runs <code>npm test</code> itself. A case
-          passes only when the tests pass and the test files are unchanged. Cost is estimated from
-          the provider’s rates. Benchmark chats are archived so you can open a failure and read it.
-          Runs execute one case at a time and use your provider quota. Results are saved under{" "}
-          <code>~/.locus/benchmarks</code>. CLI: <code>locus eval run --model provider/model</code>.
+          Toy cases are tiny JavaScript projects with failing tests; bug-fix cases (TypeScript,
+          Python, Go) start from a real-shaped repo at the commit before a fix and are scored with
+          the fix’s hidden tests. Locus starts an autonomous Host agent on a fresh copy, sends the
+          task, then runs the tests itself. A case passes only when the required tests pass and the
+          test files are unchanged; a case whose toolchain is missing is skipped. Cost is estimated
+          from the provider’s rates. Benchmark chats are archived so you can open a failure and read
+          it. Runs execute one case at a time and use your provider quota. Results are saved under{" "}
+          <code>~/.locus/benchmarks</code>. CLI: <code>locus bench run --model provider/model</code>
+          , <code>locus bench mine &lt;repo&gt;</code> drafts cases from git history.
         </p>
       </HowItWorks>
 
@@ -161,7 +198,10 @@ export function BenchmarkSettings(props: {
                   }
                 />
                 <strong>{row.title}</strong>
-                <span className="hint">{row.id}</span>
+                <span className="hint">
+                  {row.id}
+                  {row.language ? ` · ${row.language}` : ""}
+                </span>
               </label>
             </li>
           ))}
@@ -209,6 +249,111 @@ export function BenchmarkSettings(props: {
         ) : null}
       </section>
 
+      {history.length ? (
+        <section className="notify-card" data-testid="benchmark-history">
+          <h4>History</h4>
+          <table className="benchmark-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Harness</th>
+                <th>Runs</th>
+                <th>Passed</th>
+                <th>Cost / case</th>
+                <th>Median time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((row) => (
+                <tr key={`${row.providerId}/${row.model}/${row.harnessVersion}`}>
+                  <td>
+                    {row.providerId}/{row.model}
+                  </td>
+                  <td>
+                    <code>{row.harnessVersion}</code>
+                  </td>
+                  <td>{row.runs}</td>
+                  <td>
+                    {row.passed}/{row.cases} · {percent(row.passRate)}
+                  </td>
+                  <td>{row.usdPerCase != null ? formatUsd(row.usdPerCase) : "–"}</td>
+                  <td>{seconds(row.medianMs)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
+
+      {finished.length >= 2 ? (
+        <section className="notify-card" data-testid="benchmark-compare">
+          <h4>Compare runs</h4>
+          <div className="benchmark-compare-pick">
+            {(["a", "b"] as const).map((side) => (
+              <label key={side}>
+                {side === "a" ? "Before" : "After"}
+                <select
+                  aria-label={side === "a" ? "Before run" : "After run"}
+                  value={compareIds[side]}
+                  onChange={(event) =>
+                    setCompareIds((cur) => ({ ...cur, [side]: event.target.value }))
+                  }
+                >
+                  <option value="">Pick a run</option>
+                  {finished.map((run) => (
+                    <option key={run.id} value={run.id}>
+                      {new Date(run.createdAt).toLocaleString()} ·{" "}
+                      {run.targets.map((t) => t.model).join(", ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+            <button
+              type="button"
+              className="btn small"
+              data-testid="benchmark-compare-go"
+              disabled={!compareIds.a || !compareIds.b || compareIds.a === compareIds.b}
+              onClick={() => void compare()}
+            >
+              Compare
+            </button>
+          </div>
+          {comparison ? (
+            <>
+              <p className="hint">
+                {percent(comparison.a.passRate)} → {percent(comparison.b.passRate)} ·{" "}
+                {comparison.fixed} fixed · {comparison.broke} broke
+              </p>
+              <table className="benchmark-table benchmark-flips">
+                <thead>
+                  <tr>
+                    <th>Case</th>
+                    <th>Model</th>
+                    <th>Before</th>
+                    <th>After</th>
+                    <th>Change</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comparison.rows
+                    .filter((row) => !row.change.startsWith("still-"))
+                    .map((row) => (
+                      <tr key={`${row.caseId}/${row.target}`} data-change={row.change}>
+                        <td>{row.caseId}</td>
+                        <td>{row.target}</td>
+                        <td>{percent(row.before)}</td>
+                        <td>{percent(row.after)}</td>
+                        <td>{row.change}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </>
+          ) : null}
+        </section>
+      ) : null}
+
       {runs.map((run) => {
         const done = run.results.filter((r) => r.status !== "pending" && r.status !== "running");
         return (
@@ -220,6 +365,7 @@ export function BenchmarkSettings(props: {
               onClick={() => setOpen(open === run.id ? null : run.id)}
             >
               <strong>{new Date(run.createdAt).toLocaleString()}</strong>
+              {run.harness ? <code className="hint">{run.harness.key}</code> : null}
               <span className="hint">
                 {run.status === "running"
                   ? `Running · ${done.length}/${run.results.length}`
@@ -272,6 +418,7 @@ export function BenchmarkSettings(props: {
                       <td title={row.testOutput}>
                         {row.status}
                         {row.reason && row.status !== "passed" ? ` · ${row.reason}` : ""}
+                        {row.failingTests?.length ? ` (${row.failingTests.join(", ")})` : ""}
                       </td>
                       <td>{seconds(row.durationMs)}</td>
                       <td>

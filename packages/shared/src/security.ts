@@ -333,3 +333,32 @@ export function stripSensitiveListing(name: string, output: string): string {
     })
     .join("\n");
 }
+
+/**
+ * Operator credential. The control plane trusts nothing just for being on
+ * loopback: a local `/api` or `/ws` request must carry this token (cookie,
+ * header, bearer, or `?operator=`). It lives in `<LOCUS_HOME>/operator.token`
+ * (0600), which the CLI sandboxes and guests cannot read.
+ */
+export const OPERATOR_COOKIE = "locus_operator";
+export const OPERATOR_HEADER = "x-locus-operator";
+export const OPERATOR_QUERY = "operator";
+export const OPERATOR_TOKEN_FILE = "operator.token";
+
+/**
+ * Loopback requests that do not need the operator token: anything outside
+ * `/api` and `/ws` (UI assets, `/mcp`, `/play` carry their own checks), health,
+ * webhooks (secret- or HMAC-signed), and the OAuth redirect the system browser
+ * lands on (state-checked). Canvas files are exempt only on the canvas preview
+ * host, whose iframe cannot carry the 127.0.0.1 cookie.
+ */
+export function operatorTokenExempt(path: string, opts: { canvasPreviewHost?: boolean } = {}) {
+  const api = path === "/api" || path.startsWith("/api/");
+  const ws = path === "/ws" || path.startsWith("/ws/");
+  if (!api && !ws) return true;
+  if (path === "/api/health") return true;
+  if (path.startsWith("/api/hooks/")) return true;
+  if (path === "/api/oauth/callback") return true;
+  if (opts.canvasPreviewHost && isCanvasFilesPath(path)) return true;
+  return false;
+}

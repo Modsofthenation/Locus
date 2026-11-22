@@ -73,6 +73,7 @@ export class GuestHub {
   }
 
   drop(vmId: string): void {
+    this.runtimes.get(vmId)?.dispose?.();
     this.runtimes.delete(vmId);
   }
 
@@ -83,7 +84,7 @@ export class GuestHub {
 
   private dropEngineRuntimes(): void {
     for (const id of [...this.runtimes.keys()]) {
-      if (!id.startsWith("host:")) this.runtimes.delete(id);
+      if (!id.startsWith("host:")) this.drop(id);
     }
   }
 

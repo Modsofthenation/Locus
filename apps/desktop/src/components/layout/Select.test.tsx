@@ -69,7 +69,9 @@ describe("Select", () => {
         />,
       );
     });
-    const trigger = host.querySelector('[aria-label="Autonomy"]') as HTMLElement;
+    const trigger = host.querySelector(
+      '[aria-label="Autonomy"], [aria-label^="Autonomy: "]',
+    ) as HTMLElement;
     expect(trigger.closest("[data-value]")?.getAttribute("data-value")).toBe("guided");
     act(() => {
       trigger.focus();

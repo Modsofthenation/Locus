@@ -194,6 +194,57 @@ describe("claude code adapter", () => {
     expect(events).toEqual(["session", "text", "result", "done"]);
   });
 
+  it("counts cache tokens and reports the last call's prompt size", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-claude-code-usage-"));
+    const usage: unknown[] = [];
+    const callUsage = (input: number, read: number, write: number) =>
+      JSON.stringify({
+        type: "stream_event",
+        event: {
+          type: "message_start",
+          message: {
+            usage: {
+              input_tokens: input,
+              cache_read_input_tokens: read,
+              cache_creation_input_tokens: write,
+              output_tokens: 1,
+            },
+          },
+        },
+      });
+    for await (const ev of streamClaudeCode({
+      provider,
+      prompt: "hi",
+      workspace: dir,
+      spawnFn: spawner([
+        callUsage(4, 10_000, 2_000),
+        callUsage(5, 12_000, 300),
+        JSON.stringify({
+          type: "result",
+          subtype: "success",
+          result: "ok",
+          usage: {
+            input_tokens: 9,
+            output_tokens: 40,
+            cache_read_input_tokens: 22_000,
+            cache_creation_input_tokens: 2_300,
+          },
+        }),
+      ]),
+    })) {
+      if (ev.type === "result") usage.push(ev.usage);
+    }
+    expect(usage).toEqual([
+      {
+        inputTokens: 24_309,
+        outputTokens: 40,
+        cachedInputTokens: 22_000,
+        cacheWriteTokens: 2_300,
+        contextTokens: 12_305,
+      },
+    ]);
+  });
+
   it("keeps the running tool name on completed tool_result events", async () => {
     const dir = await mkdtemp(join(tmpdir(), "locus-claude-code-"));
     const names: string[] = [];

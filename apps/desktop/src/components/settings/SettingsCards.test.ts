@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cliAgentProviderFromPreset,
   isBuiltinTemplate,
   machineImageName,
   machineReady,
@@ -22,5 +23,21 @@ describe("machine settings helpers", () => {
     expect(machineStatusLabel({ os: "ubuntu", isoPath: "/iso/ubuntu.img" })).toBe("ubuntu.img");
     expect(machineStatusLabel({ os: "debian", isoPath: "" })).toBe("Needs an image");
     expect(machineStatusLabel({ os: "windows-11", isoPath: "" })).toBe("Needs a licensed ISO");
+  });
+});
+
+describe("Custom CLI agent presets", () => {
+  it("builds an off, uniquely named cli-agent row from a preset", () => {
+    const row = cliAgentProviderFromPreset("gemini", ["Gemini CLI"]);
+    expect(row).toMatchObject({
+      name: "Gemini CLI 2",
+      kind: "cli-agent",
+      enabled: false,
+      defaultModel: "gemini-2.5-pro",
+    });
+    expect(row.cli?.command).toBe("gemini");
+    expect(row.cli?.preset).toBe("gemini");
+    const custom = cliAgentProviderFromPreset("nope", []);
+    expect(custom.cli).toMatchObject({ command: "", preset: "custom" });
   });
 });

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  effectiveRailPins,
   isLockedRailSection,
+  LEGACY_PRIMARY_RAIL_SECTIONS,
   isMoreRailSection,
   MORE_RAIL_SECTIONS,
   PRIMARY_RAIL_SECTIONS,
@@ -15,17 +17,15 @@ import {
 } from "./railNav";
 
 describe("railNav", () => {
-  it("keeps five daily surfaces on the rail and the rest behind More", () => {
-    expect([...PRIMARY_RAIL_SECTIONS]).toEqual([
-      "agents",
-      "design",
-      "ide",
-      "codebase",
-      "automations",
-    ]);
+  it("pins Agents and Codebase by default and puts the rest behind More", () => {
+    expect([...PRIMARY_RAIL_SECTIONS]).toEqual(["agents", "codebase"]);
     expect([...MORE_RAIL_SECTIONS]).toEqual([
+      "design",
       "games",
       "assets",
+      "android",
+      "ide",
+      "automations",
       "board",
       "project",
       "brain",
@@ -34,11 +34,51 @@ describe("railNav", () => {
       "docker",
     ]);
     expect(isMoreRailSection("slack")).toBe(true);
-    expect(isMoreRailSection("games")).toBe(true);
+    expect(isMoreRailSection("design")).toBe(true);
+    expect(isMoreRailSection("automations")).toBe(true);
     expect(isMoreRailSection("codebase")).toBe(false);
-    expect(isMoreRailSection("automations")).toBe(false);
     expect(isMoreRailSection("agents")).toBe(false);
     expect(isMoreRailSection("settings")).toBe(false);
+  });
+
+  it("keeps the old five-icon rail for legacy installs with no saved pins", () => {
+    expect(effectiveRailPins("developer", undefined, "current")).toBeUndefined();
+    expect(effectiveRailPins("developer", undefined, "legacy")).toEqual([
+      ...LEGACY_PRIMARY_RAIL_SECTIONS,
+    ]);
+    const legacy = effectiveRailPins("developer", undefined, "legacy");
+    expect(resolveRailSections("developer", legacy).primary).toEqual([
+      "agents",
+      "design",
+      "ide",
+      "codebase",
+      "automations",
+    ]);
+    expect(resolveRailSections("developer", legacy).more).toEqual([
+      "games",
+      "assets",
+      "android",
+      "board",
+      "project",
+      "brain",
+      "slack",
+      "grafana",
+      "docker",
+    ]);
+    expect(railShortcutTargets("developer", legacy)).toEqual([
+      "inbox",
+      "agents",
+      "design",
+      "ide",
+      "codebase",
+      "automations",
+    ]);
+    // Saved pins always win, and Swarm keeps its own default.
+    expect(effectiveRailPins("developer", ["agents", "games"], "legacy")).toEqual([
+      "agents",
+      "games",
+    ]);
+    expect(effectiveRailPins("swarm", undefined, "legacy")).toBeUndefined();
   });
 
   it("promotes Teams in Locus Swarm and leaves Routines and Brain off the primary rail", () => {
@@ -59,7 +99,7 @@ describe("railNav", () => {
     const withGames = pinRailSection("developer", undefined, "games");
     expect(withGames).toContain("games");
     expect(resolveRailSections("developer", withGames).more).not.toContain("games");
-    const withoutDesign = unpinRailSection("developer", undefined, "design");
+    const withoutDesign = unpinRailSection("developer", LEGACY_PRIMARY_RAIL_SECTIONS, "design");
     expect(withoutDesign).not.toContain("design");
     expect(resolveRailSections("developer", withoutDesign).more[0]).toBe("design");
     expect(unpinRailSection("developer", withoutDesign, "agents")).toContain("agents");
@@ -68,7 +108,7 @@ describe("railNav", () => {
   });
 
   it("keeps pin order and can move a non-locked icon", () => {
-    const pinned = pinRailSection("developer", undefined, "games");
+    const pinned = pinRailSection("developer", LEGACY_PRIMARY_RAIL_SECTIONS, "games");
     expect(pinned.at(-1)).toBe("games");
     const moved = moveRailSection("developer", pinned, "games", -1);
     expect(moved.at(-2)).toBe("games");
@@ -84,13 +124,11 @@ describe("railNav", () => {
     expect(moveRailSection("developer", pinned, "agents", 1)).toEqual(
       resolveRailSections("developer", pinned).primary,
     );
-    expect(railShortcutTargets("developer")).toEqual([
-      "inbox",
+    expect(railShortcutTargets("developer")).toEqual(["inbox", "agents", "codebase"]);
+    expect(pinRailSection("developer", undefined, "design")).toEqual([
       "agents",
-      "design",
-      "ide",
       "codebase",
-      "automations",
+      "design",
     ]);
   });
 });

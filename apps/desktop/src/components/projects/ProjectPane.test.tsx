@@ -238,7 +238,7 @@ describe("ProjectFleet hub roster", () => {
     act(() => {
       more.open = true;
     });
-    expect(host.querySelector('[aria-label="Board"]')).toBeTruthy();
+    expect(host.querySelector('[aria-label="Board"], [aria-label^="Board: "]')).toBeTruthy();
     act(() => {
       setSelectValue(host, "Board", "board-1");
     });

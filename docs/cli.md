@@ -52,7 +52,7 @@ locus [--api URL] [--json] [--help] [--version] <command>
 - `--json` prints the API payload instead of a table.
 - Ids may be a unique **prefix** or a unique **title** / channel name (`sess-aaa`, `#eng`, `Nightly`).
 
-Exit codes: `0` ok, `1` usage or API error, `2` a tool call is waiting for Approve / Deny.
+Exit codes: `0` ok, `1` usage or API error, `2` a tool call is waiting for Approve / Deny. `locus ci run` adds `3` for an error; `locus audit verify` exits `1` on a broken chain.
 
 ## Command map (desktop → CLI)
 
@@ -104,7 +104,11 @@ Exit codes: `0` ok, `1` usage or API error, `2` a tool call is waiting for Appro
 | Revoke integration tokens | `locus config revoke-all --confirm REVOKE` |
 | Back up / restore `~/.locus` | `locus backup [file]` / `locus restore <file> --yes` |
 | Check for updates | `locus update [download]` |
-| Settings → Benchmark | `locus eval run --model provider/model` / `list` / `show <run>` |
+| Settings → Benchmark | `locus bench run --model provider/model` / `list` / `show <run>` / `history` / `compare <a> <b>` / `mine <repo>` |
+| Settings → Advanced → Budgets | `locus budget [status\|set\|override]` / `locus config budget` |
+| Settings → Advanced → Telemetry | `locus config telemetry [enable\|disable\|test]` |
+| Settings → Advanced → Audit log | `locus audit verify` / `locus audit export --since 7d --format csv` |
+| Headless CI | `locus ci run --recipe pr-reviewer --pr URL --out result.json` |
 
 Shortcuts: `locus ls`, `locus new`, `locus chat <id> …`, `locus session …`, `locus codebase …`, `locus auto …`.
 
@@ -371,15 +375,33 @@ Restore never touches live state. The server decrypts into `~/.locus/.restore-st
 ## Model benchmark
 
 ```bash
-npx locus eval cases
-npx locus eval run --model openai/gpt-5 --model ollama/qwen3-coder --wait
-npx locus eval run --model anthropic/claude-sonnet --case fix-add,off-by-one --repeat 3
-npx locus eval list
-npx locus eval show <run>
-npx locus eval cancel <run>
+npx locus bench cases [--suite <dir|repo>]
+npx locus bench run --model openai/gpt-5 --model ollama/qwen3-coder --wait
+npx locus bench run --model anthropic/claude-sonnet --case fix-add,go-wordwrap --repeat 3
+npx locus bench run --model openai/gpt-5 --suite ~/src/myrepo     # its .locus/benchmarks/
+npx locus bench list
+npx locus bench show <run>
+npx locus bench cancel <run>
+npx locus bench history
+npx locus bench compare <before-run> <after-run> [--all]
+npx locus bench mine ~/src/myrepo --since "6 months ago" --limit 5 [--dry-run]
 ```
 
-Each case is a small JavaScript project with failing tests (`fix-add`, `off-by-one`, `implement-slugify`, `missing-await`, `cross-file-feature`). Locus copies it to a temp folder, starts an autonomous Host agent there with the chosen provider and model, sends the task, then runs `npm test` itself. A case passes only when the tests pass and the test files are byte-identical. Results record tokens, estimated cost (provider rates), tool calls and wall time. One run at a time; cases run in order. The chats are archived so a failure can be opened. Results live in `~/.locus/benchmarks/<run>.json`. Settings → Benchmark is the same runner.
+`locus eval …` is an alias. The built-in suite is the small JavaScript toy cases plus TypeScript, Python and Go bug-fix fixtures; repo-derived cases check out the commit before a fix, hide the fix's tests until scoring, and pass only when every fail-to-pass test passes, pass-to-pass tests stay green and the test files were not touched. `history` groups pass rate, cost and time per model and harness version; `compare` lists the cases that flipped. `mine` drafts verified cases from git history into `<repo>/.locus/benchmarks/` for review. Results live in `~/.locus/benchmarks/<run>.json`. Settings → Benchmark is the same runner. Full reference: [benchmarks.md](benchmarks.md).
+
+## CI, budgets, audit, telemetry
+
+```bash
+npx locus ci run --recipe pr-reviewer --pr https://github.com/acme/web/pull/42 --post-comment --out result.json
+npx locus ci run --recipe repo-fixer --repo . --runtime host --allow "git_push(branch:locus/*)"
+npx locus budget set --daily-usd 25
+npx locus budget override --reason "release day"
+npx locus audit verify
+npx locus audit export --since 2026-11-01 --format csv --out audit.csv
+npx locus config telemetry enable --endpoint http://127.0.0.1:4318 --header x-api-key=KEY
+```
+
+`ci run` exits `0` pass, `1` fail, `2` stopped waiting for approval, `3` error. Full reference, the result JSON, and the GitHub Action: [docs/ci.md](ci.md).
 
 ## Events and debug
 

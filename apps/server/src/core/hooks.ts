@@ -4,15 +4,43 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { promisify } from "node:util";
 import { hostExecEnv, hostSpawnErrorOutput, posixShellPath } from "@locus/guest-agent";
-import { parseRepoHooks, type RepoHook, type RepoHooks } from "@locus/shared";
+import {
+  formatTestReport,
+  mergeTestReports,
+  parseTestOutput,
+  parseRepoHooks,
+  testReportFailedTests,
+  type RepoHook,
+  type RepoHooks,
+  type TestReport,
+} from "@locus/shared";
 import { resolveWindowsCliSpawn } from "@locus/shared/windowsCliSpawn";
 
 const execFileAsync = promisify(execFile);
 
-export type WorkspaceScriptName = "lint" | "test";
+export type WorkspaceScriptName = "lint" | "test" | "typecheck";
 
+/**
+ * Why a verify run failed. `missing-toolchain` (the host lacks `cargo`,
+ * `pytest`, `go`, ...) is the only kind the publish gate does not block on.
+ */
 export type WorkspaceScriptFailureKind =
-  "missing-dependencies" | "runner" | "timeout" | "script-failure" | "test-failure";
+  | "missing-dependencies"
+  | "missing-toolchain"
+  | "runner"
+  | "timeout"
+  | "script-failure"
+  | "test-failure";
+
+export type WorkspacePackageManager = "npm" | "pnpm" | "yarn";
+
+export interface WorkspaceNpmScriptOptions {
+  /** Script runner; pnpm/yarn fall back to npm when the binary is missing on the host. */
+  packageManager?: WorkspacePackageManager;
+  /** Repo-relative directories owned by other verify projects; ignored by test scoping. */
+  ignorePaths?: string[];
+  full?: boolean;
+}
 
 export interface WorkspaceScriptResult {
   ran: boolean;
@@ -24,6 +52,8 @@ export interface WorkspaceScriptResult {
   durationMs?: number;
   failureKind?: WorkspaceScriptFailureKind;
   failedTests?: string[];
+  /** Structured test counts and failures when the output could be parsed. */
+  report?: TestReport;
   cached?: boolean;
   retryable?: boolean;
 }
@@ -54,7 +84,7 @@ interface TestPlan {
   error?: WorkspaceScriptResult;
 }
 
-interface GitChangedFiles {
+export interface GitChangedFiles {
   files: string[];
   baselineKnown: boolean;
 }
@@ -65,10 +95,30 @@ export function stripAnsi(text: string): string {
   return text.replace(ANSI_CSI, "");
 }
 
+export function defaultVerifyTimeoutMs(script: WorkspaceScriptName): number {
+  return script === "test" ? 600_000 : script === "typecheck" ? 120_000 : 30_000;
+}
+
 export async function runWorkspaceNpmScript(
   workspaceRoot: string | undefined,
   script: WorkspaceScriptName,
-  timeoutMs = script === "test" ? 600_000 : 30_000,
+  timeoutMs = defaultVerifyTimeoutMs(script),
+  opts: WorkspaceNpmScriptOptions = {},
+): Promise<WorkspaceScriptResult> {
+  const manager = opts.packageManager ?? "npm";
+  const result = await runWorkspacePackageScript(workspaceRoot, script, timeoutMs, opts, manager);
+  if (manager !== "npm" && result.failureKind === "missing-toolchain") {
+    return runWorkspacePackageScript(workspaceRoot, script, timeoutMs, opts, "npm");
+  }
+  return result;
+}
+
+async function runWorkspacePackageScript(
+  workspaceRoot: string | undefined,
+  script: WorkspaceScriptName,
+  timeoutMs: number,
+  opts: WorkspaceNpmScriptOptions,
+  manager: WorkspacePackageManager,
 ): Promise<WorkspaceScriptResult> {
   if (!workspaceRoot) return { ran: false, ok: true, output: "" };
   let manifest: PackageManifest;
@@ -76,23 +126,23 @@ export async function runWorkspaceNpmScript(
     manifest = await readPackageManifest(join(workspaceRoot, "package.json"));
   } catch (error) {
     if (isMissingFile(error)) return { ran: false, ok: true, output: "" };
-    return packageManifestFailure(workspaceRoot, script, error);
+    return packageManifestFailure(workspaceRoot, script, error, manager);
   }
   const scripts = manifest.scripts;
   if (!scripts?.[script]?.trim()) return { ran: false, ok: true, output: "" };
   let cwd = workspaceRoot;
-  if (script === "test") {
-    const plan = await scopedTestPlan(workspaceRoot);
+  if (script === "test" && !opts.full) {
+    const plan = await scopedTestPlan(workspaceRoot, opts.ignorePaths ?? [], manager);
     if (plan.error) return plan.error;
     if (plan.workspaces) {
       if (!plan.workspaces.length) return { ran: false, ok: true, output: "" };
       if (plan.workspaces.length > 1)
-        return runScopedWorkspaceTests(workspaceRoot, plan.workspaces, timeoutMs);
+        return runScopedWorkspaceTests(workspaceRoot, plan.workspaces, timeoutMs, manager);
       cwd = plan.workspaces[0]!;
     }
   }
-  const result = await runNpm(cwd, script, timeoutMs);
-  return { ...result, cwd, command: `npm run ${script}` };
+  const result = await runNpm(cwd, script, timeoutMs, manager);
+  return { ...result, cwd, command: `${manager} run ${script}` };
 }
 
 /** ESLint exploding because node_modules is missing is not a lint finding. */
@@ -104,6 +154,22 @@ export function outputLooksLikeMissingDeps(output: string): boolean {
   return /ERR_MODULE_NOT_FOUND|Cannot find package|Cannot find module|spawn (?:npm|node) ENOENT/i.test(
     output,
   );
+}
+
+/**
+ * The host lacks the verify command's toolchain (`cargo`, `go`, `pytest`, a
+ * JDK, pnpm, ...). Exit 127 is the POSIX shell's "command not found".
+ */
+export function outputLooksLikeMissingToolchain(output: string, exitCode?: number): boolean {
+  if (exitCode === 127) return true;
+  return /command not found|: not found$|is not recognized as an internal or external command|spawn (?!npm\b|node\b)\S+ ENOENT|Failed to spawn: |No module named (?:pytest|ruff|mypy|flake8|pyright|tox)\b|no 'java' command could be found|JAVA_HOME (?:is not set|not found)/im.test(
+    output,
+  );
+}
+
+/** Missing toolchains are reported but never block a push. */
+export function isBlockingVerifyFailure(result: WorkspaceScriptResult): boolean {
+  return result.ran && !result.ok && result.failureKind !== "missing-toolchain";
 }
 
 export function collectNpmFailLines(output: string): string[] {
@@ -170,10 +236,13 @@ export function summarizeNpmTestFailure(output: string, maxChars = 12_000): stri
   return `Failed tests:\n${fails.join("\n")}\n\n${body}`;
 }
 
-export function formatNpmTestGateFailure(toolName: string, result: WorkspaceScriptResult): string {
+/** Publish-gate block message for any verify runner (npm, pytest, cargo, go, custom). */
+export function formatVerifyGateFailure(toolName: string, result: WorkspaceScriptResult): string {
   const kind = result.failureKind ?? "script-failure";
   const headline = kind === "test-failure" ? "tests failed" : "validation is unavailable";
-  const retryable = result.retryable ?? (kind === "missing-dependencies" || kind === "runner");
+  const retryable =
+    result.retryable ??
+    (kind === "missing-dependencies" || kind === "runner" || kind === "missing-toolchain");
   const lines = [
     `Harness blocked ${toolName}: ${headline}.`,
     `Reason: ${kind}.`,
@@ -184,16 +253,23 @@ export function formatNpmTestGateFailure(toolName: string, result: WorkspaceScri
     result.cached ? "Validation result: reused for the same clean commit." : undefined,
     result.failedTests?.length ? `Failed test count: ${result.failedTests.length}.` : undefined,
   ].filter((line): line is string => Boolean(line));
+  const rerun = result.command ? ` Re-run \`${result.command}\` before retrying.` : "";
   const next =
     kind === "missing-dependencies"
       ? "Next: install workspace dependencies, then retry the publish operation."
-      : kind === "runner"
-        ? "Next: inspect the runner error; local sandbox limits may not represent the host gate."
-        : kind === "timeout"
-          ? "Next: inspect the test log and rerun the focused workspace test."
-          : "Next: fix the reported failures or compare them with the base-branch baseline.";
-  return `${lines.join("\n")}\n${next}\n\n${summarizeNpmTestFailure(result.output)}`;
+      : kind === "missing-toolchain"
+        ? "Next: install the toolchain on the host, or set verify.test in .locus/environment.json."
+        : kind === "runner"
+          ? "Next: inspect the runner error; local sandbox limits may not represent the host gate."
+          : kind === "timeout"
+            ? `Next: inspect the test log and rerun the focused workspace test.${rerun}`
+            : `Next: fix the reported failures or compare them with the base-branch baseline.${rerun}`;
+  const report = result.report?.failures.length ? `${formatTestReport(result.report)}\n\n` : "";
+  return `${lines.join("\n")}\n${next}\n\n${report}${summarizeNpmTestFailure(result.output)}`;
 }
+
+/** @deprecated Use {@link formatVerifyGateFailure}; kept for existing callers. */
+export const formatNpmTestGateFailure = formatVerifyGateFailure;
 
 export async function workspaceGitState(
   root: string | undefined,
@@ -228,11 +304,21 @@ export async function workspaceReadinessNote(
   return "Workspace preflight: node_modules is missing. Install dependencies before relying on local lint/test commands; the host publish gate will validate the workspace separately.";
 }
 
-async function scopedTestPlan(workspaceRoot: string): Promise<TestPlan> {
+async function scopedTestPlan(
+  workspaceRoot: string,
+  ignorePaths: string[],
+  manager: WorkspacePackageManager,
+): Promise<TestPlan> {
   const changes = await gitChangedFiles(workspaceRoot);
   if (!changes.baselineKnown) return {};
   if (!changes.files.length) return {};
-  const directWorkspaces = testWorkspacesFromChangedFiles(workspaceRoot, changes.files);
+  const ignored = ignorePaths.map((dir) => dir.replace(/\\/g, "/").replace(/\/+$/, ""));
+  const files = changes.files.filter(
+    (file) => !ignored.some((dir) => file === dir || file.startsWith(`${dir}/`)),
+  );
+  // Every change belongs to another verify project: nothing for npm to test.
+  if (!files.length) return { workspaces: [] };
+  const directWorkspaces = testWorkspacesFromChangedFiles(workspaceRoot, files);
   if (directWorkspaces === undefined) return {};
   if (!directWorkspaces.length) return { workspaces: [] };
   const workspaces = await loadAffectedWorkspaceRoots(workspaceRoot, directWorkspaces);
@@ -244,7 +330,7 @@ async function scopedTestPlan(workspaceRoot: string): Promise<TestPlan> {
       if (pkg.scripts?.test?.trim()) withTests.push(cwd);
     } catch (error) {
       if (isMissingFile(error)) return {};
-      return { error: packageManifestFailure(cwd, "test", error) };
+      return { error: packageManifestFailure(cwd, "test", error, manager) };
     }
   }
   return { workspaces: withTests };
@@ -392,6 +478,7 @@ function packageManifestFailure(
   cwd: string,
   script: WorkspaceScriptName,
   error: unknown,
+  manager: WorkspacePackageManager = "npm",
 ): WorkspaceScriptResult {
   const detail = error instanceof Error ? error.message : String(error);
   return {
@@ -399,7 +486,7 @@ function packageManifestFailure(
     ok: false,
     output: `Unable to read ${join(cwd, "package.json")}: ${detail}`,
     cwd,
-    command: `npm run ${script}`,
+    command: `${manager} run ${script}`,
     failureKind: "runner",
     retryable: true,
   };
@@ -409,13 +496,14 @@ async function runScopedWorkspaceTests(
   workspaceRoot: string,
   workspaces: string[],
   timeoutMs: number,
+  manager: WorkspacePackageManager,
 ): Promise<WorkspaceScriptResult> {
   const startedAt = Date.now();
   const results: WorkspaceScriptResult[] = [];
   for (const cwd of workspaces) {
     const remaining = Math.max(1, timeoutMs - (Date.now() - startedAt));
-    const result = await runNpm(cwd, "test", remaining);
-    results.push({ ...result, cwd, command: "npm run test" });
+    const result = await runNpm(cwd, "test", remaining, manager);
+    results.push({ ...result, cwd, command: `${manager} run test` });
   }
   if (!results.length) return { ran: false, ok: true, output: "" };
 
@@ -431,12 +519,14 @@ async function runScopedWorkspaceTests(
     24_000,
   );
   const failureKind = aggregateFailureKind(failures);
+  const report = mergeTestReports(results.map((result) => result.report));
   return {
     ran: true,
     ok: failures.length === 0,
     output,
     cwd: workspaceRoot,
-    command: "npm run test (affected workspaces)",
+    command: `${manager} run test (affected workspaces)`,
+    ...(report ? { report } : {}),
     durationMs: Date.now() - startedAt,
     ...(failures.length
       ? {
@@ -451,7 +541,7 @@ async function runScopedWorkspaceTests(
   };
 }
 
-function isNonTestPath(path: string): boolean {
+export function isNonTestPath(path: string): boolean {
   return (
     path === ".locus-attachments" ||
     path.startsWith(".locus-attachments/") ||
@@ -465,12 +555,26 @@ function isRepositoryWideTestPath(path: string): boolean {
   return /^(?:apps|packages)\/[^/]+\/(?:package(?:-lock)?\.json|npm-shrinkwrap\.json)$/i.test(path);
 }
 
-function aggregateFailureKind(results: WorkspaceScriptResult[]): WorkspaceScriptFailureKind {
+/** Most actionable kind across several failed runs (all inputs are failures). */
+export function aggregateFailureKind(results: WorkspaceScriptResult[]): WorkspaceScriptFailureKind {
   if (results.some((result) => result.failureKind === "timeout")) return "timeout";
   if (results.some((result) => result.failureKind === "missing-dependencies"))
     return "missing-dependencies";
   if (results.some((result) => result.failureKind === "runner")) return "runner";
+  // A missing toolchain only wins when nothing else failed, so it cannot mask a red suite.
+  if (results.length && results.every((result) => result.failureKind === "missing-toolchain"))
+    return "missing-toolchain";
+  if (
+    results.some((result) => result.failureKind === "script-failure") &&
+    !results.some((result) => result.failureKind === "test-failure")
+  )
+    return "script-failure";
   return "test-failure";
+}
+
+/** Files changed vs HEAD, the index, untracked, and the base branch (`main`/`master`). */
+export function workspaceChangedFiles(root: string): Promise<GitChangedFiles> {
+  return gitChangedFiles(root);
 }
 
 async function gitChangedFiles(root: string): Promise<GitChangedFiles> {
@@ -485,7 +589,7 @@ async function gitChangedFiles(root: string): Promise<GitChangedFiles> {
   await gitNames(root, ["diff", "--name-only", "--cached"], add);
   await gitNames(root, ["ls-files", "--others", "--exclude-standard"], add);
   let baselineKnown = false;
-  for (const base of ["main", "master", "origin/main", "origin/master"]) {
+  for (const base of await diffBaseCandidates(root)) {
     const ok = await gitNames(root, ["diff", "--name-only", `${base}...HEAD`], add);
     if (ok) {
       baselineKnown = true;
@@ -493,6 +597,30 @@ async function gitChangedFiles(root: string): Promise<GitChangedFiles> {
     }
   }
   return { files: [...files], baselineKnown };
+}
+
+/**
+ * Branches to diff HEAD against, best first: the remote's default branch
+ * (`origin/HEAD`, e.g. `origin/develop`), then the usual trunk names.
+ */
+async function diffBaseCandidates(root: string): Promise<string[]> {
+  const bases: string[] = [];
+  const remoteHead = await gitText(root, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]);
+  const defaultBranch = remoteHead.replace(/^refs\/remotes\//, "");
+  if (defaultBranch.startsWith("origin/")) {
+    bases.push(defaultBranch.slice("origin/".length), defaultBranch);
+  }
+  for (const base of [
+    "main",
+    "master",
+    "origin/main",
+    "origin/master",
+    "develop",
+    "origin/develop",
+  ]) {
+    if (!bases.includes(base)) bases.push(base);
+  }
+  return bases;
 }
 
 async function gitNames(
@@ -545,13 +673,14 @@ function runNpm(
   cwd: string,
   script: WorkspaceScriptName,
   timeoutMs: number,
+  manager: WorkspacePackageManager = "npm",
 ): Promise<WorkspaceScriptResult> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     let settled = false;
     let timedOut = false;
     const env = { ...process.env, npm_config_loglevel: "error" };
-    const target = resolveWindowsCliSpawn("npm", ["run", script], { env });
+    const target = resolveWindowsCliSpawn(manager, ["run", script], { env });
     const child = spawn(target.command, target.args, {
       cwd,
       env: { ...env, ...target.envPatch },
@@ -580,15 +709,18 @@ function runNpm(
         ok: false,
         output,
         durationMs: Date.now() - startedAt,
-        failureKind: classifyScriptFailure(script, output, undefined, false),
+        failureKind: classifyScriptFailure(script, output, undefined, false, manager),
       });
     });
     child.on("close", (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      const uniqueFails = [...new Set(collectNpmFailLines(output))].slice(0, 20);
-      const body = stripAnsi(output).trim() || `(npm run ${script} exited ${code ?? "null"})`;
+      const body =
+        stripAnsi(output).trim() || `(${manager} run ${script} exited ${code ?? "null"})`;
+      const report = script === "test" ? parseTestOutput(body) : undefined;
+      const npmFails = [...new Set(collectNpmFailLines(output))].slice(0, 20);
+      const uniqueFails = npmFails.length ? npmFails : testReportFailedTests(report);
       const ok = code === 0 && !timedOut;
       resolve({
         ran: true,
@@ -596,10 +728,17 @@ function runNpm(
         output: body,
         ...(typeof code === "number" ? { exitCode: code } : {}),
         durationMs: Date.now() - startedAt,
+        ...(report ? { report } : {}),
         ...(ok
           ? {}
           : {
-              failureKind: classifyScriptFailure(script, body, code ?? undefined, timedOut),
+              failureKind: classifyScriptFailure(
+                script,
+                body,
+                code ?? undefined,
+                timedOut,
+                manager,
+              ),
               ...(uniqueFails.length ? { failedTests: uniqueFails } : {}),
             }),
       });
@@ -612,15 +751,26 @@ function classifyScriptFailure(
   output: string,
   exitCode: number | undefined,
   timedOut: boolean,
+  manager: WorkspacePackageManager,
 ): WorkspaceScriptFailureKind {
   if (timedOut) return "timeout";
   if (outputLooksLikeMissingDeps(output)) return "missing-dependencies";
+  // Only a missing pnpm/yarn binary is a toolchain gap (and falls back to npm);
+  // a missing script binary such as `vitest: not found` keeps the npm classification.
+  if (manager !== "npm" && packageManagerMissing(manager, output)) return "missing-toolchain";
   if (exitCode == null) return "runner";
   if (script === "test" && exitCode !== 0) return "test-failure";
   return "script-failure";
 }
 
-function clipScriptOutput(output: string, maxChars: number): string {
+function packageManagerMissing(manager: WorkspacePackageManager, output: string): boolean {
+  return new RegExp(
+    `spawn ${manager}(?:\\.cmd)? ENOENT|'?${manager}'? is not recognized|\\b${manager}: (?:command )?not found`,
+    "i",
+  ).test(output);
+}
+
+export function clipScriptOutput(output: string, maxChars: number): string {
   if (output.length <= maxChars) return output;
   const head = Math.floor(maxChars / 2);
   const tail = maxChars - head;

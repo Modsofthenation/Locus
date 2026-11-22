@@ -46,7 +46,6 @@ import {
   subagentViewMessages,
   showThoughtTraces,
   t,
-  themeOption,
   isFoldableToolActivity,
   toolActivityGroups,
   toolActivityLabel,
@@ -116,7 +115,7 @@ const VncPane = lazy(async () => ({
   default: (await import("@/components/guest/VncPane")).VncPane,
 }));
 import { batchableApprovals, needsYouHumanItems, type NeedsYouItem } from "@/lib/needsYou";
-import { applyChatDensity, applyTheme } from "@/lib/theme";
+import { applyChatDensity, applyTheme, themeDisplayName } from "@/lib/theme";
 import { useStore } from "@/state/store";
 import { screenshotSrc } from "@/components/chat/GuestTimeline";
 import { BrowserPane } from "@/components/guest/BrowserPane";
@@ -1058,7 +1057,7 @@ function MobileMore(props: {
 }) {
   const { state, dispatch } = useStore();
   const theme = state.config?.theme ?? "ember";
-  const themeName = themeOption(theme).name;
+  const themeName = themeDisplayName(theme, state.config?.customThemes ?? []);
   const density = parseChatDensity(state.config?.chatDensity);
   const workspaces = mobileIdeWorkspaces(state.sessions);
   const games = mobileGames(state.sessions);

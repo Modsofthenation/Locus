@@ -13,6 +13,7 @@ export const TOOL_OUTPUT_UNTRUSTED_MAX = 16_384;
 const HOSTILE_TOOLS = new Set([
   "websearch",
   "git_pr_get",
+  "git_ci_logs",
   "git_pr_list",
   "git_pr_loadpath",
   "git_issue_get",
@@ -66,6 +67,12 @@ const HOSTILE_TOOLS = new Set([
   "browser_console",
   "browser_network",
   "browser_snapshot",
+  "browser_action",
+  "browser_wait",
+  "a11y_tree",
+  "uia_tree",
+  "desktop_action",
+  "computer_capabilities",
   "playwright",
   "board_list",
   "board_get",
@@ -80,7 +87,12 @@ export function toolOutputIsHostile(name: string): boolean {
   if (name === "mcp_list_tools" || name === "mcp_get_tool_info" || name === "read_skill") {
     return false;
   }
-  if (name === "manage_integration_plugin") return false;
+  if (
+    name === "manage_integration_plugin" ||
+    name === "manage_skill" ||
+    name === "manage_mcp_server"
+  )
+    return false;
   if (name.startsWith("mcp_") || name.startsWith("plugin_")) return true;
   return HOSTILE_TOOLS.has(name);
 }

@@ -2,10 +2,7 @@ import {
   applyChangeStackSummaries,
   formatChangeStackSummaryPrompt,
   hasUsableKey,
-  isClaudeCodeProvider,
-  isKiroCliProvider,
-  isCursorCliProvider,
-  isCursorProvider,
+  supportsOneShotCompletion,
   parseChangeStackSummaryResponse,
   type AiProvider,
   type ChangeStack,
@@ -28,15 +25,7 @@ export function changeStackCompletionProvider(
   config: Pick<LocusConfig, "providers">,
 ): AiProvider | undefined {
   return config.providers.find((provider) => {
-    if (!provider.enabled) return false;
-    if (
-      isCursorProvider(provider) ||
-      isCursorCliProvider(provider) ||
-      isClaudeCodeProvider(provider) ||
-      isKiroCliProvider(provider)
-    ) {
-      return false;
-    }
+    if (!provider.enabled || !supportsOneShotCompletion(provider)) return false;
     return hasUsableKey(provider.apiKey, provider.baseUrl, provider.kind);
   });
 }

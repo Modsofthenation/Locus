@@ -24,6 +24,7 @@ import { selectValue, setSelectValue } from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
   api: {
+    providerUsage: vi.fn(async () => ({ usage: [] })),
     images: vi.fn(async () => []),
     workersStatus: vi.fn(async () => []),
     createSession: vi.fn(),
@@ -37,7 +38,9 @@ vi.mock("@/lib/api", () => ({
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 async function pickComposerRepoBranch(host: HTMLElement, repoName: string, branch: string) {
-  const picker = host.querySelector("[aria-label='Repository']") as HTMLButtonElement;
+  const picker = host.querySelector(
+    "[aria-label='Repository'], [aria-label^='Repository: ']",
+  ) as HTMLButtonElement;
   if (!host.querySelector("[role='listbox']")) {
     act(() => {
       picker.click();
@@ -789,7 +792,9 @@ describe("EmptyState recipes", () => {
     expect(bar).toBeTruthy();
     expect(textarea.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(bar.querySelector(".composer-add")).toBeTruthy();
-    expect(bar.querySelector("[aria-label='Repository']")).toBeTruthy();
+    expect(
+      bar.querySelector("[aria-label='Repository'], [aria-label^='Repository: ']"),
+    ).toBeTruthy();
     expect(bar.querySelector(".composer-toolbar-end .model-picker")).toBeTruthy();
   });
 
@@ -946,7 +951,9 @@ describe("EmptyState recipes", () => {
         ],
       },
     );
-    const picker = host.querySelector("[aria-label='Repository']") as HTMLButtonElement;
+    const picker = host.querySelector(
+      "[aria-label='Repository'], [aria-label^='Repository: ']",
+    ) as HTMLButtonElement;
     expect(picker).not.toBeNull();
     expect(host.querySelector(".composer-repo-placeholder")?.textContent).toBe("No repo");
 
@@ -1034,7 +1041,9 @@ describe("EmptyState recipes", () => {
       },
       { repos: [linkedRepo] },
     );
-    const picker = host.querySelector("[aria-label='Repository']") as HTMLButtonElement;
+    const picker = host.querySelector(
+      "[aria-label='Repository'], [aria-label^='Repository: ']",
+    ) as HTMLButtonElement;
     act(() => {
       picker.click();
     });
@@ -1831,8 +1840,10 @@ describe("EmptyState named environment", () => {
         </Store.Provider>,
       );
     });
-    expect(host.querySelector('[aria-label="Named environment"]')).toBeNull();
-    expect(host.querySelector('[aria-label="Jail"]')).toBeNull();
+    expect(
+      host.querySelector('[aria-label="Named environment"], [aria-label^="Named environment: "]'),
+    ).toBeNull();
+    expect(host.querySelector('[aria-label="Jail"], [aria-label^="Jail: "]')).toBeNull();
     expect(host.querySelector('[aria-label="Spend cap (USD)"]')).toBeNull();
     expect(host.querySelector("[data-testid='composer-more-options']")).toBeNull();
     expect(host.textContent).not.toMatch(
@@ -1847,9 +1858,11 @@ describe("EmptyState named environment", () => {
       more!.click();
     });
     expect(host.querySelector("[data-testid='composer-more-options']")).not.toBeNull();
-    expect(host.querySelector('[aria-label="Jail"]')).not.toBeNull();
+    expect(host.querySelector('[aria-label="Jail"], [aria-label^="Jail: "]')).not.toBeNull();
     expect(host.querySelector('[aria-label="Spend cap (USD)"]')).not.toBeNull();
-    expect(host.querySelector('[aria-label="Named environment"]')).not.toBeNull();
+    expect(
+      host.querySelector('[aria-label="Named environment"], [aria-label^="Named environment: "]'),
+    ).not.toBeNull();
     expect(
       [...host.querySelectorAll("button")].some((btn) => btn.textContent === "Full form"),
     ).toBe(true);
@@ -1964,7 +1977,9 @@ describe("EmptyState named environment", () => {
         </Store.Provider>,
       );
     });
-    expect(host.querySelector('[aria-label="Named environment"]')).toBeTruthy();
+    expect(
+      host.querySelector('[aria-label="Named environment"], [aria-label^="Named environment: "]'),
+    ).toBeTruthy();
     expect(host.textContent).toContain("Save as environment");
     act(() => {
       setSelectValue(host, "Named environment", "env-1");

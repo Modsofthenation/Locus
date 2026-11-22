@@ -71,6 +71,7 @@ export const CODEX_REVIEW_MCP_TOOLS = [
   "git_pr_comment",
   "git_pr_review",
   "git_pr_checks",
+  "git_ci_logs",
 ] as const;
 
 export function codexMcpEnabledTools(kind: CodexMcpKind = "git"): string[] {
@@ -456,6 +457,8 @@ export async function* streamCodexCli(input: {
   review?: boolean;
   gitMcpUrl?: string;
   mcpKind?: CodexMcpKind;
+  /** The child's environment before the provider key is added; defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   spawnFn?: CodexCliSpawner;
 }): AsyncGenerator<CodexCliEvent> {

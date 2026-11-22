@@ -152,6 +152,8 @@ function isTypingTarget(node: EventTarget | null): boolean {
 export function OverflowMenu(props: {
   label?: ReactNode;
   title?: string;
+  /** Accessible name for the toggle when it differs from the tooltip `title`. */
+  ariaLabel?: string;
   align?: "left" | "right" | "after";
   className?: string;
   toggleClassName?: string;
@@ -372,7 +374,7 @@ export function OverflowMenu(props: {
           id={props.id}
           className={props.toggleClassName ?? "btn small ghost menu-toggle"}
           title={props.title ?? "More"}
-          aria-label={props.title ?? "More"}
+          aria-label={props.ariaLabel ?? props.title ?? "More"}
           aria-expanded={open}
           aria-haspopup="menu"
           aria-disabled={props.disabled || undefined}

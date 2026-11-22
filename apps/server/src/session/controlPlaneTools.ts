@@ -7,6 +7,9 @@ import {
   isBoardToolName,
   isIntegrationToolName,
   isManageIntegrationPluginName,
+  isManageThemeName,
+  isManageMcpServerName,
+  isManageSkillName,
   isMcpMetaToolName,
   isMcpToolName,
   isPluginToolName,
@@ -46,6 +49,9 @@ export type ControlPlaneToolPorts = {
     ) => Promise<ToolResult>;
   };
   executeManagePlugin: (args: Record<string, unknown>) => Promise<ToolResult>;
+  executeManageTheme?: (args: Record<string, unknown>) => Promise<ToolResult>;
+  executeManageSkill?: (args: Record<string, unknown>) => Promise<ToolResult>;
+  executeManageMcpServer?: (args: Record<string, unknown>) => Promise<ToolResult>;
   executeMcpMeta: (
     session: AgentSession,
     req: { name: string; args: Record<string, unknown> },
@@ -142,6 +148,21 @@ export async function executeLateControlPlaneTool(
       throw new Error(`Tool ${req.name} is not allowed for this automation`);
     }
     return ports.executeManagePlugin(req.args);
+  }
+  if (isManageThemeName(req.name)) {
+    if (session.automationId) throw new Error(`Tool ${req.name} is not available to automations`);
+    if (!ports.executeManageTheme) throw new Error("Themes unavailable");
+    return ports.executeManageTheme(req.args ?? {});
+  }
+  if (isManageSkillName(req.name)) {
+    if (session.automationId) throw new Error(`Tool ${req.name} is not available to automations`);
+    if (!ports.executeManageSkill) throw new Error("Skills unavailable");
+    return ports.executeManageSkill(req.args ?? {});
+  }
+  if (isManageMcpServerName(req.name)) {
+    if (session.automationId) throw new Error(`Tool ${req.name} is not available to automations`);
+    if (!ports.executeManageMcpServer) throw new Error("MCP settings unavailable");
+    return ports.executeManageMcpServer(req.args ?? {});
   }
   if (isPluginToolName(req.name)) {
     if (!automationAllowsPlugin(session, req.name)) {

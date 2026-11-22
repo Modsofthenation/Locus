@@ -22,6 +22,11 @@ export interface ProvisionRequest {
   backend: WorkerBackend;
   sessionId: string;
   size: string;
+  /**
+   * TLS identity the control plane minted for this task. Fargate injects it so the
+   * worker serves a cert whose fingerprint is pinned before the task starts (no TOFU).
+   */
+  workerTls?: { cert: string; key: string; fingerprint: string };
 }
 
 export interface ComputeBackend {

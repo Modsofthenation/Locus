@@ -129,3 +129,145 @@ describe("SubscriptionService", () => {
     expect((await sessions.get(created.id))?.subscriptions).toBeUndefined();
   });
 });
+
+describe("SubscriptionService CI fix loop", () => {
+  it("starts one CI fix per head + check set, then stops after two attempts with Needs you", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-sub-ci-"));
+    cleanup.push(dir);
+    const store = new JsonStore(dir);
+    await store.init();
+    const config = await store.loadConfig();
+    await store.saveConfig({
+      ...config,
+      forges: [
+        {
+          id: "gh",
+          kind: "github",
+          name: "GitHub",
+          apiBaseUrl: "https://api.github.com",
+          token: "gh-token",
+        },
+      ],
+    });
+    const hypervisor = new MockHypervisor(dir);
+    const hub = new Hub();
+    const real = new SessionService(store, hypervisor, hub);
+    const created = await real.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      providerId: config.providers[0]!.id,
+      model: config.providers[0]!.defaultModel,
+      startVm: false,
+    });
+    const now = new Date("2026-11-14T12:00:00.000Z");
+    await store.mutateSession(created.id, (row) => {
+      row.repoId = "repo-1";
+      row.repo = { url: "https://github.com/acme/app", forge: "github" } as never;
+      row.subscriptions = [
+        {
+          id: "checks-1",
+          kind: "checks",
+          title: "PR #7 checks",
+          createdAt: now.toISOString(),
+          repoUrl: "https://github.com/acme/app",
+          pullNumber: 7,
+        },
+      ];
+    });
+
+    let sha = "s1";
+    let state = "pending";
+    const fetchFn: typeof fetch = async (input) => {
+      const url = String(input);
+      const body = (value: unknown) =>
+        new Response(JSON.stringify(value), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      if (url.endsWith("/pulls/7")) {
+        return body({
+          number: 7,
+          title: "Cart",
+          state: "open",
+          head: { ref: "feat/cart", sha },
+          base: { ref: "main" },
+          updated_at: now.toISOString(),
+        });
+      }
+      if (url.endsWith(`/commits/${sha}/status`)) {
+        return body({ statuses: [{ context: "test", state }] });
+      }
+      if (url.includes("/graphql")) return body({ data: {} });
+      return body([]);
+    };
+
+    const fixes: Array<{ number: number; ci: unknown }> = [];
+    const flagged: Array<{ id: string; text: string }> = [];
+    const wakes: string[] = [];
+    const svc = new SubscriptionService(
+      store,
+      {
+        sendChat: async (_id: string, text: string) => {
+          wakes.push(text);
+        },
+        flagNeedsHuman: async (id: string, text: string) => {
+          flagged.push({ id, text });
+          return {} as never;
+        },
+      } as never,
+      {
+        hub,
+        fetch: fetchFn,
+        now: () => now,
+        repos: {
+          startFixSession: async (_repoId: string, number: number, opts?: { ci?: unknown }) => {
+            fixes.push({ number, ci: opts?.ci });
+            return { session: { id: created.id } } as never;
+          },
+        },
+      },
+    );
+    const step = async (nextSha: string, nextState: string) => {
+      sha = nextSha;
+      state = nextState;
+      await svc.tick();
+    };
+
+    await step("s1", "pending"); // primes the cursor
+    await step("s1", "failure");
+    expect(fixes).toEqual([
+      { number: 7, ci: { headSha: "s1", checks: ["test"], attempt: 1, maxAttempts: 2 } },
+    ]);
+    expect(wakes).toEqual([]); // the fix runs in this same session
+
+    // Same head and check set fails again (re-run): no second fix.
+    await step("s1", "pending");
+    await step("s1", "failure");
+    expect(fixes).toHaveLength(1);
+
+    await step("s2", "pending");
+    await step("s2", "failure");
+    expect(fixes).toHaveLength(2);
+    expect((fixes[1]!.ci as { attempt: number }).attempt).toBe(2);
+
+    await step("s3", "pending");
+    await step("s3", "failure");
+    expect(fixes).toHaveLength(2);
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0]!.id).toBe(created.id);
+    expect(flagged[0]!.text).toMatch(/stopped after 2 attempts: test still failing at s3/);
+    const sub = (await store.loadSessions()).find((row) => row.id === created.id)
+      ?.subscriptions?.[0];
+    expect(sub?.ciFix?.stoppedAt).toBeTruthy();
+
+    // Green resets the counter; the next red starts a fresh attempt 1.
+    await step("s4", "success");
+    expect(
+      (await store.loadSessions()).find((row) => row.id === created.id)?.subscriptions?.[0]?.ciFix
+        ?.attempts,
+    ).toBeUndefined();
+    await step("s5", "failure");
+    expect(fixes).toHaveLength(3);
+    expect((fixes[2]!.ci as { attempt: number }).attempt).toBe(1);
+  });
+});

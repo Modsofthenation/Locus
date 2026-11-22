@@ -164,4 +164,39 @@ describe("BrowserPane", () => {
     });
     expect(host.textContent).toMatch(/Your Chrome/);
   });
+
+  it("forwards shortcut modifiers, text key-up and pasted Unicode", () => {
+    render();
+    const ws = FakeWebSocket.last!;
+    act(() =>
+      ws.emit("message", {
+        data: JSON.stringify({ type: "status", controller: "operator", ready: true }),
+      }),
+    );
+    const stage = host.querySelector(".browser-stage")!;
+    act(() => {
+      stage.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "a",
+          code: "KeyA",
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      stage.dispatchEvent(
+        new KeyboardEvent("keyup", { key: "a", code: "KeyA", ctrlKey: true, bubbles: true }),
+      );
+      const paste = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(paste, "clipboardData", { value: { getData: () => "你好" } });
+      stage.dispatchEvent(paste);
+    });
+    expect(ws.sent.map((row) => JSON.parse(row))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "keyDown", key: "a", code: "KeyA", modifiers: 2 }),
+        expect.objectContaining({ kind: "keyUp", key: "a", modifiers: 2 }),
+        expect.objectContaining({ kind: "insertText", text: "你好" }),
+      ]),
+    );
+  });
 });

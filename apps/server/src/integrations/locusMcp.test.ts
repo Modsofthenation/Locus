@@ -65,6 +65,30 @@ describe("locus MCP rpc", () => {
     expect(calls).toEqual([{ name: "grafana_query", args: { query: "logger.level:error" } }]);
   });
 
+  it("dispatches declared Blender tools through the MCP allowlist", async () => {
+    const ctx = {
+      tools: [
+        {
+          name: "blender_editor",
+          description: "Inspect Blender file",
+          inputSchema: { type: "object" as const, properties: {} },
+        },
+      ],
+      call: async (name: string) => ({ ok: true, output: "Called " + name }),
+    };
+    const result = await dispatchLocusMcp(
+      {
+        jsonrpc: "2.0",
+        id: 42,
+        method: "tools/call",
+        params: { name: "blender_editor", arguments: { action: "inspect", file: "model.blend" } },
+      },
+      ctx,
+    );
+    expect(result).toMatchObject({
+      result: { isError: false, content: [{ type: "text", text: "Called blender_editor" }] },
+    });
+  });
   it("returns a playwright screenshot as MCP image content", async () => {
     const called = await dispatchLocusMcp(
       {

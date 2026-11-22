@@ -3920,6 +3920,10 @@ describe("parentExtraTools", () => {
     expect(names).toEqual([
       "task_list",
       "repo_map",
+      "code_definition",
+      "code_references",
+      "code_symbols",
+      "code_diagnostics",
       "orient",
       "find_entity",
       "get_entity",
@@ -3946,6 +3950,11 @@ describe("parentExtraTools", () => {
     const names = parentExtraTools({ ...extraBase, inSubagent: true }).map((tool) => tool.name);
     expect(names).toEqual([
       ...RUNTIME_TOOLS.filter((tool) => tool.name !== "spawn_agent").map((tool) => tool.name),
+      "code_definition",
+      "code_references",
+      "code_symbols",
+      "code_diagnostics",
+      "code_rename",
       "orient",
       "find_entity",
       "get_entity",
@@ -3954,6 +3963,22 @@ describe("parentExtraTools", () => {
       "brain_brief",
       "docker_swarm",
     ]);
+  });
+
+  it("offers code-intel reads in plan mode and rename only where edits are allowed", () => {
+    const plan = parentExtraTools({ ...extraBase, planTurn: true }).map((tool) => tool.name);
+    expect(plan).toContain("code_references");
+    expect(plan).not.toContain("code_rename");
+    const review = parentExtraTools({ ...extraBase, codeRename: false }).map((tool) => tool.name);
+    expect(review).toContain("code_diagnostics");
+    expect(review).not.toContain("code_rename");
+    expect(
+      parentExtraTools({ ...extraBase, isProject: true }).some((tool) =>
+        tool.name.startsWith("code_"),
+      ),
+    ).toBe(false);
+    expect(planToolRefusal("code_definition", true)).toBeUndefined();
+    expect(planToolRefusal("code_rename", true)).toMatch(/read-only/);
   });
 
   it("offers plugin tools on coding turns and hides them in plan mode", () => {

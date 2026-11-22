@@ -41,6 +41,8 @@ export type ChatEvent =
       outputTokens: number;
       cachedInputTokens?: number;
       cacheWriteTokens?: number;
+      /** Counted from prompt and reply characters because the provider reported no tokens. */
+      estimated?: boolean;
     }
   /** SSE keepalive; runChatTurn treats this as activity and does not forward it. */
   | { type: "activity" }
@@ -89,8 +91,17 @@ export function readTokenUsage(raw: unknown): TokenUsageEvent | undefined {
   const cacheWrite = asFiniteNumber(
     u.cache_creation_input_tokens ?? u.cacheWriteTokens ?? u.cache_write_tokens,
   );
+  // Anthropic (`cache_read_input_tokens` / `cache_creation_input_tokens`) and Cursor
+  // (`cacheReadTokens` / `cacheWriteTokens`) report cache tokens on top of `input_tokens`.
+  // OpenAI-style payloads already count cached tokens inside the prompt total. Normalize to
+  // the latter so `inputTokens` is always the whole prompt.
+  const separateRead = u.cache_read_input_tokens != null || u.cacheReadTokens != null;
+  const separateWrite = u.cache_creation_input_tokens != null || u.cacheWriteTokens != null;
+  const extra =
+    (separateRead && cached != null && cached > 0 ? cached : 0) +
+    (separateWrite && cacheWrite != null && cacheWrite > 0 ? cacheWrite : 0);
   return {
-    inputTokens: input ?? 0,
+    inputTokens: (input ?? 0) + extra,
     outputTokens: output ?? 0,
     ...(cached != null && cached > 0 ? { cachedInputTokens: cached } : {}),
     ...(cacheWrite != null && cacheWrite > 0 ? { cacheWriteTokens: cacheWrite } : {}),

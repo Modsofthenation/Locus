@@ -44,11 +44,40 @@ export interface WorkflowCompletion {
   toolCalls: WorkflowToolCall[];
 }
 
+export interface WorkflowModelChoice {
+  provider?: string;
+  model?: string;
+}
+
 export type WorkflowCompleter = (input: {
   system: string;
   user: string;
   tools: string[];
+  /** The node's authored model; the session's provider and model when absent. */
+  model?: WorkflowModelChoice;
 }) => Promise<WorkflowCompletion | undefined>;
+
+/**
+ * Agent Loop Builder stamps `openai` / `gpt-4o-mini` (and `gpt-4o` in its templates)
+ * on every new agent node, and validation requires a model. Those placeholders mean
+ * "nothing chosen", so they run on the session model rather than moving every
+ * imported graph onto OpenAI. Name the provider by its Locus id or display name to
+ * pick one of these models on purpose.
+ */
+const ALB_PLACEHOLDER_MODELS = new Set(["gpt-4o-mini", "gpt-4o"]);
+
+/** The provider/model an agent node was authored with, when it names one. */
+export function nodeModelChoice(config: Record<string, unknown>): WorkflowModelChoice | undefined {
+  const raw = config.model;
+  if (typeof raw === "string") return raw.trim() ? { model: raw.trim() } : undefined;
+  const rec = asRecord(raw);
+  if (!rec) return undefined;
+  const provider = typeof rec.provider === "string" ? rec.provider.trim() : "";
+  const model = typeof rec.model === "string" ? rec.model.trim() : "";
+  if (!provider && !model) return undefined;
+  if (provider === "openai" && ALB_PLACEHOLDER_MODELS.has(model)) return undefined;
+  return { ...(provider ? { provider } : {}), ...(model ? { model } : {}) };
+}
 
 export interface LocusWorkflowRunOptions {
   input?: Record<string, unknown>;
@@ -232,8 +261,9 @@ async function runModelNode(
   ].join("\n");
   let user = `Node: ${node.data.label} (${node.data.nodeType})\nInput:\n${JSON.stringify(input)}`;
   const observations: { step: number; tool: string; observation: string }[] = [];
+  const model = nodeModelChoice(node.data.config);
   for (let step = 0; step < max; step++) {
-    const turn = await options.complete({ system, user, tools });
+    const turn = await options.complete({ system, user, tools, ...(model ? { model } : {}) });
     if (!turn) return defaultNodeExecutor(node, input, ctx);
     const calls =
       turn.toolCalls.length > 0

@@ -220,6 +220,7 @@ export function defaultConfig(dataDir: string): LocusConfig {
     skills: [],
     integrations: [],
     integrationPlugins: [],
+    customThemes: [],
     forges: [
       {
         id: randomUUID(),

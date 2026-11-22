@@ -6,6 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   EMPTY_CANVAS_NUDGE,
+  beginBootProgress,
   SELF_CORRECT_NUDGE,
   type AgentSession,
   type LocusConfig,
@@ -17,6 +18,7 @@ import { Store, initialState, type Action, type UiState } from "@/state/store";
 
 vi.mock("@/lib/api", () => ({
   api: {
+    providerUsage: vi.fn(async () => ({ usage: [] })),
     chat: vi.fn(() => new Promise(() => undefined)),
     abortChat: vi.fn(async () => ({ ok: true })),
     sendQueueNow: vi.fn(),
@@ -1108,7 +1110,9 @@ describe("ChatPane", () => {
     });
     const textarea = host.querySelector("textarea") as HTMLTextAreaElement;
     expect(textarea.placeholder).toMatch(/canvas/i);
-    expect(host.querySelector("[aria-label='Repository']")).toBeNull();
+    expect(
+      host.querySelector("[aria-label='Repository'], [aria-label^='Repository: ']"),
+    ).toBeNull();
   });
 
   it("uses an @asset placeholder on game sessions", () => {
@@ -1587,6 +1591,23 @@ describe("ChatPane", () => {
     );
     expect(host.querySelector("[data-testid='guest-start-note'] .working-dots")).toBeTruthy();
     expect(host.querySelector("[data-testid='agent-working'] .working-dots")).toBeTruthy();
+  });
+
+  it("shows the boot step list instead of the generic guest spinner", () => {
+    render({
+      ...initialState,
+      selectedId: session.id,
+      sessions: [{ ...session, runtime: "docker", status: "provisioning", messages: [] }],
+      vms: [{ ...vm, runtime: "docker", status: "booting" }],
+      bootProgress: {
+        [session.id]: beginBootProgress({ kind: "docker", key: "docker:x", at: Date.now() }),
+      },
+    });
+    expect(host.querySelector("[data-testid='boot-steps']")).toBeTruthy();
+    expect(host.querySelector("[data-testid='boot-step-pull']")?.getAttribute("data-state")).toBe(
+      "active",
+    );
+    expect(host.querySelector("[data-testid='agent-working']")).toBeNull();
   });
 
   it("does not say the canvas is in progress while a running design is still starting", () => {
@@ -2775,7 +2796,9 @@ describe("ChatPane", () => {
       sessions: [session],
       vms: [{ ...vm, status: "ready" }],
     });
-    const picker = host.querySelector("[aria-label='Default subagent']") as HTMLElement;
+    const picker = host.querySelector(
+      "[aria-label='Default subagent'], [aria-label^='Default subagent: ']",
+    ) as HTMLElement;
     expect(host.querySelector(".ui-select-value")?.textContent).toMatch(/Explore/i);
     await act(async () => {
       picker.click();
@@ -2797,7 +2820,9 @@ describe("ChatPane", () => {
       sessions: [{ ...session, kind: "design", runtime: "docker", status: "idle" }],
       vms: [{ ...vm, runtime: "docker", status: "ready" }],
     });
-    expect(host.querySelector("[aria-label='Default subagent']")).toBeNull();
+    expect(
+      host.querySelector("[aria-label='Default subagent'], [aria-label^='Default subagent: ']"),
+    ).toBeNull();
   });
 
   it("keeps vision on Docker agents and hides it on Design", () => {
@@ -2880,7 +2905,9 @@ describe("ChatPane", () => {
     expect(host.querySelector(".composer-send")?.textContent).toMatch(/Send/);
     expect(host.querySelector(".composer-send .composer-send-label")?.textContent).toBe("Send");
     expect(host.querySelector(".composer-head .model-picker")).toBeNull();
-    expect(host.querySelector("[aria-label='Repository']")).toBeNull();
+    expect(
+      host.querySelector("[aria-label='Repository'], [aria-label^='Repository: ']"),
+    ).toBeNull();
   });
 
   it("hides the demo provider badge while setting Codex reasoning effort", async () => {

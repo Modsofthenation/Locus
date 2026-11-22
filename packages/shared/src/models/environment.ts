@@ -1,3 +1,5 @@
+import { parseVerifyConfig, type VerifyConfig } from "./verify.js";
+
 export interface LocusEnvironment {
   packages?: string[];
   /** Idempotent repo bootstrap after checkout (`npm ci`, `pip install`, …). */
@@ -6,6 +8,8 @@ export interface LocusEnvironment {
   start?: string;
   image?: string;
   env?: Record<string, string>;
+  /** Harness verify commands (publish test gate, post-edit lint). See docs/verify.md. */
+  verify?: VerifyConfig;
 }
 
 /** Strip JSONC comments and trailing commas. Dev Container files are JSONC. */
@@ -130,13 +134,15 @@ export function parseLocusEnvironment(raw: unknown): LocusEnvironment | undefine
       if (typeof item === "string" && key.trim()) env[key.trim()] = item;
     }
   }
+  const verify = parseVerifyConfig(value.verify).config;
   if (
     !packages?.length &&
     !ports?.length &&
     !install &&
     !start &&
     !image &&
-    !Object.keys(env).length
+    !Object.keys(env).length &&
+    !verify
   )
     return undefined;
   return {
@@ -146,6 +152,7 @@ export function parseLocusEnvironment(raw: unknown): LocusEnvironment | undefine
     start,
     image,
     env: Object.keys(env).length ? env : undefined,
+    ...(verify ? { verify } : {}),
   };
 }
 
@@ -199,6 +206,6 @@ export function formatSetupPrompt(input: {
     "",
     `Repo: ${input.repoUrl}`,
     `${input.repoName} is already cloned at /workspace when this chat starts. Do not git_clone again unless the workspace is empty.`,
-    "Write durable setup to .locus/environment.json so later agents install, start, and preview without rediscovering the repo.",
+    "Write durable setup to .locus/environment.json so later agents install, start, and preview without rediscovering the repo. Include a verify block (test / lint / typecheck commands) so the publish gate runs the right checks.",
   ].join("\n");
 }

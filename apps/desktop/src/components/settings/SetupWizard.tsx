@@ -9,6 +9,7 @@ import { Mascot } from "@/components/layout/Mascot";
 import { PRODUCT_MODE_LABELS } from "@/lib/productMode";
 import { Select } from "@/components/layout/Select";
 import { QemuInstallStatus } from "./SettingsCards";
+import { SampleTaskButton } from "./SampleTaskButton";
 
 export function SetupWizard() {
   const { state, dispatch } = useStore();
@@ -189,6 +190,30 @@ export function SetupWizard() {
     }
   }
 
+  /** Try a sample task: save setup like Continue, then hand the saved config to the sample run. */
+  async function finishForSample(): Promise<LocusConfig | null> {
+    setBusy("save");
+    setError(null);
+    try {
+      const saved = await api.saveConfig({
+        ...current,
+        setupCompleted: true,
+        productMode,
+        setupFirstTask: "done",
+      });
+      dispatch({ type: "config", config: saved });
+      await refresh();
+      dispatch({ type: "setupOpen", open: false });
+      if (productMode === "swarm" && state.vmCollapsed) dispatch({ type: "toggleVmPane" });
+      return saved;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save");
+      return null;
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const hostLabel = setup.hostOs?.label ?? "this computer";
   const keyOptional = hasUsableKey("", provider?.baseUrl, provider?.kind);
   const enabledProvider = current.providers.find((p) => p.enabled);
@@ -229,7 +254,7 @@ export function SetupWizard() {
                 (enabledProvider
                   ? `${enabledProvider.name} · ${enabledProvider.defaultModel} is enabled.`
                   : "An enabled provider can answer chat."))
-              : "Paste an OpenCode Zen key for the free tier, or another provider key. Local servers such as Ollama, and CLI providers (Cursor CLI, Claude Code, Codex CLI, Kiro CLI), do not need a key."}
+              : "Paste an OpenCode Zen key for the free tier, or another provider key. Local servers such as Ollama, and CLI providers (Cursor CLI, Claude Code, Codex CLI, Kiro CLI, Custom CLI agents), do not need a key."}
           </span>
           {!setup.hasProvider && (
             <div className="setup-provider">
@@ -253,9 +278,11 @@ export function SetupWizard() {
                         ? "optional — uses codex login"
                         : provider?.kind === "kiro-cli"
                           ? "optional — uses kiro-cli login"
-                          : isLocalOpenAiBase(provider?.baseUrl)
-                            ? "Optional for localhost"
-                            : "API key"
+                          : provider?.kind === "cli-agent"
+                            ? "optional — uses the CLI's own login"
+                            : isLocalOpenAiBase(provider?.baseUrl)
+                              ? "Optional for localhost"
+                              : "API key"
                 }
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
@@ -387,6 +414,12 @@ export function SetupWizard() {
         <button className="btn ghost" disabled={busy !== null} onClick={() => void finish(false)}>
           Skip for now
         </button>
+        <SampleTaskButton
+          className="btn"
+          disabled={busy !== null}
+          productMode={productMode}
+          beforeStart={finishForSample}
+        />
         {setup.dockerFound ? (
           <button
             className="btn primary"

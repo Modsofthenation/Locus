@@ -4,6 +4,7 @@ import {
   isDockerBrowserActivity,
   mapCanvasToDevice,
   parseBrowserServerMessage,
+  computerKey,
   type BrowserClientMessage,
   type BrowserController,
   type BrowserTab,
@@ -38,6 +39,8 @@ export function BrowserPane({
   );
   const socketRef = useRef<WebSocket | null>(null);
   const frameRef = useRef<HTMLImageElement>(null);
+  const keyboardRef = useRef<HTMLTextAreaElement>(null);
+  const composing = useRef(false);
   const driving = !watch && controller === "operator";
 
   useEffect(() => {
@@ -220,20 +223,78 @@ export function BrowserPane({
       <div
         className="browser-stage"
         tabIndex={driving ? 0 : undefined}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) send({ type: "release-input" });
+        }}
+        onPaste={(event) => {
+          if (driving) {
+            event.preventDefault();
+            send({
+              type: "input",
+              kind: "insertText",
+              text: event.clipboardData.getData("text/plain"),
+            });
+          }
+        }}
         onKeyDown={(event) => {
-          if (!driving) return;
+          if (!driving || composing.current || event.nativeEvent.isComposing) return;
+          event.preventDefault();
           if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
             send({ type: "input", kind: "insertText", text: event.key });
             return;
           }
-          send({ type: "input", kind: "keyDown", key: event.key });
+          send({
+            type: "input",
+            kind: "keyDown",
+            ...computerKey(event.key),
+            key: event.key,
+            code: event.code,
+            modifiers:
+              (event.altKey ? 1 : 0) |
+              (event.ctrlKey ? 2 : 0) |
+              (event.metaKey ? 4 : 0) |
+              (event.shiftKey ? 8 : 0),
+          });
         }}
         onKeyUp={(event) => {
-          if (!driving || event.key.length === 1) return;
-          send({ type: "input", kind: "keyUp", key: event.key });
+          if (!driving || composing.current) return;
+          send({
+            type: "input",
+            kind: "keyUp",
+            ...computerKey(event.key),
+            key: event.key,
+            code: event.code,
+            modifiers:
+              (event.altKey ? 1 : 0) |
+              (event.ctrlKey ? 2 : 0) |
+              (event.metaKey ? 4 : 0) |
+              (event.shiftKey ? 8 : 0),
+          });
         }}
       >
+        {driving ? (
+          <textarea
+            ref={keyboardRef}
+            aria-label="Type into remote browser"
+            autoComplete="off"
+            style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
+            onCompositionStart={() => {
+              composing.current = true;
+            }}
+            onCompositionEnd={(event) => {
+              composing.current = false;
+              if (event.data) send({ type: "input", kind: "insertText", text: event.data });
+              event.currentTarget.value = "";
+            }}
+            onChange={(event) => {
+              if (!composing.current && event.currentTarget.value) {
+                send({ type: "input", kind: "insertText", text: event.currentTarget.value });
+                event.currentTarget.value = "";
+              }
+            }}
+          />
+        ) : null}
         {frame ? (
           <img
             ref={frameRef}
@@ -249,6 +310,7 @@ export function BrowserPane({
             onMouseDown={(event) => {
               if (!driving) return;
               event.preventDefault();
+              keyboardRef.current?.focus();
               const { x, y } = point(event);
               send({
                 type: "input",

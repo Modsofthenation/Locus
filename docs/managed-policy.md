@@ -59,5 +59,7 @@ Per session (loopback-only, same as `/api/debug/logs*` — a paired LAN phone ge
 - `GET /api/sessions/:id/audit/egress` — hosts contacted, allow/deny counts, bytes sent
 - `GET /api/sessions/:id/audit/approvals` — push / PR / MCP / integration writes (who, when, decision)
 - `GET /api/audit/approvals` — same export across sessions
+- `GET /api/audit/log?since=&format=jsonl|csv` — hash-chained audit log (`~/.locus/audit/`)
+- `GET /api/audit/verify` — walk the chain; reports the first broken record
 
-CLI: `locus config policy`, `locus config revoke-all --confirm REVOKE`, `locus debug egress <id>`, `locus debug approvals [id]`.
+CLI: `locus audit verify|export` (see [ci.md](ci.md#audit-log)), `locus config policy`, `locus config revoke-all --confirm REVOKE`, `locus debug egress <id>`, `locus debug approvals [id]`.

@@ -41,6 +41,11 @@ export interface WorkerBackend {
   taskDefinition?: string;
   /** Optional subnet for `awsvpc`. Locus does not create VPCs. */
   subnet?: string;
+  /**
+   * Optional security group for `awsvpc` (must allow inbound TCP 7421 from this machine).
+   * Empty uses the VPC default group.
+   */
+  securityGroup?: string;
   /** AWS access key id (secret key is `token`). */
   accessKeyId?: string;
   /** Optional ECS endpoint (PrivateLink or API Gateway). Empty uses `ecs.{region}.amazonaws.com`. */
@@ -147,6 +152,7 @@ export function parseWorkerBackend(raw: unknown): WorkerBackend | undefined {
     ...(cluster ? { cluster } : {}),
     ...(taskDefinition ? { taskDefinition } : {}),
     ...(subnet ? { subnet } : {}),
+    ...(optional("securityGroup") ? { securityGroup: optional("securityGroup") } : {}),
     ...(accessKeyId ? { accessKeyId } : {}),
     ...(ecsUrl ? { ecsUrl } : {}),
     ...(optional("tenantId") ? { tenantId: optional("tenantId") } : {}),
@@ -223,6 +229,15 @@ export function workerProvisionsCompute(backend: { kind?: WorkerKind }): boolean
   return kind === "fargate" || kind === "azure" || kind === "gcp";
 }
 
+/**
+ * Fargate: each agent gets its own ECS task running `locus-worker`. The task is the
+ * sandbox, so the agent runs as a Host guest inside it (Fargate cannot run Docker or
+ * KVM). Runtime, image, and host folder choices do not apply.
+ */
+export function workerRunsInTask(backend: { kind?: WorkerKind }): boolean {
+  return workerKind(backend) === "fargate";
+}
+
 export function workerDestroyOnStop(backend: { destroyOnStop?: boolean }): boolean {
   return backend.destroyOnStop !== false;
 }
@@ -252,6 +267,24 @@ export function workerWhereLabel(backend: WorkerBackend): string {
   if (kind === "gcp") return `${backend.name} · gcp`;
   if (kind === "cloud") return `${backend.name} · cloud`;
   return backend.name;
+}
+
+/** New agent hint under Where when a worker is picked. */
+export function workerPlacementHint(
+  backend: WorkerBackend | undefined,
+  runtime: "docker" | "vm" | "host",
+): string {
+  if (backend && workerRunsInTask(backend)) {
+    return `Runs in its own ${workerKind(backend) === "fargate" ? "Fargate" : "cloud"} task on ${backend.name} — a fresh sandbox that starts in about a minute. Chat and keys stay on this machine. Stop ends the task.`;
+  }
+  const what =
+    runtime === "host" ? "The host workspace" : runtime === "vm" ? "The VM" : "The container";
+  const where = backend ? workerWhereLabel(backend) : "the worker";
+  const metered =
+    backend && workerIsMetered(backend)
+      ? " Stop destroys the guest. Idle TTL applies on the metered VM."
+      : "";
+  return `${what} runs on ${where}. Chat and keys stay on this machine.${metered}`;
 }
 
 export function workerHourlyUsd(backend: { hourlyUsd?: number }): number | undefined {
@@ -375,7 +408,11 @@ export function workerBackendError(backend: WorkerBackend): string | undefined {
   if (kind === "cloud" && workerHourlyUsd(backend) == null) {
     return "Cloud workers need an hourly USD rate so the spend cap can meter VM time";
   }
-  if (workerIsMetered(backend) && !workerAllowedImages(backend)?.length) {
+  if (
+    workerIsMetered(backend) &&
+    !workerRunsInTask(backend) &&
+    !workerAllowedImages(backend)?.length
+  ) {
     return "Cloud workers need an image allowlist so a runaway agent cannot pull arbitrary images";
   }
   if (kind === "fargate" && !backend.region?.trim()) {

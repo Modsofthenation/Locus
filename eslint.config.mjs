@@ -17,6 +17,7 @@ export default tseslint.config(
       "**/buildResources/**",
       "**/node_modules/**",
       "apps/server/fixtures/coding-eval/**",
+      "apps/server/fixtures/benchmark/**",
       "packages/alb/**",
     ],
   },

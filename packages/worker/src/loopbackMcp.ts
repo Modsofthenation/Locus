@@ -29,14 +29,14 @@ export interface WorkerLoopbackMcpReply {
   body?: unknown;
 }
 
-export function workerLoopbackMcpUrls(
-  port: number,
-  sessionId: string,
-): { url: string; sessionUrl: string } {
-  const url = `http://127.0.0.1:${port}/mcp`;
+/**
+ * The loopback proxy only serves this turn's session MCP. There is deliberately no
+ * unscoped `/mcp` URL: the control plane would run that as the unscoped Locus MCP
+ * (integration, brain and Docker Swarm tools), which a worker CLI must not reach.
+ */
+export function workerLoopbackMcpUrls(port: number, sessionId: string): { sessionUrl: string } {
   return {
-    url,
-    sessionUrl: `${url}/sessions/${encodeURIComponent(sessionId)}`,
+    sessionUrl: `http://127.0.0.1:${port}/mcp/sessions/${encodeURIComponent(sessionId)}`,
   };
 }
 
@@ -130,7 +130,6 @@ export async function startWorkerLoopbackMcp(input: {
   onRequest: (req: WorkerCliMcpRequest) => Promise<WorkerLoopbackMcpReply>;
 }): Promise<{
   port: number;
-  url: string;
   sessionUrl: string;
   close: () => Promise<void>;
 }> {
@@ -171,20 +170,24 @@ async function handleLoopbackMcpRequest(
     json(res, 405, { error: "Method not allowed" });
     return;
   }
-  if (path !== "/mcp" && !path.startsWith("/mcp/sessions/")) {
+  // Session-scoped only: `/mcp` (the unscoped Locus MCP) and other sessions are 404.
+  if (!path.startsWith("/mcp/sessions/")) {
     json(res, 404, { error: "Not found" });
     return;
   }
-  if (path.startsWith("/mcp/sessions/")) {
-    const requested = decodeURIComponent(path.slice("/mcp/sessions/".length));
-    if (requested !== sessionId) {
-      json(res, 404, {
-        jsonrpc: "2.0",
-        id: null,
-        error: { code: -32004, message: "Unknown session" },
-      });
-      return;
-    }
+  let requested: string;
+  try {
+    requested = decodeURIComponent(path.slice("/mcp/sessions/".length));
+  } catch {
+    requested = "";
+  }
+  if (requested !== sessionId) {
+    json(res, 404, {
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32004, message: "Unknown session" },
+    });
+    return;
   }
   let raw: Buffer;
   try {

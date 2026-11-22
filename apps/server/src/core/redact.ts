@@ -5,7 +5,7 @@ import {
   looksLikeSecretName,
   pluginFieldIsSecret,
   redactText,
-  resolveTheme,
+  resolveThemeRef,
 } from "@locus/shared";
 
 function redactPassword(value: string): string {
@@ -19,6 +19,19 @@ export function redactConfig(config: LocusConfig): LocusConfig {
     providers: config.providers.map((p) => ({
       ...p,
       apiKey: p.apiKey ? "••••••••" : "",
+      ...(p.cli?.env
+        ? {
+            cli: {
+              ...p.cli,
+              env: Object.fromEntries(
+                Object.entries(p.cli.env).map(([key, value]) => [
+                  key,
+                  looksLikeSecretName(key) && value ? "••••••••" : value,
+                ]),
+              ),
+            },
+          }
+        : {}),
     })),
     forges: config.forges.map((f) => ({
       ...f,
@@ -88,6 +101,17 @@ export function redactConfig(config: LocusConfig): LocusConfig {
         ? "••••••••"
         : config.advanced.slackSigningSecret,
     },
+    telemetry: config.telemetry?.headers
+      ? {
+          ...config.telemetry,
+          headers: Object.fromEntries(
+            Object.entries(config.telemetry.headers).map(([key, value]) => [
+              key,
+              value ? "••••••••" : value,
+            ]),
+          ),
+        }
+      : config.telemetry,
   };
 }
 
@@ -112,14 +136,22 @@ export function mergeSecrets(current: LocusConfig, incoming: LocusConfig): Locus
   );
   const workerTokens = new Map((current.workers ?? []).map((row) => [row.id, row.token]));
   const templates = new Map(current.templates.map((t) => [t.id, t]));
+  const customThemes = incoming.customThemes ?? current.customThemes ?? [];
   return {
     ...incoming,
-    theme: resolveTheme(incoming.theme ?? current.theme),
+    customThemes,
+    theme: resolveThemeRef(incoming.theme ?? current.theme, customThemes),
     hardwareProfiles: incoming.hardwareProfiles ?? current.hardwareProfiles ?? [],
-    providers: incoming.providers.map((p) => ({
-      ...p,
-      apiKey: isMaskedSecret(p.apiKey) ? keys.get(p.id) : p.apiKey,
-    })),
+    providers: incoming.providers.map((p) => {
+      const apiKey = isMaskedSecret(p.apiKey) ? keys.get(p.id) : p.apiKey;
+      if (!p.cli?.env) return { ...p, apiKey };
+      const prev = current.providers.find((row) => row.id === p.id)?.cli?.env;
+      const env: Record<string, string> = {};
+      for (const [key, value] of Object.entries(p.cli.env)) {
+        env[key] = isMaskedSecret(value) ? (prev?.[key] ?? value) : value;
+      }
+      return { ...p, apiKey, cli: { ...p.cli, env } };
+    }),
     forges: incoming.forges.map((f) => ({
       ...f,
       token: isMaskedSecret(f.token) ? tokens.get(f.id) : f.token,
@@ -214,6 +246,17 @@ export function mergeSecrets(current: LocusConfig, incoming: LocusConfig): Locus
         ? current.advanced.slackSigningSecret
         : incoming.advanced.slackSigningSecret,
     },
+    telemetry: incoming.telemetry?.headers
+      ? {
+          ...incoming.telemetry,
+          headers: Object.fromEntries(
+            Object.entries(incoming.telemetry.headers).map(([key, value]) => [
+              key,
+              isMaskedSecret(value) ? (current.telemetry?.headers?.[key] ?? "") : value,
+            ]),
+          ),
+        }
+      : incoming.telemetry,
   };
 }
 
@@ -258,7 +301,12 @@ export function configSecretValues(config: LocusConfig): string[] {
     const secret = value?.trim();
     if (secret && secret.length >= 8 && !isMaskedSecret(secret)) out.push(secret);
   };
-  for (const provider of config.providers) add(provider.apiKey);
+  for (const provider of config.providers) {
+    add(provider.apiKey);
+    for (const [key, value] of Object.entries(provider.cli?.env ?? {})) {
+      if (looksLikeSecretName(key)) add(value);
+    }
+  }
   for (const forge of config.forges) {
     add(forge.token);
     add(forge.refreshToken);
@@ -276,6 +324,7 @@ export function configSecretValues(config: LocusConfig): string[] {
       if (pluginFieldIsSecret(field)) add(plugin.config?.[field.key]);
     }
   }
+  for (const value of Object.values(config.telemetry?.headers ?? {})) add(value);
   for (const server of config.mcpServers ?? []) {
     for (const [key, value] of Object.entries(server.env ?? {})) {
       if (looksLikeSecretName(key)) add(value);

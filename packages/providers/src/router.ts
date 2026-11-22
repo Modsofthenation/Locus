@@ -5,6 +5,7 @@ import {
   isCursorCliProvider,
   isCursorProvider,
   isKiroCliProvider,
+  isGenericCliProvider,
 } from "@locus/shared";
 import { streamAnthropic } from "./anthropic.js";
 import { cursorMissingCompletionsError, rewriteCursorCompletionsError } from "./models.js";
@@ -23,7 +24,8 @@ export async function* completeChat(
     isCursorCliProvider(req.provider) ||
     isClaudeCodeProvider(req.provider) ||
     isCodexCliProvider(req.provider) ||
-    isKiroCliProvider(req.provider)
+    isKiroCliProvider(req.provider) ||
+    isGenericCliProvider(req.provider)
   ) {
     throw cursorMissingCompletionsError(req.provider.kind);
   }

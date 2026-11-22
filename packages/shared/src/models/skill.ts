@@ -141,34 +141,64 @@ export function normalizeSkills(raw: unknown): AgentSkill[] {
   return out;
 }
 
-/** Parse a `.locus/skills/name.md` file with optional YAML front matter. */
-export function parseSkillMarkdown(filename: string, markdown: string): AgentSkill | undefined {
+/** Parse simple YAML front matter, including folded (`>`) and literal (`|`) block scalars. */
+function parseSkillFrontMatter(yaml: string): Record<string, string> {
+  const meta: Record<string, string> = {};
+  const lines = yaml.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (/^\s/.test(line)) continue;
+    const idx = line.indexOf(":");
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim().toLowerCase();
+    let val = line.slice(idx + 1).trim();
+    const block = /^([>|])[+-]?$/.exec(val);
+    const cont: string[] = [];
+    while (i + 1 < lines.length && (/^\s/.test(lines[i + 1] ?? "") || !lines[i + 1]?.trim())) {
+      cont.push((lines[++i] ?? "").trim());
+    }
+    if (block) {
+      val = block[1] === "|" ? cont.join("\n").trim() : cont.join(" ").replace(/\s+/g, " ").trim();
+    } else if (cont.length) {
+      val = [val, ...cont].join(" ").replace(/\s+/g, " ").trim();
+    }
+    val = val.replace(/^["']|["']$/g, "");
+    if (key && val) meta[key] = val;
+  }
+  return meta;
+}
+
+/**
+ * Parse a repo skill: a flat `.locus/skills/name.md`, or a folder skill's `SKILL.md`
+ * (Agent Skills standard). For a folder skill pass `folder` (workspace-relative) so the
+ * agent can resolve the skill's relative links to its sibling files.
+ */
+export function parseSkillMarkdown(
+  filename: string,
+  markdown: string,
+  opts?: { folder?: string },
+): AgentSkill | undefined {
   const base = filename.replace(/\\/g, "/").split("/").pop()?.replace(/\.md$/i, "") ?? "";
   const name = skillSlashName(base);
   if (!name) return undefined;
-  const meta: Record<string, string> = {};
+  let meta: Record<string, string> = {};
   let body = markdown;
   const fence = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (fence) {
     body = fence[2] ?? "";
-    for (const line of (fence[1] ?? "").split(/\r?\n/)) {
-      const idx = line.indexOf(":");
-      if (idx <= 0) continue;
-      const key = line.slice(0, idx).trim().toLowerCase();
-      const val = line
-        .slice(idx + 1)
-        .trim()
-        .replace(/^["']|["']$/g, "");
-      if (key && val) meta[key] = val;
-    }
+    meta = parseSkillFrontMatter(fence[1] ?? "");
   }
-  const tools = meta.tools ?? meta.allowedtools ?? "";
+  const tools = meta.tools ?? meta.allowedtools ?? meta["allowed-tools"] ?? "";
+  const folder = opts?.folder?.replace(/\\/g, "/").replace(/\/+$/, "");
+  const folderNote = folder
+    ? `Skill folder: ${folder}/ (relative to the workspace root). Resolve relative links in this skill from that folder and read those files only when the steps below need them.\n\n`
+    : "";
   return normalizeSkill({
     id: `file:${name}`,
     name,
     title: meta.title || name,
-    hint: meta.hint || "Repo skill",
-    body: body.trim(),
+    hint: meta.hint || meta.description || "Repo skill",
+    body: `${folderNote}${body.trim()}`,
     dockerImage: meta.image || meta.dockerimage,
     allowedTools: tools ? tools.split(/[,\s]+/).filter(Boolean) : undefined,
   });
@@ -180,7 +210,10 @@ export function mergeSkills(
 ): AgentSkill[] {
   const out = [...enabledSkills(configSkills)];
   for (const skill of enabledSkills(repoSkills)) {
-    if (!out.some((row) => row.name === skill.name)) out.push(skill);
+    const idx = out.findIndex((row) => row.name === skill.name);
+    // Operator-saved skills win; a repo skill replaces a Locus built-in of the same name.
+    if (idx < 0) out.push(skill);
+    else if (out[idx]?.id.startsWith("builtin:")) out[idx] = skill;
   }
   return out;
 }
@@ -234,4 +267,132 @@ export function mergeBuiltinSkills(skills: AgentSkill[] | undefined): AgentSkill
     out.push(REVIEW_PR_SKILL);
   }
   return out;
+}
+
+// ─────────────────────────── Agent tool ───────────────────────────
+
+export const MANAGE_SKILL_NAME = "manage_skill";
+
+export const MANAGE_SKILL_TOOL: ExtraToolDef = {
+  name: MANAGE_SKILL_NAME,
+  description:
+    "Create, update, list, or delete the operator's saved skills (Settings → Skills). A skill is a reusable prompt invoked as /name or loaded with read_skill. Use when the operator asks to save, add, or turn something into a skill. Write the body as standing instructions the agent will follow later; never include tokens or secrets. Repo skills in .locus/skills/*.md are edited as files, not with this tool.",
+  parameters: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["create", "update", "delete", "list"],
+        description: "create / update / delete / list",
+      },
+      name: {
+        type: "string",
+        description:
+          "Slash name: lowercase letters, numbers, dashes (e.g. release-notes). Identifies the skill for update/delete.",
+      },
+      id: { type: "string", description: "Skill id (update/delete). The slash name also works." },
+      title: { type: "string", description: "Short display title" },
+      hint: { type: "string", description: "One line: when to use this skill" },
+      body: { type: "string", description: "Full skill instructions (markdown)" },
+      enabled: {
+        type: "string",
+        enum: ["true", "false"],
+        description: "update: turn the skill on or off",
+      },
+      rename: { type: "string", description: "update: new slash name" },
+    },
+    required: ["action"],
+  },
+};
+
+export function isManageSkillName(name: string): boolean {
+  return name === MANAGE_SKILL_NAME;
+}
+
+function skillArg(args: Record<string, unknown>, key: string): string {
+  const value = args[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function findManagedSkill(
+  skills: AgentSkill[],
+  args: Record<string, unknown>,
+): AgentSkill | undefined {
+  const id = skillArg(args, "id");
+  const name = skillSlashName(skillArg(args, "name") || id);
+  return skills.find((row) => (id && row.id === id) || (name && row.name === name));
+}
+
+function formatSkillManageList(skills: AgentSkill[]): string {
+  if (!skills.length) return "No saved skills.";
+  return skills
+    .map((skill) => {
+      const source = skill.id.startsWith("builtin:") ? "built-in" : "custom";
+      const state = skill.enabled === false ? "off" : "on";
+      return `/${skill.name} (${skill.title}, ${source}, ${state}) id=${skill.id}: ${skill.hint}`;
+    })
+    .join("\n");
+}
+
+/** manage_skill: pure edit of config.skills. The caller persists on ok. */
+export function applySkillManageAction(
+  skills: AgentSkill[],
+  args: Record<string, unknown>,
+  newId: () => string,
+  reserved: readonly string[] = [],
+): { ok: boolean; skills: AgentSkill[]; output: string } {
+  const action = skillArg(args, "action").toLowerCase();
+  if (action === "list") return { ok: true, skills, output: formatSkillManageList(skills) };
+  if (action === "delete") {
+    const found = findManagedSkill(skills, args);
+    if (!found) return { ok: false, skills, output: "Unknown skill. Pass name or id." };
+    if (found.id.startsWith("builtin:")) {
+      return {
+        ok: false,
+        skills,
+        output: `/${found.name} is built in. Use update with enabled "false" to turn it off.`,
+      };
+    }
+    return {
+      ok: true,
+      skills: skills.filter((row) => row.id !== found.id),
+      output: `Removed skill /${found.name}`,
+    };
+  }
+  if (action !== "create" && action !== "update") {
+    return { ok: false, skills, output: "action must be create, update, delete, or list" };
+  }
+  const current = action === "update" ? findManagedSkill(skills, args) : undefined;
+  if (action === "update" && !current) {
+    return { ok: false, skills, output: "Unknown skill. Pass name or id." };
+  }
+  const rawName =
+    action === "update" ? skillArg(args, "rename") || current!.name : skillArg(args, "name");
+  const enabledArg = skillArg(args, "enabled").toLowerCase();
+  const next = normalizeSkill({
+    ...current,
+    id: current?.id ?? newId(),
+    name: rawName,
+    title: skillArg(args, "title") || current?.title,
+    hint: skillArg(args, "hint") || current?.hint,
+    body: typeof args.body === "string" && args.body.trim() ? args.body : (current?.body ?? ""),
+    enabled: enabledArg === "false" ? false : enabledArg === "true" ? true : current?.enabled,
+  });
+  if (!next) {
+    return {
+      ok: false,
+      skills,
+      output: "Skill slash name must be lowercase letters, numbers, and dashes (max 32)",
+    };
+  }
+  const error = validateSkill(next, skills, reserved);
+  if (error) return { ok: false, skills, output: error };
+  const out = current ? skills.map((row) => (row.id === next.id ? next : row)) : [...skills, next];
+  return {
+    ok: true,
+    skills: out,
+    output: current
+      ? `Updated skill /${next.name}${next.enabled === false ? " (off)" : ""}.`
+      : `Created skill /${next.name}. The operator can run it as /${next.name} or edit it in Settings → Skills.`,
+  };
 }

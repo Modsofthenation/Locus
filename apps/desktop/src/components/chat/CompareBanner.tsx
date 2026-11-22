@@ -1,3 +1,4 @@
+import { withRiskConfirm } from "@/lib/riskGate";
 import { compareGroup, comparePeer, isWorkerCompare, type AgentSession } from "@locus/shared";
 import { useStore } from "@/state/store";
 import { pickCompareWinner } from "@/lib/compare";
@@ -5,11 +6,27 @@ import { sessionNeedsYou } from "@/lib/mobileShell";
 import { api } from "@/lib/api";
 import { askAlert } from "@/lib/dialog";
 import { showUndoNotice } from "@/lib/notice";
+import { useState } from "react";
+import { WorkersBoard, type WorkersBoardView } from "@/components/workers/WorkersBoard";
 
 export function CompareBanner({ session }: { session: AgentSession }) {
   const { state, dispatch } = useStore();
   const members = compareGroup(session, state.sessions);
   const peer = comparePeer(session, state.sessions);
+  const [boardView, setBoardView] = useState<WorkersBoardView | null>(null);
+  const board = boardView ? (
+    <WorkersBoard session={session} initialView={boardView} onClose={() => setBoardView(null)} />
+  ) : null;
+  const boardButton = (
+    <>
+      <button type="button" className="btn small" onClick={() => setBoardView("board")}>
+        Board
+      </button>
+      <button type="button" className="btn small" onClick={() => setBoardView("compare")}>
+        Compare
+      </button>
+    </>
+  );
 
   async function keep(winner: AgentSession, losers: AgentSession[]) {
     try {
@@ -71,6 +88,7 @@ export function CompareBanner({ session }: { session: AgentSession }) {
             </button>
           ))}
           <span className="compare-spacer" />
+          {boardButton}
           <button
             type="button"
             className="btn small ghost"
@@ -88,6 +106,7 @@ export function CompareBanner({ session }: { session: AgentSession }) {
           >
             Diffs
           </button>
+          {board}
         </div>
       );
     }
@@ -106,6 +125,7 @@ export function CompareBanner({ session }: { session: AgentSession }) {
           </button>
         ))}
         <span className="compare-spacer" />
+        {session.compare?.parentId ? boardButton : null}
         <button
           type="button"
           className="btn small"
@@ -132,10 +152,19 @@ export function CompareBanner({ session }: { session: AgentSession }) {
             type="button"
             className="btn small"
             onClick={() => {
-              void api.mergeWorker(session.compare!.parentId!, session.id).then((parent) => {
-                dispatch({ type: "session", session: parent });
-                dispatch({ type: "select", id: parent.id });
-              });
+              void withRiskConfirm((approveRisk) =>
+                api.mergeWorker(session.compare!.parentId!, session.id, { approveRisk }),
+              )
+                .then((parent) => {
+                  dispatch({ type: "session", session: parent });
+                  dispatch({ type: "select", id: parent.id });
+                })
+                .catch((err: unknown) =>
+                  askAlert({
+                    title: "Merge",
+                    body: err instanceof Error ? err.message : "Merge failed",
+                  }),
+                );
             }}
           >
             Merge into parent
@@ -158,6 +187,7 @@ export function CompareBanner({ session }: { session: AgentSession }) {
         >
           Diffs
         </button>
+        {board}
       </div>
     );
   }

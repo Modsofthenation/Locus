@@ -18,6 +18,7 @@ import {
   codingTurnNeedsHuman,
   CODING_VERIFY_NEEDS_HUMAN,
   CODING_FAILED_VERIFY_NEEDS_HUMAN,
+  matchesVerifyCommand,
 } from "./codingLoop.js";
 import { isWorkspaceSearchTool } from "./opsRouting.js";
 
@@ -344,5 +345,54 @@ describe("coding loop walls", () => {
         { role: "assistant", toolCalls: [{ name: "apply_patch", arguments: { patch: "diff" } }] },
       ]),
     ).toBe(CODING_VERIFY_NEEDS_HUMAN);
+  });
+});
+
+describe("configured verify commands", () => {
+  const verifyCommands = ["./scripts/check.sh --fast", "bazel test //...", "dotnet test"];
+
+  it("matches the configured program and sub-command in any shell segment", () => {
+    expect(matchesVerifyCommand("./scripts/check.sh --fast", verifyCommands)).toBe(true);
+    expect(matchesVerifyCommand("scripts/check.sh", verifyCommands)).toBe(true);
+    expect(matchesVerifyCommand("cd svc && bazel test //svc/...", verifyCommands)).toBe(true);
+    expect(matchesVerifyCommand("CI=1 dotnet test --no-build | tee log", verifyCommands)).toBe(
+      true,
+    );
+    expect(matchesVerifyCommand("bazel build //...", verifyCommands)).toBe(false);
+    expect(matchesVerifyCommand("dotnet build", verifyCommands)).toBe(false);
+    expect(matchesVerifyCommand("echo dotnet test", verifyCommands)).toBe(false);
+    expect(matchesVerifyCommand("dotnet test", [])).toBe(false);
+  });
+
+  it("counts a custom command as verification only when configured", () => {
+    expect(looksLikeVerifyCommand("bazel test //...")).toBe(false);
+    expect(looksLikeVerifyCommand("bazel test //...", { verifyCommands })).toBe(true);
+    const calls = [
+      { name: "apply_patch", arguments: { patch: "diff" } },
+      { name: "exec", arguments: { command: "bazel test //pkg:all" } },
+    ];
+    expect(foldCodingVerifyFlags(calls)).toEqual({ mutated: true, verified: false });
+    expect(foldCodingVerifyFlags(calls, {}, { verifyCommands })).toEqual({
+      mutated: true,
+      verified: true,
+    });
+    const messages = [
+      { role: "user", content: "fix it" },
+      { role: "assistant", toolCalls: calls },
+    ];
+    expect(codingTurnNeedsHuman(messages)).toBe(CODING_VERIFY_NEEDS_HUMAN);
+    expect(codingTurnNeedsHuman(messages, { verifyCommands })).toBeUndefined();
+    expect(
+      codingTurnNeedsHuman(
+        [
+          { role: "user", content: "fix it" },
+          {
+            role: "assistant",
+            toolCalls: [calls[0]!, { ...calls[1]!, error: "exit 3" }],
+          },
+        ],
+        { verifyCommands },
+      ),
+    ).toBe(CODING_FAILED_VERIFY_NEEDS_HUMAN);
   });
 });

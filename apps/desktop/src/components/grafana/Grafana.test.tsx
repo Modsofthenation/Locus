@@ -300,7 +300,7 @@ describe("GrafanaPane", () => {
     expect(host.querySelector("[data-testid='grafana-dashboard']")?.textContent).toMatch(
       /Error rate/,
     );
-    expect(host.querySelector("[aria-label='Refresh']")).toBeTruthy();
+    expect(host.querySelector("[aria-label='Refresh'], [aria-label^='Refresh: ']")).toBeTruthy();
     expect(host.textContent).toContain("Watch checkout timeouts.");
     expect(host.textContent).toContain("TimeoutError");
     const investigatePanel = [...host.querySelectorAll("button")].find(
@@ -622,7 +622,9 @@ describe("GrafanaPane", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    const env = host.querySelector("[aria-label='Environment']") as HTMLElement;
+    const env = host.querySelector(
+      "[aria-label='Environment'], [aria-label^='Environment: ']",
+    ) as HTMLElement;
     const groups = host.querySelector(".grafana-var-menu summary") as HTMLElement;
     expect(selectValue(host, "Environment")).toBe("prod");
     expect(getComputedStyle(env).minWidth).toBe("148px");
@@ -957,7 +959,7 @@ describe("GrafanaPane", () => {
         repoId: undefined,
       }),
     );
-    expect(host.querySelector("[aria-label='Service']")).toBeTruthy();
+    expect(host.querySelector("[aria-label='Service'], [aria-label^='Service: ']")).toBeTruthy();
     const marker = host.querySelector("[aria-label='deploy 9f3c1ab']");
     expect(marker).toBeTruthy();
     await act(async () => {

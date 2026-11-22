@@ -4,11 +4,13 @@ import { dirname, join } from "node:path";
 export const LOCUS_MCP_SERVER_NAME = "locus";
 export const LOCUS_CLAUDE_MCP_REL = ".mcp.json";
 export const LOCUS_KIRO_MCP_REL = ".kiro/settings/mcp.json";
+export const LOCUS_GEMINI_SETTINGS_REL = ".gemini/settings.json";
 export const LOCUS_CURSOR_GIT_EXCLUDES = [
   ".cursor/mcp.json",
   ".cursor/rules/locus.mdc",
   ".mcp.json",
   ".kiro/settings/mcp.json",
+  ".gemini/settings.json",
 ] as const;
 
 /** Loopback URL for Cursor CLI on this machine. Worker `agent` must not use this — 127.0.0.1 there is the worker host. */
@@ -109,6 +111,37 @@ export async function writeLocusKiroMcpConfig(input: {
   const workspaceFile = join(input.workspace, LOCUS_KIRO_MCP_REL);
   const wroteWorkspace = await writeMcpJson(workspaceFile, input.url, true, mergeKiroMcpJson);
   if (wroteWorkspace) {
+    await excludeLocusCursorWorkspaceFiles(input.workspace);
+    return workspaceFile;
+  }
+  return undefined;
+}
+
+/**
+ * Gemini CLI project settings. `httpUrl` is Gemini's streamable-HTTP transport (`url` means
+ * SSE there); `trust` skips per-tool confirmation for Locus tools. Other settings keys survive.
+ */
+export function mergeGeminiSettingsJson(
+  existing: unknown,
+  url: string,
+): { mcpServers: Record<string, unknown> } {
+  const base =
+    existing && typeof existing === "object" && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : {};
+  const servers = mcpServersOf(existing);
+  servers[LOCUS_MCP_SERVER_NAME] = { httpUrl: url, trust: true };
+  return { ...base, mcpServers: servers };
+}
+
+export async function writeLocusGeminiMcpConfig(input: {
+  workspace: string;
+  url: string;
+}): Promise<string | undefined> {
+  const workspaceFile = join(input.workspace, LOCUS_GEMINI_SETTINGS_REL);
+  // Do not clobber a hand-written settings file we cannot parse.
+  const wrote = await writeMcpJson(workspaceFile, input.url, false, mergeGeminiSettingsJson);
+  if (wrote) {
     await excludeLocusCursorWorkspaceFiles(input.workspace);
     return workspaceFile;
   }

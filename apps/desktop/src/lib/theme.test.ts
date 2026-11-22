@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { THEME_IDS, THEME_OPTIONS } from "@locus/shared";
+import { THEME_IDS, THEME_OPTIONS, THEME_STYLES, customThemeFromInput } from "@locus/shared";
 import { describe, expect, it } from "vitest";
 import {
   applyChatDensity,
@@ -11,9 +11,13 @@ import {
   editorFontSizePx,
   editorFormatOnSave,
   editorShowMinimap,
+  themeSurfaceAttrs,
 } from "./theme";
 
-const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../index.css"), "utf8");
+const here = dirname(fileURLToPath(import.meta.url));
+const indexCss = readFileSync(join(here, "../index.css"), "utf8");
+const styleCss = readFileSync(join(here, "../styles/themeStyles.css"), "utf8");
+const css = `${indexCss}\n${styleCss}`;
 
 describe("applyTheme", () => {
   it("sets the document palette and color-scheme", () => {
@@ -171,6 +175,83 @@ describe("applyTheme", () => {
         new RegExp(`\\[data-theme="${opt.id}"\\] \\{[^}]*--term-glow:[^}]*--term-title:`),
       );
     }
+  });
+
+  it("styles every theme style group with tokens, scoped rules and palettes", () => {
+    for (const style of THEME_STYLES) {
+      expect(styleCss).toContain(`[data-theme-style="${style}"] {`);
+      expect(styleCss).toContain(
+        `@scope ([data-theme-style="${style}"]) to ([data-theme]:not([data-theme-style="${style}"]))`,
+      );
+      expect(styleCss).toContain(`.theme-thumb[data-theme-style="${style}"]`);
+    }
+    for (const opt of THEME_OPTIONS.filter((t) => t.style)) {
+      expect(styleCss).toContain(`[data-theme="${opt.id}"] {`);
+    }
+    expect(styleCss).toMatch(
+      /html\[data-theme-style="retro"\] #root::before[\s\S]*?--retro-caption/,
+    );
+    expect(styleCss).toContain("prefers-reduced-transparency");
+    expect(styleCss).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*html\[data-theme-style="hud"\] body::after/,
+    );
+    expect(styleCss).toMatch(/@property --y2k-angle/);
+    expect(styleCss).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*@scope \(\[data-theme-style="glitch"\]\)[\s\S]*?animation: none/,
+    );
+    expect(styleCss).toMatch(
+      /@media \(prefers-reduced-transparency: reduce\) \{\s*html\[data-theme-style="riso"\] body::after/,
+    );
+  });
+
+  it("applies generated themes from installed CSS and clears their markers", () => {
+    const theme = customThemeFromInput(
+      {
+        id: "custom-test-glow",
+        name: "Test Glow",
+        scheme: "light",
+        base: "comic",
+        colors: { bg: "#fff8ef", text: "#2b1b14", accent: "#d6453d" },
+        layout: { radius: 20 },
+      },
+      { now: "2026-01-01T00:00:00.000Z" },
+    );
+    expect(applyTheme("custom-test-glow", [theme])).toBe("custom-test-glow");
+    const root = document.documentElement;
+    expect(root.dataset.theme).toBe("custom-test-glow");
+    expect(root.dataset.themeStyle).toBe("comic");
+    expect(root.dataset.themeCustom).toBe("");
+    expect(root.style.colorScheme).toBe("light");
+    expect(document.getElementById("locus-custom-themes")?.textContent).toContain(
+      '[data-theme="custom-test-glow"]',
+    );
+    expect(themeSurfaceAttrs("custom-test-glow")).toMatchObject({
+      "data-theme": "custom-test-glow",
+      "data-theme-style": "comic",
+    });
+    // A generated id that no longer exists falls back to the default theme.
+    expect(applyTheme("custom-test-glow", [])).toBe("ember");
+    expect(root.dataset.themeCustom).toBeUndefined();
+    expect(document.getElementById("locus-custom-themes")?.textContent).toBe("");
+  });
+
+  it("sets and clears the style group on the document", () => {
+    applyTheme("concrete");
+    expect(document.documentElement.dataset.themeStyle).toBe("brutalist");
+    expect(document.documentElement.style.colorScheme).toBe("light");
+    applyTheme("smoke");
+    expect(document.documentElement.dataset.themeStyle).toBe("glass");
+    expect(document.documentElement.style.colorScheme).toBe("dark");
+    applyTheme("visor");
+    expect(document.documentElement.dataset.themeStyle).toBe("hud");
+    applyTheme("gazette");
+    expect(document.documentElement.dataset.themeStyle).toBe("editorial");
+    applyTheme("datamosh");
+    expect(document.documentElement.dataset.themeStyle).toBe("glitch");
+    applyTheme("thermal");
+    expect(document.documentElement.dataset.themeStyle).toBe("receipt");
+    applyTheme("nord");
+    expect(document.documentElement.dataset.themeStyle).toBeUndefined();
   });
 
   it("wires photo themes to a chat-pane scene image", () => {

@@ -1,9 +1,9 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { LOCUS_AGENT_IMAGE } from "@locus/shared";
+import { LOCUS_AGENT_IMAGE, LOCUS_AGENT_IMAGE_REVISION } from "@locus/shared";
 import { ensureLocusAgentImage, resolveAgentImageContext } from "./images.js";
 import type { CommandRunner, ExecResult } from "./runner.js";
 
@@ -11,6 +11,68 @@ describe("locus agent images", () => {
   it("resolves the repo images/agent Dockerfile", () => {
     const context = resolveAgentImageContext();
     expect(context).toMatch(/images[/\\]agent$/);
+  });
+
+  const INSPECT = [
+    "image",
+    "inspect",
+    "-f",
+    '{{ index .Config.Labels "dev.locus.agent.revision" }}',
+    LOCUS_AGENT_IMAGE,
+  ];
+
+  it("keeps images/agent/Dockerfile's revision label in sync with the runtime", async () => {
+    const context = resolveAgentImageContext();
+    const dockerfile = await readFile(join(context!, "Dockerfile"), "utf8");
+    expect(dockerfile).toContain(`LABEL dev.locus.agent.revision="${LOCUS_AGENT_IMAGE_REVISION}"`);
+  });
+
+  it("rebuilds a cached tag built from an older Dockerfile", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-img-stale-"));
+    await writeFile(join(dir, "Dockerfile"), "FROM scratch\n");
+    for (const stale of ["<no value>\n", "1\n"]) {
+      const calls: string[][] = [];
+      const logs: string[] = [];
+      const runner: CommandRunner = {
+        which: async () => "/usr/bin/docker",
+        exists: async () => true,
+        exec: async (_cmd, args) => {
+          calls.push(args);
+          if (args[0] === "image") return { stdout: stale, stderr: "", code: 0 };
+          return { stdout: "built\n", stderr: "", code: 0 };
+        },
+        spawn: () => {
+          throw new Error("unused");
+        },
+      };
+      await ensureLocusAgentImage(
+        runner,
+        "/usr/bin/docker",
+        "locus/agent",
+        (c) => logs.push(c),
+        dir,
+      );
+      expect(calls.map((args) => args[0])).toEqual(["image", "build"]);
+      expect(logs.join("")).toMatch(/outdated/);
+    }
+  });
+
+  it("keeps a stale cached tag when there is no Dockerfile to rebuild from", async () => {
+    const calls: string[][] = [];
+    const runner: CommandRunner = {
+      which: async () => "/usr/bin/docker",
+      exists: async () => true,
+      exec: async (_cmd, args) => {
+        calls.push(args);
+        return { stdout: "1\n", stderr: "", code: 0 };
+      },
+      spawn: () => {
+        throw new Error("unused");
+      },
+    };
+    const empty = await mkdtemp(join(tmpdir(), "locus-img-noctx-"));
+    await ensureLocusAgentImage(runner, "/usr/bin/docker", "locus/agent", undefined, empty);
+    expect(calls).toEqual([INSPECT]);
   });
 
   it("skips public images and rebuilds only when the tag is missing", async () => {
@@ -34,19 +96,23 @@ describe("locus agent images", () => {
     await writeFile(join(dir, "Dockerfile"), "FROM scratch\n");
     await ensureLocusAgentImage(runner, "/usr/bin/docker", "locus/agent", undefined, dir);
     expect(calls).toEqual([
-      ["image", "inspect", LOCUS_AGENT_IMAGE],
-      ["build", "--progress=plain", "-t", LOCUS_AGENT_IMAGE, "-t", "locus/agent:0.21.0", dir],
+      INSPECT,
+      ["build", "--progress=plain", "-t", LOCUS_AGENT_IMAGE, "-t", "locus/agent:0.24.0", dir],
     ]);
     calls.length = 0;
     const present: CommandRunner = {
       ...runner,
       exec: async (_cmd, args) => {
         calls.push(args);
-        return { stdout: "ok\n", stderr: "", code: 0 } satisfies ExecResult;
+        return {
+          stdout: `${LOCUS_AGENT_IMAGE_REVISION}\n`,
+          stderr: "",
+          code: 0,
+        } satisfies ExecResult;
       },
     };
     await ensureLocusAgentImage(present, "/usr/bin/docker", "locus/node", undefined, dir);
-    expect(calls).toEqual([["image", "inspect", LOCUS_AGENT_IMAGE]]);
+    expect(calls).toEqual([INSPECT]);
   });
 
   it("errors when the Dockerfile context is missing", async () => {

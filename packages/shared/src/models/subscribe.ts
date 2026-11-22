@@ -2,6 +2,7 @@ import type { ExtraToolDef } from "./mcp.js";
 import { isForgeKind, normalizeRepoUrl, type ForgeKind } from "./git.js";
 import { computeNextRunAt, parseCronExpr } from "./automation.js";
 import { wrapUntrusted } from "../untrusted.js";
+import { parseCiFixState, type CiFixState } from "../ciLog.js";
 
 export const SUBSCRIBE_TOOL_NAME = "subscribe";
 export const UNSUBSCRIBE_TOOL_NAME = "unsubscribe";
@@ -46,6 +47,8 @@ export interface SessionSubscription {
   once?: boolean;
   issueId?: string;
   alertFingerprint?: string;
+  /** checks: CI fixes already started (de-dupe per head SHA + check set, attempt cap). */
+  ciFix?: CiFixState;
 }
 
 export function isSessionSubscriptionKind(value: unknown): value is SessionSubscriptionKind {
@@ -217,6 +220,7 @@ export function parseSessionSubscription(raw: unknown): SessionSubscription | un
     once: value.once === true ? true : value.once === false ? false : undefined,
     issueId: str(value.issueId),
     alertFingerprint: str(value.alertFingerprint),
+    ciFix: value.kind === "checks" ? parseCiFixState(value.ciFix) : undefined,
   };
   return row;
 }

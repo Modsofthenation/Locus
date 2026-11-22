@@ -25,17 +25,38 @@ export function tracePath(dataDir: string, sessionId: string): string {
   return join(dataDir, "traces", `${id}.jsonl`);
 }
 
+export type TraceListener = (event: TraceEvent) => void;
+
 export class SessionTraceLog {
+  private readonly listeners = new Set<TraceListener>();
+
   constructor(private readonly dataDir: string) {}
+
+  /**
+   * Observe every redacted trace event this log writes (audit log, OTLP export). Listeners run
+   * synchronously and must not throw or block; errors are swallowed so a turn never fails on them.
+   */
+  subscribe(listener: TraceListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
 
   async write(event: TraceEvent): Promise<void> {
     const path = tracePath(this.dataDir, event.sessionId);
-    const line = formatTraceLine({
+    const redacted: TraceEvent = {
       ...event,
       t: event.t || new Date().toISOString(),
       detail: event.detail ? clipTraceDetail(redactKnownSecrets(event.detail)) : undefined,
       args: event.args ? redactedTraceArgs(event.args) : undefined,
-    });
+    };
+    const line = formatTraceLine(redacted);
+    for (const listener of this.listeners) {
+      try {
+        listener(redacted);
+      } catch {
+        /* observers never fail a turn */
+      }
+    }
     await enqueue(path, async () => {
       await mkdir(dirname(path), { recursive: true, mode: 0o700 });
       await appendFile(path, line, { mode: 0o600 });

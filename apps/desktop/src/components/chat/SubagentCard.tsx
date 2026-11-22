@@ -33,6 +33,7 @@ export function SubagentCard({
         <strong>{agent.task}</strong>
         <span className="subagent-card-meta">
           {formatSubagentKind(agent.kind ?? "explore")}
+          {agent.model ? ` · ${agent.model}` : ""}
           {" · "}
           {subagentStatusLabel(agent.status)}
           {spend ? ` · ${spend}` : ""}

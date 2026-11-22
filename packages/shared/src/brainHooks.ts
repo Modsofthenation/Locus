@@ -21,9 +21,21 @@ export function brainIngestScript(port = 7420): string {
   return `#!/usr/bin/env node
 // Personal Locus brain hook. Fail open. Never block the editor session.
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 const source = process.argv[2] || "hook";
 const port = Number(process.env.LOCUS_PORT || ${safePort});
+
+async function operatorToken() {
+  if (process.env.LOCUS_OPERATOR_TOKEN) return process.env.LOCUS_OPERATOR_TOKEN.trim();
+  const home = process.env.LOCUS_HOME || join(homedir(), ".locus");
+  try {
+    return (await readFile(join(home, "operator.token"), "utf8")).trim();
+  } catch {
+    return "";
+  }
+}
 const secret =
   /\\b(sk-[A-Za-z0-9_-]{16,}|sk-proj-[A-Za-z0-9_-]{16,}|xox[abprs]-[A-Za-z0-9-]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,}|eyJ[A-Za-z0-9_-]{20,}\\.[A-Za-z0-9_-]{10,})\\b/g;
 
@@ -65,9 +77,13 @@ try {
   }
   text = clip(text);
   if (text) {
+    const token = await operatorToken();
     await fetch("http://127.0.0.1:" + port + "/api/brain/transcript", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { "x-locus-operator": token } : {}),
+      },
       body: JSON.stringify({ text, source, repo: process.cwd() }),
     }).catch(() => undefined);
   }

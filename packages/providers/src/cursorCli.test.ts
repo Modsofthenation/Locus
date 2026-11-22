@@ -425,7 +425,8 @@ describe("cursor cli adapter", () => {
       text: "Done",
       durationMs: undefined,
       usage: {
-        inputTokens: 20_000,
+        // Cursor reports cache tokens on top of inputTokens; Locus counts the whole prompt.
+        inputTokens: 32_624,
         outputTokens: 80,
         cachedInputTokens: 10_624,
         cacheWriteTokens: 2_000,
@@ -441,7 +442,7 @@ describe("cursor cli adapter", () => {
       ),
     ).toEqual({
       type: "usage",
-      inputTokens: 12_400,
+      inputTokens: 14_400,
       outputTokens: 40,
       cachedInputTokens: 2_000,
     });

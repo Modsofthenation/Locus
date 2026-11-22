@@ -1,3 +1,5 @@
+import type { RailDefaults } from "./railNav";
+
 export const SIDEBAR_PREFS_KEY = "locus.sidebarPrefs";
 export const MOBILE_AGENT_FILTER_KEY = "locus.mobileAgentFilter";
 
@@ -17,8 +19,27 @@ export interface SidebarPrefs {
   width: number;
   /** Pinned rail section ids. Omitted means the default primary list. */
   pinnedSections?: string[];
+  /** Default rail for an empty `pinnedSections`. Missing on saved prefs means `legacy`. */
+  railDefaults: RailDefaults;
+  /** Rail sections whose Pin suggestion was answered (Pin or Not now). */
+  railHintsDone: string[];
   listFilter: SidebarListFilter;
   groupBy: SidebarGroupBy;
+}
+
+/**
+ * Prefs saved before the slimmer rail have no `railDefaults`: that install keeps the old
+ * default rail. No saved prefs at all is a new install.
+ */
+export function railDefaultsFromSaved(parsed: { railDefaults?: unknown } | null): RailDefaults {
+  if (!parsed) return "current";
+  return parsed.railDefaults === "current" ? "current" : "legacy";
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : [];
 }
 
 const FILTERS: readonly MobileAgentFilterPref[] = ["all", "needs", "running", "unseen"];
@@ -38,6 +59,8 @@ export function loadSidebarPrefs(
     showHiddenTeammates: false,
     queries: {},
     width: SIDEBAR_WIDTH_DEFAULT,
+    railDefaults: "current",
+    railHintsDone: [],
     listFilter: "all",
     groupBy: "day",
   };
@@ -54,16 +77,16 @@ export function loadSidebarPrefs(
             ),
           )
         : {};
-    const pinnedSections = Array.isArray(parsed.pinnedSections)
-      ? parsed.pinnedSections.filter((id): id is string => typeof id === "string" && id.length > 0)
-      : undefined;
+    const pinnedSections = stringList(parsed.pinnedSections);
     return {
       showArchived: parsed.showArchived === true,
       runningOnly: parsed.runningOnly === true,
       showHiddenTeammates: parsed.showHiddenTeammates === true,
       queries,
       width: clampWidth(parsed.width),
-      pinnedSections: pinnedSections?.length ? pinnedSections : undefined,
+      pinnedSections: pinnedSections.length ? pinnedSections : undefined,
+      railDefaults: railDefaultsFromSaved(parsed),
+      railHintsDone: stringList(parsed.railHintsDone),
       listFilter:
         parsed.listFilter && (FILTERS as readonly string[]).includes(parsed.listFilter)
           ? parsed.listFilter
@@ -92,6 +115,8 @@ export function saveSidebarPrefs(
     width: clampWidth(prefs.width ?? current.width),
     pinnedSections:
       prefs.pinnedSections !== undefined ? prefs.pinnedSections : current.pinnedSections,
+    railDefaults: prefs.railDefaults ?? current.railDefaults,
+    railHintsDone: prefs.railHintsDone ?? current.railHintsDone,
     listFilter: prefs.listFilter ?? current.listFilter,
     groupBy: prefs.groupBy ?? current.groupBy,
   };

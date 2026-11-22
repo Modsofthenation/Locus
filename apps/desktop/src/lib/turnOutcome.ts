@@ -1,13 +1,17 @@
 import {
   canonicalToolCall,
-  parseExitCode,
+  isTestCommand,
+  parseAnyReviewVerdict,
+  type AgentVerdict,
   patchFilesFromTool,
   rewindTargets,
+  toolCallCommand as commandOf,
+  toolCallPassed as callPassed,
   workspaceChangesFromMessages,
   type AgentSession,
   type ChatMessage,
   type PatchFile,
-  type ToolCall,
+  type TokenUsage,
   type WorkspaceFileChange,
 } from "@locus/shared";
 import { prUrlFromToolOutput } from "./markdown";
@@ -28,29 +32,15 @@ export type TurnOutcome = {
   prUrl?: string;
   /** Checkpoint taken just before this turn's prompt. Rewinding to it undoes the turn. */
   undoCheckpointId?: string;
+  /** Tokens summed over every model call in the turn. */
+  usage?: TokenUsage;
+  /** Wall time from the prompt to the last reply or tool finish, in ms. */
+  durationMs?: number;
+  /** Review verdict `{ verdict, reasons, risk }` emitted this turn. */
+  verdict?: AgentVerdict;
 };
 
-const TEST_COMMAND =
-  /\b(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?::[\w-]+)?|npx\s+(?:vitest|jest|playwright\s+test)|vitest|jest|pytest|go\s+test|cargo\s+test|dotnet\s+test|rspec|mix\s+test|phpunit|(?:\.\/)?gradlew?\s+(?:\S+\s+)*test|mvn\s+(?:\S+\s+)*test|make\s+(?:check|test))\b/i;
-
-/** True when a shell command looks like it runs a test suite. */
-export function isTestCommand(command: string): boolean {
-  return TEST_COMMAND.test(command);
-}
-
-function commandOf(call: ToolCall): string | undefined {
-  const canon = canonicalToolCall(call.name, call.arguments);
-  if (canon.name !== "exec" && canon.name !== "powershell") return undefined;
-  const command = canon.arguments.command;
-  return typeof command === "string" && command.trim() ? command.trim() : undefined;
-}
-
-function callPassed(call: ToolCall): boolean {
-  if (call.error) return false;
-  if (call.approval === "denied") return false;
-  const code = parseExitCode(call.result);
-  return code === undefined || code === 0;
-}
+export { isTestCommand };
 
 function lastUserIndex(messages: ChatMessage[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -86,8 +76,27 @@ export function latestTurnOutcome(
   const tests: TurnTestRun[] = [];
   const patches: PatchFile[] = [];
   let prUrl: string | undefined;
+  const seen = new Set<string>();
+  let input = 0;
+  let output = 0;
+  let cached = 0;
+  let lastAt = Date.parse(messages[start]!.createdAt);
+  const startAt = lastAt;
+  const later = (iso?: string) => {
+    const t = iso ? Date.parse(iso) : NaN;
+    if (Number.isFinite(t) && t > lastAt) lastAt = t;
+  };
   for (const message of turn) {
+    later(message.createdAt);
+    if (message.role === "assistant" && message.usage) {
+      input += message.usage.inputTokens;
+      output += message.usage.outputTokens;
+      cached += message.usage.cachedInputTokens ?? 0;
+    }
     for (const call of message.toolCalls ?? []) {
+      // A tool-result message repeats its call; count each call id once.
+      if (seen.has(call.id)) continue;
+      seen.add(call.id);
       if (!call.finishedAt && call.result === undefined && !call.error) {
         // A call still waiting (approval or otherwise) means the turn is not done.
         return undefined;
@@ -103,13 +112,15 @@ export function latestTurnOutcome(
           patches.push(...patchFilesFromTool("apply_patch", canon.arguments, call.result));
         }
       }
+      later(call.finishedAt);
       if (call.name === "git_pr") {
         prUrl = prUrlFromToolOutput(call.result ?? "") ?? prUrl;
       }
     }
   }
   const files = workspaceChangesFromMessages(turn);
-  if (!files.length && !tests.length && !prUrl) return undefined;
+  const verdict = parseAnyReviewVerdict(turn);
+  if (!files.length && !tests.length && !prUrl && !verdict) return undefined;
 
   const checkpoint = rewindTargets(session)
     .filter((row) => row.messageCount === start)
@@ -123,13 +134,33 @@ export function latestTurnOutcome(
     tests,
     prUrl,
     undoCheckpointId: checkpoint?.id,
+    usage:
+      input || output
+        ? {
+            inputTokens: input,
+            outputTokens: output,
+            ...(cached ? { cachedInputTokens: cached } : {}),
+          }
+        : undefined,
+    durationMs: Number.isFinite(startAt) && lastAt > startAt ? lastAt - startAt : undefined,
+    ...(verdict ? { verdict } : {}),
   };
 }
 
+/** "42s", "3m 05s", "1h 02m" */
+export function formatTurnDuration(ms?: number): string | undefined {
+  if (ms === undefined || !Number.isFinite(ms) || ms < 1000) return undefined;
+  const secs = Math.round(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ${String(secs % 60).padStart(2, "0")}s`;
+  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
+}
+
 /** "3 files changed · +40 −12" */
-export function turnOutcomeHeadline(outcome: Pick<TurnOutcome, "files">): string {
+export function turnOutcomeHeadline(outcome: Pick<TurnOutcome, "files" | "verdict">): string {
   const n = outcome.files.length;
-  if (!n) return "No file changes";
+  if (!n) return outcome.verdict ? "Review" : "No file changes";
   let add = 0;
   let del = 0;
   for (const file of outcome.files) {
@@ -155,4 +186,16 @@ export function turnTestsLabel(tests: TurnTestRun[]): { text: string; ok: boolea
     };
   if (runs.length === 1) return { text: "Tests failed", ok: false };
   return { text: `${failed} of ${runs.length} test runs failed`, ok: false };
+}
+
+/**
+ * Parent session a worktree worker merges into, for the summary card's Merge.
+ * Parallel workers point at their parent through the compare group.
+ */
+export function worktreeMergeParent(
+  session: Pick<AgentSession, "worktree" | "compare">,
+): string | undefined {
+  const group = session.compare;
+  if (!session.worktree || group?.kind !== "workers" || group.role === "parent") return undefined;
+  return group.parentId || undefined;
 }

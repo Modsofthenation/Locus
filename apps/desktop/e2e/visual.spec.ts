@@ -63,7 +63,7 @@ test.describe("visual regression", () => {
 
     test(`new-automation schedule menu ${theme}`, async ({ page }) => {
       await openScreen(page, "new-automation", theme);
-      await page.locator('[aria-label="Schedule"]').click();
+      await page.locator('[aria-label="Schedule"], [aria-label^="Schedule: "]').click();
       await page.locator(".menu-pop.placed").waitFor();
       await expect(page).toHaveScreenshot(`new-automation-schedule-${theme}.png`);
     });

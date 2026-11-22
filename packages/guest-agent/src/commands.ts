@@ -7,15 +7,29 @@ import {
   LOCUS_CHROME_PROFILE_DIR,
   normalizePatchCwd,
   sanitizeRecordingName,
+  x11Key,
+  windowsSendKey,
+  computerKey,
 } from "@locus/shared";
 import { gitCloneCommand, gitFetchCommand, gitPushCommand, argPull, argForge } from "./git.js";
 import type { ToolRequest, ToolResult } from "./types.js";
 import { num, optNum, str, truthy, grepContextLines } from "./types.js";
+import {
+  linuxAccessibilityCommand,
+  windowsAccessibilityCommand,
+  LINUX_CAPABILITIES,
+  WINDOWS_CAPABILITIES,
+} from "./desktopAccessibility.js";
+import { waylandOrX11 } from "./wayland.js";
 
 export const RECORDING_MARKER = "LOCUS_RECORDING:";
 
 export function linuxCommand(req: ToolRequest, _os: GuestOs = "ubuntu"): string {
   switch (req.name) {
+    case "computer_capabilities":
+      return withDisplay(LINUX_CAPABILITIES);
+    case "desktop_action":
+      return withDisplay(linuxAccessibilityCommand(req));
     case "exec":
       return wrapLinuxExec(
         execArgCommands(req.args),
@@ -24,32 +38,38 @@ export function linuxCommand(req: ToolRequest, _os: GuestOs = "ubuntu"): string 
       );
     case "screenshot":
       return withDisplay(
-        "(command -v grim >/dev/null && grim -t png /tmp/locus-screen.png) || scrot -o /tmp/locus-screen.png; base64 -w0 /tmp/locus-screen.png",
+        'locus_shot=$(mktemp /tmp/locus-screen.XXXXXX.png) || exit 1; trap \'rm -f -- "$locus_shot"\' EXIT; ( (command -v grim >/dev/null && grim -t png "$locus_shot") || scrot -o "$locus_shot" ) && base64 -w0 "$locus_shot"',
       );
     case "record_screen":
       return withDisplay(linuxRecordScreen(req));
     case "mouse_move":
-      return withDisplay(`xdotool mousemove ${num(req.args, "x")} ${num(req.args, "y")}`);
+      return withDisplay(
+        waylandOrX11(req, `xdotool mousemove ${num(req.args, "x")} ${num(req.args, "y")}`),
+      );
     case "mouse_click":
-      return withDisplay(linuxClick(req));
+      return withDisplay(waylandOrX11(req, linuxClick(req)));
     case "mouse_drag":
-      return withDisplay(linuxDrag(req));
+      return withDisplay(waylandOrX11(req, linuxDrag(req)));
     case "mouse_scroll":
-      return withDisplay(linuxScroll(req));
+      return withDisplay(waylandOrX11(req, linuxScroll(req)));
     case "key":
-      return withDisplay(`xdotool key ${shell(str(req.args, "key"))}`);
+      return withDisplay(waylandOrX11(req, `xdotool key ${shell(x11Key(str(req.args, "key")))}`));
     case "type_text":
-      return withDisplay(`xdotool type --delay 12 -- ${shell(str(req.args, "text"))}`);
+      return withDisplay(
+        waylandOrX11(req, `xdotool type --delay 12 -- ${shell(str(req.args, "text"))}`),
+      );
     case "clipboard_get":
-      return withDisplay("xclip -selection clipboard -o");
+      return withDisplay(waylandOrX11(req, "xclip -selection clipboard -o"));
     case "clipboard_set":
-      return withDisplay(`printf %s ${shell(str(req.args, "text"))} | xclip -selection clipboard`);
+      return withDisplay(
+        waylandOrX11(req, `printf %s ${shell(str(req.args, "text"))} | xclip -selection clipboard`),
+      );
     case "window_list":
-      return withDisplay("wmctrl -lG");
+      return withDisplay(waylandOrX11(req, "wmctrl -lG"));
     case "window_focus":
-      return withDisplay(`wmctrl -a ${shell(str(req.args, "title"))}`);
+      return withDisplay(waylandOrX11(req, `wmctrl -a ${shell(str(req.args, "title"))}`));
     case "a11y_tree":
-      return withDisplay(linuxA11yTree(str(req.args, "title") || undefined));
+      return withDisplay(linuxAccessibilityCommand(req));
     case "file_read":
       return linuxFileRead(req);
     case "file_write":
@@ -116,6 +136,10 @@ export function linuxCommand(req: ToolRequest, _os: GuestOs = "ubuntu"): string 
 
 export function windowsCommand(req: ToolRequest): string {
   switch (req.name) {
+    case "computer_capabilities":
+      return WINDOWS_CAPABILITIES;
+    case "desktop_action":
+      return windowsAccessibilityCommand(req);
     case "exec":
     case "powershell":
       return wrapWinExec(
@@ -135,8 +159,29 @@ export function windowsCommand(req: ToolRequest): string {
       return windowsDrag(req);
     case "mouse_scroll":
       return windowsScroll(req);
-    case "key":
-      return `Add-Type -AssemblyName System.Windows.Forms; [Windows.Forms.SendKeys]::SendWait('${str(req.args, "key").replace(/'/g, "''")}')`;
+    case "key": {
+      const key = computerKey(str(req.args, "key"));
+      if ((key.modifiers ?? 0) & 4) {
+        if (!key.windowsVirtualKeyCode) throw new Error("Unsupported Windows shortcut key");
+        const modifiers = [
+          [2, 17],
+          [1, 18],
+          [8, 16],
+          [4, 91],
+        ]
+          .filter(([bit]) => (key.modifiers ?? 0) & bit!)
+          .map(([, vk]) => vk!);
+        const down = modifiers
+          .map((vk) => `[LocusKeyboard]::keybd_event(${vk},0,0,[UIntPtr]::Zero)`)
+          .join("; ");
+        const up = modifiers
+          .reverse()
+          .map((vk) => `[LocusKeyboard]::keybd_event(${vk},0,2,[UIntPtr]::Zero)`)
+          .join("; ");
+        return `if (-not ('LocusKeyboard' -as [type])) { Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class LocusKeyboard { [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e); }' }; try { ${down}; [LocusKeyboard]::keybd_event(${key.windowsVirtualKeyCode},0,0,[UIntPtr]::Zero); [LocusKeyboard]::keybd_event(${key.windowsVirtualKeyCode},0,2,[UIntPtr]::Zero) } finally { ${up} }`;
+      }
+      return `Add-Type -AssemblyName System.Windows.Forms; [Windows.Forms.SendKeys]::SendWait('${windowsSendKey(str(req.args, "key")).replace(/'/g, "''")}')`;
+    }
     case "type_text":
       return `Add-Type -AssemblyName System.Windows.Forms; [Windows.Forms.SendKeys]::SendWait('${str(req.args, "text").replace(/'/g, "''")}')`;
     case "clipboard_get":
@@ -201,7 +246,7 @@ export function windowsCommand(req: ToolRequest): string {
     case "git_revert":
       return `git -C '${str(req.args, "path", "C:\\Users\\locus\\workspace").replace(/'/g, "''")}' revert --no-edit '${str(req.args, "commit", "HEAD").replace(/'/g, "''")}'`;
     case "uia_tree":
-      return windowsUiaTree(str(req.args, "title") || undefined);
+      return windowsAccessibilityCommand(req);
     case "start_process":
       return `$cmd = ${windowsUtf8Literal(str(req.args, "command"))}; Start-Process -FilePath cmd.exe -ArgumentList @('/c', $cmd)`;
     case "window_list":
@@ -218,7 +263,8 @@ export function commandFor(os: GuestOs, req: ToolRequest): string {
 }
 
 function withDisplay(command: string): string {
-  return `export DISPLAY="\${DISPLAY:-:0}"; export WAYLAND_DISPLAY="\${WAYLAND_DISPLAY:-wayland-1}"; export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"; if [ -z "$XAUTHORITY" ] || [ ! -r "$XAUTHORITY" ]; then for _xa in "$HOME/.Xauthority" "/run/user/$(id -u)/gdm/Xauthority" "/run/user/$(id -u)/.Xauthority"; do [ -r "$_xa" ] && export XAUTHORITY="$_xa" && break; done; fi; ${command}`;
+  command = `if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"; fi; ${command}`;
+  return `export DISPLAY="\${DISPLAY:-:0}"; export WAYLAND_DISPLAY="\${WAYLAND_DISPLAY:-}"; export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"; if [ -z "$WAYLAND_DISPLAY" ] && [ -S "$XDG_RUNTIME_DIR/wayland-1" ]; then export WAYLAND_DISPLAY=wayland-1; fi; if [ -z "$XAUTHORITY" ] || [ ! -r "$XAUTHORITY" ]; then for _xa in "$HOME/.Xauthority" "/run/user/$(id -u)/gdm/Xauthority" "/run/user/$(id -u)/.Xauthority"; do [ -r "$_xa" ] && export XAUTHORITY="$_xa" && break; done; fi; ${command}`;
 }
 
 export function parseRecordScreenResult(output: string): {
@@ -667,23 +713,6 @@ function windowsGitStash(req: ToolRequest): string {
     : `git -C '${path}' stash push -u -m locus`;
 }
 
-function linuxA11yTree(title?: string): string {
-  const match = title
-    ? `echo '=== match ==='; wmctrl -lx | grep -i -F -- ${shell(title)} || true; `
-    : "";
-  return [
-    "echo '=== windows ==='",
-    "wmctrl -lG",
-    "echo '=== classes ==='",
-    "wmctrl -lx",
-    "echo '=== focused ==='",
-    "xdotool getwindowfocus getwindowname getwindowgeometry getwindowpid 2>/dev/null || true",
-    match ? match.trim() : "",
-  ]
-    .filter(Boolean)
-    .join("; ");
-}
-
 function windowsMove(x: number, y: number): string {
   return `Add-Type -AssemblyName System.Windows.Forms; [Windows.Forms.Cursor]::Position = New-Object Drawing.Point ${x},${y}`;
 }
@@ -716,39 +745,6 @@ function windowsScroll(req: ToolRequest): string {
   const ensure =
     "if (-not ('LocusMouse' -as [type])) { Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class LocusMouse { [DllImport(\"user32.dll\")] public static extern void mouse_event(int f, int dx, int dy, int c, int extra); }' }";
   return `${move}${ensure}; [LocusMouse]::mouse_event(${flag},0,0,${wheel},0)`;
-}
-
-function windowsUiaTree(title?: string): string {
-  const filter = title
-    ? [
-        `$title = '${title.replace(/'/g, "''")}'`,
-        "$cond = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $title)",
-        "$hit = $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $cond)",
-        "if ($hit) { $root = $hit } else { Write-Output \"No window matching '$title'\"; return }",
-      ].join("\n")
-    : "";
-  return [
-    "Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes",
-    "$root = [Windows.Automation.AutomationElement]::RootElement",
-    filter,
-    "$script:n = 0",
-    "function Dump([Windows.Automation.AutomationElement]$el, [int]$depth) {",
-    "  if ($null -eq $el -or $script:n -ge 80 -or $depth -gt 6) { return }",
-    "  try {",
-    "    $script:n++",
-    "    $c = $el.Current",
-    "    $r = $c.BoundingRectangle",
-    "    $pad = ' ' * ($depth * 2)",
-    "    Write-Output ('{0}{1} name={2} id={3} ({4},{5} {6}x{7})' -f $pad, $c.ControlType.ProgrammaticName, $c.Name, $c.AutomationId, [int]$r.X, [int]$r.Y, [int]$r.Width, [int]$r.Height)",
-    "    $w = [Windows.Automation.TreeWalker]::ControlViewWalker",
-    "    for ($ch = $w.GetFirstChild($el); $null -ne $ch; $ch = $w.GetNextSibling($ch)) { Dump $ch ($depth + 1) }",
-    "  } catch {}",
-    "}",
-    "Dump $root 0",
-    "Write-Output ('nodes=' + $script:n)",
-  ]
-    .filter(Boolean)
-    .join("\n");
 }
 
 function gitCommitCommand(path: string, message: string, windows: boolean): string {

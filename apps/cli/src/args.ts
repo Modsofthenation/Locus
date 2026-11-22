@@ -41,6 +41,18 @@ const BOOLEAN_FLAGS = new Set([
   "no-enhance",
   "include-disks",
   "inspect",
+  "dry-run",
+  "require-issue",
+  "no-setup",
+  "all",
+  "local",
+  "post-comment",
+  "no-auto-deny",
+  "ephemeral",
+  "include-content",
+  "no-traces",
+  "no-metrics",
+  "keep-home",
 ]);
 
 const VALUE_FLAGS = new Set([
@@ -145,9 +157,29 @@ const VALUE_FLAGS = new Set([
   "current",
   "passphrase-env",
   "poll-ms",
+  "since",
+  "suite",
+  "test-command",
+  "setup",
+  "max-commits",
+  "format",
+  "allow",
+  "pr",
+  "endpoint",
+  "protocol",
+  "header",
+  "service-name",
+  "sample",
+  "daily-usd",
+  "daily-tokens",
+  "automation",
+  "project",
+  "reason",
+  "scope",
+  "home",
 ]);
 
-const MULTI_VALUE_FLAGS = new Set(["arg", "repo", "model", "case"]);
+const MULTI_VALUE_FLAGS = new Set(["arg", "repo", "model", "case", "allow", "header"]);
 
 function appendFlag(prev: FlagValue | undefined, name: string, next: string): string {
   if (MULTI_VALUE_FLAGS.has(name) && typeof prev === "string" && prev.length) {

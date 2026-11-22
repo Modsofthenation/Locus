@@ -300,3 +300,84 @@ describe("executeForgeTool", () => {
     });
   });
 });
+
+describe("git_ci_logs", () => {
+  const ready = {
+    account: {
+      id: "gh",
+      kind: "github" as const,
+      name: "GitHub",
+      apiBaseUrl: "https://api.github.com",
+    },
+    owner: "acme",
+    repo: "demo",
+  };
+  const report = {
+    headSha: "abc123",
+    pending: [],
+    failures: [
+      {
+        name: "test",
+        status: "failure" as const,
+        source: "actions" as const,
+        logAvailable: true,
+        log: {
+          text: "Error: boom",
+          regions: 1,
+          failingTests: ["t1"],
+          truncated: false,
+          totalLines: 1,
+        },
+      },
+    ],
+  };
+
+  it("finds the PR for the session branch and passes check and budget through", async () => {
+    const ciReport = vi.fn(async () => report);
+    const listPulls = vi.fn(async () => [
+      { number: 3, headRef: "main" },
+      { number: 4, headRef: "feat" },
+    ]);
+    const result = await executeForgeTool(
+      {
+        forge: { ciReport, listPulls } as never,
+        attachPull: async () => undefined,
+        requireForge: async () => ready,
+        resolveGitHeadBranch: async () => "feat",
+        loadLoadPathNotes: async () => undefined,
+      },
+      session(),
+      "git_ci_logs",
+      { check: "test", maxChars: 99_999 },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("PR #4");
+    expect(result.output).toContain("Failing tests: t1");
+    expect(ciReport).toHaveBeenCalledWith(ready.account, "acme", "demo", {
+      number: 4,
+      check: "test",
+      maxChars: 16_000,
+    });
+  });
+
+  it("uses pr= and refuses when no PR matches the branch", async () => {
+    const ciReport = vi.fn(async () => report);
+    const deps = {
+      forge: { ciReport, listPulls: async () => [] } as never,
+      attachPull: async () => undefined,
+      requireForge: async () => ready,
+      resolveGitHeadBranch: async () => "lonely",
+      loadLoadPathNotes: async () => undefined,
+    };
+    const explicit = await executeForgeTool(deps, session(), "git_ci_logs", { pr: 12 });
+    expect(ciReport).toHaveBeenCalledWith(ready.account, "acme", "demo", {
+      number: 12,
+      check: undefined,
+      maxChars: 8_000,
+    });
+    expect(explicit.ok).toBe(true);
+    const missing = await executeForgeTool(deps, session(), "git_ci_logs", {});
+    expect(missing).toMatchObject({ ok: false });
+    expect(missing.output).toContain("branch lonely");
+  });
+});

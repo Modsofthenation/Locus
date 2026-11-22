@@ -123,7 +123,16 @@ describe("worker browser driver", () => {
     const sent: string[] = [];
     const fakeWs = {
       readyState: 1,
-      send: (data: string) => sent.push(data),
+      send: (data: string) => {
+        sent.push(data);
+        const message = JSON.parse(data) as { requestId?: string };
+        if (message.requestId)
+          queueMicrotask(() =>
+            onMessage?.(
+              JSON.stringify({ type: "action-result", requestId: message.requestId, ok: true }),
+            ),
+          );
+      },
       on: (type: string, fn: () => void) => {
         if (type === "close") fakeWs.closeFn = fn;
       },

@@ -7,6 +7,7 @@ import { commandFor, decorateRemoteToolResult, isSupported } from "./commands.js
 import type { GuestRuntime, ToolRequest, ToolResult } from "./types.js";
 import { str } from "./types.js";
 import { powershellEncodedCommand } from "./winrm.js";
+import { windowsDesktopCommand } from "./windowsDesktop.js";
 
 export interface SshTarget {
   host: string;
@@ -52,7 +53,8 @@ export class SshGuestRuntime implements GuestRuntime {
     if (req.name === "apply_patch" && !isWindows(this.os)) {
       return this.applyPatchInGuest(req);
     }
-    const remote = commandFor(this.os, req);
+    const command = commandFor(this.os, req);
+    const remote = isWindows(this.os) ? windowsDesktopCommand(req.name, command) : command;
     const argv = sshArgv(
       this.target,
       isWindows(this.os) ? powershellEncodedCommand(remote) : remote,

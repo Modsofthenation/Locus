@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.24.0 — 2026-11-22
+
+Slack PR reviewers, operator-token API auth, sandboxed CLI agents, generated themes and 48 new palettes (186 in total), Android and Unreal workspaces, Fargate workers that open as a chat, any-language verification, and computer-use reliability. Settings → About is **0.24.0**.
+
+**Slack PR reviewers.** Settings → Reviewers points a reviewer at a Slack channel. When someone posts a PR link, it reviews the PR and replies in that thread and on the PR. You can ask it to review again after a skip, review PRs nobody posted, run several reviews at once, use a CLI agent you already subscribe to, clone the repo to check around the diff, and answer questions in the thread. Tagging the bot in any thread of its channel starts a review there. Adaptive and smart polling slow a quiet reviewer down; Live logs show every Slack and forge API call as it happens.
+
+**Reviewer quality.** Blocker and major findings are double-checked before posting. Settings shows accuracy, traces, in-progress and open chats, cost caps, skip labels, base-branch and requester filters, path-specific instructions, and a reaction legend that matches your channel. Reviews learn from dismissals and can propose them as REVIEW.md.
+
+**Security.** The control plane no longer treats every process on this machine as you: `/api` and `/ws` need an operator token. CLI agents on Docker, worker, and VM sessions run in a sandbox, cannot reach the Locus HTTP API or other sessions, and Slack reviewer CLIs get the same treatment. Worker MCP is limited to that session. Opt out with `LOCUS_OPERATOR_AUTH=off` or `LOCUS_CLI_SANDBOX=off`.
+
+**Appearance.** Generated themes let you describe a look, build one in the editor, or ask an agent to restyle the app. Eight structural styles (Brutalist, Glass, Paper, Retro OS, Blueprint, Neon, Clay, Zen) and eight more (Pixel, Comic, Sketch, HUD, Skeuo, Bauhaus, Y2K, Editorial, plus Origami, Art Deco, Memphis, Typewriter, Riso, Glitch, Kawaii, Receipt) bring the catalog to 186 palettes. Design has a Present mode for full-screen walkthroughs.
+
+**Engineering.** Verification is no longer npm-only: environment files and detected presets cover Python, Go, Rust, Maven, Gradle and Make. Agents get language-server navigation and rename. Benchmarks are a tracked regression suite. OpenTelemetry export, a hash-chained audit log, daily spend budgets, headless `locus ci run`, CI logs with a fix loop, evidence-based Rank, and risk-gated merge are all available.
+
+**Workspaces.** More → Android opens native (and React Native / Expo) app projects beside an emulator canvas. Games offers Unreal next to Unity and Godot. Fargate workers open as a chat: pick one in New agent and the task boots in the background. Plan-usage meters sit next to the model picker for agent CLIs.
+
+**Turns and first runs.** The turn card shows cost and time. Compare ranks parallel attempts. Start-up steps replace a spinner. Try a sample task runs a tiny Host repo with one failing test. Computer-use is more reliable, with native VM actions and shared control. Home, Reviewers, Android and Design are easier to read, and you can create from the collapsed sidebar.
+
+**Also.** Skills load from folder layouts, and chat can add skills and MCP servers. A step can be handed to another model. Git tools work in a folder that already holds a clone. Stale `locus/agent` images rebuild when they are missing iptables.
+
 ## 0.21.0 — 2026-11-13
 
 Decide from the Inbox, a turn summary card, tray and actionable notifications, encrypted backup and restore, background update checks with one-click install, a model benchmark, a smoother first hour with a public repo, and much faster workspaces on large repos. Settings → About is **0.21.0**.

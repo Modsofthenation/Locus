@@ -1,8 +1,9 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { hostname as osHostname } from "node:os";
+import { homedir, hostname as osHostname } from "node:os";
 import { join, sep } from "node:path";
 import { mkdir, rm } from "node:fs/promises";
 import { Hono } from "hono";
+import { WORKER_CLI_REPLAY_HEADER, WorkerCliReplay } from "./cliReplay.js";
 import type { ComputerUseToolName, VmInstance } from "@locus/shared";
 import {
   isGuestReady,
@@ -52,6 +53,11 @@ import { resolveWorkerHostDir } from "./hostDir.js";
 import { planeFromHeaders, planeFromRecord } from "./plane.js";
 import { saveWorkerGoldenDisk, safeWorkerImageId, workerGoldenDiskInfo } from "./goldenDisk.js";
 import { guestVisibleToPlane } from "@locus/shared";
+import {
+  resolveCliSandbox,
+  type CliSandboxPolicy,
+  type ResolvedCliSandbox,
+} from "@locus/shared/cliSandbox";
 
 export interface WorkerAppOptions {
   engine: DockerEngine;
@@ -68,6 +74,11 @@ export interface WorkerAppOptions {
   allowHostRuntime?: boolean;
   /** Optional QEMU hypervisor for VM guests on this worker. */
   hypervisor?: Hypervisor;
+  /**
+   * CLI sandbox for Docker guests (tests override). Defaults to bubblewrap / sandbox-exec
+   * via {@link resolveCliSandbox}, honouring `LOCUS_CLI_SANDBOX=off`.
+   */
+  cliSandbox?: (policy: CliSandboxPolicy) => ResolvedCliSandbox | undefined;
 }
 
 export function createWorkerApp(opts: WorkerAppOptions): Hono {
@@ -104,6 +115,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   };
   const app = new Hono();
   const jailProxies = new Map<string, AllowlistProxy>();
+  const cliRuns = new Map<string, WorkerCliReplay>();
   const cliMcpPending = new Map<
     string,
     Map<
@@ -275,6 +287,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
   app.post("/v1/guests/:id/stop", async (c) => {
     const id = c.req.param("id");
     if (!getGuest(c, id)) return c.json({ error: "Not found" }, 404);
+    cliRuns.get(id)?.stop();
     const host = hostGuests.get(id);
     if (host) {
       host.status = "stopped";
@@ -294,6 +307,8 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
     try {
       const vm = getGuest(c, id);
       if (!vm) return c.json({ error: "Not found" }, 404);
+      cliRuns.get(id)?.stop();
+      cliRuns.delete(id);
       guests.drop(id);
       jailProxies.get(id)?.close();
       jailProxies.delete(id);
@@ -622,6 +637,43 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
     }
   });
 
+  function cliResponse(stream: ReadableStream<Uint8Array>, replay = false): Response {
+    return new Response(stream, {
+      headers: {
+        "content-type": "application/x-ndjson; charset=utf-8",
+        "cache-control": "no-store",
+        ...(replay ? { [WORKER_CLI_REPLAY_HEADER]: "1" } : {}),
+      },
+    });
+  }
+
+  app.get("/v1/guests/:id/cursor-cli/status", (c) => {
+    const id = c.req.param("id");
+    if (!getGuest(c, id)) return c.json({ error: "Not found" }, 404);
+    const run = cliRuns.get(id);
+    return c.json({ state: run ? (run.active ? "running" : "finished") : "unknown" });
+  });
+
+  app.get("/v1/guests/:id/cursor-cli/:runId", (c) => {
+    const id = c.req.param("id");
+    const run = getGuest(c, id) && cliRuns.get(id);
+    if (!run || run.id !== c.req.param("runId"))
+      return c.json({ error: "Worker turn is unavailable" }, 404);
+    const offset = Number(c.req.query("offset") ?? "0");
+    if (!run.accepts(offset))
+      return c.json({ error: "Worker output fell outside the replay window" }, 410);
+    return cliResponse(run.stream(offset), true);
+  });
+
+  app.delete("/v1/guests/:id/cursor-cli/:runId", (c) => {
+    const id = c.req.param("id");
+    const run = getGuest(c, id) && cliRuns.get(id);
+    if (!run || run.id !== c.req.param("runId"))
+      return c.json({ error: "Worker turn is unavailable" }, 404);
+    run.stop();
+    return c.json({ ok: true });
+  });
+
   app.post("/v1/guests/:id/cursor-cli", async (c) => {
     const vm = getGuest(c, c.req.param("id"));
     if (!vm) return c.json({ error: "Not found" }, 404);
@@ -639,6 +691,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
       command?: string;
       args?: unknown;
       apiKey?: string;
+      runId?: string;
     };
     const command = typeof body.command === "string" ? body.command.trim() : "";
     const args = Array.isArray(body.args)
@@ -649,6 +702,32 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
       return c.json({ error: "Cursor CLI command is not allowed" }, 400);
     }
     const guestId = vm.id;
+    const runId = body.runId;
+    if (runId !== undefined && (typeof runId !== "string" || !/^[a-f0-9-]{36}$/.test(runId))) {
+      return c.json({ error: "Invalid worker turn ID" }, 400);
+    }
+    if (cliMcpPending.has(guestId))
+      return c.json({ error: "This guest already has a running CLI turn" }, 409);
+    // Docker guests: the CLI runs on this worker, not in the container. Its own shell tool
+    // must not see the worker data dir (token, TLS key, other guests' workspaces). Host
+    // guests are host access by design; VM guests run the CLI in the guest over SSH.
+    let sandbox: ResolvedCliSandbox | undefined;
+    if (!vmGuest && vm.runtime !== "host") {
+      sandbox = (opts.cliSandbox ?? defaultWorkerCliSandbox)({
+        locusHome:
+          opts.dataDir ?? process.env.LOCUS_WORKER_HOME ?? join(homedir(), ".locus-worker"),
+        workspace,
+      });
+      if (sandbox && !sandbox.ok) return c.json({ error: sandbox.reason }, 503);
+    }
+    const sandboxWrap = sandbox?.ok ? sandbox.wrap : undefined;
+    const replay = runId
+      ? new WorkerCliReplay(runId, () => {
+          if (cliRuns.get(guestId)?.id === runId) cliRuns.delete(guestId);
+        })
+      : undefined;
+    if (replay) cliRuns.set(guestId, replay);
+    const signal = replay?.abort.signal ?? c.req.raw.signal;
     const pending = new Map<
       string,
       {
@@ -665,117 +744,139 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
       for (const slot of pending.values()) slot.reject(err);
       pending.clear();
     };
-    const stream = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        const enqueueLine = (obj: unknown) => {
-          if (closed) return;
-          try {
-            controller.enqueue(encoder.encode(`${JSON.stringify(obj)}\n`));
-          } catch {
-            closed = true;
-          }
-        };
+    const runCli = async (write: (value: Uint8Array) => void, finish: () => void) => {
+      const enqueueLine = (obj: unknown) => {
+        if (closed) return;
         try {
-          const mcp = await startWorkerLoopbackMcp({
-            sessionId,
-            onRequest: (req) =>
-              new Promise<WorkerLoopbackMcpReply>((resolve, reject) => {
-                if (closed) {
-                  reject(new Error("Cursor CLI MCP stream closed"));
-                  return;
-                }
-                const timer = setTimeout(() => {
-                  pending.delete(req.id);
-                  reject(new Error("Control plane MCP reply timed out"));
-                }, WORKER_CLI_MCP_TIMEOUT_MS);
-                pending.set(req.id, {
-                  resolve: (reply) => {
-                    clearTimeout(timer);
-                    resolve(reply);
-                  },
-                  reject: (err) => {
-                    clearTimeout(timer);
-                    reject(err);
-                  },
-                });
-                enqueueLine({
-                  type: WORKER_CLI_MCP_EVENT,
-                  id: req.id,
-                  path: req.path,
-                  body: req.body,
-                });
-              }),
-          });
-          closeMcp = mcp.close;
-          const spawned = vmGuest
-            ? await spawnVmWorkerCursorCli({
-                vm,
-                guests: guests.forVm(vm),
+          write(encoder.encode(`${JSON.stringify(obj)}\n`));
+        } catch {
+          closed = true;
+        }
+      };
+      const abortRun = () => {
+        killCli?.();
+        failPending(new Error("Worker CLI turn stopped"));
+      };
+      signal.addEventListener("abort", abortRun, { once: true });
+      try {
+        const mcp = await startWorkerLoopbackMcp({
+          sessionId,
+          onRequest: (req) =>
+            new Promise<WorkerLoopbackMcpReply>((resolve, reject) => {
+              if (closed) {
+                reject(new Error("Cursor CLI MCP stream closed"));
+                return;
+              }
+              const timer = setTimeout(() => {
+                pending.delete(req.id);
+                reject(new Error("Control plane MCP reply timed out"));
+              }, WORKER_CLI_MCP_TIMEOUT_MS);
+              pending.set(req.id, {
+                resolve: (reply) => {
+                  clearTimeout(timer);
+                  resolve(reply);
+                },
+                reject: (err) => {
+                  clearTimeout(timer);
+                  reject(err);
+                },
+              });
+              enqueueLine({
+                type: WORKER_CLI_MCP_EVENT,
+                id: req.id,
+                path: req.path,
+                body: req.body,
+              });
+            }),
+        });
+        closeMcp = mcp.close;
+        if (closed || signal.aborted) return;
+        const spawned = vmGuest
+          ? await spawnVmWorkerCursorCli({
+              vm,
+              guests: guests.forVm(vm),
+              command,
+              args,
+              apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
+              gitMcpUrl: mcp.sessionUrl,
+              mcpPort: mcp.port,
+              signal,
+            })
+          : spawnWorkerCursorCli(
+              {
                 command,
                 args,
                 apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
                 gitMcpUrl: mcp.sessionUrl,
-                mcpPort: mcp.port,
-                signal: c.req.raw.signal,
-              })
-            : spawnWorkerCursorCli(
-                {
-                  command,
-                  args,
-                  apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
-                  gitMcpUrl: mcp.sessionUrl,
-                },
-                workspace,
-                c.req.raw.signal,
-              );
-          if (!vmGuest) await writeWorkerLocusMcpConfig(workspace, mcp.sessionUrl);
-          killCli = spawned.kill;
-          const reader = spawned.stream.getReader();
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              if (closed) break;
-              if (value) controller.enqueue(value);
-            }
-          } finally {
-            try {
-              await reader.cancel();
-            } catch {
-              /* ignore */
-            }
+              },
+              workspace,
+              signal,
+              sandboxWrap,
+            );
+        killCli = spawned.kill;
+        if (!vmGuest) await writeWorkerLocusMcpConfig(workspace, mcp.sessionUrl);
+        if (signal.aborted) abortRun();
+        const reader = spawned.stream.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (closed) break;
+            if (value) write(value);
           }
-        } catch (err) {
-          enqueueLine({
-            type: "error",
-            message: err instanceof Error ? err.message : "Worker Cursor CLI MCP failed",
-          });
         } finally {
-          closed = true;
-          failPending(new Error("Cursor CLI MCP stream closed"));
-          cliMcpPending.delete(guestId);
-          await closeMcp?.().catch(() => undefined);
           try {
-            controller.close();
+            await reader.cancel();
           } catch {
-            /* already closed */
+            /* ignore */
           }
         }
-      },
-      cancel() {
+      } catch (err) {
+        enqueueLine({
+          type: "error",
+          message: err instanceof Error ? err.message : "Worker Cursor CLI MCP failed",
+        });
+      } finally {
         closed = true;
+        signal.removeEventListener("abort", abortRun);
         killCli?.();
         failPending(new Error("Cursor CLI MCP stream closed"));
         cliMcpPending.delete(guestId);
-        void closeMcp?.().catch(() => undefined);
-      },
-    });
-    return new Response(stream, {
-      headers: {
-        "content-type": "application/x-ndjson; charset=utf-8",
-        "cache-control": "no-store",
-      },
-    });
+        await closeMcp?.().catch(() => undefined);
+        finish();
+      }
+    };
+    if (replay) {
+      const stream = replay.stream(0);
+      void runCli(
+        (value) => replay.write(value),
+        () => replay.finish(),
+      );
+      return cliResponse(stream, true);
+    }
+    return cliResponse(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          void runCli(
+            (value) => controller.enqueue(value),
+            () => {
+              if (!closed) return;
+              try {
+                controller.close();
+              } catch {
+                /* already cancelled */
+              }
+            },
+          );
+        },
+        cancel() {
+          closed = true;
+          killCli?.();
+          failPending(new Error("Cursor CLI MCP stream closed"));
+          void closeMcp?.().catch(() => undefined);
+        },
+      }),
+    );
   });
 
   app.post("/v1/guests/:id/cursor-cli/mcp-reply", async (c) => {
@@ -963,6 +1064,10 @@ async function spawnVmWorkerCursorCli(input: {
     },
   });
   return { stream, kill: () => handle.kill?.() };
+}
+
+function defaultWorkerCliSandbox(policy: CliSandboxPolicy): ResolvedCliSandbox | undefined {
+  return resolveCliSandbox(policy, { where: "this worker" });
 }
 
 function isDefaultHostWorkspace(dataDir: string, diskPath: string): boolean {

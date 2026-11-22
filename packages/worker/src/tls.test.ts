@@ -8,7 +8,12 @@ import { MockDockerEngine } from "@locus/hypervisor";
 import { X509Certificate } from "node:crypto";
 import { createWorkerApp } from "./app.js";
 import { WorkerClient } from "./client.js";
-import { createSelfSignedWorkerTls, loadOrCreateWorkerTls } from "./tls.js";
+import {
+  createSelfSignedWorkerTls,
+  loadOrCreateWorkerTls,
+  pinnedHttpsFetch,
+  workerTlsFromEnv,
+} from "./tls.js";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -29,6 +34,45 @@ describe("worker TLS", () => {
     const again = await loadOrCreateWorkerTls(dir);
     expect(again.created).toBe(false);
     expect(again.fingerprint).toBe(first.fingerprint);
+  });
+
+  it("delivers a pinned HTTPS response chunk before the response finishes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-worker-tls-stream-"));
+    const tls = createSelfSignedWorkerTls();
+    const app = createWorkerApp({ engine: new MockDockerEngine(dir), token: "secret" });
+    let writer: ReadableStreamDefaultController<Uint8Array> | undefined;
+    app.get(
+      "/stream-test",
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              writer = controller;
+              controller.enqueue(new TextEncoder().encode("first"));
+            },
+          }),
+        ),
+    );
+    const { port, close } = await listenHttps(app, tls);
+    cleanup.push(close);
+    const abort = AbortSignal.timeout(2000);
+    const { response } = await pinnedHttpsFetch(
+      `https://127.0.0.1:${port}/stream-test`,
+      {
+        headers: { authorization: "Bearer secret" },
+        signal: abort,
+      },
+      tls.fingerprint,
+      true,
+    );
+    const reader = response.body!.getReader();
+    try {
+      expect(new TextDecoder().decode((await reader.read()).value)).toBe("first");
+      writer?.close();
+      expect((await reader.read()).done).toBe(true);
+    } finally {
+      await reader.cancel();
+    }
   });
 
   it("pins the worker certificate on HTTPS", async () => {
@@ -102,3 +146,25 @@ function listenHttps(
     server.on("error", reject);
   });
 }
+
+describe("workerTlsFromEnv", () => {
+  it("loads a control-plane minted identity and keeps its fingerprint", () => {
+    const minted = createSelfSignedWorkerTls();
+    const loaded = workerTlsFromEnv({
+      LOCUS_WORKER_TLS_CERT_B64: Buffer.from(minted.cert).toString("base64"),
+      LOCUS_WORKER_TLS_KEY_B64: Buffer.from(minted.key).toString("base64"),
+    });
+    expect(loaded?.fingerprint).toBe(minted.fingerprint);
+    expect(loaded?.key).toBe(minted.key);
+  });
+
+  it("ignores a half-set pair and rejects non-PEM values", () => {
+    expect(workerTlsFromEnv({ LOCUS_WORKER_TLS_CERT_B64: "abc" })).toBeUndefined();
+    expect(() =>
+      workerTlsFromEnv({
+        LOCUS_WORKER_TLS_CERT_B64: Buffer.from("nope").toString("base64"),
+        LOCUS_WORKER_TLS_KEY_B64: Buffer.from("nope").toString("base64"),
+      }),
+    ).toThrow(/not PEM/);
+  });
+});

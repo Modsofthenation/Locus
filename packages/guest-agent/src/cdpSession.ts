@@ -179,12 +179,25 @@ export class LiveCdp {
     this.closeHandlers.push(fn);
   }
 
-  call(method: string, params: Record<string, unknown>): Promise<unknown> {
+  call(method: string, params: Record<string, unknown>, timeoutMs = 8000): Promise<unknown> {
     if (this.closed) return Promise.reject(new Error("CDP closed"));
     const id = this.nextId;
     this.nextId += 1;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`CDP timeout: ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
       this.ws.send(JSON.stringify({ id, method, params }));
     });
   }

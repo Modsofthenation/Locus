@@ -1,3 +1,5 @@
+import { riskGateRefusal } from "@locus/shared";
+import { RiskGateError } from "../session/riskGate.js";
 import type { Hono } from "hono";
 import type { CreateSessionInput } from "@locus/shared";
 import { parseIssueListState, parsePullListState, wantsFreshPulls } from "@locus/shared";
@@ -230,9 +232,30 @@ export function registerRepoRoutes(app: Hono, repos: RepoService | undefined): v
     const number = Number(c.req.param("number"));
     if (!Number.isInteger(number) || number <= 0)
       return c.json({ error: "Invalid pull number" }, 400);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      approveRisk?: boolean;
+      requestApproval?: boolean;
+    };
     try {
-      return c.json(await repos.merge(c.req.param("id"), number));
+      return c.json(
+        await repos.merge(c.req.param("id"), number, { approveRisk: body.approveRisk === true }),
+      );
     } catch (err) {
+      if (err instanceof RiskGateError) {
+        if (body.requestApproval === true) {
+          const queued = await repos.requestMergeApproval(c.req.param("id"), number);
+          return c.json(
+            {
+              pending: true,
+              sessionId: queued.sessionId,
+              toolCallId: queued.toolCallId,
+              ...riskGateRefusal(queued.gate),
+            },
+            202,
+          );
+        }
+        return c.json(riskGateRefusal(err.gate), 409);
+      }
       const { message, status } = repoError(err);
       return c.json({ error: message }, status);
     }
@@ -391,7 +414,16 @@ export function registerRepoRoutes(app: Hono, repos: RepoService | undefined): v
     if (!Number.isInteger(number) || number <= 0)
       return c.json({ error: "Invalid pull number" }, 400);
     try {
-      const { session } = await repos.startReviewSession(c.req.param("id"), number);
+      const body = (await c.req.json().catch(() => ({}))) as {
+        providerId?: unknown;
+        model?: unknown;
+        maxUsd?: unknown;
+      };
+      const { session } = await repos.startReviewSession(c.req.param("id"), number, {
+        providerId: typeof body.providerId === "string" ? body.providerId : undefined,
+        model: typeof body.model === "string" ? body.model : undefined,
+        maxUsd: typeof body.maxUsd === "number" ? body.maxUsd : undefined,
+      });
       return c.json(session, 201);
     } catch (err) {
       const { message, status } = repoError(err);

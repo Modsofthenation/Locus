@@ -27,13 +27,13 @@ export class WorkerGuestHub {
   setLiveDocker(live: boolean): void {
     if (this.liveDocker === live) return;
     this.liveDocker = live;
-    this.runtimes.clear();
+    for (const id of this.runtimes.keys()) this.drop(id);
   }
 
   setLiveQemu(live: boolean): void {
     if (this.liveQemu === live) return;
     this.liveQemu = live;
-    this.runtimes.clear();
+    for (const id of this.runtimes.keys()) this.drop(id);
   }
 
   forVm(vm: VmInstance): GuestRuntime {
@@ -56,6 +56,7 @@ export class WorkerGuestHub {
   }
 
   drop(vmId: string): void {
+    this.runtimes.get(vmId)?.dispose?.();
     this.runtimes.delete(vmId);
   }
 

@@ -62,7 +62,10 @@ export function normalizeRef(ref?: string): string {
   return (ref ?? "").replace(/^refs\/heads\//, "").trim();
 }
 
-export function parseWebhookPayload(raw: string): {
+export function parseWebhookPayload(
+  raw: string,
+  isPullRequest = false,
+): {
   repoUrl?: string;
   ref?: string;
   sha?: string;
@@ -94,8 +97,33 @@ export function parseWebhookPayload(raw: string): {
           })
         : undefined;
     const change = push?.changes?.[0];
-    const ref = str(body.ref) || str(change?.new?.name);
-    const sha = str(body.after) || str(change?.new?.target?.hash);
+    const pr = isPullRequest
+      ? (body.pull_request as { base?: { ref?: string }; head?: { sha?: string } } | undefined)
+      : undefined;
+    const mr = isPullRequest
+      ? (body.object_attributes as
+          { target_branch?: string; last_commit?: { id?: string } } | undefined)
+      : undefined;
+    const bitbucket = isPullRequest
+      ? (body.pullrequest as
+          | {
+              destination?: { branch?: { name?: string } };
+              source?: { commit?: { hash?: string } };
+            }
+          | undefined)
+      : undefined;
+    const ref =
+      str(pr?.base?.ref) ||
+      str(mr?.target_branch) ||
+      str(bitbucket?.destination?.branch?.name) ||
+      str(body.ref) ||
+      str(change?.new?.name);
+    const sha =
+      str(pr?.head?.sha) ||
+      str(mr?.last_commit?.id) ||
+      str(bitbucket?.source?.commit?.hash) ||
+      str(body.after) ||
+      str(change?.new?.target?.hash);
     const deleted =
       body.deleted === true ||
       Boolean(change?.closed) ||
@@ -170,7 +198,7 @@ export function decideWebhook(input: {
     }
   }
   if (item.schedule.kind === "forge" || item.schedule.kind === "pull_request") {
-    const payload = parseWebhookPayload(input.raw);
+    const payload = parseWebhookPayload(input.raw, item.schedule.kind === "pull_request");
     if (payload.deleted) return { kind: "skip" };
     if (
       item.repo?.url &&

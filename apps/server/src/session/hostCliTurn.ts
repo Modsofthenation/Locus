@@ -1,3 +1,4 @@
+import { WorkerCliDisconnectError } from "./workerCliConnection.js";
 import { mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type { AgentSession, ChatMessage, LocusConfig, PatchSessionInput } from "@locus/shared";
@@ -12,6 +13,7 @@ import {
   isCodingLoopSession,
   isCodexCliProvider,
   isKiroCliProvider,
+  isGenericCliProvider,
   isCursorCliProvider,
   isDesignSession,
   isGameSession,
@@ -31,10 +33,12 @@ import {
   streamCodexCli,
   streamCursorCli,
   streamKiroCli,
+  streamGenericCli,
   formatProviderError,
   type ClaudeCodeSpawner,
   type CodexCliSpawner,
   type KiroCliSpawner,
+  type GenericCliSpawner,
   type CodexMcpKind,
   type CursorCliSpawner,
   type CursorCliSpawnHandle,
@@ -47,9 +51,11 @@ import {
   controlPlaneMcpSessionUrl,
   controlPlaneMcpUrl,
   mergeClaudeMcpJson,
+  mergeGeminiSettingsJson,
   mergeKiroMcpJson,
   mergeLocusMcpJson,
   writeLocusClaudeMcpConfig,
+  writeLocusGeminiMcpConfig,
   writeLocusKiroMcpConfig,
   writeLocusCursorMcpConfig,
 } from "../integrations/cursorCliMcp.js";
@@ -68,8 +74,11 @@ import {
 import { type CliTurnContinueInput, type CliTurnContinueResult } from "./cliTurnContinue.js";
 import { llmResponseDetail, withWorkspaceReadiness } from "./sessionTurnHelpers.js";
 import type { SessionTraceLog } from "./traces.js";
+import { resolveCliSandbox, type CliSandbox, type CliSandboxPolicy } from "./cliSandbox.js";
+import type { CliMcpGrant } from "../http/cliMcpGateway.js";
 
-export type HostCliKind = "cursor" | "claude" | "codex" | "kiro";
+/** `generic` is a Custom CLI agent (provider kind `cli-agent`). */
+export type HostCliKind = "cursor" | "claude" | "codex" | "kiro" | "generic";
 
 export type HostCliTurnInput = {
   sessionId: string;
@@ -95,6 +104,7 @@ export type HostCliTurnPorts = {
   claudeCodeSpawner: () => ClaudeCodeSpawner;
   codexCliSpawner: () => CodexCliSpawner;
   kiroCliSpawner: () => KiroCliSpawner;
+  genericCliSpawner: () => GenericCliSpawner;
   requireWorker: (session: AgentSession) => Promise<WorkerClient>;
   spawnOnWorker: (
     client: WorkerClient,
@@ -138,6 +148,7 @@ export type HostCliTurnPorts = {
       cachedInputTokens?: number;
       cacheWriteTokens?: number;
       window?: number;
+      contextTokens?: number;
     },
   ) => Promise<void>;
   upsertCursorToolCall: (
@@ -156,6 +167,17 @@ export type HostCliTurnPorts = {
   hasSteerAfter: (sessionId: string, replyId: string) => Promise<boolean>;
   continueAfterCliRound: (input: CliTurnContinueInput) => Promise<CliTurnContinueResult>;
   now: () => string;
+  /**
+   * Filesystem sandbox for a CLI spawned on this machine for a Docker session.
+   * `undefined` means the operator opted out (`LOCUS_CLI_SANDBOX=off`). Defaults to
+   * bubblewrap / sandbox-exec via {@link resolveCliSandbox}.
+   */
+  cliSandbox?: (policy: CliSandboxPolicy) => CliSandbox | undefined;
+  /**
+   * A token-gated, session-scoped MCP URL on the CLI MCP gateway. A sandboxed CLI gets this
+   * instead of the control-plane URL, because the sandbox only forwards the gateway port.
+   */
+  cliMcpGrant?: (sessionId: string) => Promise<CliMcpGrant>;
 };
 
 const LABELS: Record<
@@ -189,12 +211,37 @@ const LABELS: Record<
     worker:
       "Codex CLI on a worker needs a running Docker, Host, or Linux VM guest. Start it first.",
   },
+  generic: {
+    missing: "Custom CLI agent provider is not configured. Enable it in Settings → Providers.",
+    vm: "Custom CLI agent on a VM needs a running guest with SSH.",
+    workspace: "Custom CLI agent needs a workspace folder on this machine.",
+    worker:
+      "Custom CLI agent on a worker needs a running Docker, Host, or Linux VM guest. Start it first.",
+  },
 };
+
+/** Gemini CLI presets read Locus MCP from `.gemini/settings.json`; other CLI agents skip it. */
+function wantsGeminiMcp(provider: { cli?: { preset?: string } }): boolean {
+  return provider.cli?.preset === "gemini" || provider.cli?.preset === "gemini-acp";
+}
 
 /** One Host CLI Turn stream loop. Cursor / Claude / Codex / Kiro are adapters. */
 export async function runHostCliTurn(
   ports: HostCliTurnPorts,
   input: HostCliTurnInput,
+): Promise<string> {
+  const cleanup: (() => void)[] = [];
+  try {
+    return await hostCliTurn(ports, input, cleanup);
+  } finally {
+    for (const done of cleanup) done();
+  }
+}
+
+async function hostCliTurn(
+  ports: HostCliTurnPorts,
+  input: HostCliTurnInput,
+  cleanup: (() => void)[],
 ): Promise<string> {
   let session = await ports.require(input.sessionId);
   const config = await ports.loadConfig();
@@ -207,7 +254,9 @@ export async function runHostCliTurn(
         ? Boolean(provider && isClaudeCodeProvider(provider))
         : kind === "kiro"
           ? Boolean(provider && isKiroCliProvider(provider))
-          : Boolean(provider && isCodexCliProvider(provider));
+          : kind === "generic"
+            ? Boolean(provider && isGenericCliProvider(provider))
+            : Boolean(provider && isCodexCliProvider(provider));
   const labels = LABELS[kind];
   if (!provider || !isProvider) {
     await ports.appendMessage(input.sessionId, {
@@ -266,9 +315,57 @@ export async function runHostCliTurn(
           playbook: session.playbook,
         }
       : undefined;
-  const mcpSessionUrl = controlPlaneMcpSessionUrl(session.id, config.advanced.bindPort);
+  // A Docker session's CLI runs on this machine, but the operator chose a container. Its
+  // own shell tool must not see <LOCUS_HOME> (config, other sessions, attachments, traces)
+  // or reach the control plane, which trusts loopback clients as the operator. It gets a
+  // session-scoped MCP URL on the gateway, the one host loopback port the sandbox forwards.
+  // Host-runtime sessions are host access by design and stay unsandboxed.
+  let sandbox: CliSandbox | undefined;
+  let mcpSessionUrl = controlPlaneMcpSessionUrl(session.id, config.advanced.bindPort);
+  if (!worker && !localVm && sessionRuntime(session) === "docker") {
+    const grant = await ports.cliMcpGrant?.(session.id);
+    if (grant) cleanup.push(grant.revoke);
+    sandbox = (ports.cliSandbox ?? resolveCliSandbox)({
+      locusHome: ports.dataDir,
+      workspace,
+      loopbackPorts: grant ? [grant.port] : [],
+    });
+    if (sandbox && !sandbox.ok) {
+      await ports.appendMessage(input.sessionId, {
+        id: randomUUID(),
+        role: "system",
+        content: sandbox.reason,
+        createdAt: ports.now(),
+      });
+      return "";
+    }
+    if (sandbox && grant) mcpSessionUrl = grant.url;
+  }
+  // A local VM's CLI runs in the guest, and its SSH connection reverse-forwards a guest
+  // loopback port back to this machine. ssh connects from 127.0.0.1, so forwarding to the
+  // control plane would make the guest the local operator (`/api/*`, other sessions'
+  // transcripts). Forward to the gateway instead, with a per-turn token. The guest keeps
+  // listening on <bindPort> so its URL keeps the same shape.
+  let vmForwards: { listenPort: number; hostPort: number }[] = [];
   if (localVm) {
-    await writeGuestCliMcp(ports, input.sessionId, kind, mcpSessionUrl);
+    const grant = await ports.cliMcpGrant?.(session.id);
+    if (grant) {
+      cleanup.push(grant.revoke);
+      const guestPort = config.advanced.bindPort || 7420;
+      const guestUrl = new URL(grant.url);
+      guestUrl.hostname = "127.0.0.1";
+      guestUrl.port = String(guestPort);
+      mcpSessionUrl = guestUrl.toString();
+      vmForwards = [{ listenPort: guestPort, hostPort: grant.port }];
+    }
+  }
+  if (localVm) {
+    await writeGuestCliMcp(
+      ports,
+      input.sessionId,
+      kind === "generic" && !wantsGeminiMcp(provider) ? undefined : kind,
+      mcpSessionUrl,
+    );
     if (kind === "cursor" && cursorRule) {
       const body = formatLocusCursorRule(cursorRule);
       if (body) await ports.writeWorkspace(input.sessionId, LOCUS_CURSOR_RULE_REL, body);
@@ -296,6 +393,9 @@ export async function runHostCliTurn(
         url: mcpSessionUrl,
       });
     }
+    if (kind === "generic" && wantsGeminiMcp(provider)) {
+      await writeLocusGeminiMcpConfig({ workspace, url: mcpSessionUrl });
+    }
   } else if (cursorRule) {
     const body = formatLocusCursorRule(cursorRule);
     if (body) {
@@ -309,6 +409,7 @@ export async function runHostCliTurn(
     | HostCliTurnPorts["claudeCodeSpawner"]
     | HostCliTurnPorts["kiroCliSpawner"]
     | HostCliTurnPorts["codexCliSpawner"]
+    | HostCliTurnPorts["genericCliSpawner"]
   >;
   if (worker) {
     if (!session.vmId) {
@@ -324,14 +425,14 @@ export async function runHostCliTurn(
     const vmId = session.vmId;
     spawnFn = (req) => ports.spawnOnWorker(client, vmId, session.id, req);
   } else if (localVm && ssh) {
-    const mcpPort = Number(new URL(mcpSessionUrl).port) || config.advanced.bindPort || 7420;
     const overSsh = ports.spawnOverSsh ?? spawnCliOverSsh;
     spawnFn = (req) =>
       overSsh(
         ssh,
         { ...req, cwd: isWindows(session.os) ? WINDOWS_WORKSPACE : LINUX_WORKSPACE },
         {
-          reverseForwards: [{ listenPort: mcpPort, hostPort: mcpPort }],
+          // Never the control-plane port. Without a gateway grant, nothing is forwarded.
+          reverseForwards: vmForwards,
           shell: isWindows(session.os) ? "powershell" : "posix",
         },
       );
@@ -343,14 +444,15 @@ export async function runHostCliTurn(
           ? ports.claudeCodeSpawner()
           : kind === "kiro"
             ? ports.kiroCliSpawner()
-            : ports.codexCliSpawner();
+            : kind === "generic"
+              ? ports.genericCliSpawner()
+              : ports.codexCliSpawner();
+    if (sandbox?.ok) spawnFn = sandbox.wrap(spawnFn);
   }
   const reviewing = isReviewSession(session);
   const mcpKind: CodexMcpKind = reviewing ? "review" : isCanvasSession(session) ? "canvas" : "git";
   const gitMcpUrl =
-    (kind === "codex" || kind === "kiro") && !input.planTurn
-      ? controlPlaneMcpSessionUrl(session.id, config.advanced.bindPort)
-      : undefined;
+    (kind === "codex" || kind === "kiro") && !input.planTurn ? mcpSessionUrl : undefined;
   let promptText =
     kind === "cursor" ? input.userText : withWorkspaceReadiness(input.userText, readiness);
   const first =
@@ -360,7 +462,9 @@ export async function runHostCliTurn(
         ? !session.claudeCode?.sessionId
         : kind === "kiro"
           ? !session.kiroCli?.sessionId
-          : !session.codexCli?.sessionId;
+          : kind === "generic"
+            ? !session.genericCli?.sessionId
+            : !session.codexCli?.sessionId;
   const designing = isCanvasSession(session);
   const excludeTools =
     kind === "cursor"
@@ -378,18 +482,12 @@ export async function runHostCliTurn(
     });
     if (card) promptText = `${card}\n\n${promptText}`;
   }
-  if (
-    (kind === "claude" || kind === "codex" || kind === "kiro") &&
-    first &&
-    session.instructions?.trim()
-  ) {
+  const plainPromptKind =
+    kind === "claude" || kind === "codex" || kind === "kiro" || kind === "generic";
+  if (plainPromptKind && first && session.instructions?.trim()) {
     promptText = `${session.instructions.trim()}\n\n${promptText}`;
   }
-  if (
-    (kind === "claude" || kind === "codex" || kind === "kiro") &&
-    first &&
-    session.playbook?.trim()
-  ) {
+  if (plainPromptKind && first && session.playbook?.trim()) {
     promptText = `${promptText}\n\nPlaybook:\n${session.playbook.trim()}`;
   }
   if (!input.planTurn && isGameSession(session)) {
@@ -441,10 +539,18 @@ export async function runHostCliTurn(
       promptText,
       worker,
     )}`;
+    const priorThread =
+      kind === "codex" ? current.codexCli : kind === "kiro" ? current.kiroCli : undefined;
+    // A resumed thread already holds these instructions; resending them every turn and every
+    // nudge round only adds input tokens.
+    const sendMcpPrompt =
+      (kind === "codex" || kind === "kiro") &&
+      Boolean(gitMcpUrl) &&
+      !(priorThread?.sessionId && priorThread.mcpPrompt === mcpKind);
     const cliPrompt =
-      kind === "codex" && gitMcpUrl
+      sendMcpPrompt && kind === "codex"
         ? `${codexMcpPrompt(mcpKind)}\n\n${promptText}`
-        : kind === "kiro" && gitMcpUrl
+        : sendMcpPrompt && kind === "kiro"
           ? `${kiroMcpPrompt(mcpKind)}\n\n${promptText}`
           : promptText;
     await ports.recordCursorCliContext(input.sessionId, cliPrompt);
@@ -464,7 +570,9 @@ export async function runHostCliTurn(
           ? current.claudeCode?.sessionId
           : kind === "kiro"
             ? current.kiroCli?.sessionId
-            : current.codexCli?.sessionId;
+            : kind === "generic"
+              ? current.genericCli?.sessionId
+              : current.codexCli?.sessionId;
     const streamDefault =
       kind === "cursor"
         ? "cursor-cli"
@@ -472,7 +580,9 @@ export async function runHostCliTurn(
           ? "claude-code"
           : kind === "kiro"
             ? "kiro-cli"
-            : "codex-cli";
+            : kind === "generic"
+              ? "cli-agent"
+              : "codex-cli";
     try {
       await ports.traces.write({
         t: ports.now(),
@@ -535,21 +645,34 @@ export async function runHostCliTurn(
                   signal: spawnAbort.signal,
                   spawnFn,
                 })
-              : streamCodexCli({
-                  provider,
-                  prompt: cliPrompt,
-                  workspace,
-                  model: current.model,
-                  reasoningEffort: current.reasoningEffort,
-                  resume,
-                  mode: input.planTurn ? "plan" : "agent",
-                  webSearch: sessionWebSearch(current) && !input.planTurn,
-                  review: reviewing,
-                  gitMcpUrl,
-                  mcpKind,
-                  signal: spawnAbort.signal,
-                  spawnFn,
-                });
+              : kind === "generic"
+                ? streamGenericCli({
+                    provider,
+                    prompt: promptText,
+                    workspace,
+                    model: current.model,
+                    resume,
+                    // ACP agents get the session MCP URL on session/new. On a worker,
+                    // 127.0.0.1 is the worker host, so the URL is withheld there.
+                    mcpUrl: worker ? undefined : mcpSessionUrl,
+                    signal: spawnAbort.signal,
+                    spawnFn,
+                  })
+                : streamCodexCli({
+                    provider,
+                    prompt: cliPrompt,
+                    workspace,
+                    model: current.model,
+                    reasoningEffort: current.reasoningEffort,
+                    resume,
+                    mode: input.planTurn ? "plan" : "agent",
+                    webSearch: sessionWebSearch(current) && !input.planTurn,
+                    review: reviewing,
+                    gitMcpUrl,
+                    mcpKind,
+                    signal: spawnAbort.signal,
+                    spawnFn,
+                  });
       for await (const ev of stream) {
         if (input.abort.signal.aborted) break;
         if (ev.type === "session" && ev.sessionId) {
@@ -560,9 +683,15 @@ export async function runHostCliTurn(
           } else if (kind === "claude") {
             await ports.patch(input.sessionId, { claudeCode: { sessionId: ev.sessionId } });
           } else if (kind === "kiro") {
-            await ports.patch(input.sessionId, { kiroCli: { sessionId: ev.sessionId } });
+            await ports.patch(input.sessionId, {
+              kiroCli: cliThreadState(ev.sessionId, priorThread, sendMcpPrompt, mcpKind),
+            });
+          } else if (kind === "generic") {
+            await ports.patch(input.sessionId, { genericCli: { sessionId: ev.sessionId } });
           } else {
-            await ports.patch(input.sessionId, { codexCli: { sessionId: ev.sessionId } });
+            await ports.patch(input.sessionId, {
+              codexCli: cliThreadState(ev.sessionId, priorThread, sendMcpPrompt, mcpKind),
+            });
           }
         }
         if (ev.type === "reasoning" && "text" in ev && ev.text) {
@@ -592,6 +721,7 @@ export async function runHostCliTurn(
         }
       }
     } catch (err) {
+      if (err instanceof WorkerCliDisconnectError) throw err;
       const steered = await ports.hasSteerAfter(input.sessionId, replyId);
       if (!input.abort.signal.aborted && !steered && !spawnAbort.signal.aborted) {
         await ports.appendDelta(input.sessionId, replyId, `\n\n${formatProviderError(err)}`);
@@ -701,13 +831,38 @@ export async function runHostCliTurn(
   return lastReplyId;
 }
 
+/** Record which MCP instructions a Codex / Kiro thread has seen, so resumes skip them. */
+export function cliThreadState(
+  sessionId: string,
+  prior: { sessionId?: string; mcpPrompt?: string } | undefined,
+  sentMcpPrompt: boolean,
+  mcpKind: string,
+): { sessionId: string; mcpPrompt?: string } {
+  if (sentMcpPrompt) return { sessionId, mcpPrompt: mcpKind };
+  // Same thread resumed: keep what it already saw. A new thread id means it saw nothing.
+  if (prior?.sessionId === sessionId && prior.mcpPrompt) {
+    return { sessionId, mcpPrompt: prior.mcpPrompt };
+  }
+  return { sessionId };
+}
+
 async function writeGuestCliMcp(
   ports: Pick<HostCliTurnPorts, "writeWorkspace">,
   sessionId: string,
-  kind: HostCliKind,
+  /** `generic` here means a Gemini preset; other Custom CLI agents pass undefined. */
+  kind: HostCliKind | undefined,
   url: string,
 ): Promise<void> {
   const body = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
+  if (!kind) return;
+  if (kind === "generic") {
+    await ports.writeWorkspace(
+      sessionId,
+      ".gemini/settings.json",
+      body(mergeGeminiSettingsJson({}, url)),
+    );
+    return;
+  }
   if (kind === "cursor") {
     await ports.writeWorkspace(sessionId, ".cursor/mcp.json", body(mergeLocusMcpJson({}, url)));
     return;

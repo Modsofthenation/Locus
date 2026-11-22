@@ -5,7 +5,11 @@ import { THEME_IDS } from "@locus/shared";
 import { describe, expect, it } from "vitest";
 import { contrastRatio, parseThemePalettes, themeReadabilityFailures } from "./contrast";
 
-const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../index.css"), "utf8");
+const here = dirname(fileURLToPath(import.meta.url));
+const css = [
+  readFileSync(join(here, "../index.css"), "utf8"),
+  readFileSync(join(here, "../styles/themeStyles.css"), "utf8"),
+].join("\n");
 
 describe("theme contrast", () => {
   it("computes WCAG contrast for hex pairs", () => {

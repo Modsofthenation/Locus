@@ -177,23 +177,18 @@ export function buildContextBreakdown(input: {
 }
 
 /**
- * Cursor CLI `usage` is turn-level billing, not live prompt occupancy.
- * `inputTokens` is uncached only; cache reads/writes are disjoint per call but
- * summed across every model call in the turn, so the totals often exceed the
- * model window. Occupancy is that prompt-side sum, capped at the window.
+ * Context occupancy from CLI agent usage. `inputTokens` is the whole prompt (cache reads and
+ * writes included, see readTokenUsage). Callers pass the last model call's prompt size when
+ * they have it; run-level totals sum every call, so the result is capped at the window.
  */
 export function occupancyFromCursorCliUsage(input: {
   inputTokens: number;
   cachedInputTokens?: number;
-  cacheWriteTokens?: number;
   window: number;
 }): { used: number; cachedInputTokens?: number } {
   const window = Math.max(1, Math.round(input.window));
-  const uncached = Math.max(0, Math.round(input.inputTokens));
-  const cacheRead = Math.max(0, Math.round(input.cachedInputTokens ?? 0));
-  const cacheWrite = Math.max(0, Math.round(input.cacheWriteTokens ?? 0));
-  const used = Math.min(window, uncached + cacheRead + cacheWrite);
-  const cached = Math.min(cacheRead, used);
+  const used = Math.min(window, Math.max(0, Math.round(input.inputTokens)));
+  const cached = Math.min(Math.max(0, Math.round(input.cachedInputTokens ?? 0)), used);
   return {
     used,
     ...(cached > 0 ? { cachedInputTokens: cached } : {}),

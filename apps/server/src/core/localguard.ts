@@ -8,12 +8,15 @@ import {
   isLoopbackHost,
   isLoopbackOrigin,
   type ChromeExtensionSettings,
+  OPERATOR_QUERY,
   type PhoneRemote,
 } from "@locus/shared";
 import {
   allowPhoneAccess,
   isPhoneUiRequest,
   normalizePeer,
+  operatorCookie,
+  operatorCredentialFromHeaders,
   phoneCookie,
   tokenFromHeaders,
   tokensMatch,
@@ -25,6 +28,8 @@ export type PhoneGate = {
   chromeExtension?: () =>
     ChromeExtensionSettings | Promise<ChromeExtensionSettings | undefined> | undefined;
   peer?: (c: Context) => string | undefined;
+  /** Required on loopback `/api` and `/ws`. Unset leaves loopback trusted (tests). */
+  operatorToken?: string;
 };
 
 export function loopbackCorsOrigin(origin: string): string | undefined {
@@ -72,6 +77,23 @@ export function attachPhoneGate(gate: PhoneGate) {
       await next();
       return;
     }
+    const operatorCredential = operatorCredentialFromHeaders(c.req.raw.headers, url);
+    const loopback = !normalizePeer(peer) || isLoopbackHost(normalizePeer(peer) ?? "");
+    // `/?operator=<token>` signs a plain browser in (what `locus open` prints).
+    const operatorQuery = c.req.query(OPERATOR_QUERY)?.trim();
+    if (
+      gate.operatorToken &&
+      operatorQuery &&
+      loopback &&
+      isPhoneUiRequest(c.req.method, c.req.path) &&
+      tokensMatch(operatorQuery, gate.operatorToken)
+    ) {
+      const clean = new URL(url);
+      clean.searchParams.delete(OPERATOR_QUERY);
+      c.header("set-cookie", operatorCookie(gate.operatorToken));
+      c.header("referrer-policy", "no-referrer");
+      return c.redirect(`${clean.pathname}${clean.search}${clean.hash}`, 302);
+    }
     const allowed = allowPhoneAccess({
       peer,
       origin,
@@ -79,6 +101,9 @@ export function attachPhoneGate(gate: PhoneGate) {
       remote,
       method: c.req.method,
       path: c.req.path,
+      operatorToken: gate.operatorToken,
+      operatorCredential,
+      canvasPreviewHost: isCanvasPreviewHost(c.req.header("host")),
     });
     if (!allowed) {
       const loopbackPeer = !peer || isLoopbackHost(peer);

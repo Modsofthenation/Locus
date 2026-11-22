@@ -15,6 +15,7 @@ import { Store, initialState, reducer, type UiState } from "@/state/store";
 import { AUTOMATION_SIDEBAR_PREFS_KEY } from "@/lib/automationPrefs";
 import { SWARM_ROSTER_PREFS_KEY } from "@/lib/swarmRosterPrefs";
 import { SIDEBAR_PREFS_KEY } from "@/lib/sidebarPrefs";
+import { noteRailSignal } from "@/lib/railSuggest";
 import { setSelectValue } from "@/lib/selectControl";
 
 vi.mock("@/lib/api", () => ({
@@ -151,10 +152,12 @@ describe("Sidebar", () => {
     dismissNotice();
   });
 
-  function render(state: UiState) {
+  /** `savedPrefs` seeds sidebar prefs; `{}` is an install from before the slim rail. */
+  function render(state: UiState, savedPrefs?: object) {
     window.localStorage.removeItem(AUTOMATION_SIDEBAR_PREFS_KEY);
     window.localStorage.removeItem(SWARM_ROSTER_PREFS_KEY);
     window.localStorage.removeItem(SIDEBAR_PREFS_KEY);
+    if (savedPrefs) window.localStorage.setItem(SIDEBAR_PREFS_KEY, JSON.stringify(savedPrefs));
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
@@ -196,7 +199,7 @@ describe("Sidebar", () => {
     const labels = [...host.querySelectorAll(".side-rail-nav > button")].map((el) =>
       el.getAttribute("aria-label"),
     );
-    expect(labels).toEqual(["Inbox", "Agents", "Design", "IDE", "Codebase", "Jobs"]);
+    expect(labels).toEqual(["Home", "Agents", "Codebase"]);
     expect(host.querySelector(".rail-more")).toBeTruthy();
     expect(host.querySelector(".rail-more summary")?.getAttribute("aria-label")).toBe("More");
     expect(host.querySelector(".side-rail-nav .rail-sep")?.getAttribute("role")).toBe("separator");
@@ -215,10 +218,7 @@ describe("Sidebar", () => {
     expect(host.querySelector(".search-wrap kbd")).toBeNull();
     expect(
       [...host.querySelectorAll(".side-rail-nav .rail-label")].map((el) => el.textContent),
-    ).toEqual(["Inbox", "Agents", "Design", "IDE", "Codebase", "Jobs", "More"]);
-    expect(
-      host.querySelector(".side-rail-nav button[aria-label='Jobs'] .rail-label")?.textContent,
-    ).toBe("Jobs");
+    ).toEqual(["Home", "Agents", "Codebase", "More"]);
     expect(host.querySelector("[data-testid='sidebar-inbox']")).toBeTruthy();
     expect(host.querySelector(".sidebar-gutter")?.getAttribute("aria-label")).toBe(
       "Resize sidebar",
@@ -226,7 +226,7 @@ describe("Sidebar", () => {
     expect(host.querySelector("[aria-label='Session filter']")).toBeTruthy();
   });
 
-  it("lists Games, Assets, Board, and Docker in the More menu", () => {
+  it("lists every unpinned surface in the More menu", () => {
     render({ ...initialState, sessions: [session] });
     act(() => {
       (host.querySelector(".rail-more summary") as HTMLElement | null)?.click();
@@ -235,8 +235,12 @@ describe("Sidebar", () => {
       (el) => el.textContent,
     );
     expect(moreItems).toEqual([
+      "Design",
       "Games",
       "Assets",
+      "Android",
+      "IDE",
+      "Jobs",
       "Board",
       "Projects",
       "Brain",
@@ -245,11 +249,74 @@ describe("Sidebar", () => {
       "Docker",
     ]);
     const pins = [...host.querySelectorAll(".rail-more [data-menu-pin]")];
-    expect(pins).toHaveLength(8);
-    expect(pins[0]?.getAttribute("aria-label")).toBe("Pin Games to rail");
+    expect(pins).toHaveLength(12);
+    expect(pins[0]?.getAttribute("aria-label")).toBe("Pin Design to rail");
     expect(pins[0]?.getAttribute("aria-pressed")).toBe("false");
     // One row per surface: the pin toggle sits in the same row as its item.
-    expect(pins[0]?.closest(".menu-row")?.textContent).toBe("Games");
+    expect(pins[0]?.closest(".menu-row")?.textContent).toBe("Design");
+    expect(host.querySelector("[data-testid='rail-suggestion']")).toBeNull();
+  });
+
+  it("keeps the old five-icon rail for installs saved before the slim default", () => {
+    render({ ...initialState, sessions: [session] }, { width: 340 });
+    const labels = [...host.querySelectorAll(".side-rail-nav > button")].map((el) =>
+      el.getAttribute("aria-label"),
+    );
+    expect(labels).toEqual(["Home", "Agents", "Design", "IDE", "Codebase", "Jobs"]);
+    expect(
+      host.querySelector(".side-rail-nav button[aria-label='Jobs'] .rail-label")?.textContent,
+    ).toBe("Jobs");
+    expect(JSON.parse(window.localStorage.getItem(SIDEBAR_PREFS_KEY) ?? "{}")).toMatchObject({
+      railDefaults: "legacy",
+    });
+  });
+
+  it("suggests pinning Design once a design exists, and pins it", () => {
+    const design: AgentSession = { ...session, id: "d1", title: "Landing", kind: "design" };
+    render({ ...initialState, sessions: [session, design] });
+    expect(host.querySelector(".rail-more summary .unread-dot")).toBeTruthy();
+    act(() => {
+      (host.querySelector(".rail-more summary") as HTMLElement | null)?.click();
+    });
+    const hint = host.querySelector("[data-testid='rail-suggestion']") as HTMLElement;
+    expect(hint.textContent).toContain("Pin Design?");
+    const pin = [...hint.querySelectorAll<HTMLElement>("[role='menuitem']")].find(
+      (el) => el.textContent === "Pin",
+    )!;
+    act(() => pin.click());
+    expect(host.querySelector(".side-rail-nav button[aria-label='Design']")).toBeTruthy();
+    expect(host.querySelector("[data-testid='rail-suggestion']")).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(SIDEBAR_PREFS_KEY) ?? "{}")).toMatchObject({
+      railHintsDone: ["design"],
+    });
+  });
+
+  it("hides a rail suggestion for good after Not now", () => {
+    const design: AgentSession = { ...session, id: "d1", title: "Landing", kind: "design" };
+    render({ ...initialState, sessions: [session, design] });
+    act(() => {
+      (host.querySelector(".rail-more summary") as HTMLElement | null)?.click();
+    });
+    const notNow = [
+      ...host.querySelectorAll<HTMLElement>("[data-testid='rail-suggestion'] [role='menuitem']"),
+    ].find((el) => el.textContent === "Not now")!;
+    act(() => notNow.click());
+    expect(host.querySelector("[data-testid='rail-suggestion']")).toBeNull();
+    expect(host.querySelector(".side-rail-nav button[aria-label='Design']")).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(SIDEBAR_PREFS_KEY) ?? "{}")).toMatchObject({
+      railHintsDone: ["design"],
+    });
+  });
+
+  it("suggests IDE after the palette opens it", () => {
+    render({ ...initialState, sessions: [session] });
+    act(() => noteRailSignal("ide"));
+    act(() => {
+      (host.querySelector(".rail-more summary") as HTMLElement | null)?.click();
+    });
+    expect(host.querySelector("[data-testid='rail-suggestion']")?.textContent).toContain(
+      "Pin IDE?",
+    );
   });
 
   it("moves between a More row and its pin toggle with the arrow keys", () => {
@@ -379,6 +446,7 @@ describe("Sidebar", () => {
       "Environments",
       "Git",
       "Integrations",
+      "Reviewers",
       "Appearance",
       "Notifications",
       "Phone",
@@ -827,7 +895,7 @@ describe("Sidebar", () => {
       ...initialState,
       sessions: [{ ...session, needsHuman: "Approve git_push" }],
     });
-    expect(host.querySelector("button[aria-label='Inbox, 1 waiting']")).toBeTruthy();
+    expect(host.querySelector("button[aria-label='Home, 1 waiting']")).toBeTruthy();
     expect(host.querySelector(".icon-badge.danger")?.textContent).toBe("1");
     expect(host.querySelector(".session-group-label.warn")?.textContent).toBe("Needs you");
     expect(host.querySelector(".session-item.needs-you")).toBeTruthy();
@@ -844,13 +912,40 @@ describe("Sidebar", () => {
     act(() => {
       (host.querySelector("[data-testid='sidebar-inbox']") as HTMLElement).click();
     });
-    expect(host.querySelector(".session-list")?.getAttribute("aria-label")).toBe("Inbox");
-    expect(host.querySelector(".brand h1")?.textContent).toBe("Inbox");
+    expect(host.querySelector(".session-list")?.getAttribute("aria-label")).toBe("Home");
+    expect(host.querySelector(".brand h1")?.textContent).toBe("Home");
     expect(host.textContent).toContain("Approve git_push");
-    expect(host.querySelector(".inbox-kind")?.textContent).toBe("Agent");
+    expect(host.querySelector(".inbox-kind")?.textContent).toBe("Question");
     expect(host.querySelector("[aria-label='Session filter']")).toBeNull();
     expect(host.querySelector(".side-actions")).toBeNull();
     expect(host.querySelector(".side-foot")?.textContent).toBe("");
+  });
+
+  it("shows a picked Home row in the decision card instead of leaving Home", () => {
+    renderLive({
+      ...initialState,
+      inboxOpen: true,
+      sessions: [
+        { ...session, needsHuman: "Approve git_push" },
+        { ...session, id: "s2", title: "Second", needsHuman: "Which region?" },
+      ],
+    });
+    const rows = [...host.querySelectorAll(".inbox-row")];
+    expect(rows).toHaveLength(2);
+    act(() => {
+      (rows[1]!.querySelector(".session-item-open") as HTMLElement).click();
+    });
+    const after = [...host.querySelectorAll(".inbox-row")];
+    expect(after[1]!.classList.contains("active")).toBe(true);
+    expect(after[1]!.querySelector("[aria-current='true']")).toBeTruthy();
+    expect(host.querySelector(".session-list")?.getAttribute("aria-label")).toBe("Home");
+  });
+
+  it("drops the Home rail dot beside its count badge", () => {
+    render({ ...initialState, sessions: [{ ...session, needsHuman: "Approve git_push" }] });
+    const home = host.querySelector("[data-testid='sidebar-inbox']");
+    expect(home?.querySelector(".icon-badge")?.textContent).toBe("1");
+    expect(home?.querySelector(".unread-dot")).toBeNull();
   });
 
   it("keeps an empty Inbox to the Caught up subtitle", () => {
@@ -961,7 +1056,7 @@ describe("Sidebar", () => {
     const labels = [...host.querySelectorAll(".side-rail-nav > button .rail-label")].map(
       (el) => el.textContent,
     );
-    expect(labels.indexOf("Games")).toBeLessThan(labels.indexOf("Jobs"));
+    expect(labels.indexOf("Games")).toBeLessThan(labels.indexOf("Codebase"));
   });
 
   it("peeks the agent list when the rail is collapsed", () => {
@@ -976,12 +1071,30 @@ describe("Sidebar", () => {
     );
   });
 
+  it("creates a new item from the collapsed rail peek", () => {
+    renderLive({ ...initialState, collapsed: true, section: "board", sessions: [session] });
+    const agents = host.querySelector(".side-rail-nav button[aria-label='Agents']") as HTMLElement;
+    act(() => {
+      agents.focus();
+      agents.dispatchEvent(new FocusEvent("focus", { bubbles: true }));
+    });
+    const create = host.querySelector("[data-testid='rail-peek-action']") as HTMLElement;
+    expect(create?.textContent).toContain("New agent");
+    act(() => {
+      create.click();
+    });
+    expect(host.querySelector("[data-testid='rail-peek']")).toBeNull();
+    expect(host.querySelector(".side-rail-nav button[aria-label='Agents']")?.className).toBe(
+      "active",
+    );
+  });
+
   it("jumps to Inbox with Alt+1", () => {
     renderLive({ ...initialState, sessions: [session] });
     act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "1", altKey: true, bubbles: true }));
     });
-    expect(host.querySelector(".brand h1")?.textContent).toBe("Inbox");
+    expect(host.querySelector(".brand h1")?.textContent).toBe("Home");
   });
 
   it("pins Games onto the rail from More", () => {
@@ -999,7 +1112,7 @@ describe("Sidebar", () => {
   });
 
   it("unpins a rail section from its right-click menu", () => {
-    render({ ...initialState, sessions: [session] });
+    render({ ...initialState, sessions: [session] }, { width: 340 });
     const design = host.querySelector(".side-rail-nav button[aria-label='Design']") as HTMLElement;
     expect(design).toBeTruthy();
     act(() => {
@@ -1090,7 +1203,7 @@ describe("Sidebar", () => {
         },
       ],
     });
-    expect(host.querySelector("button[aria-label='Inbox, 1 waiting']")).toBeTruthy();
+    expect(host.querySelector("button[aria-label='Home, 1 waiting']")).toBeTruthy();
     expect(host.querySelector(".icon-badge.danger")?.textContent).toBe("1");
     expect(host.querySelector(".session-group-label.warn")?.textContent).toBe("Needs you");
     expect(host.textContent).toContain("Name the owner");
@@ -1941,19 +2054,22 @@ describe("Sidebar", () => {
   });
 
   it("collapses to the icon rail so labels cannot overflow", () => {
-    render({
-      ...initialState,
-      collapsed: true,
-      sessions: [session],
-      unreadAutomationIds: ["a1"],
-      setup: assessSetup({
-        hypervisorKind: "mock",
-        qemuFound: false,
-        linuxImageReady: false,
-        hasProvider: false,
-        hasGoldenImage: false,
-      }),
-    });
+    render(
+      {
+        ...initialState,
+        collapsed: true,
+        sessions: [session],
+        unreadAutomationIds: ["a1"],
+        setup: assessSetup({
+          hypervisorKind: "mock",
+          qemuFound: false,
+          linuxImageReady: false,
+          hasProvider: false,
+          hasGoldenImage: false,
+        }),
+      },
+      { width: 340 },
+    );
 
     expect(host.querySelector(".app.collapsed .sidebar")).toBeTruthy();
     expect(
@@ -2516,6 +2632,21 @@ describe("Sidebar", () => {
       expect(host.querySelector(".app")?.classList.contains("collapsed")).toBe(true);
     });
 
+    it("closes the drawer when Home opens so its dashboard shows", () => {
+      stubNarrow(true);
+      renderLive({ ...initialState, sessions: [{ ...session, needsHuman: "Approve git_push" }] });
+      act(() => {
+        (
+          host.querySelector(".side-rail button[aria-label='Expand sidebar']") as HTMLElement
+        ).click();
+      });
+      expect(host.querySelector(".app")?.classList.contains("collapsed")).toBe(false);
+      act(() => {
+        (host.querySelector("[data-testid='sidebar-inbox']") as HTMLElement).click();
+      });
+      expect(host.querySelector(".app")?.classList.contains("collapsed")).toBe(true);
+    });
+
     it("leaves wide windows open with no scrim", () => {
       stubNarrow(false);
       renderLive({ ...initialState, sessions: [session] });
@@ -2541,7 +2672,7 @@ describe("Sidebar", () => {
         },
       ],
     });
-    expect(host.querySelector(".brand p")?.textContent).toBe("Docker · mock");
+    expect(host.querySelector(".brand p")?.textContent).toBe("Mock engine");
     expect(host.querySelector(".session-item.active .title-text")?.textContent).toBe("web");
     expect(host.querySelector(".session-item .dot.running")).toBeTruthy();
     expect(host.querySelector(".session-group-label")?.textContent).toMatch(/Running \(1\)/);
@@ -3289,7 +3420,9 @@ describe("Sidebar", () => {
       section: "automations",
       automations: [jobRow("auto-daily", "Daily job", { kind: "daily", hour: 9, minute: 0 })],
     });
-    expect(host.querySelector('[aria-label="Job filter"]')).toBeTruthy();
+    expect(
+      host.querySelector('[aria-label="Job filter"], [aria-label^="Job filter: "]'),
+    ).toBeTruthy();
     expect(host.querySelector('[aria-label="Job sort"]')).toBeNull();
     expect(host.querySelector("[data-testid='auto-bulk']")).toBeNull();
     expect(host.querySelector('[aria-label="Filter by health"]')).toBeNull();

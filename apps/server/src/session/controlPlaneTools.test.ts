@@ -50,3 +50,38 @@ describe("control-plane tool dispatch", () => {
     ).toBeUndefined();
   });
 });
+
+describe("manage_theme dispatch", () => {
+  const req = { name: "manage_theme" as ToolRequest["name"], args: { action: "list" } };
+  it("runs after the access gate for interactive sessions", async () => {
+    const executeManageTheme = vi.fn(async () => ({
+      ok: true,
+      output: "No generated themes yet.",
+    }));
+    const result = await executeLateControlPlaneTool(
+      ports({ executeManageTheme }),
+      session,
+      req,
+      undefined,
+      (_name, output) => output,
+      {} as never,
+    );
+    expect(result).toEqual({ ok: true, output: "No generated themes yet." });
+    expect(executeManageTheme).toHaveBeenCalledWith({ action: "list" });
+  });
+
+  it("is refused inside automations", async () => {
+    const executeManageTheme = vi.fn();
+    await expect(
+      executeLateControlPlaneTool(
+        ports({ executeManageTheme }),
+        { ...session, automationId: "a1" } as AgentSession,
+        req,
+        undefined,
+        (_name, output) => output,
+        {} as never,
+      ),
+    ).rejects.toThrow(/not available to automations/);
+    expect(executeManageTheme).not.toHaveBeenCalled();
+  });
+});

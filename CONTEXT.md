@@ -34,13 +34,25 @@ Lifecycle of a Docker container or QEMU VM: create, start, stop, snapshot, resto
 
 The `/workspace` tree the operator Files pane and the agent file tools share. Host listing, guest exec listing, and git dirty stats are one concept.
 
+## Terminal mode
+
+An agent's `viewMode: "terminal"`: the guest pane's Terminal tab runs an interactive CLI (`claude`, `codex`, a shell, any command) in a PTY in that agent's Workspace (`/ws/sessions/:id/terminal`). `AgentTerminalRegistry` owns the processes (per-session cap, scrollback replay, killed on delete). Host and local Docker only. A quiet prompt raises Needs you. Not the IDE rail's workspace shell, and not a CLI provider turn (those run headless inside the chat).
+
+## Boot steps
+
+The start-up plan a **Guest** reports while it comes up (`boot.progress` events, `BootProgress` in shared): Docker Pull image → Start container → Install, VM Prepare disk → Boot → Connect agent, Host worktree Create worktree → Install. Machine lifecycles report through an optional `onBootStep` hook; `BootTracker` on the server broadcasts and records durations for the "usually ~Ns" estimate. Not clone progress (its own card) and not Studio continue.
+
+## Sample task
+
+`POST /api/sample-task`: a bundled repo with one failing test, reset under `<LOCUS_HOME>/samples/sum`, and a Host agent on a new git worktree of it. The first-run answer when nothing is linked; the first-task card otherwise suggests work on the user's own repo or folder.
+
 ## Forge
 
 GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps as the remote for clone, push, pull requests, and issues. Locus stays the local catalog. `ForgeClient` selects one forge adapter per account. Gitea/Forgejo/Azure DevOps are PAT-only and are not auto-added as empty Settings cards.
 
 ## Design
 
-An agent whose canvas is `/workspace/index.html`. Promote copies that canvas into a coding agent.
+An agent whose canvas is `/workspace/index.html`. Promote copies that canvas into a coding agent. Present shows the canvas alone, full screen, and steps saved variants with the arrow keys.
 
 ## Game
 
@@ -96,7 +108,7 @@ A durable HTML document a coding or review chat builds beside the thread (`canva
 
 ## Turn
 
-One user prompt through the agent loop, including interrupt, Stop, queue drain, and Send now. Native model Turns and host **CLI Turns** (Cursor CLI, Claude Code, Codex CLI, Kiro CLI) share one continue policy: canvas/review/studio nudges after each round.
+One user prompt through the agent loop, including interrupt, Stop, queue drain, and Send now. Native model Turns and host **CLI Turns** (Cursor CLI, Claude Code, Codex CLI, Kiro CLI, Custom CLI agents incl. ACP) share one continue policy: canvas/review/studio nudges after each round.
 
 ## Checkpoint
 

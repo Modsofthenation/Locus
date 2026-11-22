@@ -13,6 +13,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { noteRailSignal } from "@/lib/railSuggest";
 import {
   formatFileComment,
   hasConflictMarkers,
@@ -3290,7 +3291,11 @@ export const WorkspaceEditor = memo(function WorkspaceEditor({
           emptyWorkspace={emptyWorkspace}
           scrollRef={treeScroll}
           onToggleDir={toggleDir}
-          onOpenFile={(path) => void openFile(path)}
+          onOpenFile={(path) => {
+            // An .html file opened from Files makes Design worth a rail pin.
+            if (isWorkspaceHtmlPath(path)) noteRailSignal("design");
+            void openFile(path);
+          }}
           onPrefetchFile={(path) => {
             if (isWorkspaceBinaryPreviewPath(path)) return;
             if (peekWorkspaceFile(sessionId, path)) return;

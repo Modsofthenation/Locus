@@ -24,6 +24,8 @@ import {
   sessionAvatarPose,
   sessionAvatarAccessory,
   projectTeamName,
+  type AgentSession,
+  type SessionViewMode,
 } from "@locus/shared";
 import { api } from "@/lib/api";
 import { showErrorNotice } from "@/lib/notice";
@@ -48,11 +50,17 @@ import { ReplayModal } from "@/components/chat/ReplayModal";
 import { CompareModal } from "@/components/chat/CompareModal";
 import { WorkersModal } from "@/components/settings/WorkersModal";
 import { TraceModal } from "@/components/chat/TraceModal";
+import { WorkerConnection } from "@/components/chat/WorkerConnection";
 import { ExpandableLog } from "@/components/chat/ExpandableLog";
 import { dockerIsDown } from "./DockerDownCallout";
 import { isDockerDownError } from "@/lib/automations";
 import { PersonaAvatar } from "@/components/layout/PersonaAvatar";
 import { composerModelLabel } from "@/components/settings/ModelPicker";
+import {
+  androidProjects,
+  rememberAndroidReturn,
+  useAndroidReturnTo,
+} from "@/components/android/androidNav";
 
 export function Topbar() {
   const { state, dispatch } = useStore();
@@ -87,6 +95,10 @@ export function Topbar() {
     } finally {
       setDockerBusy(null);
     }
+  }
+
+  if (state.section === "android") {
+    return <AndroidTopbar />;
   }
 
   if (state.section === "automations") {
@@ -649,12 +661,16 @@ export function Topbar() {
               ]
                 .filter(Boolean)
                 .join(" · ")}
+              {session.offline ? " · Offline profile" : ""}
               {session.pinned ? " · pinned" : ""}
               {session.archived ? " · archived" : ""}
             </button>
           </div>
         </div>
         <div className="topbar-actions">
+          {session.placement === "worker" && session.vmId ? (
+            <WorkerConnection key={session.id} session={session} />
+          ) : null}
           {session.error && !isDockerDownError(session.error) ? (
             <ExpandableLog compact danger text={session.error} />
           ) : null}
@@ -906,12 +922,16 @@ export function Topbar() {
             {!hubMode && session.network && session.network !== "open" && !hostChat
               ? ` · ${formatNetworkJail(session.network)}`
               : ""}
+            {session.offline ? " · Offline profile" : ""}
             {session.pinned ? " · pinned" : ""}
             {session.archived ? " · archived" : ""}
           </button>
         </div>
       </div>
       <div className="topbar-actions">
+        {session.placement === "worker" && session.vmId ? (
+          <WorkerConnection key={session.id} session={session} />
+        ) : null}
         {session.error && !isDockerDownError(session.error) ? (
           <ExpandableLog compact danger text={session.error} />
         ) : null}
@@ -927,7 +947,10 @@ export function Topbar() {
             </button>
           </Tooltip>
         ) : state.section === "ide" ? null : (
-          <PanelToggle label={hostChat ? "Files" : docker ? "Container" : "Desktop"} />
+          <>
+            <ViewModeToggle session={session} />
+            <PanelToggle label={hostChat ? "Files" : docker ? "Container" : "Desktop"} />
+          </>
         )}
         {hubMode || hostChat ? null : vm &&
           (vm.status === "running" || vm.status === "ready" || vm.status === "paused") ? (
@@ -1065,6 +1088,20 @@ export function Topbar() {
           >
             Compare models
           </MenuItem>
+          {!hubMode && state.section !== "ide" ? (
+            // Phones hide the Chat / Terminal toggle to give the title room; it lives here too.
+            <MenuItem
+              onClick={() =>
+                chooseViewMode(
+                  dispatch,
+                  session,
+                  session.viewMode === "terminal" ? "chat" : "terminal",
+                )
+              }
+            >
+              {session.viewMode === "terminal" ? "Back to chat" : "Open terminal"}
+            </MenuItem>
+          ) : null}
           <MenuItem onClick={() => duplicateSession(session.id)}>Duplicate</MenuItem>
           <MenuItem
             disabled={!canClearChat(session)}
@@ -1164,7 +1201,19 @@ export function Topbar() {
               Save as environment…
             </MenuItem>
           ) : null}
-          {hostChat ? null : (
+          {hostChat && session.placement !== "worker" ? (
+            <MenuItem
+              disabled={
+                isCanvasSession(session) ||
+                Boolean(session.compare) ||
+                !lastUserPrompt(session.messages)
+              }
+              title="Run the last prompt on several agents, each in its own git worktree and branch."
+              onClick={() => setWorkers(true)}
+            >
+              Run in parallel…
+            </MenuItem>
+          ) : hostChat ? null : (
             <MenuItem
               disabled={!docker || Boolean(session.compare) || !lastUserPrompt(session.messages)}
               title={
@@ -1203,6 +1252,134 @@ export function Topbar() {
       ) : null}
       {workers ? <WorkersModal session={session} onClose={() => setWorkers(false)} /> : null}
     </header>
+  );
+}
+
+/** Android: project title, project picker and New project / Back (no separate project bar). */
+function AndroidTopbar() {
+  const { state, dispatch } = useStore();
+  const returnTo = useAndroidReturnTo();
+  const projects = androidProjects(state);
+  const selected = projects.find((s) => s.id === state.selectedId);
+  const back = selected ? undefined : projects.find((s) => s.id === returnTo);
+  return (
+    <header className="topbar android-topbar">
+      <div className="topbar-main">
+        <div className="topbar-title">
+          {selected ? (
+            <SessionTitle id={selected.id} title={selected.title} />
+          ) : (
+            <h2>{back ? "New Android project" : "Android apps"}</h2>
+          )}
+          <p className="topbar-kicker">
+            {selected ? "Android project" : "Build, run and test native Android apps"}
+          </p>
+        </div>
+      </div>
+      <div className="topbar-actions">
+        {projects.length && (projects.length > 1 || !selected) ? (
+          <OverflowMenu
+            className="android-topbar-project"
+            title="Switch Android project"
+            align="right"
+            toggleClassName="btn small ghost"
+            testId="android-project-menu"
+            label={
+              <>
+                Projects <span className="android-topbar-count">{projects.length}</span>
+              </>
+            }
+          >
+            <MenuLabel>Android projects</MenuLabel>
+            {projects.map((project) => (
+              <MenuItem
+                key={project.id}
+                value={project.id}
+                active={project.id === selected?.id}
+                onClick={() => dispatch({ type: "select", id: project.id })}
+              >
+                {project.title}
+              </MenuItem>
+            ))}
+          </OverflowMenu>
+        ) : null}
+        {back ? (
+          <button
+            type="button"
+            className="btn small ghost"
+            title={`Back to ${back.title}`}
+            onClick={() => dispatch({ type: "select", id: back.id })}
+          >
+            ← Back to {back.title}
+          </button>
+        ) : selected ? (
+          <>
+            <PanelToggle label="Device" />
+            <button
+              type="button"
+              className="btn small"
+              onClick={() => {
+                rememberAndroidReturn(selected.id);
+                dispatch({ type: "select", id: null });
+              }}
+            >
+              + New project
+            </button>
+          </>
+        ) : null}
+      </div>
+    </header>
+  );
+}
+
+/** Switch one agent between Chat and Terminal; the top-bar toggle and the ⋯ menu share it. */
+function chooseViewMode(
+  dispatch: ReturnType<typeof useStore>["dispatch"],
+  session: AgentSession,
+  next: SessionViewMode,
+) {
+  const mode: SessionViewMode = session.viewMode ?? "chat";
+  if (next === mode) {
+    if (next === "terminal") dispatch({ type: "showVmPane" });
+    return;
+  }
+  dispatch({ type: "session", session: { ...session, viewMode: next } });
+  void api
+    .patchSession(session.id, { viewMode: next })
+    .then((updated) => dispatch({ type: "session", session: updated }))
+    .catch(() => dispatch({ type: "session", session }));
+}
+
+/** Chat / Terminal: Terminal focuses the guest pane's Terminal tab (an agent CLI in a PTY). */
+function ViewModeToggle({ session }: { session: AgentSession }) {
+  const { dispatch } = useStore();
+  const mode: SessionViewMode = session.viewMode ?? "chat";
+  const choose = (next: SessionViewMode) => chooseViewMode(dispatch, session, next);
+  return (
+    <div
+      className="product-mode-toggle view-mode-toggle"
+      role="radiogroup"
+      aria-label="Chat or terminal"
+      data-testid="view-mode-toggle"
+    >
+      {(["chat", "terminal"] as const).map((value) => (
+        <button
+          key={value}
+          type="button"
+          role="radio"
+          aria-checked={mode === value}
+          className={mode === value ? "on" : ""}
+          title={
+            value === "terminal"
+              ? "Run the agent CLI (claude, codex, and others) in a terminal beside the chat"
+              : "Chat with the agent"
+          }
+          onClick={() => choose(value)}
+        >
+          {value === "chat" ? "Chat" : "Terminal"}
+        </button>
+      ))}
+    </div>
   );
 }
 

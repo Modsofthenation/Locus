@@ -13,11 +13,15 @@ export type GuestBootPorts = {
   runStartVm: (sessionId: string) => Promise<VmInstance>;
   ensureDocker: (sessionId: string) => Promise<VmInstance>;
   ensureWorkerHost: (sessionId: string) => Promise<VmInstance>;
+  /** The worker is a provisioned task (Fargate): starting it takes a minute, never block on it. */
+  provisionsCompute?: (session: AgentSession) => Promise<boolean>;
   getMachine: (id: string) => VmInstance | undefined;
   workerClient: (backendId: string) => WorkerClient | undefined;
   onVmStatus: (id: string, status: string, error?: string) => Promise<void>;
   resumeIgnoredStartPrompt: (sessionId: string) => Promise<void>;
   bootTimeoutMs: () => Promise<number>;
+  /** Mark the boot step list failed (timeouts and fire-and-forget start errors). */
+  onBootFailed?: (sessionId: string, message: string) => void;
   store: JsonStore;
   hub: Hub;
 };
@@ -25,7 +29,7 @@ export type GuestBootPorts = {
 /**
  * Guest Machine start coordination: inflight dedupe, expected-boot tracking,
  * fire-and-forget Docker/worker boot, and Turn wait-until-ready.
- * ensure/start adapters stay on Session; this module owns the boot seam.
+ * ensure/start adapters live in `MachineLifecycle`; this module owns the boot seam.
  */
 export class GuestBoot {
   private guestBoots = new Map<string, Promise<VmInstance>>();
@@ -81,6 +85,11 @@ export class GuestBoot {
       !waitUntilStarted &&
       (sessionRuntime(session) === "docker" || this.ports.isWorkerHost(session))
     ) {
+      if (this.ports.isWorkerHost(session) && (await this.ports.provisionsCompute?.(session))) {
+        // Create returns right away; boot steps and the first turn wait on startVm.
+        void this.startVm(sessionId).catch((err) => void this.failBoot(sessionId, err));
+        return;
+      }
       if (sessionRuntime(session) === "docker") await this.ports.ensureDocker(sessionId);
       else await this.ports.ensureWorkerHost(sessionId);
       void this.startVm(sessionId).catch((err) => void this.failBoot(sessionId, err));
@@ -155,6 +164,7 @@ export class GuestBoot {
   async failBoot(sessionId: string, err: unknown): Promise<void> {
     this.guestExpected.delete(sessionId);
     const message = err instanceof Error ? err.message : "Start failed";
+    this.ports.onBootFailed?.(sessionId, message);
     try {
       const updated = await this.ports.store.mutateSession(sessionId, (current) => {
         current.status = "error";

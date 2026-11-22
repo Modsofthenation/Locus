@@ -2,7 +2,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { MockHypervisor } from "@locus/hypervisor";
+import type { VmInstance } from "@locus/shared";
+import { MockDockerEngine, MockHypervisor } from "@locus/hypervisor";
 import type { KiroCliSpawner } from "@locus/providers";
 import { Hub } from "../core/hub.js";
 import { SessionService } from "./sessions.js";
@@ -49,6 +50,73 @@ function linesSpawner(
 }
 
 describe("kiro cli chat loop", () => {
+  it("does not run the CLI when its Docker container fails to start", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-kiro-cli-docker-fail-"));
+    cleanup.push(dir);
+    const store = new JsonStore(dir);
+    await store.init();
+    const config = await store.loadConfig();
+    const kiro = config.providers.find((p) => p.kind === "kiro-cli")!;
+    kiro.enabled = true;
+    await store.saveConfig(config);
+    const hypervisor = new MockHypervisor(dir);
+    const failure = "Restricted jail requires iptables in the guest image.";
+    class FailDocker extends MockDockerEngine {
+      override async start(id: string): Promise<VmInstance> {
+        const vm = this.get(id);
+        if (vm) {
+          vm.status = "error";
+          vm.error = failure;
+          this.emit("status", id, "error", failure);
+        }
+        throw new Error(failure);
+      }
+    }
+    const sessions = new SessionService(
+      store,
+      hypervisor,
+      new Hub(),
+      undefined,
+      undefined,
+      new FailDocker(dir),
+    );
+    const captured: Array<{ args: string[]; cwd: string; env?: NodeJS.ProcessEnv }> = [];
+    sessions.kiroCliSpawner = linesSpawner(captured, [
+      JSON.stringify({ type: "result", subtype: "success", result: "should not run" }),
+    ]);
+    const created = await sessions.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      runtime: "docker",
+      dockerImage: "locus/agent",
+      providerId: kiro.id,
+      model: "auto",
+      startVm: false,
+    });
+    try {
+      await sessions.sendChat(created.id, "review the PR");
+      const fresh = await waitFor(
+        sessions,
+        created.id,
+        (session) =>
+          session.status !== "running" &&
+          session.messages.some(
+            (m) => m.role === "system" && m.content.includes("did not become ready"),
+          ),
+      );
+      expect(
+        fresh?.messages.some(
+          (m) => m.role === "system" && m.content.includes("did not become ready"),
+        ),
+      ).toBe(true);
+      expect(captured).toEqual([]);
+      expect(fresh?.messages.some((m) => m.role === "assistant")).toBe(false);
+    } finally {
+      await sessions.abortChat(created.id).catch(() => undefined);
+      hypervisor.shutdown();
+    }
+  });
+
   it("runs kiro-cli chat against the host workspace and resumes the CLI session", async () => {
     const dir = await mkdtemp(join(tmpdir(), "locus-kiro-cli-"));
     cleanup.push(dir);
@@ -95,7 +163,7 @@ describe("kiro cli chat loop", () => {
     const fresh = await waitFor(sessions, created.id, (session) =>
       Boolean(session.kiroCli?.sessionId && session.status !== "running"),
     );
-    expect(fresh?.kiroCli).toEqual({ sessionId: "kiro-sess-1" });
+    expect(fresh?.kiroCli).toMatchObject({ sessionId: "kiro-sess-1" });
     const assistant = fresh?.messages.find((m) => m.role === "assistant");
     expect(assistant?.content).toContain("Updated README.md.");
     expect(assistant?.toolCalls?.some((call) => call.name === "file_read")).toBe(true);
@@ -370,7 +438,7 @@ describe("kiro cli chat loop", () => {
       Boolean(session.messages.some((m) => m.role === "assistant" && m.content.includes("Hello"))),
     );
     expect(fresh?.messages.find((m) => m.role === "assistant")?.content).toContain("Hello");
-    expect(fresh?.kiroCli).toEqual({ sessionId: "kiro-native-hello" });
+    expect(fresh?.kiroCli).toMatchObject({ sessionId: "kiro-native-hello" });
   });
 
   it("shows stream-json envelope text in chat instead of a blank turn", async () => {
@@ -432,7 +500,7 @@ describe("kiro cli chat loop", () => {
     expect(fresh?.messages.find((m) => m.role === "assistant")?.content).toContain(
       "Hello from Kiro.",
     );
-    expect(fresh?.kiroCli).toEqual({ sessionId: "sess_envelope" });
+    expect(fresh?.kiroCli).toMatchObject({ sessionId: "sess_envelope" });
     expect(fresh?.messages.find((m) => m.role === "assistant")?.content).not.toMatch(
       /finished without a reply/,
     );
@@ -474,7 +542,7 @@ describe("kiro cli chat loop", () => {
       Boolean(session.messages.some((m) => m.role === "assistant" && m.content.includes("Hello"))),
     );
     expect(fresh?.messages.find((m) => m.role === "assistant")?.content).toContain("Hello");
-    expect(fresh?.kiroCli).toEqual({ sessionId: "v3-hello" });
+    expect(fresh?.kiroCli).toMatchObject({ sessionId: "v3-hello" });
   });
 
   it("shows a clean error when Kiro starts KAS but emits no stream-json", async () => {

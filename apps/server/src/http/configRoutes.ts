@@ -4,6 +4,8 @@ import { clearIntegrationCredentials, type LocusConfig } from "@locus/shared";
 import type { AutomationService } from "../automations/automations.js";
 import { redactConfig, redactVm } from "../core/redact.js";
 import { prepareSavedConfig } from "../core/configSave.js";
+import { generateCustomTheme } from "../core/themeGenerate.js";
+import { auditConfigChanges } from "../core/auditLog.js";
 import { UpdateChecker, downloadAndVerifyUpdate, openVerifiedUpdate } from "../core/updates.js";
 import type { JsonStore } from "../core/store.js";
 import type { SessionService } from "../session/sessions.js";
@@ -26,6 +28,24 @@ export function registerConfigRoutes(
     fetchFn?: typeof fetch;
   },
 ): void {
+  app.post("/api/themes/generate", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      prompt?: unknown;
+      current?: unknown;
+      providerId?: unknown;
+      model?: unknown;
+    };
+    const result = await generateCustomTheme({
+      config: await opts.store.loadConfig(),
+      prompt: typeof body.prompt === "string" ? body.prompt : "",
+      current: body.current,
+      providerId: typeof body.providerId === "string" ? body.providerId : undefined,
+      model: typeof body.model === "string" ? body.model : undefined,
+    });
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    return c.json({ theme: result.theme });
+  });
+
   app.get("/api/config", async (c) => {
     const config = await opts.store.loadConfig();
     return c.json(redactConfig(config));
@@ -78,6 +98,9 @@ export function registerConfigRoutes(
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Failed to save config" }, 500);
     }
+    for (const change of auditConfigChanges(current, saved.config)) {
+      opts.sessions.audit.record(change);
+    }
     if (opts.onConfigSaved) {
       const next = await opts.onConfigSaved(saved.config);
       if (next) opts.setCapabilities(next);
@@ -99,6 +122,13 @@ export function registerConfigRoutes(
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Failed to revoke tokens" }, 500);
     }
+    opts.sessions.audit.record({
+      type: "credential",
+      actor: "operator",
+      decision: "revoked",
+      summary: "Revoked all integration tokens",
+      data: { integrations: current.integrations.map((row) => row.id) },
+    });
     if (opts.onConfigSaved) await opts.onConfigSaved(current);
     void opts.slack.restart();
     return c.json({ ok: true, config: redactConfig(await opts.store.loadConfig()) });

@@ -13,8 +13,14 @@ import {
   isClaudeCodeProvider,
   isCodexCliProvider,
   isKiroCliProvider,
+  isGenericCliProvider,
+  cliAgentConfigError,
+  normalizeCliAgentConfig,
+  CLI_AGENT_BASE_URL,
   isLoopbackHost,
+  findCustomTheme,
   isThemeId,
+  normalizeCustomThemes,
   normalizePlugins,
   normalizeSkills,
   parseAllowHosts,
@@ -34,6 +40,9 @@ import {
   policyTokenFree,
   policyTokenScopeMode,
   stampIntegrationToken,
+  parseBudgetSettings,
+  parseTelemetrySettings,
+  telemetryEndpointError,
   type LocusConfig,
 } from "@locus/shared";
 import { validateTemplate as validateVmTemplate } from "@locus/hypervisor";
@@ -50,7 +59,8 @@ export function providerBaseUrlError(provider: {
     isCursorCliProvider(provider) ||
     isClaudeCodeProvider(provider) ||
     isCodexCliProvider(provider) ||
-    isKiroCliProvider(provider)
+    isKiroCliProvider(provider) ||
+    isGenericCliProvider(provider)
   )
     return undefined;
   return invalidHttpUrl(provider.baseUrl, `${provider.name} base URL`);
@@ -73,7 +83,12 @@ export function normalizeSavedConfig(
   incomingTheme: LocusConfig["theme"] | undefined,
   dataDir: string,
 ): ConfigSaveResult {
-  if (incomingTheme !== undefined && !isThemeId(incomingTheme)) {
+  merged.customThemes = normalizeCustomThemes(merged.customThemes);
+  if (
+    incomingTheme !== undefined &&
+    !isThemeId(incomingTheme) &&
+    !findCustomTheme(incomingTheme, merged.customThemes)
+  ) {
     return { ok: false, error: "Unknown theme" };
   }
   if (!isLoopbackHost(merged.advanced.bindHost || "127.0.0.1")) {
@@ -82,6 +97,17 @@ export function normalizeSavedConfig(
   for (const provider of merged.providers) {
     const urlError = providerBaseUrlError(provider);
     if (urlError) return { ok: false, error: urlError };
+    if (provider.kind === "cli-agent") {
+      // A disabled card with no command yet is a draft; anything else must be runnable.
+      const draft = !provider.enabled && !provider.cli?.command?.trim();
+      const cliError = draft ? undefined : cliAgentConfigError(provider.name, provider.cli);
+      if (cliError) return { ok: false, error: cliError };
+      const cli = normalizeCliAgentConfig(provider.cli);
+      if (cli) provider.cli = cli;
+      if (!provider.baseUrl?.trim()) provider.baseUrl = CLI_AGENT_BASE_URL;
+    } else if (provider.cli !== undefined) {
+      delete provider.cli;
+    }
   }
   for (const forge of merged.forges) {
     const urlError = invalidHttpUrl(forge.apiBaseUrl, `${forge.name} API URL`);
@@ -191,6 +217,13 @@ export function normalizeSavedConfig(
     };
   }
   merged.advanced.extraAllowHosts = parseAllowHosts(merged.advanced.extraAllowHosts);
+  merged.telemetry = parseTelemetrySettings(merged.telemetry);
+  const telemetryError = telemetryEndpointError(merged.telemetry?.endpoint);
+  if (telemetryError) return { ok: false, error: telemetryError };
+  if (merged.telemetry?.enabled && !merged.telemetry.endpoint) {
+    return { ok: false, error: "Telemetry export needs an OTLP endpoint" };
+  }
+  merged.budgets = parseBudgetSettings(merged.budgets);
   if (typeof merged.defaultDesignSystemId === "string") {
     merged.defaultDesignSystemId = merged.defaultDesignSystemId.trim() || undefined;
   } else {

@@ -147,25 +147,17 @@ describe("context windows and token calibration", () => {
     expect(persisted.parts.find((part) => part.id === "conversation")?.tokens).toBe(256_000);
   });
 
-  it("treats Cursor CLI billing totals as window occupancy", () => {
+  it("treats CLI prompt totals as window occupancy", () => {
     expect(
       occupancyFromCursorCliUsage({
-        inputTokens: 20_000,
+        inputTokens: 30_624,
         cachedInputTokens: 10_624,
         window: 200_000,
       }),
     ).toEqual({ used: 30_624, cachedInputTokens: 10_624 });
     expect(
       occupancyFromCursorCliUsage({
-        inputTokens: 7,
-        cachedInputTokens: 147_695,
-        cacheWriteTokens: 39_331,
-        window: 200_000,
-      }),
-    ).toEqual({ used: 187_033, cachedInputTokens: 147_695 });
-    expect(
-      occupancyFromCursorCliUsage({
-        inputTokens: 275_312,
+        inputTokens: 911_312,
         cachedInputTokens: 636_000,
         window: 256_000,
       }),

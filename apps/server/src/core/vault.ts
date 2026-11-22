@@ -23,9 +23,13 @@ export interface SecretBundle {
   integrationRefreshTokens: Record<string, string>;
   templatePasswords: Record<string, { cloudInit?: string; unattend?: string }>;
   mcpEnv: Record<string, Record<string, string>>;
+  /** Secret-named env on Custom CLI agent providers, keyed by provider id. */
+  providerCliEnv: Record<string, Record<string, string>>;
   workerTokens: Record<string, string>;
   pluginSecrets: Record<string, Record<string, string>>;
   slackSigningSecret?: string;
+  /** OTLP collector headers (API keys) keyed by header name. */
+  telemetryHeaders?: Record<string, string>;
   phoneRemoteToken?: string;
   chromeExtensionToken?: string;
 }
@@ -44,6 +48,7 @@ export function emptySecrets(): SecretBundle {
     integrationRefreshTokens: {},
     templatePasswords: {},
     mcpEnv: {},
+    providerCliEnv: {},
     workerTokens: {},
     pluginSecrets: {},
   };
@@ -163,7 +168,17 @@ export function extractSecrets(config: LocusConfig): {
   const providers = config.providers.map((p) => {
     const key = p.apiKey?.trim();
     if (key) secrets.providerKeys[p.id] = key;
-    return { ...p, apiKey: key ? "" : p.apiKey };
+    const next = { ...p, apiKey: key ? "" : p.apiKey };
+    if (!p.cli?.env) return next;
+    const env: Record<string, string> = {};
+    const stored: Record<string, string> = {};
+    for (const [name, value] of Object.entries(p.cli.env)) {
+      if (!value) continue;
+      if (looksLikeSecretName(name)) stored[name] = value;
+      else env[name] = value;
+    }
+    if (Object.keys(stored).length) secrets.providerCliEnv[p.id] = stored;
+    return { ...next, cli: { ...p.cli, env } };
   });
   const forges = config.forges.map((f) => {
     const token = f.token?.trim();
@@ -253,6 +268,12 @@ export function extractSecrets(config: LocusConfig): {
   if (phoneToken) secrets.phoneRemoteToken = phoneToken;
   const chromeToken = config.chromeExtension?.token?.trim();
   if (chromeToken) secrets.chromeExtensionToken = chromeToken;
+  const telemetryHeaders: Record<string, string> = {};
+  for (const [name, value] of Object.entries(config.telemetry?.headers ?? {})) {
+    const v = value?.trim();
+    if (v) secrets.telemetryHeaders = { ...secrets.telemetryHeaders, [name]: v };
+    telemetryHeaders[name] = "";
+  }
   const workers = (config.workers ?? []).map((row) => {
     const token = row.token?.trim();
     if (token) secrets.workerTokens[row.id] = token;
@@ -278,6 +299,12 @@ export function extractSecrets(config: LocusConfig): {
       chromeExtension: config.chromeExtension
         ? { enabled: config.chromeExtension.enabled }
         : config.chromeExtension,
+      telemetry: config.telemetry
+        ? {
+            ...config.telemetry,
+            headers: Object.keys(telemetryHeaders).length ? telemetryHeaders : undefined,
+          }
+        : config.telemetry,
     },
     secrets,
   };
@@ -286,10 +313,14 @@ export function extractSecrets(config: LocusConfig): {
 export function applySecrets(config: LocusConfig, secrets: SecretBundle): LocusConfig {
   return {
     ...config,
-    providers: config.providers.map((p) => ({
-      ...p,
-      apiKey: secrets.providerKeys[p.id] || p.apiKey,
-    })),
+    providers: config.providers.map((p) => {
+      const cliEnv = secrets.providerCliEnv?.[p.id];
+      return {
+        ...p,
+        apiKey: secrets.providerKeys[p.id] || p.apiKey,
+        ...(p.cli && cliEnv ? { cli: { ...p.cli, env: { ...cliEnv, ...(p.cli.env ?? {}) } } } : {}),
+      };
+    }),
     forges: config.forges.map((f) => ({
       ...f,
       token: secrets.forgeTokens[f.id] || f.token,
@@ -345,11 +376,24 @@ export function applySecrets(config: LocusConfig, secrets: SecretBundle): LocusC
           token: secrets.chromeExtensionToken || config.chromeExtension.token,
         }
       : config.chromeExtension,
+    telemetry: config.telemetry?.headers
+      ? {
+          ...config.telemetry,
+          headers: Object.fromEntries(
+            Object.entries(config.telemetry.headers).map(([name, value]) => [
+              name,
+              secrets.telemetryHeaders?.[name] || value,
+            ]),
+          ),
+        }
+      : config.telemetry,
   };
 }
 
 export function hasExtractableSecrets(config: LocusConfig): boolean {
   if (config.providers.some((p) => p.apiKey?.trim())) return true;
+  if (config.providers.some((p) => Object.keys(p.cli?.env ?? {}).some(looksLikeSecretName)))
+    return true;
   if (
     config.forges.some(
       (f) => f.token?.trim() || f.refreshToken?.trim() || f.oauthClientSecret?.trim(),
@@ -384,6 +428,7 @@ export function hasExtractableSecrets(config: LocusConfig): boolean {
   if (config.advanced.slackSigningSecret?.trim()) return true;
   if (config.phoneRemote?.token?.trim()) return true;
   if (config.chromeExtension?.token?.trim()) return true;
+  if (Object.values(config.telemetry?.headers ?? {}).some((value) => value?.trim())) return true;
   return false;
 }
 
@@ -408,11 +453,13 @@ export async function readVaultFile(
       integrationRefreshTokens: parsed.integrationRefreshTokens ?? {},
       templatePasswords: parsed.templatePasswords ?? {},
       mcpEnv: parsed.mcpEnv ?? {},
+      providerCliEnv: parsed.providerCliEnv ?? {},
       workerTokens: parsed.workerTokens ?? {},
       pluginSecrets: parsed.pluginSecrets ?? {},
       slackSigningSecret: parsed.slackSigningSecret,
       phoneRemoteToken: parsed.phoneRemoteToken,
       chromeExtensionToken: parsed.chromeExtensionToken,
+      telemetryHeaders: parsed.telemetryHeaders,
     };
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;

@@ -16,7 +16,11 @@ import {
   forgeShort,
   isDesignSession,
   isGameSession,
+  isUnityProjectSession,
+  isGodotProjectSession,
+  isUnrealProjectSession,
   isAssetSession,
+  isBlenderProjectSession,
   conversationLabel,
   isDirectConversation,
   shortRepoName,
@@ -73,6 +77,7 @@ import {
   IconStop,
   IconInbox,
 } from "./Icons";
+import { NativeProjectThumb } from "@/components/design/NativeProjectThumb";
 import { DesignThumb } from "@/components/design/DesignThumb";
 import { MenuItem, MenuLabel, MenuSep, OverflowMenu } from "./OverflowMenu";
 import { SearchField } from "./SearchField";
@@ -105,7 +110,12 @@ import { Select } from "@/components/layout/Select";
 import { Splitter } from "@/components/layout/Splitter";
 import { FilterChips } from "@/components/layout/sidebar/FilterChips";
 import { InboxList } from "@/components/layout/sidebar/InboxList";
-import { SideRail, shortcutCaption, type RailPeekRow } from "@/components/layout/sidebar/SideRail";
+import {
+  SideRail,
+  shortcutCaption,
+  type RailPeekAction,
+  type RailPeekRow,
+} from "@/components/layout/sidebar/SideRail";
 import {
   AutomationListItem,
   patchListedAutomations,
@@ -156,6 +166,7 @@ import { showErrorNotice, showNotice } from "@/lib/notice";
 import { askConfirm } from "@/lib/dialog";
 import { archiveSessions } from "@/lib/sessionUndo";
 import {
+  effectiveRailPins,
   isLockedRailSection,
   lockedRailSections,
   moveRailSection,
@@ -166,6 +177,13 @@ import {
   unpinRailSection,
 } from "@/lib/railNav";
 import { swarmShellKeepsSection } from "@/lib/productMode";
+import {
+  addRailSignal,
+  markRailHintDone,
+  onRailSignal,
+  railPinSuggestion,
+  railUsageSignals,
+} from "@/lib/railSuggest";
 import { useDrawerSidebar } from "@/lib/useDrawerSidebar";
 import { EmptyListNote } from "./EmptyHero";
 
@@ -195,6 +213,9 @@ export function Sidebar() {
   const [pinnedSections, setPinnedSections] = useState<string[] | undefined>(
     () => loadSidebarPrefs().pinnedSections,
   );
+  const [railDefaults] = useState(() => loadSidebarPrefs().railDefaults);
+  const [railHintsDone, setRailHintsDone] = useState(() => loadSidebarPrefs().railHintsDone);
+  const [railEvents, setRailEvents] = useState<UiSection[]>([]);
   const [listFilter, setListFilter] = useState<SidebarListFilter>(
     () => loadSidebarPrefs().listFilter,
   );
@@ -226,6 +247,8 @@ export function Sidebar() {
       queries: state.queries,
       width: sidebarWidth,
       pinnedSections,
+      railDefaults,
+      railHintsDone,
       listFilter,
       groupBy,
     });
@@ -236,11 +259,18 @@ export function Sidebar() {
     state.queries,
     sidebarWidth,
     pinnedSections,
+    railDefaults,
+    railHintsDone,
     listFilter,
     groupBy,
   ]);
+  useEffect(
+    () => onRailSignal((section) => setRailEvents((rows) => addRailSignal(rows, section))),
+    [],
+  );
   const q = query.toLowerCase();
   const productMode = parseProductMode(state.config?.productMode);
+  const railPins = effectiveRailPins(productMode, pinnedSections, railDefaults);
   const hideAutomationInList = hideAutomationChats || productMode === "swarm";
   const archivedCount = state.sessions.filter(
     (s) =>
@@ -256,10 +286,13 @@ export function Sidebar() {
     (s) => s.archived && isDesignSession(s) && sessionMatchesSurface(s, productMode),
   ).length;
   const archivedGameCount = state.sessions.filter(
-    (s) => s.archived && isGameSession(s) && sessionMatchesSurface(s, productMode),
+    (s) => s.archived && sessionFitsSection(s, "games") && sessionMatchesSurface(s, productMode),
   ).length;
   const archivedAssetCount = state.sessions.filter(
-    (s) => s.archived && isAssetSession(s) && sessionMatchesSurface(s, productMode),
+    (s) =>
+      s.archived &&
+      (isAssetSession(s) || isBlenderProjectSession(s)) &&
+      sessionMatchesSurface(s, productMode),
   ).length;
   const agentCatalog = state.sessions.filter((s) => {
     if (!sessionFitsSection(s, "agents")) return false;
@@ -314,14 +347,14 @@ export function Sidebar() {
     sessionPassesListFilter(s, listFilter, state.unreadIds),
   );
   const gameCatalog = state.sessions.filter((s) => {
-    if (!isGameSession(s)) return false;
+    if (!sessionFitsSection(s, "games")) return false;
     if (!sessionMatchesSurface(s, productMode)) return false;
     if (s.archived && !showArchived) return false;
     return sessionMatchesQuery(s, q);
   });
   const games = gameCatalog.filter((s) => sessionPassesListFilter(s, listFilter, state.unreadIds));
   const assetCatalog = state.sessions.filter((s) => {
-    if (!isAssetSession(s)) return false;
+    if (!isAssetSession(s) && !isBlenderProjectSession(s)) return false;
     if (!sessionMatchesSurface(s, productMode)) return false;
     if (s.archived && !showArchived) return false;
     return sessionMatchesQuery(s, q);
@@ -331,7 +364,11 @@ export function Sidebar() {
   );
   useCanvasPrefetch(
     state.section === "design" || state.section === "games" || state.section === "assets",
-    state.section === "games" ? games : state.section === "assets" ? assets : designs,
+    state.section === "games"
+      ? games.filter(isGameSession)
+      : state.section === "assets"
+        ? assets.filter(isAssetSession)
+        : designs,
     state.canvasHtml,
     dispatch,
   );
@@ -425,7 +462,7 @@ export function Sidebar() {
   const boardWaiting = boardNeedsYouItems(state.boards);
   const brainWaiting = state.brain?.inboxCount ?? 0;
   const sectionMeta = sectionMetaFor(productMode);
-  const railSections = resolveRailSections(productMode, pinnedSections);
+  const railSections = resolveRailSections(productMode, railPins);
   const primarySections = railSections.primary.map((id) => ({
     id,
     ...sectionMeta[id as Exclude<UiSection, "settings">],
@@ -434,6 +471,23 @@ export function Sidebar() {
     id,
     ...sectionMeta[id as Exclude<UiSection, "settings">],
   }));
+  const railSuggestion = railPinSuggestion({
+    mode: productMode,
+    pinned: railSections.primary,
+    done: railHintsDone,
+    signals: [
+      ...railEvents,
+      ...railUsageSignals({
+        designs: state.sessions.some((s) => !s.archived && isDesignSession(s)),
+        automations: state.automations.length > 0,
+        grafanaToken: (state.config?.integrations ?? []).some(
+          (row) => row.kind === "grafana" && Boolean(row.token?.trim()),
+        ),
+        dockerFound: Boolean(state.setup?.dockerFound),
+        dockerAgents: state.sessions.some((s) => !s.archived && s.runtime === "docker"),
+      }),
+    ],
+  });
   const inboxAll = buildInboxRows({
     sessions: state.sessions.filter((s) => sessionMatchesSurface(s, productMode)),
     boards: state.boards,
@@ -525,17 +579,25 @@ export function Sidebar() {
   function togglePinnedSection(section: UiSection) {
     if (section === "settings" || isLockedRailSection(section, productMode)) return;
     const next = railSections.primary.includes(section)
-      ? unpinRailSection(productMode, pinnedSections, section)
-      : pinRailSection(productMode, pinnedSections, section);
+      ? unpinRailSection(productMode, railPins, section)
+      : pinRailSection(productMode, railPins, section);
     setPinnedSections(next);
+    if (next.includes(section)) setRailHintsDone((done) => markRailHintDone(done, section));
+  }
+
+  function answerRailSuggestion(section: UiSection, pin: boolean) {
+    if (pin && !railSections.primary.includes(section)) {
+      setPinnedSections(pinRailSection(productMode, railPins, section));
+    }
+    setRailHintsDone((done) => markRailHintDone(done, section));
   }
 
   function movePinnedSection(section: UiSection, delta: -1 | 1) {
-    setPinnedSections(moveRailSection(productMode, pinnedSections, section, delta));
+    setPinnedSections(moveRailSection(productMode, railPins, section, delta));
   }
 
   function reorderPinnedSection(section: UiSection, target: UiSection) {
-    setPinnedSections(reorderRailSections(productMode, pinnedSections, section, target));
+    setPinnedSections(reorderRailSections(productMode, railPins, section, target));
   }
 
   function goToSection(section: UiSection) {
@@ -557,9 +619,16 @@ export function Sidebar() {
       dispatch({ type: "settings", open: false });
     }
     dispatch({ type: "inbox", open: true });
+    // On narrow windows Home's dashboard already lists what needs you; close the drawer so it shows.
+    if (drawer) dispatch({ type: "sidebarCollapsed", collapsed: true });
   }
 
   function openInboxRow(row: InboxRow) {
+    // Beside Home's dashboard a pick shows the item in the decision card; its Open goes to the chat.
+    if (inboxOpen && !drawer) {
+      dispatch({ type: "inboxFocus", key: row.key });
+      return;
+    }
     openInboxTarget(row, dispatch);
   }
 
@@ -768,7 +837,7 @@ export function Sidebar() {
           return;
         }
       }
-      const dest = railShortcutTargets(productMode, pinnedSections)[Number(digit) - 1];
+      const dest = railShortcutTargets(productMode, railPins)[Number(digit) - 1];
       if (!dest) return;
       event.preventDefault();
       if (dest === "inbox") openInbox();
@@ -777,7 +846,7 @@ export function Sidebar() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // goToSection / openInbox close over the latest section; listing them retriggers every render.
-  }, [productMode, pinnedSections, state.section]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [productMode, railPins, state.section]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function returnToSwarmTeammates() {
     if (!confirmLeaveSettings()) return;
@@ -792,7 +861,7 @@ export function Sidebar() {
     }
   }
 
-  const shortcutTargets = railShortcutTargets(productMode, pinnedSections);
+  const shortcutTargets = railShortcutTargets(productMode, railPins);
   function shortcutHint(target: "inbox" | UiSection) {
     return shortcutCaption(shortcutTargets.indexOf(target));
   }
@@ -850,6 +919,76 @@ export function Sidebar() {
       ];
     }
     return [];
+  }
+
+  // Create actions for the collapsed-rail flyout, mirroring each section's primary button.
+  function peekActions(target: "inbox" | UiSection): RailPeekAction[] {
+    if (target === "inbox") return [];
+    const go = (run: () => void) => () => {
+      goToSection(target);
+      run();
+    };
+    const fresh = go(() => dispatch({ type: "select", id: null }));
+    switch (target) {
+      case "agents":
+        return [{ key: "new", label: swarmMode ? "New teammate" : "New agent", run: fresh }];
+      case "android":
+        return [{ key: "new", label: "New Android project", run: fresh }];
+      case "design":
+        return [{ key: "new", label: "New design", run: fresh }];
+      case "games":
+        return [{ key: "new", label: "New game", run: fresh }];
+      case "assets":
+        return [{ key: "new", label: "New asset", run: fresh }];
+      case "ide":
+        return (
+          [
+            ["open", "Open folder…"],
+            ["clone", "Clone repo…"],
+          ] as const
+        ).map(([intent, label]) => ({
+          key: intent,
+          label,
+          run: go(() => {
+            dispatch({ type: "select", id: null });
+            dispatch({ type: "ideStart", intent });
+          }),
+        }));
+      case "automations":
+        return [
+          {
+            key: "new",
+            label: swarmMode ? "New routine" : "New job",
+            run: go(() => dispatch({ type: "newAutomation", open: true })),
+          },
+        ];
+      case "board":
+        return [
+          {
+            key: "new",
+            label: "New board",
+            run: go(() => dispatch({ type: "selectBoard", id: null })),
+          },
+        ];
+      case "project":
+        return [
+          {
+            key: "new",
+            label: swarmMode ? "New team" : "New project",
+            run: go(() => dispatch({ type: "selectProject", id: null })),
+          },
+        ];
+      case "codebase":
+        return [
+          {
+            key: "new",
+            label: "Link repo",
+            run: go(() => dispatch({ type: "selectRepo", id: null })),
+          },
+        ];
+      default:
+        return [];
+    }
   }
 
   function onPeekOpen(target: "inbox" | UiSection, row: RailPeekRow) {
@@ -919,7 +1058,9 @@ export function Sidebar() {
   }
 
   const primaryAction =
-    state.section === "automations" ? (
+    state.section === "android" ? (
+      primaryButton("New Android project", () => dispatch({ type: "select", id: null }))
+    ) : state.section === "automations" ? (
       primaryButton(swarmMode ? "New routine" : "New job", () =>
         dispatch({ type: "newAutomation", open: true }),
       )
@@ -1050,6 +1191,7 @@ export function Sidebar() {
     settingsTab: state.settingsTab,
     dockerKind: state.dockerKind,
     slackTeam: state.slackStatus?.teamName,
+    grafanaConnected,
     agentCount: agentCatalog.length,
     needsCount: agentCatalog.filter(sessionHasNeedsYou).length,
     designCount: designCatalog.length,
@@ -1090,12 +1232,19 @@ export function Sidebar() {
         onInbox={openInbox}
         onSection={goToSection}
         onPin={togglePinnedSection}
+        suggestion={
+          railSuggestion
+            ? (secondarySections.find((row) => row.id === railSuggestion) ?? null)
+            : null
+        }
+        onSuggestion={answerRailSuggestion}
         onReorder={reorderPinnedSection}
         onMove={movePinnedSection}
         onSettings={() => dispatch({ type: "settings", open: true })}
         onToggleCollapse={() => dispatch({ type: "toggleSidebar" })}
         onSetup={() => dispatch({ type: "setupOpen", open: true })}
         peekRows={peekRows}
+        peekActions={peekActions}
         onPeekOpen={onPeekOpen}
       />
       <div
@@ -1105,7 +1254,7 @@ export function Sidebar() {
       >
         <div className="brand">
           <div className="brand-copy">
-            <h1>{inboxOpen ? "Inbox" : sectionLabel(state.section, productMode)}</h1>
+            <h1>{inboxOpen ? "Home" : sectionLabel(state.section, productMode)}</h1>
             {brandSubtitle ? <p>{brandSubtitle}</p> : null}
           </div>
           {headerShown && !primaryAction && headerMenu ? (
@@ -1124,7 +1273,7 @@ export function Sidebar() {
           <SearchField
             className="search"
             placeholder={
-              inboxOpen ? "Search inbox" : sectionSearchPlaceholder(state.section, productMode)
+              inboxOpen ? "Search needs you" : sectionSearchPlaceholder(state.section, productMode)
             }
             value={query}
             onChange={(e: FormEvent<HTMLInputElement>) =>
@@ -1359,7 +1508,7 @@ export function Sidebar() {
         >
           <div
             className="session-list"
-            aria-label={inboxOpen ? "Inbox" : sectionLabel(state.section, productMode)}
+            aria-label={inboxOpen ? "Home" : sectionLabel(state.section, productMode)}
           >
             {inboxOpen ? (
               <InboxList
@@ -1367,6 +1516,7 @@ export function Sidebar() {
                 sessions={state.sessions}
                 query={q}
                 mode={productMode}
+                focusKey={state.inboxFocusKey}
                 onOpen={openInboxRow}
               />
             ) : state.section === "settings" ? (
@@ -1705,14 +1855,22 @@ export function Sidebar() {
                   unreadIds={state.unreadIds}
                   repos={state.repos}
                   metaFor={(s) => `${s.archived ? "Archived · " : ""}${s.model}`}
-                  previewFor={(s) => (
-                    <DesignThumb
-                      session={s}
-                      html={state.canvasHtml[s.id]}
-                      systems={state.designSystems}
-                      shot={state.gameShots[s.id]}
-                    />
-                  )}
+                  previewFor={(s) =>
+                    isGodotProjectSession(s) ? (
+                      <NativeProjectThumb engine="godot" />
+                    ) : isUnrealProjectSession(s) ? (
+                      <NativeProjectThumb engine="unreal" />
+                    ) : isUnityProjectSession(s) ? (
+                      <NativeProjectThumb engine="unity" />
+                    ) : (
+                      <DesignThumb
+                        session={s}
+                        html={state.canvasHtml[s.id]}
+                        systems={state.designSystems}
+                        shot={state.gameShots[s.id]}
+                      />
+                    )
+                  }
                   onSelect={(id) => dispatch({ type: "select", id })}
                   groupBy={groupBy}
                 />
@@ -1727,13 +1885,17 @@ export function Sidebar() {
                   unreadIds={state.unreadIds}
                   repos={state.repos}
                   metaFor={(s) => `${s.archived ? "Archived · " : ""}${s.model}`}
-                  previewFor={(s) => (
-                    <DesignThumb
-                      session={s}
-                      html={state.canvasHtml[s.id]}
-                      systems={state.designSystems}
-                    />
-                  )}
+                  previewFor={(s) =>
+                    isBlenderProjectSession(s) ? (
+                      <NativeProjectThumb engine="blender" />
+                    ) : (
+                      <DesignThumb
+                        session={s}
+                        html={state.canvasHtml[s.id]}
+                        systems={state.designSystems}
+                      />
+                    )
+                  }
                   onSelect={(id) => dispatch({ type: "select", id })}
                   groupBy={groupBy}
                 />
@@ -1850,6 +2012,22 @@ export function Sidebar() {
                   ))
                 )}
               </>
+            ) : state.section === "android" ? (
+              <SessionGroupBlocks
+                sessions={state.sessions.filter(
+                  (s) =>
+                    sessionFitsSection(s, "android") &&
+                    !s.archived &&
+                    sessionMatchesSurface(s, productMode) &&
+                    s.title.toLowerCase().includes(q),
+                )}
+                selectedId={state.selectedId}
+                unreadIds={state.unreadIds}
+                repos={state.repos}
+                metaFor={(s) => s.model}
+                onSelect={(id) => dispatch({ type: "select", id })}
+                groupBy={groupBy}
+              />
             ) : state.section === "brain" ? (
               <EmptyListNote>{q ? "No matching claims" : "No claims yet"}</EmptyListNote>
             ) : state.section === "grafana" ? (

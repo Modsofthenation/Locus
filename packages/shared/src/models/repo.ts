@@ -192,6 +192,8 @@ export interface PullCommit {
 
 export interface PullRequestDetail extends PullRequestRef {
   body?: string;
+  /** Label names. GitHub, Gitea / Forgejo, GitLab and Azure DevOps; Bitbucket PRs have none. */
+  labels?: string[];
   files: PullFile[];
   comments: PullComment[];
   commits: PullCommit[];
@@ -598,6 +600,7 @@ export function parsePullRequestDetail(
   return {
     ...ref,
     body: typeof value.body === "string" ? value.body : undefined,
+    labels: parseNameList(value.labels),
     files: Array.isArray(value.files) ? value.files.flatMap((row) => parsePullFile(row) ?? []) : [],
     comments: Array.isArray(value.comments)
       ? value.comments.flatMap((row) => {

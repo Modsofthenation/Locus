@@ -1,0 +1,92 @@
+name: benchmark
+
+# Weekly model benchmark: the built-in suite (toy JS cases plus the TS / Python / Go bug-fix
+# fixtures) as real Host agent turns against one model. Fails when the pass rate drops more
+# than the allowed amount below apps/server/bench/benchmark-baseline.json.
+#
+# Configure in Settings → Secrets and variables → Actions:
+#   secret   LOCUS_BENCH_API_KEY    provider API key (the job skips with a notice when unset)
+#   variable LOCUS_BENCH_PROVIDER   built-in provider kind or name, e.g. anthropic, openai, OpenRouter
+#   variable LOCUS_BENCH_MODEL      model id
+#   variable LOCUS_BENCH_BASE_URL   optional base URL override
+#   variable LOCUS_BENCH_MAX_DROP   optional allowed drop below the baseline (0–1, default from the baseline file)
+
+on:
+  schedule:
+    - cron: "37 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model id (default: the LOCUS_BENCH_MODEL variable)"
+        required: false
+      cases:
+        description: "Comma-separated case ids (default: the whole built-in suite)"
+        required: false
+      max_drop:
+        description: "Allowed pass-rate drop below the baseline, 0–1"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      LOCUS_BENCH_API_KEY: ${{ secrets.LOCUS_BENCH_API_KEY }}
+      LOCUS_BENCH_PROVIDER: ${{ vars.LOCUS_BENCH_PROVIDER }}
+      LOCUS_BENCH_MODEL: ${{ inputs.model || vars.LOCUS_BENCH_MODEL }}
+      LOCUS_BENCH_BASE_URL: ${{ vars.LOCUS_BENCH_BASE_URL }}
+      LOCUS_BENCH_MAX_DROP: ${{ inputs.max_drop || vars.LOCUS_BENCH_MAX_DROP }}
+      LOCUS_BENCH_CASES: ${{ inputs.cases }}
+    steps:
+      - name: Check for model credentials
+        id: creds
+        run: |
+          if [ -z "$LOCUS_BENCH_API_KEY" ] || [ -z "$LOCUS_BENCH_PROVIDER" ] || [ -z "$LOCUS_BENCH_MODEL" ]; then
+            echo "::notice title=Benchmark skipped::Set the LOCUS_BENCH_API_KEY secret and the LOCUS_BENCH_PROVIDER / LOCUS_BENCH_MODEL variables to run the model benchmark."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.creds.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: steps.creds.outputs.enabled == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.22"
+          cache: npm
+      - if: steps.creds.outputs.enabled == 'true'
+        run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      # The runner image ships Python 3 and Go; a case whose toolchain is missing is skipped.
+      - if: steps.creds.outputs.enabled == 'true'
+        name: Toolchains
+        run: |
+          node --version
+          python3 --version || echo "python3 missing: Python cases will be skipped"
+          go version || echo "go missing: Go cases will be skipped"
+      - if: steps.creds.outputs.enabled == 'true'
+        name: Run the built-in suite
+        env:
+          LOCUS_GIT_SHA: ${{ github.sha }}
+        run: >-
+          npx tsx apps/server/bench/benchmarkCi.ts
+          --provider "$LOCUS_BENCH_PROVIDER"
+          --model "$LOCUS_BENCH_MODEL"
+          --out benchmark-run.json
+          --baseline apps/server/bench/benchmark-baseline.json
+          --timeout-min 10
+      - if: always() && steps.creds.outputs.enabled == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: benchmark-run
+          path: benchmark-run.json
+          if-no-files-found: warn
+          retention-days: 90

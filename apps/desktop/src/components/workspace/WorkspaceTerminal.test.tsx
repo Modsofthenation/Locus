@@ -127,6 +127,42 @@ describe("WorkspaceTerminal", () => {
     ).toBe("0");
   });
 
+  it("attaches to an explicit PTY url and reports when the server closes it", async () => {
+    const opened: Array<{ url: string; onclose?: (ev: { code: number; reason: string }) => void }> =
+      [];
+    globalThis.WebSocket = class extends FakeWebSocket {
+      onclose?: (ev: { code: number; reason: string }) => void;
+      constructor(readonly url: string) {
+        super();
+        opened.push(this);
+      }
+    } as unknown as typeof WebSocket;
+    globalThis.ResizeObserver = FakeResizeObserver as unknown as typeof ResizeObserver;
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const closed: Array<{ code: number; reason: string }> = [];
+    act(() => {
+      root!.render(
+        <WorkspaceTerminal
+          sessionId="s1"
+          url="ws://127.0.0.1/ws/sessions/s1/terminal?terminal=a"
+          onClose={(ev) => closed.push(ev)}
+        />,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(opened.map((ws) => ws.url)).toEqual([
+      "ws://127.0.0.1/ws/sessions/s1/terminal?terminal=a",
+    ]);
+    act(() => opened[0]!.onclose?.({ code: 1000, reason: "exited" }));
+    expect(closed).toEqual([{ code: 1000, reason: "exited" }]);
+  });
+
   it("focuses the helper textarea when you click the pane", async () => {
     await render(true);
     const pane = host!.querySelector("[data-testid='workspace-terminal']") as HTMLDivElement;

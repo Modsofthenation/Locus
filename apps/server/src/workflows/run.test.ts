@@ -85,6 +85,34 @@ describe("runLocusWorkflow", () => {
     expect(JSON.stringify(run.output)).toContain("port 7420");
   });
 
+  it("passes an agent node's authored model to the completer", async () => {
+    const workflow = createEmptyWorkflow("Routed");
+    const input = createNode("input", templateAt(0), "Task");
+    const planner = createNode("agent", templateAt(1), "Planner");
+    planner.data.config.model = { provider: "anthropic", model: "claude-opus-5-5" };
+    // Catalog default (openai / gpt-4o-mini) counts as no choice.
+    const worker = createNode("agent", templateAt(2), "Worker");
+    const output = createNode("output", templateAt(3), "Output");
+    workflow.nodes = [input, planner, worker, output];
+    workflow.edges = [
+      createEdge(input.id, planner.id),
+      createEdge(planner.id, worker.id),
+      createEdge(worker.id, output.id),
+    ];
+    const models: unknown[] = [];
+    const run = await runLocusWorkflow(workflow, {
+      input: { message: "plan then do" },
+      toolCatalog: [],
+      invokeTool: async () => ({ ok: true, output: "" }),
+      complete: async (req) => {
+        models.push(req.model);
+        return { text: '{"action":"finish","result":"ok"}', toolCalls: [] };
+      },
+    });
+    expect(run.error ?? run.status).toBe("success");
+    expect(models).toEqual([{ provider: "anthropic", model: "claude-opus-5-5" }, undefined]);
+  });
+
   it("refuses workflow tools and tools outside the node allowlist", async () => {
     const workflow = createEmptyWorkflow("Denied");
     const input = createNode("input", templateAt(0), "Task");

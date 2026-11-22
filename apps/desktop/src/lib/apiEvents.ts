@@ -42,6 +42,21 @@ export function workspaceTerminalWsUrl(
   );
 }
 
+/** Terminal mode PTY: an agent CLI (preset id or raw command) in the session workspace. */
+export function agentTerminalWsUrl(
+  sessionId: string,
+  terminalId: string,
+  command?: string,
+  loc: Pick<Location, "protocol" | "host"> = location,
+): string {
+  const proto = loc.protocol === "https:" ? "wss" : "ws";
+  const params = new URLSearchParams({ terminal: terminalId });
+  if (command?.trim()) params.set("command", command.trim());
+  return withPhoneToken(
+    `${proto}://${loc.host}/ws/sessions/${encodeURIComponent(sessionId)}/terminal?${params.toString()}`,
+  );
+}
+
 export type ConnectEventsOptions = {
   WebSocketImpl?: typeof WebSocket;
   retryDelayMs?: (attempt: number) => number;

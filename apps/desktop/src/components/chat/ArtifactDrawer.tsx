@@ -1,7 +1,12 @@
 import { useMemo, useRef, useState } from "react";
 import { useDialogFocus } from "@/lib/useDialogFocus";
 import { Skeleton } from "@/components/layout/Skeleton";
-import { canShowTimeline, parseUnifiedDiff, type AgentSession } from "@locus/shared";
+import {
+  canShowTimeline,
+  parseUnifiedDiff,
+  sessionRuntime,
+  type AgentSession,
+} from "@locus/shared";
 import {
   artifactSummary,
   countChangedFiles,
@@ -13,6 +18,7 @@ import {
 import { screenshotSrc } from "./GuestTimeline";
 import { useStore } from "@/state/store";
 import { api } from "@/lib/api";
+import { VisualReview } from "./VisualReview";
 import { PatchStackCard } from "./PatchStackCard";
 
 export async function loadTurnDiff(sessionId: string, checkpointId: string): Promise<string> {
@@ -124,7 +130,8 @@ export function ArtifactDrawer({ session }: { session: AgentSession }) {
   const items = useMemo(() => sessionArtifacts(session.messages), [session.messages]);
   const gitTurns = turnDiffCheckpoints(session);
   useDialogFocus(open, () => setOpen(false), drawerRef, { trap: false });
-  if (!items.length && !gitTurns.length) return null;
+  const visual = Boolean(session.preview) && sessionRuntime(session) !== "vm";
+  if (!items.length && !gitTurns.length && !visual) return null;
 
   async function loadDiff(checkpointId: string) {
     const text = await loadTurnDiff(session.id, checkpointId);
@@ -148,11 +155,12 @@ export function ArtifactDrawer({ session }: { session: AgentSession }) {
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        Artifacts · {artifactSummary(items)}
+        Artifacts{items.length || gitTurns.length ? ` · ${artifactSummary(items)}` : ""}
         {gitTurns.length
           ? ` · ${gitTurns.length} turn diff${gitTurns.length === 1 ? "" : "s"}`
           : ""}
       </button>
+      {open && visual ? <VisualReview key={session.id} sessionId={session.id} /> : null}
       {open ? (
         <div className="artifact-track" role="group" aria-label="Thread artifacts">
           {items.map((item) => {

@@ -41,6 +41,9 @@ export function dockerExecNeedsRoot(command: string): boolean {
 }
 
 export class DockerGuestRuntime implements GuestRuntime {
+  dispose(): void {
+    this.browser?.close?.();
+  }
   readonly os: VmInstance["os"];
   readonly liveGuest = true;
   private browser?: ChromiumDriver;
@@ -62,6 +65,18 @@ export class DockerGuestRuntime implements GuestRuntime {
     if (!DOCKER_SET.has(req.name)) {
       return { ok: false, output: `${req.name} is not available in a Docker agent` };
     }
+    if (req.name === "computer_capabilities")
+      return {
+        ok: true,
+        output: JSON.stringify({
+          backend: "cdp",
+          browser: true,
+          nativeDesktop: false,
+          observation: ["browser_snapshot", "screenshot"],
+          actions: ["browser_action", "browser_click", "browser_type", "key"],
+          note: "Chromium must be installed; use a VM guest for native applications.",
+        }),
+      };
     if (req.name === "preview") {
       return { ok: true, output: "preview is handled by the control plane" };
     }

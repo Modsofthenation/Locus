@@ -1,6 +1,12 @@
 export { startAllowlistProxy } from "./netjail.js";
 export type { AllowlistProxy, EgressAttempt } from "./netjail.js";
-export type { CreateVmRequest, Hypervisor, MachineLifecycle, VmListener } from "./types.js";
+export type {
+  BootStepListener,
+  CreateVmRequest,
+  Hypervisor,
+  MachineLifecycle,
+  VmListener,
+} from "./types.js";
 export { ensureLocusAgentImage, resolveAgentImageContext } from "./images.js";
 export type { CreateContainerRequest, DockerEngine } from "./docker.js";
 export {

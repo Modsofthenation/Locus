@@ -8,6 +8,12 @@ const EN: Record<string, string> = {
     "List files in /workspace and write hello.txt. Works on Host with no repo.",
   "empty.firstTask.cta": "Fill the composer",
   "setup.firstTask.hint": "After setup, the Agents empty state offers a first Host task.",
+  "sample.title": "Try a sample task",
+  "sample.body":
+    "No repo linked yet. A Host agent fixes a failing test in a small sample repo. Nothing is pushed.",
+  "sample.cta": "Try a sample task",
+  "sample.starting": "Starting…",
+  "sample.needsProvider": "Add a provider first",
   "phone.more.settings": "Settings",
   "phone.more.automation": "New job",
   "phone.more.palette": "Command palette",

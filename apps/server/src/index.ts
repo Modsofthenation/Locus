@@ -21,6 +21,7 @@ import {
   GcpComputeBackend,
   computeTasksPath,
 } from "@locus/compute";
+import { readProviderUsage } from "@locus/providers";
 import { loadOrCreateWorkerTls } from "@locus/worker";
 import { createApp } from "./app.js";
 import { defaultDataDir } from "./defaults.js";
@@ -28,11 +29,13 @@ import { AutomationService } from "./automations/automations.js";
 import { BoardService } from "./boards/boards.js";
 import { ProjectService } from "./projects/projects.js";
 import { createProtocolMux } from "./core/controlPlaneListen.js";
+import { loadOrCreateOperatorToken } from "./core/operatorToken.js";
 import { GuestHub } from "./core/guests.js";
 import { Hub } from "./core/hub.js";
 import { RepoService } from "./git/repos.js";
 import { SessionService } from "./session/sessions.js";
 import { attachSockets } from "./core/sockets.js";
+import { AgentTerminalRegistry } from "./workspace/agentTerminals.js";
 import {
   electronResourcesPath,
   syncChromeExtensionFiles,
@@ -47,9 +50,19 @@ import { WorkflowService } from "./workflows/service.js";
 import { jiraCorpusCollector, slackCorpusCollector } from "./brain/corpus.js";
 import { SlackGateway } from "./slack/slackGateway.js";
 import { SubscriptionService } from "./session/subscriptions.js";
+import { SlackReviewerService } from "./slack/slackReviewer.js";
 import { slackSocketConnect } from "./slack/slackSocket.js";
 import { attachUi, resolveUiDir } from "./ui.js";
-import { phoneListenHost, type GuestOs, type ServerCommand } from "@locus/shared";
+import {
+  agentTerminalNeedsYou,
+  isAgentTerminalNeedsYou,
+  phoneListenHost,
+  sessionKind,
+  sessionRuntime,
+  type GuestOs,
+  type ServerCommand,
+} from "@locus/shared";
+import { TelemetryExporter } from "./core/telemetry.js";
 
 process.on("uncaughtException", (err) => {
   console.error("Locus control plane crashed:", err);
@@ -135,10 +148,57 @@ plane.onSlackApproval = (sessionId, toolName, callId) => {
 };
 brain.setCorpusCollectors([slackCorpusCollector(store, slack), jiraCorpusCollector(store)]);
 const subscriptions = new SubscriptionService(store, sessions, { slack, hub, repos, projects });
+const slackReviewers = new SlackReviewerService(store, {
+  slack,
+  budgets: sessions.budgets,
+  readProviderUsage,
+});
+const agentTerminals = new AgentTerminalRegistry({
+  resolve: (sessionId) => sessions.agentTerminalTarget(sessionId),
+  attention: {
+    flag: async (sessionId, line) => {
+      const current = await sessions.get(sessionId);
+      if (!current || current.archived || current.needsHuman?.trim()) return;
+      await sessions.flagNeedsHuman(sessionId, agentTerminalNeedsYou(line));
+    },
+    clear: async (sessionId) => {
+      const current = await sessions.get(sessionId);
+      if (!isAgentTerminalNeedsYou(current?.needsHuman)) return;
+      await sessions.patchMeta(sessionId, { needsHuman: null });
+    },
+  },
+});
+hub.subscribe((event) => {
+  if (event.type === "session.deleted") agentTerminals.closeSession(event.id);
+});
 let liveConfig = config;
+const telemetry = new TelemetryExporter({
+  serviceVersion: process.env.npm_package_version,
+  resolveMeta: async (sessionId) => {
+    const session = await sessions.get(sessionId);
+    if (!session) return undefined;
+    const provider = liveConfig.providers.find((row) => row.id === session.providerId);
+    return {
+      model: session.model,
+      providerId: session.providerId,
+      providerKind: provider?.kind,
+      runtime: sessionRuntime(session),
+      kind: sessionKind(session),
+      automationId: session.automationId,
+      projectId: session.projectId,
+    };
+  },
+});
+telemetry.configure(config.telemetry);
+sessions.onTrace((event) => telemetry.onTrace(event));
+sessions.budgets.onUsage((event) => telemetry.onUsage(event));
 setPythonInterpreterOverride(liveConfig.advanced.pythonInterpreter);
 const phoneOn = Boolean(liveConfig.phoneRemote?.enabled);
 const phoneTls = phoneOn ? await loadOrCreateWorkerTls(dataDir) : undefined;
+// Loopback is not proof of the operator; /api and /ws need this token (core/operatorToken.ts).
+const operatorToken = await loadOrCreateOperatorToken(dataDir);
+if (!operatorToken)
+  console.warn("LOCUS_OPERATOR_AUTH=off: any local process can use the Locus API.");
 const app = createApp({
   store,
   sessions,
@@ -150,11 +210,16 @@ const app = createApp({
   repos,
   hub,
   slack,
+  slackReviewers,
   brain,
   workflows,
+  telemetry,
   phoneTls: phoneTls ? { fingerprint: phoneTls.fingerprint } : undefined,
+  agentTerminals,
+  operatorToken,
   onConfigSaved: async (next) => {
     liveConfig = next;
+    telemetry.configure(next.telemetry);
     setPythonInterpreterOverride(next.advanced.pythonInterpreter);
     sessions.chromeExtension.setToken(
       next.chromeExtension?.enabled ? next.chromeExtension.token : undefined,
@@ -174,6 +239,13 @@ const app = createApp({
     return bundle;
   },
   onReset: async () => {
+    // Reset deletes the data dir; keep the running desktop's token and put the file back.
+    if (operatorToken) {
+      await loadOrCreateOperatorToken(dataDir, {
+        ...process.env,
+        LOCUS_OPERATOR_TOKEN: operatorToken,
+      });
+    }
     const { key: nextKey, error: nextKeyError } = await tryEnsureHostKey(store.dataDir);
     if (nextKeyError) console.warn(hostKeyWarning(nextKeyError));
     ssh.sshPublicKey = nextKey.publicKey;
@@ -210,6 +282,7 @@ const socketOpts = {
   },
   onCommand: handleCommand,
   phoneRemote: () => liveConfig.phoneRemote,
+  operatorToken,
   browsers: {
     attach: (sessionId: string, ws: import("ws").WebSocket) => {
       sessions.attachBrowserSocket(sessionId, ws);
@@ -225,6 +298,7 @@ const socketOpts = {
   workspaceShell: {
     root: (sessionId: string) => sessions.workspaceShellRoot(sessionId),
   },
+  agentTerminals,
 };
 attachSockets({ server: httpServer, ...socketOpts });
 if (httpsServer) attachSockets({ server: httpsServer, ...socketOpts });
@@ -245,6 +319,7 @@ if (httpsServer) {
 automations.start();
 void slack.start();
 subscriptions.start();
+slackReviewers.start();
 
 async function adoptSavedMachines(hv: Hypervisor, engine: DockerEngine): Promise<void> {
   const current = await store.loadConfig();

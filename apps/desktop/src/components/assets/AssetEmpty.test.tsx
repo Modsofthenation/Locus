@@ -80,7 +80,7 @@ describe("AssetEmpty", () => {
     expect(host.textContent).toMatch(/Drop a photo to reconstruct/);
     expect(host.querySelector("[aria-label='Source photos']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Front']")).toBeTruthy();
-    expect(host.querySelector("[aria-label='Side']")).toBeTruthy();
+    expect(host.querySelector("[aria-label='Side'], [aria-label^='Side: ']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Back']")).toBeTruthy();
     // One heading; wells read Front / Side / Back (optional), not file names.
     expect(host.textContent?.match(/Drop a photo to reconstruct/g)).toHaveLength(1);
@@ -96,11 +96,13 @@ describe("AssetEmpty", () => {
     // Style and Build fold into the "+" menu until picked.
     expect(host.querySelector("[aria-label='Style']")).toBeNull();
     expect(host.querySelector("[aria-label='Build']")).toBeNull();
-    expect(host.querySelector("[aria-label='Asset kit']")).toBeNull();
+    expect(host.querySelector("[aria-label='Asset kit'], [aria-label^='Asset kit: ']")).toBeNull();
     reveal("style");
     reveal("build");
     expect(host.querySelector("[aria-label='Style']")).toBeTruthy();
-    expect(host.querySelector("[aria-label='Asset style']")).toBeTruthy();
+    expect(
+      host.querySelector("[aria-label='Asset style'], [aria-label^='Asset style: ']"),
+    ).toBeTruthy();
     expect(host.textContent).toContain("Image to 3D");
     expect(host.textContent).toContain("Rig");
     expect(host.textContent).toContain("Walk cycle");
@@ -114,9 +116,13 @@ describe("AssetEmpty", () => {
     expect(host.textContent).toContain("A-Pose");
     expect(host.textContent).toContain("Printability");
     reveal("kit");
-    expect(host.querySelector("[aria-label='Asset kit']")).toBeTruthy();
+    expect(
+      host.querySelector("[aria-label='Asset kit'], [aria-label^='Asset kit: ']"),
+    ).toBeTruthy();
     expect(host.textContent).toContain("Sprite pack");
-    expect(host.querySelector("[aria-label='Asset kit']")).toBeTruthy();
+    expect(
+      host.querySelector("[aria-label='Asset kit'], [aria-label^='Asset kit: ']"),
+    ).toBeTruthy();
     act(() => {
       setSelectValue(host, "Asset kit", "rig-kit");
     });
@@ -215,7 +221,9 @@ describe("AssetEmpty", () => {
       );
     });
     reveal("style");
-    expect(host.querySelector("[aria-label='Asset style']")).toBeTruthy();
+    expect(
+      host.querySelector("[aria-label='Asset style'], [aria-label^='Asset style: ']"),
+    ).toBeTruthy();
     expect(host.textContent).toContain("Clay hero");
     act(() => {
       setSelectValue(host, "Asset style", "st1");

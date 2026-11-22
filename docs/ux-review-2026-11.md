@@ -113,3 +113,70 @@ consistency. Every item below is **fixed** unless it says otherwise.
   now uses the theme's `--accent` with its paired `--accent-ink`, the same pair primary buttons use.
   Text, links and message actions in the bubble all follow it. All 106 theme definitions keep at
   least 4.5:1 contrast (WCAG AA). The lowest is Paper at 4.56:1.
+
+## Second pass — 13 November
+
+Same method, on main at 0.21.0: the server with the mock hypervisor and an isolated `LOCUS_HOME`, plus
+Vite. A fake OpenAI-compatible endpoint streamed a markdown answer (headings, a table, code, a list),
+and a slow variant kept a turn running. Every rail section, every Settings tab and the setup wizard were
+captured at 1440, 1280, 1024, 800 and 390px. The same overlap, off-screen, clipped-text and page-scroll
+script ran on each one. Every item below is **fixed**.
+
+### Chat / Agents
+
+- **P2 · The Chat / Terminal toggle cut "Terminal" to "Term…"**, even at 1440px. `swarm.css` gives
+  `.product-mode-toggle` buttons `flex: 1` and an ellipsis, and that rule beat the toggle's own
+  `flex: 0 0 auto`. The toggle now keeps its size and full labels.
+- **P2 · On phones, keeping the toggle readable squeezed the title to "SLOW Ex…".** Below 600px the
+  toggle is hidden, like Compare, and the ⋯ menu has **Open terminal** / **Back to chat**.
+- **P3 · The filter chips wrapped onto a second row** once "Running 1" appeared. They stay on one row
+  with tighter padding and scroll sideways in a narrow sidebar.
+- **P3 · The running-turn placeholder repeated the hint under it** ("Send steers this turn…"). It now
+  reads "Add guidance for the running turn…". The phone composer has no hint under it, so it keeps the
+  old wording.
+
+### Sidebar headers
+
+- **P3 · Grafana's header had no second line**, so **Add Grafana** sat 16px higher than every other
+  section's primary button. It now reads "Not connected" or "Connected".
+- **P3 · Docker read "Docker · local"** under the title "Docker". It now reads "Local engine" (or
+  "Mock engine"). The footer already shows the daemon's state.
+
+### Empty states
+
+- **P3 · Board and Projects put Create bottom-left**, while every other composer puts Send
+  bottom-right. Board's placeholder also said "start from a pill"; it now points at the templates.
+- **P3 · Assets: the + in the Back slot sat higher than Front and Side** because "optional" added a
+  line. "optional" now hangs under the label.
+- **P3 · Codebase: "Add a GitHub token" was a centred link under a large gap.** It is now a button at
+  the start of the card, like **Import from Git** once a token exists.
+- **P3 · Hero subtitles ended on one word** ("…no / guest.", "…the canvas / can write."). They use
+  `text-wrap: pretty`.
+
+### Settings
+
+- **P3 · Git account rows said the forge's name three times** ("GitHub / GitHub · GitHub /
+  github.com") before sign-in. The handle is shown once, the subtitle only when it differs, and the
+  service column shows just the host.
+- **P3 · Providers on a phone broke "Add provider" across two lines.** The header wraps its actions
+  under the count instead.
+
+### Brain (phone)
+
+- **P3 · The tabs wrapped "Activity" onto a second row, and the repo path field was squeezed** beside
+  Browse and Build. The tabs stay on one row and the path gets its own line.
+
+### Model chip
+
+- **P2 · Before setup, the composer chip read "OpenCode (off) · big-pickle"** and Send would fail.
+  When the chosen provider is off or missing, the chip label is tinted with the theme's warning
+  colour, and its menu opens with **Turn on a provider…** (Settings → Providers). The topbar subtitle
+  keeps the same label.
+
+### Checked, not changed
+
+- Eyebrows such as "OR START FROM" use IBM Plex Mono on purpose; it loads from Google Fonts like
+  Outfit does.
+- Visual snapshots: this container can't download the Chromium build that `@playwright/test` pins,
+  and the preinstalled build differs from the baselines even on unchanged main. Baselines that this
+  pass changed are refreshed from CI's own "actual" images instead.

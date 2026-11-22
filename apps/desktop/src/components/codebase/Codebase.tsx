@@ -1,3 +1,4 @@
+import { verdictLabel, verdictTone, withRiskConfirm } from "@/lib/riskGate";
 import {
   useDeferredValue,
   useEffect,
@@ -8,6 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import {
+  latestPullVerdict,
+  type AgentVerdict,
   type RepoAbout,
   DEFAULT_DOCKER_IMAGE,
   anonymousForgeLabel,
@@ -89,6 +92,9 @@ import { ImportAccounts } from "@/components/settings/ImportAccounts";
 import { SearchField } from "@/components/layout/SearchField";
 import { MenuItem, MenuSep, OverflowMenu } from "@/components/layout/OverflowMenu";
 import { Select } from "@/components/layout/Select";
+import { formatAgo } from "@/lib/timeAgo";
+
+export { formatAgo };
 
 type RepoTab =
   "overview" | "architecture" | "pulls" | "issues" | "agents" | "automations" | "settings";
@@ -138,27 +144,6 @@ function saveIssueListWidth(width: number) {
   } catch {
     /* ignore */
   }
-}
-
-export function formatAgo(iso?: string, compact = false): string {
-  if (!iso) return compact ? "—" : "never";
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return compact ? "—" : "never";
-  const sec = Math.round((Date.now() - t) / 1000);
-  if (sec < 45) return compact ? "now" : "just now";
-  if (sec < 3600) {
-    const value = `${Math.max(1, Math.floor(sec / 60))}m`;
-    return compact ? value : `${value} ago`;
-  }
-  if (sec < 86400) {
-    const value = `${Math.floor(sec / 3600)}h`;
-    return compact ? value : `${value} ago`;
-  }
-  if (sec < 86400 * 7) {
-    const value = `${Math.floor(sec / 86400)}d`;
-    return compact ? value : `${value} ago`;
-  }
-  return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function pullChip(row: { state: string; draft?: boolean }): { label: string; tone: string } {
@@ -380,6 +365,13 @@ export function CodebasePane() {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
     return latestAssistantText(review?.messages);
   }, [agents, repo, state.selectedPullNumber]);
+  const agentVerdict = useMemo(
+    () =>
+      repo && state.selectedPullNumber
+        ? latestPullVerdict(agents, { repoId: repo.id, number: state.selectedPullNumber })?.verdict
+        : undefined,
+    [agents, repo, state.selectedPullNumber],
+  );
   const selectedLine: DiffLineRef | null =
     commentPath && commentLine
       ? {
@@ -1219,7 +1211,10 @@ export function CodebasePane() {
     setBusy(true);
     setError(null);
     try {
-      const next = await api.mergePull(repo.id, state.selectedPullNumber);
+      const number = state.selectedPullNumber;
+      const next = await withRiskConfirm((approveRisk) =>
+        api.mergePull(repo.id, number, { approveRisk }),
+      );
       dispatch({ type: "pull", pull: next });
       setPulls(await api.repoPulls(repo.id, pullState, { fresh: true }));
     } catch (err) {
@@ -1296,7 +1291,7 @@ export function CodebasePane() {
             <p className="meta">
               Connect GitHub, GitLab or Bitbucket to pick from your repos, including private ones.
             </p>
-            <button type="button" className="linkish" onClick={() => openSettings(dispatch, "git")}>
+            <button type="button" className="btn" onClick={() => openSettings(dispatch, "git")}>
               Add a GitHub token
             </button>
           </>
@@ -1766,6 +1761,7 @@ export function CodebasePane() {
           pullFiles={pullFiles}
           pullDiff={pullDiff}
           agentSummary={agentSummary}
+          agentVerdict={agentVerdict}
           loadPath={loadPath}
           loadPathNotes={loadPathNotes}
           setLoadPathNotes={setLoadPathNotes}
@@ -1970,6 +1966,7 @@ type PullDetailProps = {
   pullFiles: ReturnType<typeof patchFilesFromPull>;
   pullDiff: { additions: number; deletions: number };
   agentSummary?: string;
+  agentVerdict?: AgentVerdict;
   loadPath: LoadPathReview | null;
   loadPathNotes: string;
   setLoadPathNotes: (value: string) => void;
@@ -2973,7 +2970,18 @@ function PullDetail(props: PullDetailProps) {
             )}
           </section>
           <section>
-            <h3>Agent summary</h3>
+            <h3>
+              Agent summary
+              {props.agentVerdict ? (
+                <span
+                  className={`pill pr-verdict is-${verdictTone(props.agentVerdict)}`}
+                  title={props.agentVerdict.reasons.join("\n") || undefined}
+                  data-testid="pr-verdict"
+                >
+                  {verdictLabel(props.agentVerdict)}
+                </span>
+              ) : null}
+            </h3>
             {props.agentSummary ? (
               <p className="pr-summary-text">{props.agentSummary}</p>
             ) : (

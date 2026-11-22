@@ -1,8 +1,8 @@
-import { act } from "react";
+import { act, useReducer } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "@locus/shared";
-import { Store, initialState, type UiState } from "@/state/store";
+import { Store, initialState, reducer, type Action, type UiState } from "@/state/store";
 import { api } from "@/lib/api";
 import { InboxPane } from "./InboxPane";
 
@@ -30,6 +30,30 @@ describe("InboxPane", () => {
     host.remove();
   });
 
+  /** Runs the real reducer so focus changes (J/K, Prev/Next) re-render. */
+  function renderLive(state: UiState) {
+    const seen = vi.fn();
+    function Live() {
+      const [live, dispatch] = useReducer(reducer, state);
+      const spy = (action: Action) => {
+        seen(action);
+        dispatch(action);
+      };
+      return (
+        <Store.Provider value={{ state: live, dispatch: spy }}>
+          <InboxPane />
+        </Store.Provider>
+      );
+    }
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root.render(<Live />);
+    });
+    return seen;
+  }
+
   function render(state: UiState, dispatch = vi.fn()) {
     host = document.createElement("div");
     document.body.appendChild(host);
@@ -52,10 +76,10 @@ describe("InboxPane", () => {
 
   it("previews the next item and opens its target", () => {
     const dispatch = render({ ...initialState, inboxOpen: true, sessions: [waiting] });
-    expect(host.querySelector(".empty-hero h2")?.textContent).toBe("1 item needs you");
+    expect(host.querySelector(".inbox-decision-head h2")?.textContent).toBe("1 item needs you");
     const next = host.querySelector("[data-testid='inbox-next']");
     expect(next?.textContent).toContain("Review checkout");
-    expect(next?.textContent).toContain("Agent");
+    expect(next?.querySelector(".inbox-next-kind")?.textContent).toBe("Question");
     act(() => {
       (next?.querySelector("button") as HTMLButtonElement).click();
     });
@@ -106,7 +130,7 @@ describe("InboxPane", () => {
 
   it("moves with J/K and denies with D", async () => {
     const spy = vi.spyOn(api, "resolveApproval").mockResolvedValue(approval);
-    render({ ...initialState, inboxOpen: true, sessions: [waiting, approval] });
+    renderLive({ ...initialState, inboxOpen: true, sessions: [waiting, approval] });
     expect(host.querySelector("[data-testid='inbox-stepper']")?.textContent).toContain("1 of 2");
     expect(host.querySelector("[data-testid='inbox-next']")?.textContent).toContain(
       "Review checkout",
@@ -120,5 +144,85 @@ describe("InboxPane", () => {
     });
     expect(spy).toHaveBeenCalledWith("s2", "c1", "denied", undefined, undefined);
     spy.mockRestore();
+  });
+
+  it("shows active agents, review chats, and counts beside the decision card", () => {
+    const working = {
+      ...waiting,
+      id: "s3",
+      title: "Fix flaky test",
+      status: "running",
+      needsHuman: undefined,
+    } as AgentSession;
+    const review = {
+      ...waiting,
+      id: "s4",
+      title: "Review #12",
+      kind: "review",
+      status: "running",
+      needsHuman: undefined,
+    } as AgentSession;
+    const dispatch = render({
+      ...initialState,
+      inboxOpen: true,
+      sessions: [waiting, working, review],
+    });
+    const stats = host.querySelector("[data-testid='dash-stats']")?.textContent ?? "";
+    expect(stats).toContain("1Needs you");
+    expect(stats).toContain("1Active agents");
+    expect(stats).toContain("1Reviews running");
+    const active = host.querySelector("[data-testid='dash-active']");
+    expect(active?.textContent).toContain("Fix flaky test");
+    expect(active?.textContent).not.toContain("Review #12");
+    expect(host.querySelector("[data-testid='dash-reviewers']")?.textContent).toContain(
+      "Review #12",
+    );
+    act(() => {
+      (active?.querySelector("button.dash-line") as HTMLButtonElement).click();
+    });
+    expect(dispatch).toHaveBeenCalledWith({ type: "select", id: "s3" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "inbox", open: false });
+  });
+
+  it("labels approvals and shows waiting chats as Needs you under Recent", () => {
+    render({ ...initialState, inboxOpen: true, sessions: [approval] });
+    expect(host.querySelector(".inbox-next-kind")?.textContent).toBe("Approval");
+    expect(host.textContent).toContain("Risk");
+    expect(host.textContent).not.toContain("Why ask");
+    const recent = host.querySelector("[data-testid='dash-recent']");
+    expect(recent?.textContent).toContain("Run checks");
+    expect(recent?.textContent).toContain("Needs you");
+    expect(recent?.textContent).not.toContain("Idle");
+    expect(recent?.querySelector(".dot.needs-you")).toBeTruthy();
+  });
+
+  it("jumps to a panel from its stat tile", () => {
+    render({ ...initialState, inboxOpen: true, sessions: [waiting] });
+    const tile = host.querySelector("[aria-controls='dash-active']") as HTMLButtonElement;
+    expect(tile.tagName).toBe("BUTTON");
+    act(() => tile.click());
+    expect(document.activeElement?.id).toBe("dash-active");
+  });
+
+  it("folds active agents past five into a link to Agents and labels running counts", () => {
+    const busy = Array.from(
+      { length: 7 },
+      (_, i) =>
+        ({
+          ...waiting,
+          id: `w${i}`,
+          title: `Busy ${i}`,
+          status: "running",
+          needsHuman: undefined,
+        }) as AgentSession,
+    );
+    const dispatch = render({ ...initialState, inboxOpen: true, sessions: busy });
+    const active = host.querySelector("[data-testid='dash-active']");
+    expect(active?.querySelectorAll("button.dash-line")).toHaveLength(5);
+    const more = host.querySelector("[data-testid='dash-active-more']") as HTMLButtonElement;
+    expect(more.textContent).toBe("+2 more in Agents");
+    act(() => more.click());
+    expect(dispatch).toHaveBeenCalledWith({ type: "section", section: "agents" });
+    expect(host.querySelector("[data-testid='dash-jobs'] .dash-panel-count")).toBeNull();
   });
 });

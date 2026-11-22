@@ -1,5 +1,6 @@
 import type {
   AdvancedSettings,
+  BootStepId,
   DisplayEndpoint,
   SerialEndpoint,
   VmInstance,
@@ -20,6 +21,9 @@ export interface CreateVmRequest {
 
 export type VmListener = (id: string, status: VmLifecycle, error?: string) => void;
 
+/** Adapter-reported boot phase inside `start()` (pull/start, disk/boot/connect). */
+export type BootStepListener = (id: string, step: BootStepId) => void;
+
 /**
  * Shared machine lifecycle at the hypervisor / Docker engine seam.
  * Runtime-specific ops (create request shape, display, host containers) stay on those interfaces.
@@ -34,6 +38,8 @@ export interface MachineLifecycle {
   list(): VmInstance[];
   logs(id: string): string;
   onStatus(listener: VmListener): void;
+  /** Boot steps inside `start()`. Adapters that omit this only report lifecycle status. */
+  onBootStep?(listener: BootStepListener): void;
   /**
    * Live QEMU guests must stop before restoreDisk. In-memory mock adapters restore in place.
    */

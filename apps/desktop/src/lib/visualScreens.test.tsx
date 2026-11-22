@@ -107,7 +107,9 @@ describe("visual screens contract", () => {
     });
     expect(host.querySelector("select")).toBeNull();
     expect(host.querySelector("#new-session-title")?.textContent).toBe("New agent");
-    expect(host.querySelector('[aria-label="More options"]')).toBeTruthy();
+    expect(
+      host.querySelector('[aria-label="More options"], [aria-label^="More options: "]'),
+    ).toBeTruthy();
     expect(host.querySelector(".ui-select")).toBeTruthy();
   });
 
@@ -128,7 +130,7 @@ describe("visual screens contract", () => {
       );
     });
     expect(host.querySelector("[data-testid='auto-trigger-family']")).toBeTruthy();
-    const schedule = host.querySelector('[aria-label="Schedule"]');
+    const schedule = host.querySelector('[aria-label="Schedule"], [aria-label^="Schedule: "]');
     expect(schedule).toBeTruthy();
     expect(schedule instanceof HTMLSelectElement).toBe(false);
   });
@@ -169,14 +171,8 @@ describe("visual screens contract", () => {
     }
   });
 
-  it("keeps five primary rails and Swarm Teammates + Teams", () => {
-    expect([...PRIMARY_RAIL_SECTIONS]).toEqual([
-      "agents",
-      "design",
-      "ide",
-      "codebase",
-      "automations",
-    ]);
+  it("keeps a slim primary rail and Swarm Teammates + Teams", () => {
+    expect([...PRIMARY_RAIL_SECTIONS]).toEqual(["agents", "codebase"]);
     expect([...MORE_RAIL_SECTIONS]).toContain("brain");
     expect([...primaryRailSections("swarm")]).toEqual(["agents", "project"]);
   });

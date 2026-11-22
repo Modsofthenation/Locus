@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -81,6 +81,33 @@ describe("workspace metadata", () => {
     expect(env?.packages).toEqual(["git"]);
     expect(env?.ports).toEqual([5173]);
     expect(await loadWorkspaceMemories(dir)).toMatch(/Vite/);
+  });
+
+  it("loads folder skills from .locus, .agents, and .claude with .locus winning", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-meta-folder-skills-"));
+    await mkdir(join(dir, ".agents", "skills", "review-pr"), { recursive: true });
+    await writeFile(
+      join(dir, ".agents", "skills", "review-pr", "SKILL.md"),
+      "---\nname: review-pr\ndescription: >\n  Review a PR.\n---\nSee [HOST.md](HOST.md).\n",
+    );
+    await writeFile(join(dir, ".agents", "skills", "review-pr", "HOST.md"), "host notes");
+    await mkdir(join(dir, ".agents", "skills", "tdd"), { recursive: true });
+    await writeFile(join(dir, ".agents", "skills", "tdd", "SKILL.md"), "Agents tdd.");
+    await mkdir(join(dir, ".claude", "skills"), { recursive: true });
+    await symlink(
+      join(dir, ".agents", "skills", "review-pr"),
+      join(dir, ".claude", "skills", "review-pr"),
+    );
+    await mkdir(join(dir, ".locus", "skills"), { recursive: true });
+    await writeFile(join(dir, ".locus", "skills", "tdd.md"), "Locus tdd.");
+    await mkdir(join(dir, ".agents", "skills", "not-a-skill"), { recursive: true });
+
+    const skills = await loadRepoSkills(dir);
+    expect(skills.map((row) => row.name).sort()).toEqual(["review-pr", "tdd"]);
+    const review = skills.find((row) => row.name === "review-pr");
+    expect(review?.hint).toBe("Review a PR.");
+    expect(review?.body).toContain("Skill folder: .agents/skills/review-pr/");
+    expect(skills.find((row) => row.name === "tdd")?.body).toBe("Locus tdd.");
   });
 
   it("loads Locus.md as guiding context before AGENTS.md", async () => {

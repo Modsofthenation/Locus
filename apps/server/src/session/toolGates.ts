@@ -3,6 +3,7 @@ import {
   SENSITIVE_PATH_REFUSAL,
   TOOL_SCHEMAS,
   branchLockRefusal,
+  codeIntelToolSchema,
   execCommandsFromArgs,
   fileReadPaths,
   fillCanvasFileWritePath,
@@ -49,7 +50,7 @@ function gatePolicy(
 ): ToolGateDecision {
   if (name === "file_write")
     Object.assign(args, fillCanvasFileWritePath(args, { design: ctx.isDesign }));
-  const schema = TOOL_SCHEMAS[name as ComputerUseToolName];
+  const schema = TOOL_SCHEMAS[name as ComputerUseToolName] ?? codeIntelToolSchema(name);
   if (schema) {
     const invalid = validateToolArgs(name, args, schema);
     if (invalid) return { kind: "fail", output: invalid };

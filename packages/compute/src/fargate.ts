@@ -20,7 +20,11 @@ import type {
 } from "./types.js";
 
 const ECS_TARGET_PREFIX = "AmazonEC2ContainerServiceV20141113.";
-const DESCRIBE_ATTEMPTS = 8;
+/** ENI attach on a cold Fargate task commonly takes 10–60s. Poll every 2s for up to 3 minutes. */
+const DESCRIBE_ATTEMPTS = 90;
+const DESCRIBE_INTERVAL_MS = 2_000;
+/** Container name the task definition must use for the `locus-worker` container. */
+export const FARGATE_WORKER_CONTAINER = "worker";
 
 export class FargateComputeBackend implements ComputeBackend {
   private handles = new Map<string, ComputeHandle>();
@@ -63,6 +67,13 @@ export class FargateComputeBackend implements ComputeBackend {
     if (!region) throw new Error("Fargate workers need a region");
     const cluster = req.backend.cluster?.trim() || DEFAULT_FARGATE_CLUSTER;
     const token = randomWorkerToken();
+    const environment = fargateWorkerEnvironment({
+      token,
+      sessionId: req.sessionId,
+      tls: req.workerTls,
+    });
+    const subnet = req.backend.subnet?.trim();
+    const securityGroup = req.backend.securityGroup?.trim();
     const run = await this.ecs<Record<string, unknown>>(req.backend, "RunTask", {
       cluster,
       taskDefinition: req.backend.taskDefinition,
@@ -71,18 +82,14 @@ export class FargateComputeBackend implements ComputeBackend {
       overrides: {
         cpu: resources.cpu,
         memory: resources.memory,
-        containerOverrides: [
-          {
-            name: "worker",
-            environment: [{ name: "LOCUS_WORKER_TOKEN", value: token }],
-          },
-        ],
+        containerOverrides: [{ name: FARGATE_WORKER_CONTAINER, environment }],
       },
-      ...(req.backend.subnet
+      ...(subnet
         ? {
             networkConfiguration: {
               awsvpcConfiguration: {
-                subnets: [req.backend.subnet],
+                subnets: [subnet],
+                ...(securityGroup ? { securityGroups: [securityGroup] } : {}),
                 assignPublicIp: "ENABLED",
               },
             },
@@ -95,7 +102,12 @@ export class FargateComputeBackend implements ComputeBackend {
       ],
     });
     const taskArn = taskArnFrom(run);
-    if (!taskArn) throw new Error("Fargate RunTask did not return a task ARN");
+    if (!taskArn) {
+      const reason = runFailureFrom(run);
+      throw new Error(
+        reason ? `Fargate RunTask failed: ${reason}` : "Fargate RunTask did not return a task ARN",
+      );
+    }
     this.registry.upsert({
       id: taskArn,
       backendId: req.backend.id,
@@ -115,6 +127,7 @@ export class FargateComputeBackend implements ComputeBackend {
         url: `https://${ip}:7421`,
         token,
         size: quoted.size,
+        ...(req.workerTls?.fingerprint ? { fingerprint: req.workerTls.fingerprint } : {}),
       };
       this.handles.set(handle.id, handle);
       this.registry.upsert({
@@ -195,15 +208,17 @@ export class FargateComputeBackend implements ComputeBackend {
     taskArn: string,
   ): Promise<string> {
     for (let attempt = 0; attempt < DESCRIBE_ATTEMPTS; attempt += 1) {
-      if (attempt) await this.wait(1_000);
+      if (attempt) await this.wait(DESCRIBE_INTERVAL_MS);
       const described = await this.ecs<Record<string, unknown>>(backend, "DescribeTasks", {
         cluster,
         tasks: [taskArn],
       });
+      const stopped = stoppedReasonFrom(described);
+      if (stopped) throw new Error(`Fargate task stopped before it was reachable: ${stopped}`);
       const ip = workerIpFrom(described);
       if (ip) return ip;
     }
-    throw new Error("Fargate task did not get an ENI address");
+    throw new Error("Fargate task did not get an ENI address within 3 minutes");
   }
 
   private async ecs<T>(
@@ -242,6 +257,29 @@ export class FargateComputeBackend implements ComputeBackend {
   }
 }
 
+/**
+ * Container env for the `worker` container: the per-task bearer token, host-runtime opt-in
+ * (the task itself is the sandbox), and the minted TLS identity as base64 PEM.
+ */
+export function fargateWorkerEnvironment(input: {
+  token: string;
+  sessionId: string;
+  tls?: { cert: string; key: string };
+}): { name: string; value: string }[] {
+  const env = [
+    { name: "LOCUS_WORKER_TOKEN", value: input.token },
+    { name: "LOCUS_WORKER_ALLOW_HOST", value: "1" },
+    { name: "LOCUS_WORKER_NAME", value: `locus-${input.sessionId.slice(0, 8)}` },
+  ];
+  if (input.tls) {
+    env.push(
+      { name: "LOCUS_WORKER_TLS_CERT_B64", value: Buffer.from(input.tls.cert).toString("base64") },
+      { name: "LOCUS_WORKER_TLS_KEY_B64", value: Buffer.from(input.tls.key).toString("base64") },
+    );
+  }
+  return env;
+}
+
 function randomWorkerToken(): string {
   return randomBytes(24).toString("base64url");
 }
@@ -251,6 +289,35 @@ function taskArnFrom(body: Record<string, unknown>): string | undefined {
   if (!Array.isArray(tasks) || !tasks[0] || typeof tasks[0] !== "object") return undefined;
   const arn = (tasks[0] as { taskArn?: unknown }).taskArn;
   return typeof arn === "string" ? arn : undefined;
+}
+
+function runFailureFrom(body: Record<string, unknown>): string | undefined {
+  const failures = body.failures;
+  if (!Array.isArray(failures) || !failures[0] || typeof failures[0] !== "object") return undefined;
+  const row = failures[0] as { reason?: unknown; detail?: unknown };
+  const reason = typeof row.reason === "string" ? row.reason : "";
+  const detail = typeof row.detail === "string" ? row.detail : "";
+  return [reason, detail].filter(Boolean).join(" — ") || undefined;
+}
+
+function stoppedReasonFrom(body: Record<string, unknown>): string | undefined {
+  const tasks = body.tasks;
+  if (!Array.isArray(tasks) || !tasks[0] || typeof tasks[0] !== "object") return undefined;
+  const task = tasks[0] as {
+    lastStatus?: unknown;
+    stoppedReason?: unknown;
+    containers?: unknown;
+  };
+  if (task.lastStatus !== "STOPPED" && task.lastStatus !== "DEPROVISIONING") return undefined;
+  const containerReason = Array.isArray(task.containers)
+    ? task.containers
+        .map((row) =>
+          row && typeof row === "object" ? (row as { reason?: unknown }).reason : undefined,
+        )
+        .find((reason): reason is string => typeof reason === "string" && Boolean(reason.trim()))
+    : undefined;
+  const stopped = typeof task.stoppedReason === "string" ? task.stoppedReason : "";
+  return [stopped, containerReason].filter(Boolean).join(" — ") || "task stopped";
 }
 
 function workerIpFrom(body: Record<string, unknown>): string | undefined {

@@ -212,6 +212,28 @@ export interface ProjectContextFile {
   content: string;
 }
 
+export interface ProjectOfflineProfile {
+  providerId: string;
+  model: string;
+  dockerImage: string;
+  imageId?: string;
+}
+
+export interface ProjectOfflinePreflight {
+  checks: { label: string; ready: boolean; detail: string }[];
+  unavailable: string[];
+}
+
+export function parseProjectOfflineProfile(raw: unknown): ProjectOfflineProfile | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Record<string, unknown>;
+  const providerId = str(value.providerId);
+  const model = str(value.model);
+  const dockerImage = str(value.dockerImage);
+  if (!providerId || !model || !dockerImage || model.length > 180) return undefined;
+  return { providerId, model, dockerImage, imageId: str(value.imageId) };
+}
+
 export interface ProjectDocument {
   id: string;
   title: string;
@@ -226,6 +248,7 @@ export interface ProjectDocument {
   placement?: AgentPlacement;
   backendId?: string;
   namedEnvId?: string;
+  offlineProfile?: ProjectOfflineProfile;
   repoId?: string;
   /** Optional planning board pinned to this project. */
   boardId?: string;
@@ -302,6 +325,7 @@ export interface PatchProjectInput {
   placement?: AgentPlacement | null;
   backendId?: string | null;
   namedEnvId?: string | null;
+  offlineProfile?: ProjectOfflineProfile | null;
   repoId?: string | null;
   boardId?: string | null;
   runtime?: AgentRuntime | null;
@@ -396,6 +420,7 @@ export function parseProjectDocument(raw: unknown): ProjectDocument | undefined 
     placement,
     backendId: str(value.backendId),
     namedEnvId: str(value.namedEnvId),
+    offlineProfile: parseProjectOfflineProfile(value.offlineProfile),
     repoId: str(value.repoId),
     boardId: str(value.boardId),
     runtime,

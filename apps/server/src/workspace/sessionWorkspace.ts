@@ -9,6 +9,7 @@ import {
   isCursorProvider,
   isClaudeCodeProvider,
   isKiroCliProvider,
+  isGenericCliProvider,
   isGuestReady,
   matchGitDest,
   matchLinkedRepo,
@@ -372,7 +373,8 @@ export class SessionWorkspace {
       isCursorProvider(provider) ||
       isCursorCliProvider(provider) ||
       isClaudeCodeProvider(provider) ||
-      isKiroCliProvider(provider)
+      isKiroCliProvider(provider) ||
+      isGenericCliProvider(provider)
     ) {
       throw new Error(INLINE_EDIT_NO_COMPLETIONS);
     }

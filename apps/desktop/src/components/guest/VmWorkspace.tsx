@@ -40,6 +40,10 @@ import {
   useAgentCanvasOpen,
 } from "@/components/workspace/AgentCanvasPane";
 import { WorkspaceEditor } from "@/components/workspace/WorkspaceEditor";
+import {
+  AgentTerminalPane,
+  useAgentTerminalViewMode,
+} from "@/components/workspace/AgentTerminalPane";
 import { WorkspaceFullscreenButton } from "@/components/workspace/WorkspaceFullscreenButton";
 import { useWorkspaceFullscreen } from "@/lib/useWorkspaceFullscreen";
 
@@ -50,7 +54,9 @@ export function VmWorkspace(props: { embedded?: boolean } = {}) {
   const showRail = useDeferredCollapse(state.vmCollapsed) && !props.embedded;
   const filesFs = useWorkspaceFullscreen();
   const session = state.sessions.find((s) => s.id === state.selectedId);
-  const [view, setView] = useState<"desktop" | "files" | "preview" | "canvas">("desktop");
+  const [view, setView] = useState<"desktop" | "files" | "preview" | "canvas" | "terminal">(
+    "desktop",
+  );
   const canvasFocus = useAgentCanvasFocus(session?.id, session?.agentCanvases);
   const [fileCount, setFileCount] = useState(0);
   const vm =
@@ -178,6 +184,11 @@ export function VmWorkspace(props: { embedded?: boolean } = {}) {
     setView("desktop");
     setFileCount(0);
   }, [sessionId]);
+
+  useAgentTerminalViewMode(sessionId, session?.viewMode, {
+    terminal: () => setView("terminal"),
+    chat: () => setView((current) => (current === "terminal" ? "desktop" : current)),
+  });
 
   useEffect(() => {
     if (!workspaceOpen?.follow) return;
@@ -410,6 +421,15 @@ export function VmWorkspace(props: { embedded?: boolean } = {}) {
           >
             Preview
           </button>
+          <button
+            type="button"
+            className={`btn small ghost ${view === "terminal" ? "on" : ""}`}
+            aria-pressed={view === "terminal"}
+            title="Terminal mode runs on Host and local Docker agents"
+            onClick={() => setView("terminal")}
+          >
+            Terminal
+          </button>
           {session.agentCanvases?.length ? (
             <button
               type="button"
@@ -542,12 +562,6 @@ export function VmWorkspace(props: { embedded?: boolean } = {}) {
               {fileCount.toLocaleString()} file{fileCount === 1 ? "" : "s"}
             </span>
           ) : null}
-          {showingFiles ? (
-            <WorkspaceFullscreenButton
-              isFullscreen={filesFs.isFullscreen}
-              onToggle={filesFs.toggle}
-            />
-          ) : null}
           {filesFs.isFullscreen ? null : (
             <button
               type="button"
@@ -558,6 +572,13 @@ export function VmWorkspace(props: { embedded?: boolean } = {}) {
               <IconPanelRight />
             </button>
           )}
+          {/* Last, so it stays under the pointer when Collapse hides on entering full screen. */}
+          {showingFiles ? (
+            <WorkspaceFullscreenButton
+              isFullscreen={filesFs.isFullscreen}
+              onToggle={filesFs.toggle}
+            />
+          ) : null}
         </div>
       </div>
       <GuestTimeline session={session}>
@@ -583,6 +604,10 @@ export function VmWorkspace(props: { embedded?: boolean } = {}) {
                 canvases={session.agentCanvases}
                 focus={canvasFocus}
               />
+            </div>
+          ) : view === "terminal" && sessionId ? (
+            <div className="agent-term-host">
+              <AgentTerminalPane sessionId={sessionId} />
             </div>
           ) : showingFiles && sessionId ? (
             <div className="workspace-editor-slot vm-files-slot">

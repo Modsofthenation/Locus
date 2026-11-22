@@ -40,9 +40,9 @@ import { mkdir, cp, rm, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { appendVmLog, formatStatusLine } from "./logs.js";
-import { ensureLocusAgentImage } from "./images.js";
+import { ensureLocusAgentImage, imageExists } from "./images.js";
 import { nodeRunner, type CommandRunner } from "./runner.js";
-import type { MachineLifecycle, VmListener } from "./types.js";
+import type { BootStepListener, MachineLifecycle, VmListener } from "./types.js";
 
 export interface CreateContainerRequest {
   sessionId: string;
@@ -54,6 +54,7 @@ export interface CreateContainerRequest {
   /** Worker-only: mount an empty `/mnt/host` on the worker; laptop uploads after create. */
   hostShare?: boolean;
   workspaceSeed?: string;
+  cachedImageOnly?: boolean;
   network?: NetworkJail;
   proxyPort?: number;
   /** Shared secret for the restricted-jail CONNECT proxy (`locus:<token>` basic auth). */
@@ -76,6 +77,7 @@ export type ImageBuildListener = (id: string, progress: ImageBuildProgress) => v
 
 export interface DockerEngine extends MachineLifecycle {
   readonly kind: "mock" | "docker";
+  hasImage?(image: string): Promise<boolean>;
   create(req: CreateContainerRequest): Promise<VmInstance>;
   restart(id: string): Promise<VmInstance>;
   resume(id: string): Promise<VmInstance>;
@@ -223,6 +225,7 @@ function instanceFrom(req: CreateContainerRequest, id: string, dataDir: string):
     diskPath: workspaceHost(dataDir, req.sessionId),
     runtime: "docker",
     dockerImage: req.image,
+    ...(req.cachedImageOnly ? { cachedImageOnly: true } : {}),
     network: req.network,
     planeId: req.planeId,
     createdAt: now(),
@@ -256,6 +259,10 @@ export class MockDockerEngine extends EventEmitter implements DockerEngine {
 
   onBuild(listener: ImageBuildListener): void {
     this.on("build", listener);
+  }
+
+  onBootStep(listener: BootStepListener): void {
+    this.on("bootStep", listener);
   }
 
   list(): VmInstance[] {
@@ -388,6 +395,9 @@ export class MockDockerEngine extends EventEmitter implements DockerEngine {
 
   async start(id: string): Promise<VmInstance> {
     this.clearTimers(id);
+    // Mirrors the CLI engine: pull, then run; the server reports setup after start() returns.
+    this.emit("bootStep", id, "pull");
+    this.emit("bootStep", id, "start");
     this.setStatus(id, "booting");
     const t1 = setTimeout(() => this.setStatus(id, "ready"), BOOT_MS);
     const t2 = setTimeout(() => this.setStatus(id, "running", undefined, 1), READY_MS);
@@ -536,6 +546,10 @@ export class DockerCliEngine extends EventEmitter implements DockerEngine {
     super();
   }
 
+  hasImage(image: string): Promise<boolean> {
+    return imageExists(this.runner, this.dockerBin, image);
+  }
+
   async available(): Promise<boolean> {
     const info = await this.runner
       .exec(this.dockerBin, ["info"])
@@ -549,6 +563,10 @@ export class DockerCliEngine extends EventEmitter implements DockerEngine {
 
   onBuild(listener: ImageBuildListener): void {
     this.on("build", listener);
+  }
+
+  onBootStep(listener: BootStepListener): void {
+    this.on("bootStep", listener);
   }
 
   list(): VmInstance[] {
@@ -588,15 +606,18 @@ export class DockerCliEngine extends EventEmitter implements DockerEngine {
     if (vm.status === "running" || vm.status === "ready" || vm.status === "paused") return vm;
     this.setStatus(id, "booting");
     try {
-      await ensureLocusAgentImage(
-        this.runner,
-        this.dockerBin,
-        vm.dockerImage ?? "",
-        (chunk) => this.pushLog(id, chunk),
-        undefined,
-        (progress) => this.emit("build", id, progress),
-      );
+      this.emit("bootStep", id, "pull");
+      if (!vm.cachedImageOnly)
+        await ensureLocusAgentImage(
+          this.runner,
+          this.dockerBin,
+          vm.dockerImage ?? "",
+          (chunk) => this.pushLog(id, chunk),
+          undefined,
+          (progress) => this.emit("build", id, progress),
+        );
       this.assertPresent(id);
+      this.emit("bootStep", id, "start");
       if (vm.containerId) {
         const started = await this.runner.exec(this.dockerBin, ["start", vm.containerId]);
         if (started.code !== 0) {
@@ -954,6 +975,7 @@ export class DockerCliEngine extends EventEmitter implements DockerEngine {
       "-v",
       `${vm.diskPath}:/workspace`,
     ];
+    if (vm.cachedImageOnly) args.push("--pull=never");
     if (envFile) args.push("--env-file", envFile);
     if (jail === "none") args.push("--network", "none");
     if (jail === "restricted") {
@@ -1004,9 +1026,20 @@ export class DockerCliEngine extends EventEmitter implements DockerEngine {
       "-lc",
       restrictedEgressScript(proxyPort),
     ]);
-    if (applied.stdout.includes("LOCUS_NO_IPTABLES") || applied.code !== 0) {
+    if (applied.stdout.includes("LOCUS_NO_IPTABLES")) {
       throw new Error(
-        "Restricted jail requires iptables in the guest image (install iptables or use an image that includes it).",
+        isLocusAgentImage(vm.dockerImage ?? "")
+          ? `Restricted jail requires iptables, but ${vm.dockerImage} has none. Rebuild it with \`npm run images\` (or \`docker rmi locus/agent:0.1\` and start again).`
+          : "Restricted jail requires iptables in the guest image (install iptables or use an image that includes it).",
+      );
+    }
+    if (applied.code !== 0) {
+      const detail = (applied.stderr.trim() || applied.stdout.trim())
+        .split("\n")
+        .slice(-3)
+        .join(" ");
+      throw new Error(
+        `Could not apply the restricted jail firewall in the guest${detail ? `: ${detail}` : ""}.`,
       );
     }
   }

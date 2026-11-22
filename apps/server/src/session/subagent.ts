@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { AgentRuntime, ChatMessage, ExtraToolDef, SubagentKind } from "@locus/shared";
 import {
+  CODE_INTEL_READ_TOOL_NAMES,
+  CODE_INTEL_READ_TOOLS,
+  CODE_RENAME_TOOL,
   REPO_MAP_TOOL,
   WEBSEARCH_TOOL,
   execCommandsFromArgs,
@@ -33,13 +36,21 @@ const READ_TOOLS = new Set([
   "git_pr_get",
   "git_pr_loadpath",
   "git_pr_checks",
+  "git_ci_logs",
   "git_issue_list",
   "git_issue_get",
   "repo_map",
+  ...CODE_INTEL_READ_TOOL_NAMES,
   "websearch",
 ]);
 
-const IMPLEMENT_TOOLS = new Set([...READ_TOOLS, "apply_patch", "file_write", "exec"]);
+const IMPLEMENT_TOOLS = new Set([
+  ...READ_TOOLS,
+  "apply_patch",
+  "file_write",
+  "exec",
+  "code_rename",
+]);
 
 export function subagentToolSet(kind?: SubagentKind): Set<string> {
   return kind === "implement" ? IMPLEMENT_TOOLS : READ_TOOLS;
@@ -104,7 +115,12 @@ export async function runIsolatedSubagent(
 ): Promise<string> {
   const goal = task.trim();
   if (!goal) return "task is required";
-  const extraTools: ExtraToolDef[] = [REPO_MAP_TOOL, ...(ctx.webSearch ? [WEBSEARCH_TOOL] : [])];
+  const extraTools: ExtraToolDef[] = [
+    REPO_MAP_TOOL,
+    ...CODE_INTEL_READ_TOOLS,
+    ...(ctx.kind === "implement" ? [CODE_RENAME_TOOL] : []),
+    ...(ctx.webSearch ? [WEBSEARCH_TOOL] : []),
+  ];
   const system = subagentSystemPrompt(ctx.kind ?? "explore", focus);
   const allowed = subagentToolSet(ctx.kind);
   const messages: ChatMessage[] = [

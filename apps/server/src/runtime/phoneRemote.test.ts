@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   allowPhoneAccess,
   generatePhoneToken,
+  operatorCookie,
+  operatorCredentialFromHeaders,
   phoneCookie,
   tokenFromCookie,
   tokenFromHeaders,
@@ -134,5 +136,100 @@ describe("phone remote gate", () => {
   it("marks the pairing cookie Secure on HTTPS", () => {
     expect(phoneCookie("ph_abc")).not.toMatch(/Secure/);
     expect(phoneCookie("ph_abc", true)).toMatch(/Secure/);
+  });
+});
+
+describe("operator token gate", () => {
+  const operatorToken = `op_${"c".repeat(64)}`;
+  const base = { peer: "127.0.0.1", operatorToken };
+
+  it("refuses loopback /api and /ws without the operator token", () => {
+    expect(allowPhoneAccess({ ...base, path: "/api/sessions", method: "GET" })).toBe(false);
+    expect(
+      allowPhoneAccess({ ...base, origin: "http://127.0.0.1:7420", path: "/api/sessions" }),
+    ).toBe(false);
+    expect(allowPhoneAccess({ ...base, path: "/ws", method: "GET" })).toBe(false);
+    expect(
+      allowPhoneAccess({ ...base, path: "/api/sessions", operatorCredential: "op_wrong" }),
+    ).toBe(false);
+    // Unknown peer (no socket address) is not a free pass either.
+    expect(
+      allowPhoneAccess({ operatorToken, path: "/api/config", method: "GET", peer: undefined }),
+    ).toBe(false);
+  });
+
+  it("allows loopback /api with the operator token", () => {
+    expect(
+      allowPhoneAccess({ ...base, path: "/api/sessions", operatorCredential: operatorToken }),
+    ).toBe(true);
+    expect(
+      allowPhoneAccess({
+        ...base,
+        origin: "http://127.0.0.1:5173",
+        path: "/ws",
+        operatorCredential: operatorToken,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps the UI, health, webhooks, OAuth callback, /mcp and /play open on loopback", () => {
+    for (const [method, path] of [
+      ["GET", "/"],
+      ["GET", "/assets/index.js"],
+      ["GET", "/api/health"],
+      ["POST", "/api/hooks/automations/a1"],
+      ["GET", "/api/oauth/callback"],
+      ["POST", "/mcp"],
+      ["POST", "/mcp/sessions/s1"],
+      ["POST", "/play/tok/booth"],
+    ] as const) {
+      expect(allowPhoneAccess({ ...base, method, path }), `${method} ${path}`).toBe(true);
+    }
+  });
+
+  it("lets canvas files through only on the canvas preview host", () => {
+    const path = "/api/sessions/s1/canvas-files/index.html";
+    expect(allowPhoneAccess({ ...base, path })).toBe(false);
+    expect(allowPhoneAccess({ ...base, path, canvasPreviewHost: true })).toBe(true);
+    expect(allowPhoneAccess({ ...base, path: "/api/sessions/s1", canvasPreviewHost: true })).toBe(
+      false,
+    );
+  });
+
+  it("still accepts a paired phone token from loopback", () => {
+    const remote = { enabled: true, token: generatePhoneToken() };
+    expect(allowPhoneAccess({ ...base, remote, token: remote.token, path: "/api/sessions" })).toBe(
+      true,
+    );
+  });
+
+  it("leaves loopback trusted when no operator token is configured", () => {
+    expect(allowPhoneAccess({ peer: "127.0.0.1", path: "/api/sessions" })).toBe(true);
+  });
+
+  it("reads the credential from cookie, header, bearer, or query", () => {
+    expect(
+      operatorCredentialFromHeaders(
+        new Headers({ cookie: `a=1; locus_operator=${operatorToken}` }),
+      ),
+    ).toBe(operatorToken);
+    expect(operatorCredentialFromHeaders(new Headers({ "x-locus-operator": operatorToken }))).toBe(
+      operatorToken,
+    );
+    expect(
+      operatorCredentialFromHeaders(new Headers({ authorization: `Bearer ${operatorToken}` })),
+    ).toBe(operatorToken);
+    expect(operatorCredentialFromHeaders(new Headers(), `/ws?operator=${operatorToken}`)).toBe(
+      operatorToken,
+    );
+    expect(operatorCredentialFromHeaders(new Headers())).toBeUndefined();
+  });
+
+  it("sets an HttpOnly SameSite=Strict cookie", () => {
+    const cookie = operatorCookie(operatorToken);
+    expect(cookie).toContain(`locus_operator=${operatorToken}`);
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("SameSite=Strict");
+    expect(cookie).toContain("Path=/");
   });
 });

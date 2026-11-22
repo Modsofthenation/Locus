@@ -16,6 +16,7 @@ import {
   isCanvasPreviewHost,
   isCanvasPreviewUrl,
   isGamePlayPath,
+  operatorTokenExempt,
 } from "./security.js";
 
 describe("canvas frame CSP", () => {
@@ -79,5 +80,35 @@ describe("canvas frame CSP", () => {
     expect(isGamePlayPath("/play/pl_abc123/vendor/boot-three.js")).toBe(true);
     expect(isGamePlayPath("/api/sessions/d1/canvas-files/")).toBe(false);
     expect(CANVAS_PREVIEW_HOST).toBe("locus-canvas.localhost");
+  });
+});
+
+describe("operatorTokenExempt", () => {
+  it("guards /api and /ws only", () => {
+    expect(operatorTokenExempt("/")).toBe(true);
+    expect(operatorTokenExempt("/assets/index.js")).toBe(true);
+    expect(operatorTokenExempt("/mcp")).toBe(true);
+    expect(operatorTokenExempt("/play/abc/")).toBe(true);
+    expect(operatorTokenExempt("/api")).toBe(false);
+    expect(operatorTokenExempt("/api/sessions")).toBe(false);
+    expect(operatorTokenExempt("/ws")).toBe(false);
+    expect(operatorTokenExempt("/ws/terminal/vm1")).toBe(false);
+    // Prefix lookalikes are not /api.
+    expect(operatorTokenExempt("/apis")).toBe(true);
+  });
+
+  it("exempts health, webhooks and the OAuth redirect", () => {
+    expect(operatorTokenExempt("/api/health")).toBe(true);
+    expect(operatorTokenExempt("/api/hooks/automations/a1")).toBe(true);
+    expect(operatorTokenExempt("/api/oauth/callback")).toBe(true);
+    expect(operatorTokenExempt("/api/health/extra")).toBe(false);
+    expect(operatorTokenExempt("/api/hooks")).toBe(false);
+  });
+
+  it("exempts canvas files only on the canvas preview host", () => {
+    const path = "/api/sessions/s1/canvas-files/index.html";
+    expect(operatorTokenExempt(path)).toBe(false);
+    expect(operatorTokenExempt(path, { canvasPreviewHost: true })).toBe(true);
+    expect(operatorTokenExempt("/api/sessions/s1", { canvasPreviewHost: true })).toBe(false);
   });
 });

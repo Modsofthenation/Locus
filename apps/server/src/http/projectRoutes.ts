@@ -9,6 +9,7 @@ import {
   type PatchProjectInput,
 } from "@locus/shared";
 import type { ProjectService } from "../projects/projects.js";
+import { isLocalOperator } from "../core/localguard.js";
 import { errorJson } from "./sessionJson.js";
 
 export function registerProjectRoutes(app: Hono, projects: ProjectService | undefined): void {
@@ -68,6 +69,17 @@ export function registerProjectRoutes(app: Hono, projects: ProjectService | unde
     try {
       const input = (await c.req.json()) as PatchProjectInput;
       return c.json(await projects.patch(c.req.param("id"), input));
+    } catch (err) {
+      return errorJson(c, err);
+    }
+  });
+
+  app.post("/api/projects/:id/offline-preflight", async (c) => {
+    if (!projects) return c.json({ error: "Projects unavailable" }, 503);
+    if (!isLocalOperator(c)) return c.json({ error: "Offline preflight is desktop-only" }, 403);
+    try {
+      const { profile } = await c.req.json<{ profile?: unknown }>();
+      return c.json(await projects.offlinePreflight(c.req.param("id"), profile));
     } catch (err) {
       return errorJson(c, err);
     }

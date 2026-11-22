@@ -130,6 +130,24 @@ export function gitCheckoutReady(root: string): boolean {
   }
 }
 
+/**
+ * `origin`'s URL for a folder that already holds a clone (`git remote get-url origin`),
+ * or undefined when it is not a checkout or has no origin.
+ */
+export async function workspaceOriginUrl(root: string): Promise<string | undefined> {
+  if (!root || !existsSync(root)) return undefined;
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", root, "remote", "get-url", "origin"], {
+      timeout: 5_000,
+      env: gitEnv(),
+      windowsHide: true,
+    });
+    return stdout.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function workspaceGitStatus(root: string): Promise<WorkspaceGitStatus> {
   const empty = (): WorkspaceGitStatus => ({ branch: "", ahead: 0, behind: 0, files: [] });
   let status: PorcelainStatus;

@@ -1,3 +1,4 @@
+import { withRiskConfirm } from "@/lib/riskGate";
 import { useEffect, useMemo, useState } from "react";
 import {
   buildPreMergeBoard,
@@ -235,7 +236,9 @@ export function MobilePullDetail(props: { repo: LinkedRepo; number: number; onBa
     setBusy(true);
     setError(null);
     try {
-      const detail = await api.mergePull(props.repo.id, props.number);
+      const detail = await withRiskConfirm((approveRisk) =>
+        api.mergePull(props.repo.id, props.number, { approveRisk }),
+      );
       setPull(detail);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Merge failed");

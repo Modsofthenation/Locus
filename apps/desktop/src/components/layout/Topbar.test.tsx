@@ -37,6 +37,7 @@ vi.mock("@/lib/api", () => ({
     boardChat: vi.fn(),
     exportBoard: vi.fn(),
     session: vi.fn(),
+    patchSession: vi.fn(() => new Promise(() => undefined)),
   },
 }));
 
@@ -906,6 +907,54 @@ describe("Topbar", () => {
       pdf.click();
     });
     expect(exportSessionChat).toHaveBeenCalledWith(row, "pdf");
+  });
+
+  it("opens the terminal from the agent menu so phones can switch without the toggle", () => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const row = {
+      id: "s1",
+      title: "Host chat",
+      os: "ubuntu" as const,
+      templateId: "host",
+      runtime: "host" as const,
+      providerId: "p",
+      model: "grok-4",
+      status: "idle" as const,
+      messages: [],
+      createdAt: "2020-01-01T00:00:00.000Z",
+      updatedAt: "2020-01-01T00:00:00.000Z",
+    };
+    const dispatch = vi.fn();
+    act(() => {
+      root.render(
+        <Store.Provider
+          value={{ state: { ...initialState, selectedId: "s1", sessions: [row] }, dispatch }}
+        >
+          <Topbar />
+        </Store.Provider>,
+      );
+    });
+    // The top-bar toggle is still there for wide windows; CSS hides it on phones.
+    expect(host.querySelector("[data-testid='view-mode-toggle']")).not.toBeNull();
+    const trigger = host.querySelector('[title="Agent menu"]') as HTMLElement;
+    act(() => {
+      trigger.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      trigger.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+      trigger.click();
+    });
+    const open = [...host.querySelectorAll(".menu-item")].find(
+      (btn) => btn.textContent === "Open terminal",
+    ) as HTMLButtonElement;
+    act(() => {
+      open.click();
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "session",
+      session: expect.objectContaining({ id: "s1", viewMode: "terminal" }),
+    });
+    expect(api.patchSession).toHaveBeenCalledWith("s1", { viewMode: "terminal" });
   });
 
   it("saves a named golden image from the agent menu", async () => {

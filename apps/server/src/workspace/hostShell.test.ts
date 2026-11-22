@@ -21,6 +21,21 @@ describe("hostShellCommand", () => {
     });
   });
 
+  it("runs a command through the interactive shell inside script", () => {
+    expect(hostShellCommand("linux", { SHELL: "/bin/zsh" }, "claude --resume 'x y'")).toEqual({
+      cmd: "script",
+      args: ["-qefc", `/bin/zsh -ic 'claude --resume '\\''x y'\\'''`, "/dev/null"],
+    });
+    expect(hostShellCommand("darwin", { SHELL: "/bin/bash" }, "codex")).toEqual({
+      cmd: "script",
+      args: ["-q", "/dev/null", "/bin/bash", "-ic", "codex"],
+    });
+    expect(hostShellCommand("win32", { ComSpec: "cmd.exe" }, "aider")).toEqual({
+      cmd: "cmd.exe",
+      args: ["/d", "/s", "/c", "aider"],
+    });
+  });
+
   it("uses ComSpec on Windows", () => {
     expect(hostShellCommand("win32", { ComSpec: "C:\\Windows\\System32\\cmd.exe" })).toEqual({
       cmd: "C:\\Windows\\System32\\cmd.exe",

@@ -877,12 +877,20 @@
   margin: 0;
   font-size: var(--type-body);
 }
+.codebase-start-card p {
+  margin: 0;
+}
+/* Actions hug their label at the start of the card instead of stretching and centring. */
+.codebase-start-card > .btn,
+.codebase-start-card > button.linkish {
+  align-self: flex-start;
+}
 button.linkish {
   display: inline;
   padding: 0;
   border: 0;
   background: none;
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline;
   cursor: pointer;
   font: inherit;

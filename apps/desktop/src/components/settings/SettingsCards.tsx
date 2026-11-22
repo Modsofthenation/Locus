@@ -5,6 +5,11 @@ import {
   CLAUDE_CODE_BASE_URL,
   CODEX_CLI_BASE_URL,
   KIRO_CLI_BASE_URL,
+  CLI_AGENT_OUTPUTS,
+  CLI_AGENT_PRESETS,
+  cliAgentPreset,
+  formatCliArgsText,
+  parseCliArgsText,
   DEFAULT_DOCKER_IMAGE,
   DEFAULT_FARGATE_CLUSTER,
   DEFAULT_FARGATE_REGION,
@@ -49,8 +54,11 @@ import {
   workerIsMetered,
   workerKind,
   workerProvisionsCompute,
+  workerRunsInTask,
   type AgentSkill,
   type AiProvider,
+  type CliAgentConfig,
+  type CliAgentOutput,
   type GitForgeAccount,
   type GuestOs,
   type IntegrationAccount,
@@ -176,11 +184,15 @@ export function ProviderCard({
                 <input
                   type="password"
                   placeholder={
-                    localCli
-                      ? localCli.key
-                      : providerLooksLikeAws(p) || p.accessKeyId
-                        ? "AWS secret access key"
-                        : "API key"
+                    p.kind === "cli-agent"
+                      ? p.cli?.apiKeyEnv
+                        ? `optional — exported as ${p.cli.apiKeyEnv}`
+                        : "optional — uses the CLI's own login"
+                      : localCli
+                        ? localCli.key
+                        : providerLooksLikeAws(p) || p.accessKeyId
+                          ? "AWS secret access key"
+                          : "API key"
                   }
                   value={p.apiKey ?? ""}
                   onChange={(e) => onPatch({ apiKey: e.target.value })}
@@ -190,20 +202,25 @@ export function ProviderCard({
                 </span>
               </div>
             </div>
-            <div className="field">
-              <label>{localCli ? "CLI binary" : "Base URL"}</label>
-              <input
-                value={localCli && p.baseUrl === localCli.base ? "" : p.baseUrl}
-                placeholder={localCli ? localCli.binary : undefined}
-                disabled={locked}
-                onChange={(e) =>
-                  onPatch({
-                    baseUrl: localCli ? e.target.value.trim() || localCli.base : e.target.value,
-                  })
-                }
-              />
-            </div>
+            {p.kind === "cli-agent" ? null : (
+              <div className="field">
+                <label>{localCli ? "CLI binary" : "Base URL"}</label>
+                <input
+                  value={localCli && p.baseUrl === localCli.base ? "" : p.baseUrl}
+                  placeholder={localCli ? localCli.binary : undefined}
+                  disabled={locked}
+                  onChange={(e) =>
+                    onPatch({
+                      baseUrl: localCli ? e.target.value.trim() || localCli.base : e.target.value,
+                    })
+                  }
+                />
+              </div>
+            )}
           </div>
+          {p.kind === "cli-agent" ? (
+            <CliAgentFields provider={p} locked={locked} onPatch={onPatch} />
+          ) : null}
           {providerLooksLikeAws(p) || p.accessKeyId ? (
             <div className="field">
               <label>Access key ID</label>
@@ -410,6 +427,187 @@ export function ProviderCard({
   );
 }
 
+const CLI_OUTPUT_LABELS: Record<CliAgentOutput, string> = {
+  text: "Plain text (stdout)",
+  jsonl: "JSONL events",
+  "claude-stream-json": "Claude Code stream-json",
+  acp: "Agent Client Protocol (ACP)",
+};
+
+function envText(env: Record<string, string> | undefined): string {
+  return Object.entries(env ?? {})
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+}
+
+function parseEnvText(text: string): Record<string, string> | undefined {
+  const env: Record<string, string> = {};
+  for (const line of text.split(/\r?\n/)) {
+    const at = line.indexOf("=");
+    if (at <= 0) continue;
+    const key = line.slice(0, at).trim();
+    if (key) env[key] = line.slice(at + 1);
+  }
+  return Object.keys(env).length ? env : undefined;
+}
+
+/** A fresh provider row for a Custom CLI agent preset. */
+export function cliAgentProviderFromPreset(presetId: string, takenNames: string[]): AiProvider {
+  const preset = cliAgentPreset(presetId) ?? CLI_AGENT_PRESETS[CLI_AGENT_PRESETS.length - 1]!;
+  let name = preset.name;
+  for (let n = 2; takenNames.includes(name); n++) name = `${preset.name} ${n}`;
+  return {
+    id: crypto.randomUUID(),
+    name,
+    kind: "cli-agent",
+    baseUrl: "cli-agent://local",
+    models: [...preset.models],
+    defaultModel: preset.defaultModel,
+    enabled: false,
+    extraHeaders: {},
+    cli: structuredClone(preset.cli),
+  };
+}
+
+/** Command, argv template, output parser, and env for a Custom CLI agent. */
+export function CliAgentFields({
+  provider: p,
+  locked,
+  onPatch,
+}: {
+  provider: AiProvider;
+  locked?: boolean;
+  onPatch: (patch: Partial<AiProvider>) => void;
+}) {
+  const cli: CliAgentConfig = p.cli ?? { command: "", args: ["{prompt}"], output: "text" };
+  const [argsText, setArgsText] = useState(() => formatCliArgsText(cli.args));
+  const [resumeText, setResumeText] = useState(() => formatCliArgsText(cli.resumeArgs ?? []));
+  const [envDraft, setEnvDraft] = useState(() => envText(cli.env));
+  const patchCli = (next: Partial<CliAgentConfig>) => onPatch({ cli: { ...cli, ...next } });
+  const applyPreset = (id: string) => {
+    const preset = cliAgentPreset(id);
+    if (!preset) return;
+    const next = structuredClone(preset.cli);
+    setArgsText(formatCliArgsText(next.args));
+    setResumeText(formatCliArgsText(next.resumeArgs ?? []));
+    setEnvDraft(envText(next.env));
+    onPatch({
+      cli: next,
+      models: [...preset.models],
+      defaultModel: preset.defaultModel,
+    });
+  };
+  const promptOnStdin = cli.output !== "acp" && !cli.args.some((arg) => arg.includes("{prompt}"));
+  return (
+    <>
+      <div className="grid-2">
+        <div className="field">
+          <label>Preset</label>
+          <Select
+            ariaLabel="CLI agent preset"
+            disabled={locked}
+            value={cli.preset ?? "custom"}
+            options={CLI_AGENT_PRESETS.map((row) => ({
+              value: row.id,
+              label: row.name,
+              hint: row.hint,
+            }))}
+            onChange={applyPreset}
+          />
+        </div>
+        <div className="field">
+          <label>Output</label>
+          <Select
+            ariaLabel="CLI agent output"
+            disabled={locked}
+            value={cli.output}
+            options={CLI_AGENT_OUTPUTS.map((value) => ({
+              value,
+              label: CLI_OUTPUT_LABELS[value],
+            }))}
+            onChange={(output) => patchCli({ output })}
+          />
+        </div>
+      </div>
+      <div className="grid-2">
+        <div className="field">
+          <label>Command</label>
+          <input
+            value={cli.command}
+            spellCheck={false}
+            placeholder="gemini, aider, /usr/local/bin/my-agent"
+            disabled={locked}
+            onChange={(e) => patchCli({ command: e.target.value })}
+          />
+        </div>
+        <div className="field">
+          <label>API key env var</label>
+          <input
+            value={cli.apiKeyEnv ?? ""}
+            spellCheck={false}
+            placeholder="optional, e.g. GEMINI_API_KEY"
+            disabled={locked}
+            onChange={(e) => patchCli({ apiKeyEnv: e.target.value.trim() || undefined })}
+          />
+        </div>
+      </div>
+      <div className="field">
+        <label>Args</label>
+        <input
+          value={argsText}
+          spellCheck={false}
+          placeholder="-p {prompt} -m {model}"
+          disabled={locked}
+          onChange={(e) => {
+            setArgsText(e.target.value);
+            patchCli({ args: parseCliArgsText(e.target.value) });
+          }}
+        />
+      </div>
+      <div className="field">
+        <label>Resume args</label>
+        <input
+          value={resumeText}
+          spellCheck={false}
+          placeholder="optional, e.g. --resume {resume} or --continue"
+          disabled={locked}
+          onChange={(e) => {
+            setResumeText(e.target.value);
+            const resumeArgs = parseCliArgsText(e.target.value);
+            patchCli({ resumeArgs: resumeArgs.length ? resumeArgs : undefined });
+          }}
+        />
+      </div>
+      <div className="field">
+        <label>Environment</label>
+        <textarea
+          rows={2}
+          value={envDraft}
+          spellCheck={false}
+          placeholder="NAME=value, one per line. Secret-looking names are stored in the vault."
+          disabled={locked}
+          onChange={(e) => {
+            setEnvDraft(e.target.value);
+            patchCli({ env: parseEnvText(e.target.value) });
+          }}
+        />
+      </div>
+      <p className="hint">
+        Runs <code>{[cli.command || "<command>", ...cli.args].join(" ")}</code> in the session
+        workspace. Placeholders: {"{prompt}"}, {"{model}"}, {"{workspace}"}, {"{resume}"}; an arg
+        whose value is empty is dropped with its flag.{" "}
+        {cli.output === "acp"
+          ? "ACP agents get the prompt over JSON-RPC (initialize → session/new → session/prompt), resume with session/load when supported, and have tool permission requests auto-allowed."
+          : promptOnStdin
+            ? "No {prompt} in args, so the prompt is written to stdin."
+            : ""}{" "}
+        Test connection runs <code>{cli.command || "<command>"} --version</code>. Workers cannot
+        pipe stdin yet, so ACP and stdin prompts run on this machine or a VM.
+      </p>
+    </>
+  );
+}
+
 export function ForgeAccountCard({
   account: f,
   expanded,
@@ -454,6 +652,7 @@ export function ForgeAccountCard({
       ? { ...baseStatus, label: anonymousForgeLabel(f.kind) }
       : baseStatus;
   const handle = forgeAccountHandle(f);
+  const subtitle = forgeAccountSubtitle(f);
   const sso = forgeSupportsSso(f.kind);
   const scopes = forgeOauthScopes(f.kind).split(/\s+/).filter(Boolean).join(" · ");
   /** PAT-only forges always need the field; SSO forges show it on demand or once set. */
@@ -480,11 +679,11 @@ export function ForgeAccountCard({
           </span>
           <span className="git-account-identity">
             <strong>{handle}</strong>
-            <span className="meta">{forgeAccountSubtitle(f)}</span>
+            {/* A signed-out account's handle is already the forge name; don't say it twice. */}
+            {subtitle !== handle ? <span className="meta">{subtitle}</span> : null}
           </span>
         </span>
         <span className="git-account-service">
-          <strong>{forgeLabel(f.kind)}</strong>
           <span className="meta">{forgeHostLabel(f.kind, f.apiBaseUrl)}</span>
         </span>
         <span className="git-account-status">
@@ -1842,6 +2041,23 @@ export function WorkerCard({
                 />
               </div>
               <div className="field">
+                <label>Security group (optional)</label>
+                <input
+                  value={worker.securityGroup ?? ""}
+                  placeholder="sg-… must allow TCP 7421 from this machine"
+                  spellCheck={false}
+                  onChange={(e) =>
+                    onPatch((row) => {
+                      const next = { ...row };
+                      const value = e.target.value.trim();
+                      if (value) next.securityGroup = value;
+                      else delete next.securityGroup;
+                      return next;
+                    })
+                  }
+                />
+              </div>
+              <div className="field">
                 <label>ECS endpoint</label>
                 <input
                   value={worker.ecsUrl ?? ""}
@@ -1943,31 +2159,33 @@ export function WorkerCard({
               />
             </div>
           )}
-          <div className="field">
-            <label>Allowed images</label>
-            <textarea
-              value={(worker.allowedImages ?? []).join("\n")}
-              placeholder={
-                workerIsMetered(worker)
-                  ? "Required — one image per line"
-                  : "Optional — one image per line (empty = any)"
-              }
-              spellCheck={false}
-              rows={3}
-              onChange={(e) =>
-                onPatch((row) => {
-                  const next = { ...row };
-                  const images = e.target.value
-                    .split("\n")
-                    .map((line) => line.trim())
-                    .filter(Boolean);
-                  if (images.length) next.allowedImages = images;
-                  else delete next.allowedImages;
-                  return next;
-                })
-              }
-            />
-          </div>
+          {workerRunsInTask(worker) ? null : (
+            <div className="field">
+              <label>Allowed images</label>
+              <textarea
+                value={(worker.allowedImages ?? []).join("\n")}
+                placeholder={
+                  workerIsMetered(worker)
+                    ? "Required — one image per line"
+                    : "Optional — one image per line (empty = any)"
+                }
+                spellCheck={false}
+                rows={3}
+                onChange={(e) =>
+                  onPatch((row) => {
+                    const next = { ...row };
+                    const images = e.target.value
+                      .split("\n")
+                      .map((line) => line.trim())
+                      .filter(Boolean);
+                    if (images.length) next.allowedImages = images;
+                    else delete next.allowedImages;
+                    return next;
+                  })
+                }
+              />
+            </div>
+          )}
           {workerProvisionsCompute(worker) ? (
             <div className="field">
               <label>Allowed sizes</label>

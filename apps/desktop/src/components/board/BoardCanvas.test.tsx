@@ -888,7 +888,9 @@ describe("BoardCanvas", () => {
     expect(host.textContent).toContain("Timeline view");
     expect(host.textContent).toContain("First task");
     expect(host.querySelector(".board-timeline-bar")).toBeTruthy();
-    expect(host.querySelector('[aria-label="Timeline scale"]')).toBeTruthy();
+    expect(
+      host.querySelector('[aria-label="Timeline scale"], [aria-label^="Timeline scale: "]'),
+    ).toBeTruthy();
   });
 
   it("shows overlay delete for a selected connector", () => {

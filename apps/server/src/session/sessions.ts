@@ -1,14 +1,22 @@
 import { mkdir, rm, readFile, cp, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
+import { executeUnityMcp } from "../unity/unityMcp.js";
+import { executeGodotMcp } from "../godot/godotMcp.js";
+import { executeUnrealMcp } from "../unreal/unrealMcp.js";
+import { executeBlenderMcp } from "../blender/blenderMcp.js";
 import type {
   AgentSession,
+  BootProgress,
   ApprovalPolicy,
   ChatAttachment,
   ChatImage,
   ChatMessage,
   ComputerUseToolName,
   CreateSessionInput,
+  SessionWorktree,
+  WorkerBoardRow,
+  WorkerRanking,
   GoldenImage,
   LocusConfig,
   PatchSessionInput,
@@ -19,9 +27,10 @@ import type {
   ToolCall,
   VisionMode,
   VmInstance,
-  WorkerBackend,
 } from "@locus/shared";
 import {
+  defaultAgentTerminalPresetId,
+  isSessionViewMode,
   isCanvasSession,
   isCodingLoopSession,
   isDesignSession,
@@ -33,6 +42,7 @@ import {
   isProjectToolName,
   isProjectSession,
   isGuestReady,
+  bootHistoryKey,
   isHumanDriving,
   isMutatingBrowserTool,
   isOperatorDrivingBrowser,
@@ -41,6 +51,7 @@ import {
   isLocusAgentImage,
   isWindows,
   lastUserPrompt,
+  canRewind,
   compareSessionsForList,
   lastUserMessage,
   turnUserPrompt,
@@ -49,6 +60,7 @@ import {
   isClaudeCodeProvider,
   isCodexCliProvider,
   isKiroCliProvider,
+  isGenericCliProvider,
   isCodexReasoningEffort,
   normalizeCodexCliModel,
   cursorGithubRepoUrl,
@@ -58,7 +70,6 @@ import {
   parseRepoUrl,
   parseToolAllowlist,
   parseSessionCompare,
-  parseWorkerCount,
   parseSessionPreview,
   parseDesignPalette,
   parseDesignTune,
@@ -95,19 +106,16 @@ import {
   sessionPlacement,
   hostChromeProfileDir,
   sessionLiveChrome,
-  workerDestroyOnStop,
   workerIdleTtlMs,
-  workerMaxConcurrent,
   workerComputeUsd,
   sessionComputeMs,
-  workerImageAllowed,
   workerProvisionsCompute,
-  workerPickSize,
   runtimeNeedsGuest,
   toolsForRuntime,
   configuredToolsForRuntime,
   validateHardwareOverride,
   addUsage,
+  type TokenUsage,
   overlayFromTool,
   toolNeedsApproval,
   execArgCommands,
@@ -115,7 +123,6 @@ import {
   toolNeedsGuest,
   defaultNetworkJail,
   isNetworkJail,
-  jailNetworking,
   forgeProviderAllowlist,
   compactMessages,
   foldOldTurns,
@@ -135,7 +142,6 @@ import {
   sessionVision,
   sessionWebSearch,
   isVisionMode,
-  imageRuntime,
   rewindTargets,
   applyCheckpointWorkingState,
   canClearChat,
@@ -180,6 +186,7 @@ import {
   policyRejectsCreate,
   policyForcedJail,
   policyAllowsAutonomous,
+  policyAllowsHostAgents,
   policyAllowsLiveChrome,
   providerAllowedByPolicy,
   parseStartProcessPid,
@@ -205,9 +212,8 @@ import {
   pickPreviewPort,
   sanitizePreviewPath,
   DEFAULT_DOCKER_IMAGE,
-  WORKER_COUNT_DEFAULT,
-  workerBranchName,
-  workerPlaybook,
+  worktreeBranchName,
+  worktreeDirName,
   isWorkerLockPath,
   parseApprovalPolicy,
   resolveUsageRates,
@@ -253,6 +259,14 @@ import {
   pluginExtraTools,
   pluginReadToolNames,
   MANAGE_INTEGRATION_PLUGIN_TOOL,
+  MANAGE_THEME_TOOL,
+  MANAGE_SKILL_TOOL,
+  MANAGE_MCP_SERVER_TOOL,
+  applySkillManageAction,
+  applyMcpServerManageAction,
+  DEFAULT_THEME,
+  isThemeId,
+  applyThemeManageAction,
   applySlackPostApprovalText,
   applyBrainBriefApprovalBody,
   canvasHtmlFromToolCall,
@@ -282,6 +296,11 @@ import {
   canLinkAssetSessions,
   isHostSessionsToolName,
   isDockerSwarmToolName,
+  isCodeIntelToolName,
+  isCodeRenameToolName,
+  codeRenameRefusal,
+  renameUnifiedDiff,
+  CODE_INTEL_NO_WORKSPACE,
   sessionOffersHostSessions,
   isAssetPackKind,
   parseAssetMentions,
@@ -315,6 +334,7 @@ import {
   resolveSubagentKind,
   isSubagentKind,
   type SessionPull,
+  resolveModelRoute,
 } from "@locus/shared";
 import type { DockerEngine, Hypervisor } from "@locus/hypervisor";
 import { parseWorkerCliMcpLine, WorkerClient } from "@locus/worker";
@@ -372,6 +392,7 @@ import {
   spawnClaudeCode,
   spawnCodexCli,
   spawnKiroCli,
+  spawnGenericCli,
   isCursorImageMime,
   type ChatEvent,
   type CompleteRequest,
@@ -382,6 +403,7 @@ import {
   type ClaudeCodeSpawner,
   type CodexCliSpawner,
   type KiroCliSpawner,
+  type GenericCliSpawner,
   type CursorRunHandle,
 } from "@locus/providers";
 import {
@@ -407,22 +429,28 @@ import {
 } from "./controlPlaneTools.js";
 import { executeSessionForgeTool } from "./sessionForgeTools.js";
 import { GuestBoot } from "./guestBoot.js";
+import { MachineLifecycle } from "./machineLifecycle.js";
+import { BootTracker } from "./bootSteps.js";
 import { SessionPreview } from "./sessionPreview.js";
+import { ParallelWorkers } from "./parallelWorkers.js";
 import { continueAfterCliRound, type CliTurnContinuePorts } from "./cliTurnContinue.js";
-import { runHostCliTurn, type HostCliTurnPorts } from "./hostCliTurn.js";
+import { runHostCliTurn, type HostCliKind, type HostCliTurnPorts } from "./hostCliTurn.js";
 import { executeSwarmTeamTool, swarmSpeakerFrom } from "./swarmTeamTools.js";
 import type { ControlPlane } from "../core/controlPlane.js";
 import { BRAIN_DISTILL_IDLE_MS } from "../brain/distiller.js";
+import { riskGatedPolicy } from "./riskGate.js";
 import { draftBrainIssueBrief, postBrainIssueBrief } from "../brain/issueBrief.js";
 import { withFreshForgeToken } from "../git/forgeOauth.js";
 import { recordingDest, writeMockRecording } from "../media/recordings.js";
 import { screenshotDest, writeScreenshot } from "../media/screenshots.js";
 import { startAllowlistProxy, type AllowlistProxy } from "../runtime/netjail.js";
 import { McpHub } from "../integrations/mcp.js";
-import { cliGitMcpTools, isCliGitTool } from "../integrations/cliGitMcp.js";
-import { dispatchControlPlaneMcp } from "../http/mcpRoutes.js";
+import { cliGitMcpTools, cliSkillMcpTools, isCliGitTool } from "../integrations/cliGitMcp.js";
+import { dispatchWorkerCliMcp, sessionMcpHandler } from "../http/mcpRoutes.js";
+import { CliMcpGateway } from "../http/cliMcpGateway.js";
 import { resolveOptionalHostDir } from "../workspace/hostWorkspace.js";
 import { SessionWorkspace } from "../workspace/sessionWorkspace.js";
+import type { AgentTerminalResolution } from "../workspace/agentTerminals.js";
 import { DockerInventory } from "../runtime/dockerInventory.js";
 import {
   dockerCreateAllowlist,
@@ -450,7 +478,16 @@ import {
   workerMirrorDir,
   writeGuestFiles,
 } from "../workspace/guestTreeMirror.js";
-import { gitCheckoutReady } from "../workspace/workspaceGit.js";
+import { gitCheckoutReady, workspaceOriginUrl } from "../workspace/workspaceGit.js";
+import {
+  addWorktree,
+  gitToplevel,
+  removeWorktree,
+  runWorktreeSetup,
+  seedWorktree,
+  worktreeSetupCommand,
+  worktreeStatus,
+} from "../workspace/gitWorktree.js";
 import { type PreviewTarget } from "../runtime/preview.js";
 import { writeArtifactBytes } from "../media/artifacts.js";
 import {
@@ -467,16 +504,20 @@ import {
 import { persistIntegrationAccount } from "../integrations/googleOauth.js";
 import { runMcpCode } from "../integrations/mcpCode.js";
 import { IntegrationsClient } from "../integrations/integrations.js";
-import { SessionTraceLog, saveFailedEval } from "./traces.js";
+import { SessionTraceLog, saveFailedEval, type TraceListener } from "./traces.js";
+import { AuditLog, auditConfigChanges } from "../core/auditLog.js";
+import { BudgetService } from "../core/budgets.js";
 import {
   dropWorkspaceIndex,
   indexCacheDir,
   indexWorkspace,
   updateIndexPaths,
 } from "../workspace/repoIndex.js";
+import { appendPostEditDiagnostics, runCodeIntelTool } from "../workspace/agentCodeIntel.js";
 import { dropGrepIndex, grepIndexedWorkspace, grepContextLines } from "../workspace/grepIndex.js";
 import { runIsolatedSubagent, subagentTimeoutMs } from "./subagent.js";
 import { gateToolRequest, type ToolGateDecision } from "./toolGates.js";
+import { ComputerControl, ComputerControlChanged } from "./computerControl.js";
 import { sessionWorkflowCatalog } from "../workflows/catalog.js";
 import type { WorkflowCompletion } from "../workflows/run.js";
 import {
@@ -502,14 +543,15 @@ import {
   refundLastRoundSlot,
 } from "./agentTurn.js";
 import {
-  formatNpmTestGateFailure,
+  formatVerifyGateFailure,
+  isBlockingVerifyFailure,
   lintOutputLooksLikeMissingDeps,
   loadRepoHooks,
   runRepoHook,
-  runWorkspaceNpmScript,
   workspaceGitState,
   type WorkspaceScriptResult,
 } from "../core/hooks.js";
+import { runWorkspaceVerify, workspaceVerifyCommands } from "../core/verify.js";
 import {
   assemblePrompt,
   checkBudget,
@@ -586,13 +628,27 @@ import {
   clipTraceDetail,
 } from "@locus/shared";
 
-export type ChatEngine = (req: CompleteRequest) => AsyncGenerator<ChatEvent>;
+import { WorkerCliDisconnectError, workerCliLines } from "./workerCliConnection.js";
+import {
+  offlineProjectProvider,
+  offlineProjectTool,
+  offlineProviderFetch,
+} from "../projects/offlineProject.js";
+
+export type ChatEngine = (
+  req: CompleteRequest,
+  fetchFn?: typeof fetch,
+) => AsyncGenerator<ChatEvent>;
 
 function now(): string {
   return new Date().toISOString();
 }
 
+const CLI_CANVAS_UNCHANGED_NOTE = "Canvas unchanged since the snapshot earlier in this turn.";
+
 export class SessionService {
+  private computerControl = new ComputerControl();
+  private computerCapabilitiesProbed = new Set<string>();
   private aborts = new Map<string, AbortController>();
   private cloned = new Set<string>();
   private cloneInflight = new Map<string, Promise<void>>();
@@ -653,7 +709,12 @@ export class SessionService {
     { requesterId: string; task: string; wakeRequester?: boolean }
   >();
   private readonly guestBoot: GuestBoot;
+  private readonly machineLifecycle: MachineLifecycle;
+  private readonly boots: BootTracker;
+  /** Docker start paths that still owe workspace setup before the step list reaches Ready. */
+  private bootSetupPending = new Set<string>();
   private readonly sessionPreview: SessionPreview;
+  private readonly parallelWorkers: ParallelWorkers;
   private startPromptResumed = new Set<string>();
   /** Create-time Games `assetIds` to copy after a worker guest exists. */
   private pendingCreateAssetIds = new Map<string, string[]>();
@@ -672,17 +733,41 @@ export class SessionService {
     }
   >();
   private turnSubagents = new Map<string, number>();
+  /** Last canvas snapshot sent on a CLI nudge round, so an unchanged one is not resent. */
+  private cliCanvasSnapshotSent = new Map<string, { turnId: string; snap: string }>();
   private turnStartedAt = new Map<string, number>();
   private inSubagent = new Set<string>();
+  private reconnectingWorkerTurns = new Set<string>();
+  private recoveringWorkerTurns = new Set<string>();
   private publishTestCache = new Map<string, WorkspaceScriptResult>();
   fetchFn: typeof fetch = fetch;
   cursorCliSpawner: CursorCliSpawner = spawnCursorCli;
   claudeCodeSpawner: ClaudeCodeSpawner = spawnClaudeCode;
   codexCliSpawner: CodexCliSpawner = spawnCodexCli;
   kiroCliSpawner: KiroCliSpawner = spawnKiroCli;
+  genericCliSpawner: GenericCliSpawner = spawnGenericCli;
   private cliGitTurns = new Map<string, AbortSignal>();
+  /** Session-scoped MCP listener for sandboxed Docker-session CLIs. Started on first use. */
+  private cliMcpGatewayInstance?: CliMcpGateway;
+  private get cliMcpGateway(): CliMcpGateway {
+    const plane = this.plane;
+    this.cliMcpGatewayInstance ??= new CliMcpGateway(
+      sessionMcpHandler({
+        store: this.store,
+        sessions: this,
+        // The brain is attached to the plane after construction (createApp).
+        get brain() {
+          return plane.brain;
+        },
+        fetchFn: (input, init) => this.fetchFn(input, init),
+      }),
+    );
+    return this.cliMcpGatewayInstance;
+  }
 
   private workers = new Map<string, WorkerClient>();
+  /** How long a freshly provisioned compute worker may take to answer `/v1/info`. */
+  computeReadyTimeoutMs = 4 * 60 * 1000;
   private cursorCliSpawnAborts = new Map<string, AbortController>();
   /** Last good complete index.html — used to detect snippet wipes and restore. */
   private gameCanvasBaseline = new Map<string, string>();
@@ -697,12 +782,16 @@ export class SessionService {
   readonly workspace: SessionWorkspace;
   readonly design: DesignCanvas;
   readonly agentCanvases: AgentCanvases;
+  /** Hash-chained audit log fed from this service's trace stream. */
+  readonly audit: AuditLog;
+  /** Daily spend ledger behind server-enforced budgets. */
+  readonly budgets: BudgetService;
 
   constructor(
     private readonly store: JsonStore,
     hypervisor: Hypervisor,
     private readonly hub: Hub,
-    private readonly chatEngine: ChatEngine = (req) => completeChat(req),
+    private readonly chatEngine: ChatEngine = completeChat,
     private readonly guests: GuestHub = new GuestHub(),
     docker?: DockerEngine,
     compute?: ComputeBackend,
@@ -714,6 +803,9 @@ export class SessionService {
     this.docker = docker ?? new MockDockerEngine(store.dataDir);
     this.compute = compute ?? new MockComputeBackend();
     this.traces = new SessionTraceLog(store.dataDir);
+    this.audit = new AuditLog(store.dataDir);
+    this.budgets = new BudgetService(store.dataDir);
+    this.traces.subscribe((event) => this.audit.fromTrace(event));
     this.chromeExtension = new ChromeExtensionHub();
     this.guests.setLiveBrowser((sessionId) => this.chromeExtension.driverFor(sessionId));
     this.guests.setLiveDocker(Boolean(this.docker.liveEngine));
@@ -752,15 +844,27 @@ export class SessionService {
         this.repoMapCache.delete(sessionId);
       },
     });
+    this.boots = new BootTracker({
+      broadcast: (event) => this.hub.broadcast(event),
+      loadHistory: () => this.store.loadBootHistory(),
+      saveHistory: (history) => this.store.saveBootHistory(history),
+    });
     this.guestBoot = new GuestBoot({
       require: (id) => this.require(id),
       get: (id) => this.get(id),
       sessionNeedsGuest: (session) => this.sessionNeedsGuest(session),
       isWorkerHost: (session) => this.isWorkerHost(session),
       isWorkerSession: (session) => this.isWorkerSession(session),
-      runStartVm: (id) => this.runStartVm(id),
-      ensureDocker: (id) => this.ensureDocker(id),
-      ensureWorkerHost: (id) => this.ensureWorkerHost(id),
+      runStartVm: (id) => this.machineLifecycle.runStartVm(id),
+      ensureDocker: (id) => this.machineLifecycle.ensureDocker(id),
+      ensureWorkerHost: (id) => this.machineLifecycle.ensureWorkerHost(id),
+      provisionsCompute: async (session) => {
+        if (!session.backendId) return false;
+        const backend = (await this.store.loadConfig()).workers?.find(
+          (row) => row.id === session.backendId,
+        );
+        return Boolean(backend && workerProvisionsCompute(backend));
+      },
       getMachine: (id) => this.getMachine(id),
       workerClient: (backendId) => this.workers.get(backendId),
       onVmStatus: (id, status, error) => this.onVmStatus(id, status, error),
@@ -769,6 +873,43 @@ export class SessionService {
         const config = await this.store.loadConfig();
         return guestBootTimeoutMs(config.advanced.guestBootTimeoutMs);
       },
+      onBootFailed: (id, message) => this.boots.fail(id, message),
+      store: this.store,
+      hub: this.hub,
+    });
+    this.machineLifecycle = new MachineLifecycle({
+      require: (id) => this.require(id),
+      get: (id) => this.get(id),
+      list: () => this.list(),
+      patch: (id, body) => this.patch(id, body),
+      persistVm: (vm) => this.persistVm(vm),
+      getMachine: (id) => this.getMachine(id),
+      onVmStatus: (id, status, error) => this.onVmStatus(id, status, error),
+      isWorkerSession: (session) => this.isWorkerSession(session),
+      isWorkerHost: (session) => this.isWorkerHost(session),
+      requireWorker: (session) => this.requireWorker(session),
+      attachWorkerGuest: (session, client, vm) => this.attachWorkerGuest(session, client, vm),
+      destroyWorkerGuest: (session) => this.destroyWorkerGuest(session),
+      engine: (session) => this.engine(session),
+      installGuestGitAuth: (vm) => this.installGuestGitAuth(vm),
+      keepGuestOrDestroy: (id, vmId, engine) => this.keepGuestOrDestroy(id, vmId, engine),
+      applyWorkspaceEnvironment: (id, vm) => this.applyWorkspaceEnvironment(id, vm),
+      landStudioWorkspace: (id) => this.landStudioWorkspace(id),
+      sessionForge: (config, session) => this.sessionForge(config, session),
+      ensureProxy: (id) => this.ensureProxy(id),
+      closeProxy: (id) => this.closeProxy(id),
+      closeIdeTunnel: (id) => this.closeIdeTunnel(id),
+      hypervisor: () => this.hypervisor,
+      docker: () => this.docker,
+      fetchFn: () => this.fetchFn,
+      compute: this.compute,
+      workers: this.workers,
+      boots: this.boots,
+      computeReadyTimeoutMs: () => this.computeReadyTimeoutMs,
+      cloned: this.cloned,
+      cloneInflight: this.cloneInflight,
+      envApplied: this.envApplied,
+      bootSetupPending: this.bootSetupPending,
       store: this.store,
       hub: this.hub,
     });
@@ -800,6 +941,30 @@ export class SessionService {
       create: (input) => this.create(input),
       captureImage: (sessionId, name) => this.captureImage(sessionId, name),
     });
+    this.parallelWorkers = new ParallelWorkers({
+      require: (id) => this.require(id),
+      get: (id) => this.get(id),
+      isWorkerSession: (session) => this.isWorkerSession(session),
+      sessionCheckoutHostRoot: (session, checkout) =>
+        this.sessionCheckoutHostRoot(session, checkout),
+      create: (input, opts) => this.create(input, opts),
+      remove: (id, opts) => this.remove(id, opts),
+      patchMeta: (id, patch) => this.patchMeta(id, patch),
+      appendMessage: (id, message) => this.appendMessage(id, message),
+      sendChat: (id, content) => this.sendChat(id, content),
+      abortChat: (id) => this.abortChat(id),
+      executeTool: (id, req, opts) => this.executeTool(id, req, opts),
+      captureImage: (id, name) => this.captureImage(id, name),
+      startVm: (id) => this.startVm(id),
+      stopVm: (id) => this.stopVm(id),
+      docker: {
+        get: (id) => this.docker.get(id),
+        restoreWorkspace: (id, srcPath) =>
+          this.docker.restoreWorkspace?.(id, srcPath) ?? Promise.resolve(),
+      },
+      store: this.store,
+      chatEngine: (req) => this.chatEngine(req),
+    });
     this.browsers = new BrowserStreams(
       this.guests,
       async (sessionId) => {
@@ -821,6 +986,7 @@ export class SessionService {
       {
         takeover: (sessionId) => this.takeoverBrowser(sessionId),
         handback: (sessionId) => this.handbackBrowser(sessionId),
+        run: (sessionId, work) => this.computerControl.run(sessionId, work),
         allowHosts: async (session) => {
           const config = await this.store.loadConfig();
           return forgeProviderAllowlist({ ...config, extraHosts: session.allowHosts });
@@ -911,6 +1077,11 @@ export class SessionService {
     return this.docker.kind;
   }
 
+  hasCachedDockerImage(image: string): Promise<boolean> {
+    if (!parseDockerImage(image) || image.startsWith("-")) return Promise.resolve(false);
+    return this.docker.hasImage?.(image) ?? Promise.resolve(false);
+  }
+
   private dockerReadyCache: { at: number; ready: Promise<boolean> } | null = null;
 
   /** Whether the container daemon answers (`docker info`), cached for a few seconds. */
@@ -962,6 +1133,8 @@ export class SessionService {
     this.draining.clear();
     this.pendingTurnPrompt.clear();
     this.guestBoot.clear();
+    this.boots.reset();
+    this.bootSetupPending.clear();
     this.startPromptResumed.clear();
     this.pendingCreateAssetIds.clear();
     this.design.reset();
@@ -974,6 +1147,10 @@ export class SessionService {
     hypervisor.onStatus((id, status, error) => {
       void this.onVmStatus(id, status, error);
     });
+    hypervisor.onBootStep?.((id, step) => {
+      const sessionId = hypervisor.get(id)?.sessionId;
+      if (sessionId) this.boots.step(sessionId, step);
+    });
   }
 
   private bindDocker(docker: DockerEngine): void {
@@ -983,6 +1160,10 @@ export class SessionService {
       void this.onVmStatus(id, status, error);
     });
     docker.onBuild((id, progress) => this.queueImageBuild(id, progress));
+    docker.onBootStep?.((id, step) => {
+      const sessionId = docker.get(id)?.sessionId;
+      if (sessionId) this.boots.step(sessionId, step);
+    });
   }
 
   private engine(session: AgentSession): Hypervisor | DockerEngine {
@@ -1173,6 +1354,8 @@ export class SessionService {
       const backend = (config.workers ?? []).find((row) => row.id === session.backendId);
       await this.compute.destroy(remoteId, backend).catch(() => undefined);
     }
+    // The workspace went with the guest (or the whole task): clone again on the next start.
+    if (remoteId || sessionRuntime(session) !== "host") this.cloned.delete(session.id);
     await this.patch(session.id, {
       vmId: undefined,
       status: "stopped",
@@ -1199,6 +1382,30 @@ export class SessionService {
     const session = await this.get(sessionId);
     if (!session || sessionRuntime(session) !== "host") return undefined;
     return this.hostRoot(session);
+  }
+
+  /** Terminal mode target: the host folder, or a running local Docker container. */
+  async agentTerminalTarget(sessionId: string): Promise<AgentTerminalResolution> {
+    const session = await this.get(sessionId);
+    if (!session) return { reason: "Session not found", defaultPreset: "shell" };
+    const config = await this.store.loadConfig();
+    const provider = config.providers.find((row) => row.id === session.providerId);
+    const defaultPreset = defaultAgentTerminalPresetId(provider);
+    const runtime = sessionRuntime(session);
+    if (this.isWorkerSession(session)) {
+      return { reason: "Terminal mode is not available for worker sessions.", defaultPreset };
+    }
+    if (runtime === "host") {
+      return { target: { runtime, cwd: this.hostRoot(session) }, defaultPreset };
+    }
+    if (runtime !== "docker") {
+      return { reason: "Terminal mode is not available for VM sessions.", defaultPreset };
+    }
+    const vm = session.vmId ? this.docker.get(session.vmId) : undefined;
+    if (!this.docker.liveEngine || !vm?.containerId || !isGuestReady(vm.status)) {
+      return { reason: "Start the container to open a terminal.", defaultPreset };
+    }
+    return { target: { runtime, containerId: vm.containerId }, defaultPreset };
   }
 
   async promoteIdeToDocker(sessionId: string, runtime: "docker" | "host" = "docker") {
@@ -1274,9 +1481,53 @@ export class SessionService {
 
   async create(
     input: CreateSessionInput,
-    opts?: { waitUntilStarted?: boolean },
+    opts?: {
+      waitUntilStarted?: boolean;
+      /**
+       * Server-only: git checkout to branch a Host worktree from, trusted as-is (it may sit
+       * under the data directory, e.g. the bundled sample repo). Never taken from a request.
+       */
+      worktreeSource?: string;
+    },
   ): Promise<AgentSession> {
     const config = await this.store.loadConfig();
+    const offline = input.projectId
+      ? (await this.projects?.get(input.projectId))?.offlineProfile
+      : undefined;
+    if (offline) {
+      const coordinator = sessionKind(input) === "project";
+      if (!coordinator && !["agent", "design", "game", "assets"].includes(sessionKind(input))) {
+        throw new Error("This session type requires services unavailable in an offline project");
+      }
+      offlineProjectProvider(config, offline.providerId);
+      const jail = policyForcedJail(config.managedPolicy);
+      if (!coordinator && jail && jail !== "none")
+        throw new Error("Managed policy requires a different Docker network mode");
+      input = {
+        ...input,
+        os: "ubuntu",
+        providerId: offline.providerId,
+        model: offline.model,
+        runtime: coordinator ? "host" : "docker",
+        startVm: !coordinator,
+        dockerImage: coordinator ? undefined : offline.dockerImage,
+        imageId: coordinator ? undefined : offline.imageId,
+        placement: undefined,
+        backendId: undefined,
+        network: coordinator ? undefined : "none",
+        repo: undefined,
+        repoId: undefined,
+        extraRepos: undefined,
+        extraRepoIds: undefined,
+        pull: undefined,
+        webSearch: false,
+        liveChrome: false,
+        hostDir: undefined,
+        worktree: undefined,
+        worktreeFrom: undefined,
+        guestEnv: undefined,
+      };
+    }
     const surface =
       input.surface === "swarm" || input.surface === "developer"
         ? input.surface
@@ -1292,6 +1543,7 @@ export class SessionService {
     const { kind, runtime, placement, backendId, cursorCloud } = prep;
     const policyErr = policyRejectsCreate({
       runtime,
+      cloudTask: prep.cloudTask,
       autonomy: input.autonomy,
       network: input.network,
       liveChrome: input.liveChrome,
@@ -1299,7 +1551,7 @@ export class SessionService {
     });
     if (policyErr) throw new Error(policyErr);
     const forcedJail = policyForcedJail(config.managedPolicy);
-    if (forcedJail) input.network = forcedJail;
+    if (forcedJail && !offline) input.network = forcedJail;
     const provider = config.providers.find((row) => row.id === input.providerId);
     if (
       provider &&
@@ -1316,6 +1568,15 @@ export class SessionService {
         config.templates.find((t) => t.os === "ubuntu") ??
         config.templates.find((t) => !isWindows(t.os));
       const workerHost = placement === "worker";
+      const wantsWorktree = Boolean(input.worktree || input.worktreeFrom || opts?.worktreeSource);
+      if (workerHost && wantsWorktree) {
+        throw new Error("Worktrees are for Host agents on this machine, not on a worker");
+      }
+      const worktreeStartedAt = Date.now();
+      const worktree =
+        !workerHost && wantsWorktree
+          ? await this.prepareWorktree(input, opts?.worktreeSource)
+          : undefined;
       const session: AgentSession = sessionCreateBase(input, {
         now: now(),
         os,
@@ -1328,9 +1589,11 @@ export class SessionService {
         vision: "off",
         status: workerHost && input.startVm && !cursorCloud ? "provisioning" : "idle",
         titleRuntime: "host",
-        hostDir: workerHost
-          ? input.hostDir?.trim() || undefined
-          : await resolveOptionalHostDir(input.hostDir, this.store.dataDir),
+        hostDir: worktree
+          ? worktree.hostDir
+          : workerHost
+            ? input.hostDir?.trim() || undefined
+            : await resolveOptionalHostDir(input.hostDir, this.store.dataDir),
         palette: isCanvasSession({ kind })
           ? (parseDesignPalette(input.palette) ?? DEFAULT_DESIGN_PALETTE)
           : parseDesignPalette(input.palette),
@@ -1350,10 +1613,15 @@ export class SessionService {
         surface,
         reasoningEffort: input.reasoningEffort,
       });
+      if (offline) session.offline = true;
+      if (worktree) session.worktree = worktree.record;
       if (!session.hostDir && !workerHost) {
         await mkdir(hostWorkspaceDir(this.store.dataDir, session.id), { recursive: true });
       }
       await this.store.replaceSession(session);
+      if (worktree) {
+        await this.finishWorktreeSetup(session.id, worktree.record, worktreeStartedAt);
+      }
       this.hub.broadcast({ type: "session.updated", session });
       await this.enrollSwarmTeammate(session);
       if (!workerHost) {
@@ -1439,6 +1707,7 @@ export class SessionService {
         surface,
         reasoningEffort: input.reasoningEffort,
       });
+      if (offline) session.offline = true;
       await this.store.replaceSession(session);
       this.hub.broadcast({ type: "session.updated", session });
       await this.enrollSwarmTeammate(session);
@@ -1671,15 +1940,13 @@ export class SessionService {
     return this.guestBoot.startVm(sessionId);
   }
 
-  private async runStartVm(sessionId: string): Promise<VmInstance> {
-    const session = await this.require(sessionId);
-    if (this.isWorkerHost(session)) return this.startWorkerHost(sessionId);
-    if (!runtimeNeedsGuest(sessionRuntime(session))) {
-      throw new Error("Host agents do not have a VM or container.");
-    }
-    if (sessionRuntime(session) === "docker") return this.startDocker(sessionId);
-    if (this.isWorkerSession(session)) return this.startWorkerVm(sessionId);
-    return this.startQemuVm(sessionId);
+  /** Current boot step list for a session (also broadcast as `boot.progress`). */
+  bootProgress(sessionId: string): BootProgress | undefined {
+    return this.boots.get(sessionId);
+  }
+
+  private async maybeFinishBootSteps(sessionId: string): Promise<void> {
+    return this.machineLifecycle.maybeFinishBootSteps(sessionId);
   }
 
   private async bootGuest(sessionId: string, waitUntilStarted: boolean): Promise<void> {
@@ -1718,556 +1985,94 @@ export class SessionService {
     }
   }
 
-  private async ensureWorkerDocker(sessionId: string): Promise<VmInstance> {
-    let session = await this.require(sessionId);
-    const dockerImage = parseDockerImage(session.dockerImage ?? "");
-    if (!dockerImage) throw new Error("Enter a Docker image such as ubuntu:24.04");
-    const jail = session.network ?? defaultNetworkJail(session.imageId);
-    const config = await this.store.loadConfig();
-    const backend = (config.workers ?? []).find((row) => row.id === session.backendId);
-    if (!backend) throw new Error("Worker was removed from Settings → Workers");
-    const fargate = workerProvisionsCompute(backend);
-    if (!session.vmId) {
-      if (!workerImageAllowed(backend, dockerImage)) {
-        throw new Error(`Worker ${backend.name} does not allow image ${dockerImage}`);
-      }
-      if (fargate) {
-        const cap = workerMaxConcurrent(backend);
-        if (cap != null) {
-          const live = (await this.list()).filter(
-            (row) =>
-              row.id !== session.id &&
-              row.backendId === backend.id &&
-              Boolean(row.remoteGuestId || (row.vmId && row.status !== "stopped")),
-          ).length;
-          if (live >= cap) {
-            throw new Error(
-              `Worker ${backend.name} already has ${cap} live guest${cap === 1 ? "" : "s"} (maxConcurrent)`,
-            );
-          }
-        }
-      }
-    }
-    if (fargate) {
-      session = await this.ensureFargateHandle(session, backend);
-    }
-    const client = await this.requireWorker(session);
-    let vm = session.vmId ? client.get(session.vmId) : undefined;
-    if (!vm && session.vmId) vm = await client.refresh(session.vmId);
-    if (!vm) {
-      const cap = workerMaxConcurrent(backend);
-      if (!fargate && cap != null) {
-        const live = (await client.listGuests()).filter(
-          (guest) => guest.status !== "stopped" && guest.status !== "error",
-        ).length;
-        if (live >= cap) {
-          throw new Error(
-            `Worker ${backend.name} already has ${cap} live guest${cap === 1 ? "" : "s"} (maxConcurrent)`,
-          );
-        }
-      }
-      const seed = session.imageId
-        ? (await this.store.loadImages()).find((i) => i.id === session.imageId)
-        : undefined;
-      if (session.imageId && !seed) throw new Error("Golden image not found");
-      if (seed && imageRuntime(seed) !== "docker") {
-        throw new Error("That golden image is a VM disk, not a container workspace");
-      }
-      const share = config.advanced.hostSharePath?.trim();
-      if (share) await mkdirShare(share);
-      const seedEnv = await loadWorkspaceEnvironment(seed?.path);
-      const forge = this.sessionForge(config, session);
-      const guestEnv: Record<string, string> = {
-        ...(seedEnv?.env ?? {}),
-        ...(session.guestEnv ?? {}),
-      };
-      const freshForge = forge
-        ? await withFreshForgeToken(this.store, forge, this.fetchFn)
-        : undefined;
-      if (
-        freshForge?.token &&
-        !guestEnv.GIT_TOKEN &&
-        !guestEnv.GITHUB_TOKEN &&
-        !guestEnv.GITLAB_TOKEN &&
-        !guestEnv.BITBUCKET_TOKEN
-      ) {
-        guestEnv.GIT_TOKEN = freshForge.token;
-      }
-      try {
-        vm = await client.create({
-          sessionId,
-          name: session.title,
-          image: dockerImage,
-          os: session.os,
-          templateId: session.templateId,
-          network: jail,
-          hostShare: Boolean(share),
-          allowHosts:
-            jail === "restricted"
-              ? forgeProviderAllowlist({ ...config, extraHosts: session.allowHosts })
-              : undefined,
-          env: Object.keys(guestEnv).length ? guestEnv : undefined,
-          planeId: config.workerPlaneId,
-        });
-        if (seed?.path) await client.uploadTree(vm.id, "workspace-seed", seed.path);
-        if (share) await client.uploadTree(vm.id, "host-share", share);
-      } catch (err) {
-        if (vm) await client.destroy(vm.id).catch(() => undefined);
-        if (fargate && session.remoteGuestId) {
-          await this.compute.destroy(session.remoteGuestId, backend).catch(() => undefined);
-          await this.patch(session.id, { remoteGuestId: undefined });
-        }
-        throw err;
-      }
-    }
-    this.attachWorkerGuest(session, client, vm);
-    await this.patch(sessionId, {
-      vmId: vm.id,
-      status: vm.status === "running" ? "idle" : "provisioning",
-      error: undefined,
-      ...(session.computeStartedAt ? {} : { computeStartedAt: now() }),
-    });
-    await this.persistVm(vm);
-    this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
-    this.hub.broadcast({ type: "session.updated", session: await this.require(sessionId) });
-    await this.landStudioWorkspace(sessionId);
-
-    return client.get(vm.id) ?? vm;
-  }
-
-  private async ensureWorkerHost(sessionId: string): Promise<VmInstance> {
-    let session = await this.require(sessionId);
-    const config = await this.store.loadConfig();
-    const backend = (config.workers ?? []).find((row) => row.id === session.backendId);
-    if (!backend) throw new Error("Worker was removed from Settings → Workers");
-    if (workerProvisionsCompute(backend)) {
-      session = await this.ensureFargateHandle(session, backend);
-    }
-    const client = await this.requireWorker(session);
-    let vm = session.vmId ? client.get(session.vmId) : undefined;
-    if (!vm && session.vmId) vm = await client.refresh(session.vmId);
-    if (!vm) {
-      vm = await client.create({
-        sessionId,
-        name: session.title,
-        image: "host",
-        os: session.os,
-        templateId: session.templateId,
-        runtime: "host",
-        hostDir: session.hostDir?.trim() || undefined,
-      });
-    }
-    this.attachWorkerGuest(session, client, vm);
-    await this.patch(sessionId, {
-      vmId: vm.id,
-      status: isGuestReady(vm.status) ? "idle" : "provisioning",
-      error: undefined,
-      ...(session.computeStartedAt ? {} : { computeStartedAt: now() }),
-    });
-    await this.persistVm(vm);
-    this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
-    this.hub.broadcast({ type: "session.updated", session: await this.require(sessionId) });
-    await this.landStudioWorkspace(sessionId);
-    return client.get(vm.id) ?? vm;
-  }
-
-  private async startWorkerHost(sessionId: string): Promise<VmInstance> {
-    let vm = await this.ensureWorkerHost(sessionId);
-    const session = await this.require(sessionId);
-    const client = await this.requireWorker(session);
-    this.attachWorkerGuest(session, client, vm);
-    if (isGuestReady(vm.status)) {
-      await this.installGuestGitAuth(vm);
-      await this.onVmStatus(vm.id, vm.status, vm.error);
-      return vm;
-    }
-    vm = await client.start(vm.id);
-    this.attachWorkerGuest(session, client, vm);
-    await this.installGuestGitAuth(vm);
-    await this.patch(sessionId, { vmId: vm.id, status: "provisioning", error: undefined });
-    await this.persistVm(vm);
-    this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
-    await this.onVmStatus(vm.id, vm.status, vm.error);
-    return vm;
-  }
-
-  private async ensureFargateHandle(
-    session: AgentSession,
-    backend: WorkerBackend,
-  ): Promise<AgentSession> {
-    if (session.remoteGuestId) {
-      if (this.compute.get(session.remoteGuestId)) return session;
-      await this.compute.destroy(session.remoteGuestId, backend).catch(() => undefined);
-      session = await this.patch(session.id, { remoteGuestId: undefined });
-    }
-    const size = workerPickSize(backend, session.instanceSize);
-    const quote = this.compute.quote(backend, size);
-    const handle = await this.compute.provision({ backend, sessionId: session.id, size });
-    try {
-      const probe = new WorkerClient(
-        {
-          ...backend,
-          url: handle.url,
-          token: handle.token,
-          fingerprint: handle.fingerprint ?? backend.fingerprint,
-        },
-        this.fetchFn === fetch ? undefined : (input, init) => this.fetchFn(input, init),
-      );
-      const health = await probe.health();
-      if (health.fingerprint) handle.fingerprint = health.fingerprint;
-      this.workers.set(`${backend.id}:${handle.id}`, probe);
-    } catch {
-      /* in-process mock workers still answer through fetchFn */
-    }
-    return this.patch(session.id, {
-      remoteGuestId: handle.id,
-      quotedUsdPerHour: quote.usdPerHour,
-      instanceSize: size,
-    });
-  }
-
-  private async startWorkerVm(sessionId: string): Promise<VmInstance> {
-    let vm = await this.ensureWorkerVm(sessionId);
-    const session = await this.require(sessionId);
-    const client = await this.requireWorker(session);
-    this.attachWorkerGuest(session, client, vm);
-    if (isGuestReady(vm.status)) {
-      await this.installGuestGitAuth(vm);
-      return vm;
-    }
-    vm = await client.start(vm.id);
-    this.attachWorkerGuest(session, client, vm);
-    await this.keepGuestOrDestroy(sessionId, vm.id, client);
-    await this.installGuestGitAuth(vm);
-    await this.patch(sessionId, { vmId: vm.id, status: "provisioning", error: undefined });
-    await this.persistVm(vm);
-    this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
-    await this.onVmStatus(vm.id, vm.status, vm.error);
-    return vm;
-  }
-
-  private async ensureWorkerVm(sessionId: string): Promise<VmInstance> {
-    let session = await this.require(sessionId);
-    const config = await this.store.loadConfig();
-    const backend = (config.workers ?? []).find((row) => row.id === session.backendId);
-    if (!backend) throw new Error("Worker was removed from Settings → Workers");
-    const template = config.templates.find((row) => row.id === session.templateId);
-    if (!template) throw new Error("Template missing");
-    if (workerProvisionsCompute(backend)) {
-      session = await this.ensureFargateHandle(session, backend);
-    }
-    const client = await this.requireWorker(session);
-    let vm = session.vmId ? client.get(session.vmId) : undefined;
-    if (!vm && session.vmId) vm = await client.refresh(session.vmId);
-    if (!vm) {
-      const cap = workerMaxConcurrent(backend);
-      if (cap != null) {
-        const live = (await client.listGuests()).filter(
-          (guest) => guest.status !== "stopped" && guest.status !== "error",
-        ).length;
-        if (live >= cap) {
-          throw new Error(
-            `Worker ${backend.name} already has ${cap} live guest${cap === 1 ? "" : "s"} (maxConcurrent)`,
-          );
-        }
-      }
-      const hardware = session.hardware ?? template.hardware;
-      const seed = session.imageId
-        ? (await this.store.loadImages()).find((i) => i.id === session.imageId)
-        : undefined;
-      if (session.imageId && !seed) throw new Error("Golden image not found");
-      if (seed && imageRuntime(seed) !== "vm") {
-        throw new Error("That golden image is a container workspace, not a VM disk");
-      }
-      let imagePath = seed?.path;
-      if (seed?.path && session.imageId) {
-        const remote = await client.hasGoldenDisk(session.imageId);
-        if (remote?.path) imagePath = remote.path;
-        else {
-          const uploaded = await client.uploadGoldenDisk(session.imageId, seed.path);
-          imagePath = uploaded.path;
-        }
-      }
-      vm = await client.create({
-        sessionId,
-        name: session.title,
-        image: "vm",
-        os: session.os,
-        templateId: session.templateId,
-        runtime: "vm",
-        template: { ...template, hardware },
-        network: session.network ?? defaultNetworkJail(session.imageId),
-        imagePath,
-        planeId: config.workerPlaneId,
-      });
-    }
-    this.attachWorkerGuest(session, client, vm);
-    await this.patch(sessionId, {
-      vmId: vm.id,
-      status: isGuestReady(vm.status) ? "idle" : "provisioning",
-      error: undefined,
-      ...(session.computeStartedAt ? {} : { computeStartedAt: now() }),
-    });
-    await this.persistVm(vm);
-    this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
-    this.hub.broadcast({ type: "session.updated", session: await this.require(sessionId) });
-    await this.landStudioWorkspace(sessionId);
-    return client.get(vm.id) ?? vm;
-  }
-
-  private async startWorkerDocker(sessionId: string): Promise<VmInstance> {
-    let vm = await this.ensureWorkerDocker(sessionId);
-    const session = await this.require(sessionId);
-    const client = await this.requireWorker(session);
-    this.attachWorkerGuest(session, client, vm);
-    if (isGuestReady(vm.status)) {
-      await this.installGuestGitAuth(vm);
-      return vm;
-    }
-    vm = await client.start(vm.id);
-    this.attachWorkerGuest(session, client, vm);
-    await this.keepGuestOrDestroy(sessionId, vm.id, client);
-    await this.installGuestGitAuth(vm);
-    await this.patch(sessionId, { vmId: vm.id, status: "provisioning", error: undefined });
-    await this.persistVm(vm);
-    this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
-    await this.onVmStatus(vm.id, vm.status, vm.error);
-    return vm;
-  }
-
-  private async ensureDocker(sessionId: string): Promise<VmInstance> {
-    const session = await this.require(sessionId);
-    if (sessionRuntime(session) !== "docker") {
-      throw new Error(
-        sessionRuntime(session) === "host"
-          ? "Host agents do not have a VM or container."
-          : "This agent is not a Docker session.",
-      );
-    }
-    if (this.isWorkerSession(session)) return this.ensureWorkerDocker(sessionId);
-    const dockerImage = parseDockerImage(session.dockerImage ?? "");
-    if (!dockerImage) throw new Error("Enter a Docker image such as ubuntu:24.04");
-    const config = await this.store.loadConfig();
-    const share = config.advanced.hostSharePath?.trim();
-    if (share) await mkdirShare(share);
-
-    const seed = session.imageId
-      ? (await this.store.loadImages()).find((i) => i.id === session.imageId)
-      : undefined;
-    if (session.imageId && !seed) throw new Error("Golden image not found");
-    if (seed && imageRuntime(seed) !== "docker") {
-      throw new Error("That golden image is a VM disk, not a container workspace");
-    }
-
-    let vm = session.vmId ? this.docker.get(session.vmId) : undefined;
-    if (!vm && session.vmId && this.docker.adopt) {
-      const persisted = (await this.store.loadVms()).find((v) => v.id === session.vmId);
-      if (persisted) vm = this.docker.adopt(persisted);
-    }
-    if (!vm) {
-      const seedEnv = await loadWorkspaceEnvironment(seed?.path);
-      const forge = this.sessionForge(config, session);
-      const guestEnv: Record<string, string> = {
-        ...(seedEnv?.env ?? {}),
-        ...(session.guestEnv ?? {}),
-      };
-      const freshForge = forge
-        ? await withFreshForgeToken(this.store, forge, this.fetchFn)
-        : undefined;
-      if (
-        freshForge?.token &&
-        !guestEnv.GIT_TOKEN &&
-        !guestEnv.GITHUB_TOKEN &&
-        !guestEnv.GITLAB_TOKEN &&
-        !guestEnv.BITBUCKET_TOKEN
-      ) {
-        guestEnv.GIT_TOKEN = freshForge.token;
-      }
-      vm = await this.docker.create({
-        sessionId,
-        name: session.title,
-        image: dockerImage,
-        os: session.os,
-        templateId: session.templateId,
-        hostSharePath: share || undefined,
-        workspaceSeed: seed?.path,
-        network: session.network ?? defaultNetworkJail(session.imageId),
-        env: Object.keys(guestEnv).length ? guestEnv : undefined,
-      });
-    }
-    const jail = session.network ?? defaultNetworkJail(session.imageId);
-    if (jail === "restricted") {
-      const proxy = await this.ensureProxy(sessionId);
-      this.docker.configureNetwork?.(vm.id, jail, proxy.port);
-    } else {
-      this.closeProxy(sessionId);
-      this.docker.configureNetwork?.(vm.id, jail);
-    }
-    await this.patch(sessionId, {
-      vmId: vm.id,
-      status: vm.status === "running" ? "idle" : "provisioning",
-      error: undefined,
-    });
-    await this.persistVm(vm);
-    this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
-    this.hub.broadcast({ type: "session.updated", session: await this.require(sessionId) });
-    return this.docker.get(vm.id) ?? vm;
-  }
-
-  private async startDocker(sessionId: string): Promise<VmInstance> {
-    const current = await this.require(sessionId);
-    if (this.isWorkerHost(current)) return this.startWorkerHost(sessionId);
-    if (this.isWorkerSession(current)) return this.startWorkerDocker(sessionId);
-    let vm = await this.ensureDocker(sessionId);
-    if (vm.status === "running" || vm.status === "ready" || vm.status === "booting") {
-      await this.installGuestGitAuth(vm);
-      return vm;
-    }
-    vm = await this.docker.start(vm.id);
-    await this.keepGuestOrDestroy(sessionId, vm.id, this.docker);
-    await this.installGuestGitAuth(vm);
-    const session = await this.require(sessionId);
-    if (!isCanvasSession(session) && (!session.repo?.url || this.cloned.has(sessionId))) {
-      await this.applyWorkspaceEnvironment(sessionId, vm);
-    }
-    await this.patch(sessionId, { vmId: vm.id, status: "provisioning", error: undefined });
-    await this.persistVm(vm);
-    this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
-    return vm;
-  }
-
-  private async startQemuVm(sessionId: string): Promise<VmInstance> {
-    const session = await this.require(sessionId);
-    const config = await this.store.loadConfig();
-    const template = config.templates.find((t) => t.id === session.templateId);
-    if (!template) throw new Error("Template missing");
-    const hardware = session.hardware ?? template.hardware;
-    const isoError = this.hypervisor.isoError?.(template, { imageId: session.imageId });
-    if (isoError) throw new Error(isoError);
-
-    const existing = this.hypervisor
-      .list()
-      .filter((v) => (v.status === "running" || v.status === "booting") && v.id !== session.vmId);
-    if (existing.length >= config.advanced.maxConcurrentVms) {
-      throw new Error(`Max concurrent VMs reached (${config.advanced.maxConcurrentVms})`);
-    }
-
-    const share = config.advanced.hostSharePath?.trim();
-    if (share) await mkdirShare(share);
-    const image = session.imageId
-      ? (await this.store.loadImages()).find((i) => i.id === session.imageId)
-      : undefined;
-    if (session.imageId && !image) throw new Error("Golden image not found");
-
-    let vm = session.vmId ? this.hypervisor.get(session.vmId) : undefined;
-    if (!vm && session.vmId && this.hypervisor.adopt) {
-      const persisted = (await this.store.loadVms()).find((v) => v.id === session.vmId);
-      if (persisted) {
-        vm = this.hypervisor.adopt(
-          persisted,
-          { ...template, hardware },
-          {
-            imagePath: image?.path,
-            hostSharePath: share || undefined,
-          },
-        );
-      }
-    }
-    if (!vm) {
-      vm = await this.hypervisor.create({
-        sessionId,
-        name: session.title,
-        template: { ...template, hardware },
-        slot: this.hypervisor.nextSlot(),
-        imagePath: image?.path,
-        hostSharePath: share || undefined,
-      });
-    }
-    if (!vm) throw new Error("VM not found");
-    if (session.imageId) vm.imageId = session.imageId;
-    const jail = session.network ?? defaultNetworkJail(session.imageId);
-    let proxyPort: number | undefined;
-    if (jail === "restricted") proxyPort = (await this.ensureProxy(sessionId)).port;
-    else this.closeProxy(sessionId);
-    this.hypervisor.configureNetwork?.(vm.id, jailNetworking(jail, proxyPort));
-    if (
-      vm &&
-      (vm.status === "running" ||
-        vm.status === "ready" ||
-        vm.status === "booting" ||
-        vm.status === "installing")
-    ) {
-      await this.patch(sessionId, {
-        vmId: vm.id,
-        status: vm.status === "running" ? "idle" : "provisioning",
-      });
-      await this.persistVm(vm);
-      this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
-      return vm;
-    }
-    vm = await this.hypervisor.start(vm.id);
-    await this.patch(sessionId, { vmId: vm.id, status: "provisioning", error: undefined });
-    await this.persistVm(vm);
-    this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
-    return vm;
-  }
-
   async stopVm(sessionId: string): Promise<void> {
-    const session = await this.require(sessionId);
-    if (this.isWorkerSession(session)) {
-      const client = await this.requireWorker(session);
-      const config = await this.store.loadConfig();
-      const backend =
-        (config.workers ?? []).find((row) => row.id === session.backendId) ?? client.backend;
-      if (workerDestroyOnStop(backend)) {
-        await this.destroyWorkerGuest(session);
-        return;
-      }
-      if (!session.vmId) return;
-      const vm = await client.stop(session.vmId);
-      this.closeProxy(sessionId);
-      this.closeIdeTunnel(sessionId);
-      await this.patch(sessionId, {
-        status: "stopped",
-        computeMs: sessionComputeMs(session),
-        computeStartedAt: undefined,
-      });
-      await this.persistVm(vm);
-      this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
-      await this.onVmStatus(vm.id, vm.status, vm.error);
-      return;
-    }
-    if (!session.vmId) return;
-    const vm = await this.engine(session).stop(session.vmId);
-    this.closeProxy(sessionId);
-    this.closeIdeTunnel(sessionId);
-    await this.patch(sessionId, { status: "stopped" });
-    await this.persistVm(vm);
-    this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
+    return this.machineLifecycle.stopVm(sessionId);
   }
 
   async pauseVm(sessionId: string): Promise<VmInstance> {
-    const session = await this.require(sessionId);
-    if (this.isWorkerSession(session)) throw new Error("Pause is not available on a worker guest");
-    if (!session.vmId) throw new Error("Start the machine before pausing");
-    const engine = this.engine(session);
-    const vm = await engine.pause(session.vmId);
-    await this.persistVm(vm);
-    this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
-    return vm;
+    return this.machineLifecycle.pauseVm(sessionId);
   }
 
   async resumeVm(sessionId: string): Promise<VmInstance> {
+    return this.machineLifecycle.resumeVm(sessionId);
+  }
+
+  async workerConnection(
+    sessionId: string,
+  ): Promise<import("@locus/shared").WorkerConnectionStatus> {
     const session = await this.require(sessionId);
-    if (this.isWorkerSession(session)) throw new Error("Resume is not available on a worker guest");
-    if (!session.vmId) throw new Error("Start the machine before resuming");
-    const engine = this.engine(session);
-    const resume = engine.resume?.bind(engine);
-    if (!resume) throw new Error("This runtime cannot resume");
-    const vm = await resume(session.vmId);
-    await this.persistVm(vm);
-    this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
-    return vm;
+    if (!this.isWorkerSession(session)) throw new Error("This agent runs on this machine");
+    const vmId = session.vmId;
+    if (!vmId) return { connection: "missing", task: "unknown", canResume: false };
+    const reconnecting = this.reconnectingWorkerTurns.has(sessionId);
+    try {
+      const client = await this.requireWorker(session);
+      const before = client.get(vmId);
+      const vm = await client.guestConnection(vmId);
+      if (!vm) return { connection: "missing", task: "unknown", canResume: false };
+      this.attachWorkerGuest(session, client, vm);
+      if (before?.status !== vm.status || before?.updatedAt !== vm.updatedAt) {
+        this.hub.broadcast({ type: "vm.updated", vm: redactVm(vm) });
+      }
+      const cli = await client.cliRunStatus(vmId).catch(() => "unknown" as const);
+      const interrupted =
+        session.workerInterrupted || session.messages.at(-1)?.content === INTERRUPTED_TURN_NOTE;
+      const hasPrompt = Boolean(lastUserPrompt(session.messages));
+      const ready = isGuestReady(vm.status);
+      return {
+        connection: ready ? "connected" : "stopped",
+        task:
+          cli === "running"
+            ? "running"
+            : session.status === "running" && !reconnecting
+              ? "running"
+              : cli === "finished" ||
+                  (hasPrompt && ["idle", "error", "stopped"].includes(session.status))
+                ? "finished"
+                : "unknown",
+        reconnecting,
+        canResume:
+          ready &&
+          !reconnecting &&
+          cli !== "running" &&
+          session.status !== "running" &&
+          (session.status === "error" || interrupted) &&
+          canRewind(session) &&
+          hasPrompt,
+      };
+    } catch {
+      return { connection: "unreachable", task: "unknown", reconnecting, canResume: false };
+    }
+  }
+
+  async resumeWorkerCheckpoint(sessionId: string): Promise<AgentSession> {
+    if (this.recoveringWorkerTurns.has(sessionId))
+      throw new Error("Worker recovery is already running");
+    this.recoveringWorkerTurns.add(sessionId);
+    try {
+      if (!(await this.workerConnection(sessionId)).canResume)
+        throw new Error("No interrupted worker turn can be resumed");
+      const session = await this.require(sessionId);
+      if (session.status === "running") throw new Error("The agent is already running");
+      const checkpoint = rewindTargets(session).at(-1);
+      const prompt =
+        checkpoint &&
+        session.messages
+          .slice(checkpoint.messageCount)
+          .find((message) => message.role === "user" && !message.hidden && message.content.trim());
+      if (!checkpoint || !prompt) throw new Error("The saved checkpoint has no interrupted prompt");
+      await this.rewind(sessionId, checkpoint.id);
+      if (session.queue?.length) {
+        await this.patch(sessionId, { queue: session.queue, queuePaused: session.queuePaused });
+      }
+      await this.sendChat(sessionId, prompt.content, {
+        attachments: prompt.attachments,
+        workerRecovery: true,
+      });
+      return this.require(sessionId);
+    } finally {
+      this.recoveringWorkerTurns.delete(sessionId);
+    }
   }
 
   async vmLogs(sessionId: string): Promise<string> {
@@ -2285,7 +2090,8 @@ export class SessionService {
     return "";
   }
 
-  async remove(sessionId: string): Promise<void> {
+  async remove(sessionId: string, opts?: { discardBranch?: boolean }): Promise<void> {
+    this.assertAttemptNotVerifying(sessionId);
     const session = await this.require(sessionId);
     await this.killBackgroundProcesses(session).catch(() => undefined);
     this.guestBoot.dropExpected(sessionId);
@@ -2317,6 +2123,7 @@ export class SessionService {
         force: true,
       }).catch(() => undefined);
     }
+    if (session.worktree) await this.dropWorktree(session, opts?.discardBranch === true);
     await rm(join(this.store.dataDir, "checkpoints", sessionId), {
       recursive: true,
       force: true,
@@ -2413,9 +2220,13 @@ export class SessionService {
        * transcript without a coordinator LLM turn for ordinary `done`.
        */
       wakeRequester?: boolean;
+      workerRecovery?: boolean;
     },
   ): Promise<void> {
     const session = await this.require(sessionId);
+    this.assertAttemptNotVerifying(sessionId);
+    if (this.recoveringWorkerTurns.has(sessionId) && !opts?.workerRecovery)
+      throw new Error("Worker recovery is already running");
     const incoming = (opts?.attachments ?? []).filter((row): row is IncomingAttachment =>
       Boolean(
         row &&
@@ -2482,6 +2293,7 @@ export class SessionService {
       await this.store.mutateSession(sessionId, (current) => {
         current.control = undefined;
         current.needsHuman = undefined;
+        current.workerInterrupted = undefined;
         applyRequestedDefaultSubagent(current, content.trim());
         applyPromptTitle(current, content);
       });
@@ -2654,6 +2466,7 @@ export class SessionService {
     let verifyNudges = 0;
     let calledPlaywrightThisTurn = false;
     let calledReview = false;
+    let workerInterrupted = false;
     let reviewRoutingNudges = 0;
     let reviewVerdictNudges = 0;
     const namedOps = looksLikeOpsPrompt(userText);
@@ -2666,13 +2479,17 @@ export class SessionService {
     try {
       const bootConfig = await this.store.loadConfig();
       const session0 = await this.require(sessionId);
+      let verifyOptsPromise: Promise<{ verifyCommands: string[] }> | undefined;
+      const verifyOpts = () => (verifyOptsPromise ??= this.codingVerifyOptions(session0));
       const taskListAtPlanStart = (session0.taskList ?? []).map((row) => ({ ...row }));
+      if (session0.offline) offlineProjectProvider(bootConfig, session0.providerId);
       const cursorProvider = bootConfig.providers.find((p) => p.id === session0.providerId);
       const cursorCloud = Boolean(cursorProvider && isCursorProvider(cursorProvider));
       const cursorCli = Boolean(cursorProvider && isCursorCliProvider(cursorProvider));
       const claudeCode = Boolean(cursorProvider && isClaudeCodeProvider(cursorProvider));
       const codexCli = Boolean(cursorProvider && isCodexCliProvider(cursorProvider));
       const kiroCli = Boolean(cursorProvider && isKiroCliProvider(cursorProvider));
+      const genericCli = Boolean(cursorProvider && isGenericCliProvider(cursorProvider));
       if (!planTurn && !cursorCloud) {
         await this.startGuestIfNeeded(sessionId);
         await this.waitForGuestIfStarting(sessionId, abort);
@@ -2687,6 +2504,7 @@ export class SessionService {
         turnId,
         detail: userText.slice(0, 500),
       });
+      if (await this.stopForDailyBudget(sessionId, turnId, 0)) return;
       if (cursorCloud) {
         lastReplyId = await this.runCursorCloudTurn({
           sessionId,
@@ -2702,22 +2520,8 @@ export class SessionService {
         if (!stop() && !planTurn) await this.design.finishTurn(sessionId);
         return;
       }
-      if (cursorCli || claudeCode || codexCli || kiroCli) {
-        lastReplyId = await this.runHostCliTurn({
-          sessionId,
-          userText,
-          abort,
-          turnId,
-          planTurn,
-          stop,
-          kind: cursorCli ? "cursor" : claudeCode ? "claude" : kiroCli ? "kiro" : "codex",
-        });
-        if (!stop()) {
-          await this.finishPlanTurnIfNeeded(sessionId, lastReplyId, planTurn, taskListAtPlanStart);
-        }
-        if (!stop() && !planTurn) await this.design.finishTurn(sessionId);
-        return;
-      }
+      // Before CLI turns too: they drive the guest through Locus tools, so a failed
+      // container start must stop the turn instead of letting the agent run blind.
       if (!planTurn && !stop()) {
         const booted = await this.require(sessionId);
         const docker = sessionRuntime(booted) === "docker";
@@ -2736,6 +2540,30 @@ export class SessionService {
           });
           return;
         }
+      }
+      if (cursorCli || claudeCode || codexCli || kiroCli || genericCli) {
+        lastReplyId = await this.runHostCliTurn({
+          sessionId,
+          userText,
+          abort,
+          turnId,
+          planTurn,
+          stop,
+          kind: cursorCli
+            ? "cursor"
+            : claudeCode
+              ? "claude"
+              : kiroCli
+                ? "kiro"
+                : genericCli
+                  ? "generic"
+                  : "codex",
+        });
+        if (!stop()) {
+          await this.finishPlanTurnIfNeeded(sessionId, lastReplyId, planTurn, taskListAtPlanStart);
+        }
+        if (!stop() && !planTurn) await this.design.finishTurn(sessionId);
+        return;
       }
       if (!planTurn && isGameSession(await this.require(sessionId))) {
         const prefix = await this.primeGameTurn(sessionId, userText);
@@ -2778,12 +2606,16 @@ export class SessionService {
         const session = await this.require(sessionId);
         const vm = session.vmId ? this.getMachine(session.vmId) : undefined;
         const config = await this.store.loadConfig();
-        const provider = config.providers.find((p) => p.id === session.providerId);
+        const provider = session.offline
+          ? offlineProjectProvider(config, session.providerId)
+          : config.providers.find((p) => p.id === session.providerId);
         const guestReady = isGuestReady(vm?.status);
         const runtime = sessionRuntime(session);
         const toolsReady = runtime === "host" || guestReady;
         const allTools = configuredToolsForRuntime(session.os, runtime, config.integrations).filter(
           (t) => {
+            if (session.offline && !offlineProjectTool(t.name, isProjectSession(session)))
+              return false;
             if (session.allowedTools?.length && !session.allowedTools.includes(t.name))
               return false;
             if (isIntegrationToolName(t.name) && !automationAllowsIntegration(session, t.name))
@@ -2809,7 +2641,12 @@ export class SessionService {
           if (!toolsReady && toolNeedsGuest(t.name)) return false;
           return true;
         });
-        const policy = this.policyFor(session, config);
+        const policy = await riskGatedPolicy(
+          this.store,
+          session,
+          config,
+          this.policyFor(session, config),
+        );
         const tier = sessionAutonomy(session.autonomy, config.advanced.autonomy);
         const cap = resolveSpendCapUsd(tier, session.maxUsd, config.advanced.maxUsdPerTurn);
         const timeCap = session.maxMs ?? config.advanced.maxMsPerTurn;
@@ -2829,6 +2666,7 @@ export class SessionService {
           await this.reportBudgetStop(sessionId, turnId, round, session, verdict.message);
           break;
         }
+        if (round > 0 && (await this.stopForDailyBudget(sessionId, turnId, round))) break;
         const skills = mergeSkills(config.skills, await this.repoSkills(session));
         const allowAskUser = !session.automationId && !this.inSubagent.has(sessionId);
         const mcpPromptTools = this.mcp.promptTools(sessionId).filter((t) => {
@@ -2859,10 +2697,21 @@ export class SessionService {
           offerBrain: sessionOffersBrain(session),
           mcpTools: mcpPromptTools,
           pluginTools: this.pluginPromptTools(session, config),
+          codeIntel: !isCanvasSession(session),
+          codeRename: !codeRenameRefusal({
+            runtime: sessionRuntime(session),
+            worker: this.isWorkerSession(session),
+            kind: session.kind,
+            allowedTools: session.allowedTools,
+          }),
         };
         const extraFrozen = freezePromptTools(advertisedExtraTools, parentExtraTools(extraInput));
         advertisedExtraTools = extraFrozen.advertised;
-        const extraTools = extraFrozen.tools;
+        const extraTools = session.offline
+          ? extraFrozen.tools.filter((tool) =>
+              offlineProjectTool(tool.name, isProjectSession(session)),
+            )
+          : extraFrozen.tools;
         const memories = await this.sessionMemoryPrompt(session);
         const rules = await loadWorkspaceRules(this.repoContextRoot(session));
         const pins = (session.designPins ?? [])
@@ -2916,8 +2765,10 @@ export class SessionService {
           assetBuild,
           kitSkill,
           skillCatalog: formatSkillCatalog(skills),
-          pluginCatalog: formatPluginCatalog(config.integrationPlugins),
-          mcpCatalog: this.mcp.connectorCards(sessionId),
+          pluginCatalog: session.offline
+            ? undefined
+            : formatPluginCatalog(config.integrationPlugins),
+          mcpCatalog: session.offline ? undefined : this.mcp.connectorCards(sessionId),
           vision: sessionVision(session),
           webSearch: sessionWebSearch(session),
           liveChrome: sessionLiveChrome(session),
@@ -2999,6 +2850,7 @@ export class SessionService {
         if (folded.note) {
           compactSource = "heuristic";
           if (
+            !session.offline &&
             folded.dropped &&
             shouldAttemptLlmCompact(folded.dropped) &&
             provider &&
@@ -3144,7 +2996,11 @@ export class SessionService {
         const stream =
           provider && hasUsableKey(provider.apiKey, provider.baseUrl, provider.kind)
             ? runChatTurn(
-                (req) => this.chatEngine(req),
+                (req) =>
+                  this.chatEngine(
+                    req,
+                    session.offline ? offlineProviderFetch(this.fetchFn) : undefined,
+                  ),
                 {
                   provider,
                   model: session.model,
@@ -3157,7 +3013,9 @@ export class SessionService {
                   allowedTools: cachedTurnAllowedTools({
                     planTurn,
                     planToolNames: [...tools.map((t) => t.name), ...extraTools.map((t) => t.name)],
-                    sessionAllowedTools: session.allowedTools,
+                    sessionAllowedTools: session.offline
+                      ? tools.map((tool) => tool.name)
+                      : session.allowedTools,
                   }),
                   extraTools,
                   signal: streamAbort.signal,
@@ -3767,6 +3625,9 @@ export class SessionService {
           execute: async (call) => {
             try {
               const name = canonicalToolName(call.name);
+              if (session.offline && !offlineProjectTool(name, isProjectSession(session))) {
+                return { ok: false, output: "Tool unavailable in an offline project" };
+              }
               const kind = parentToolKind(name, {
                 planTurn,
                 needsApproval:
@@ -3786,13 +3647,17 @@ export class SessionService {
                 approvals += 1;
                 if (!isAskUserToolName(call.name)) {
                   try {
-                    const preview = await this.executeTool(
-                      sessionId,
-                      { name: "git_diff", args: {} },
-                      { ignoreAllowlist: true },
-                    );
-                    if (preview.ok && preview.output.trim()) {
-                      call.result = preview.output.slice(0, 8000);
+                    if (isMutatingBrowserTool(name, call.arguments) || name === "desktop_action") {
+                      call.result = `Computer action awaiting approval: ${JSON.stringify({ tool: name, effect: call.arguments.effect ?? "unspecified", ref: call.arguments.ref, action: call.arguments.action })}`;
+                    } else {
+                      const preview = await this.executeTool(
+                        sessionId,
+                        { name: "git_diff", args: {} },
+                        { ignoreAllowlist: true },
+                      );
+                      if (preview.ok && preview.output.trim()) {
+                        call.result = preview.output.slice(0, 8000);
+                      }
                     }
                   } catch {
                     /* preview is optional */
@@ -3937,6 +3802,7 @@ export class SessionService {
         ({ mutated: mutatedThisTurn, verified: verifiedThisTurn } = foldCodingVerifyFlags(
           toolCalls,
           { mutated: mutatedThisTurn, verified: verifiedThisTurn },
+          await verifyOpts(),
         ));
         if (
           calledPlaywright(toolCalls) &&
@@ -4425,6 +4291,10 @@ export class SessionService {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Agent failed";
       if (!stale() && !abort.signal.aborted) {
+        workerInterrupted = err instanceof WorkerCliDisconnectError;
+        if (workerInterrupted) {
+          await this.patch(sessionId, { workerInterrupted: true }).catch(() => undefined);
+        }
         await this.appendMessage(sessionId, {
           id: randomUUID(),
           role: "system",
@@ -4484,7 +4354,7 @@ export class SessionService {
           const session = await this.get(sessionId);
           if (session) {
             if (!planTurn) await this.resetRunningPlanSteps(sessionId);
-            if (!planTurn && !abort.signal.aborted) {
+            if (!planTurn && !abort.signal.aborted && !workerInterrupted) {
               await this.applyReviewVerdict(sessionId, session);
               await this.applyGenerationQuality(sessionId, (await this.get(sessionId)) ?? session);
               await this.applyDesignAdherence(sessionId, (await this.get(sessionId)) ?? session);
@@ -4507,7 +4377,7 @@ export class SessionService {
             this.hub.broadcast({ type: "chat.done", sessionId, messageId: lastReplyId });
             const handoffKind = session.needsHuman
               ? ("needs_you" as const)
-              : abort.signal.aborted
+              : abort.signal.aborted || workerInterrupted
                 ? ("blocked" as const)
                 : ("done" as const);
             await this.deliverPeerHandoff(sessionId, session, {
@@ -4518,7 +4388,7 @@ export class SessionService {
         } catch {
           /* store may already be torn down in tests */
         }
-        if (!abort.signal.aborted) await this.drainQueue(sessionId);
+        if (!abort.signal.aborted && !workerInterrupted) await this.drainQueue(sessionId);
       }
     }
   }
@@ -4845,6 +4715,7 @@ export class SessionService {
     sessionId: string,
     prompt: string,
     planTurn: boolean,
+    turnId?: string,
   ): Promise<string> {
     if (planTurn || !prompt.trim()) return prompt;
     const session = await this.require(sessionId);
@@ -4858,6 +4729,13 @@ export class SessionService {
     ) {
       return prompt;
     }
+    // Nudge rounds resume the same CLI thread, which already holds the last snapshot sent this
+    // turn. Resending an unchanged canvas only burns input tokens.
+    const last = turnId ? this.cliCanvasSnapshotSent.get(sessionId) : undefined;
+    if (last && last.turnId === turnId && last.snap === snap) {
+      return `${CLI_CANVAS_UNCHANGED_NOTE}\n\n${prompt}`;
+    }
+    if (turnId) this.cliCanvasSnapshotSent.set(sessionId, { turnId, snap });
     return `${snap}\n\n${prompt}`;
   }
 
@@ -4880,7 +4758,8 @@ export class SessionService {
           input.html,
           input.sessionId,
         ),
-      prefixPrompt: (id, prompt, planTurn) => this.prefixCliCanvasSnapshot(id, prompt, planTurn),
+      prefixPrompt: (id, prompt, planTurn, turnId) =>
+        this.prefixCliCanvasSnapshot(id, prompt, planTurn, turnId),
       appendMessage: (id, message) => this.appendMessage(id, message),
       gameCanvasBaseline: (id) => this.gameCanvasBaseline.get(id),
       traces: this.traces,
@@ -4909,6 +4788,7 @@ export class SessionService {
       claudeCodeSpawner: () => this.claudeCodeSpawner,
       codexCliSpawner: () => this.codexCliSpawner,
       kiroCliSpawner: () => this.kiroCliSpawner,
+      genericCliSpawner: () => this.genericCliSpawner,
       requireWorker: (session) => this.requireWorker(session),
       spawnOnWorker: (client, vmId, sessionId, req) =>
         this.workerCursorCliHandle(client, vmId, sessionId, req),
@@ -4943,6 +4823,7 @@ export class SessionService {
         this.applyCursorRunResult(id, replyId, ev, sawText),
       hasSteerAfter: (id, replyId) => this.hasSteerAfter(id, replyId),
       continueAfterCliRound: (input) => this.continueAfterCliRound(input),
+      cliMcpGrant: (sessionId) => this.cliMcpGateway.issue(sessionId),
       now,
     };
   }
@@ -4954,7 +4835,7 @@ export class SessionService {
     turnId: string;
     planTurn: boolean;
     stop: () => boolean;
-    kind: "cursor" | "claude" | "codex" | "kiro";
+    kind: HostCliKind;
   }): Promise<string> {
     return runHostCliTurn(this.hostCliTurnPorts(), input);
   }
@@ -4983,34 +4864,27 @@ export class SessionService {
       void this.answerWorkerCliMcp(client, vmId, sessionId, mcp);
       return true;
     };
+    const runId = randomUUID();
+    const reconnecting = this.reconnectingWorkerTurns;
+    const remoteLines = workerCliLines({
+      client,
+      guestId: vmId,
+      runId,
+      request: { command: req.command, args: req.args, apiKey },
+      signal: abort.signal,
+      reconnecting: (active) => {
+        if (active) reconnecting.add(sessionId);
+        else reconnecting.delete(sessionId);
+      },
+    });
     const lines = (async function* () {
-      const stream = await client.streamCursorCli(
-        vmId,
-        { command: req.command, args: req.args, apiKey },
-        abort.signal,
-      );
-      const reader = stream.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const parts = buf.split(/\r?\n/);
-          buf = parts.pop() ?? "";
-          for (const line of parts) {
-            if (!answerMcp(line)) yield line;
-          }
+        for await (const line of remoteLines) {
+          if (!answerMcp(line)) yield line;
         }
-        if (buf && !answerMcp(buf)) yield buf;
       } finally {
         req.signal?.removeEventListener("abort", onParent);
-        try {
-          await reader.cancel();
-        } catch {
-          /* ignore */
-        }
+        if (abort.signal.aborted) void client.stopCursorCli(vmId, runId).catch(() => undefined);
       }
     })();
     return {
@@ -5027,13 +4901,13 @@ export class SessionService {
     mcp: { id: string; path: string; body: unknown },
   ): Promise<void> {
     try {
-      const scoped = mcp.path.startsWith("/mcp/sessions/");
-      const result = await dispatchControlPlaneMcp({
+      const result = await dispatchWorkerCliMcp({
         store: this.store,
         sessions: this,
         brain: this.brain,
         fetchFn: this.fetchFn,
-        sessionId: scoped ? sessionId : undefined,
+        sessionId,
+        path: mcp.path,
         raw: mcp.body,
       });
       await client.replyCursorCliMcp(vmId, {
@@ -5618,7 +5492,12 @@ export class SessionService {
       sessionId,
       name: decision,
       id: toolCallId,
-      args: { tool: toolName, by: "operator", persist: persist === true },
+      args: {
+        tool: toolName,
+        by: "operator",
+        persist: persist === true,
+        ...(entry ? { entry } : {}),
+      },
     });
     this.hub.broadcast({ type: "session.updated", session: saved });
     return saved;
@@ -5773,48 +5652,59 @@ export class SessionService {
       throw new Error("Host agents do not have a VM or container.");
     }
     await this.abortChat(sessionId);
-    this.turnEpoch.set(sessionId, (this.turnEpoch.get(sessionId) ?? 0) + 1);
-    const updated = await this.store.mutateSession(sessionId, (current) => {
-      current.control = "human";
-      if (current.status === "running") current.status = parkedStatus(current);
+    return this.computerControl.handoff(sessionId, async () => {
+      this.turnEpoch.set(sessionId, (this.turnEpoch.get(sessionId) ?? 0) + 1);
+      const updated = await this.store.mutateSession(sessionId, (current) => {
+        current.control = "human";
+        if (current.status === "running") current.status = parkedStatus(current);
+      });
+      if (!updated) throw new Error(`Session not found: ${sessionId}`);
+      this.hub.broadcast({ type: "session.updated", session: updated });
+      return updated;
     });
-    if (!updated) throw new Error(`Session not found: ${sessionId}`);
-    this.hub.broadcast({ type: "session.updated", session: updated });
-    return updated;
   }
 
   async handback(sessionId: string): Promise<AgentSession> {
-    const updated = await this.store.mutateSession(sessionId, (current) => {
-      current.control = undefined;
+    return this.computerControl.handoff(sessionId, async () => {
+      const updated = await this.store.mutateSession(sessionId, (current) => {
+        current.control = undefined;
+      });
+      if (!updated) throw new Error(`Session not found: ${sessionId}`);
+      this.hub.broadcast({ type: "session.updated", session: updated });
+      await this.drainQueue(sessionId);
+      return (await this.get(sessionId)) ?? updated;
     });
-    if (!updated) throw new Error(`Session not found: ${sessionId}`);
-    this.hub.broadcast({ type: "session.updated", session: updated });
-    await this.drainQueue(sessionId);
-    return (await this.get(sessionId)) ?? updated;
   }
 
   async takeoverBrowser(sessionId: string): Promise<AgentSession> {
-    const session = await this.require(sessionId);
-    if (sessionRuntime(session) !== "docker") {
-      throw new Error("Browser takeover is only for Docker agents.");
-    }
-    const updated = await this.store.mutateSession(sessionId, (current) => {
-      current.browserControl = "human";
+    return this.computerControl.handoff(sessionId, async () => {
+      const session = await this.require(sessionId);
+      if (sessionRuntime(session) !== "docker" && sessionRuntime(session) !== "host") {
+        throw new Error("Browser takeover requires a Docker or Host browser.");
+      }
+      await this.browsers.releaseInput(sessionId);
+      const updated = await this.store.mutateSession(sessionId, (current) => {
+        current.browserControl = "human";
+      });
+      if (!updated) throw new Error(`Session not found: ${sessionId}`);
+      this.browsers.notifyControl(sessionId, "operator");
+      this.hub.broadcast({ type: "session.updated", session: updated });
+      return updated;
     });
-    if (!updated) throw new Error(`Session not found: ${sessionId}`);
-    this.browsers.notifyControl(sessionId, "operator");
-    this.hub.broadcast({ type: "session.updated", session: updated });
-    return updated;
   }
 
   async handbackBrowser(sessionId: string): Promise<AgentSession> {
-    const updated = await this.store.mutateSession(sessionId, (current) => {
-      current.browserControl = undefined;
+    return this.computerControl.handoff(sessionId, async () => {
+      await this.browsers.releaseInput(sessionId);
+      await this.browsers.invalidateObservation(sessionId);
+      const updated = await this.store.mutateSession(sessionId, (current) => {
+        current.browserControl = undefined;
+      });
+      if (!updated) throw new Error(`Session not found: ${sessionId}`);
+      this.browsers.notifyControl(sessionId, "agent");
+      this.hub.broadcast({ type: "session.updated", session: updated });
+      return updated;
     });
-    if (!updated) throw new Error(`Session not found: ${sessionId}`);
-    this.browsers.notifyControl(sessionId, "agent");
-    this.hub.broadcast({ type: "session.updated", session: updated });
-    return updated;
   }
 
   async fork(sessionId: string): Promise<AgentSession> {
@@ -5836,8 +5726,13 @@ export class SessionService {
           diskSizeGb: session.hardware.diskSizeGb,
         }
       : undefined;
+    const forkWorktree =
+      runtime === "host" && Boolean(session.worktree) && !this.isWorkerSession(session);
     const shareHostDir =
-      runtime === "host" && Boolean(session.hostDir?.trim()) && !isCanvasSession(session);
+      runtime === "host" &&
+      Boolean(session.hostDir?.trim()) &&
+      !isCanvasSession(session) &&
+      !forkWorktree;
     const forked = await this.create({
       title: `${session.title} fork`,
       os: session.os,
@@ -5846,6 +5741,7 @@ export class SessionService {
       runtime,
       dockerImage: session.dockerImage,
       hostDir: shareHostDir ? session.hostDir : undefined,
+      worktreeFrom: forkWorktree ? session.id : undefined,
       providerId: session.providerId,
       model: session.model,
       reasoningEffort: session.reasoningEffort,
@@ -5914,14 +5810,24 @@ export class SessionService {
   /** Overlay the source workspace after create so kit landing cannot wipe the copy. */
   private async copyForkWorkspace(src: AgentSession, dest: AgentSession): Promise<void> {
     const shareHostDir =
-      sessionRuntime(src) === "host" && Boolean(src.hostDir?.trim()) && !isCanvasSession(src);
+      sessionRuntime(src) === "host" &&
+      Boolean(src.hostDir?.trim()) &&
+      !isCanvasSession(src) &&
+      !dest.worktree;
     if (shareHostDir) return;
     const from = this.workspaceRoot(src);
     const to = this.workspaceRoot(dest);
     if (!from || !to || from === to) return;
+    // A worktree's `.git` is a pointer file to its own gitdir; never overwrite it.
+    const gitPointer = dest.worktree ? join(from, ".git") : undefined;
     try {
       await mkdir(to, { recursive: true });
-      await cp(from, to, { recursive: true, force: true });
+      await cp(from, to, {
+        recursive: true,
+        force: true,
+        filter: (path) =>
+          !gitPointer || (path !== gitPointer && !path.startsWith(`${gitPointer}/`)),
+      });
     } catch {
       /* source workspace may not exist yet */
     }
@@ -5929,167 +5835,162 @@ export class SessionService {
 
   async spawnWorkers(
     sessionId: string,
-    input: { count?: unknown; prompt?: string; models?: unknown } = {},
+    input: { count?: unknown; prompt?: string; models?: unknown; agents?: unknown } = {},
   ): Promise<AgentSession[]> {
-    const session = await this.require(sessionId);
-    if (sessionRuntime(session) !== "docker") {
-      throw new Error(
-        "Parallel workers are Docker-only. Fork the agent or switch to a Docker runtime.",
-      );
-    }
-    if (isCanvasSession(session))
-      throw new Error("Workers are for coding agents, not Design or Games");
-    if (isReviewSession(session)) throw new Error("Workers are for coding agents, not reviews");
-    if (session.compare) throw new Error("Finish the current compare or workers first");
-    const count = parseWorkerCount(input.count ?? WORKER_COUNT_DEFAULT);
-    if (!count) throw new Error("Spawn 2, 3, or 4 workers");
-    const prompt = input.prompt?.trim() || lastUserPrompt(session.messages);
-    if (!prompt) throw new Error("Send a prompt first");
-    const models = Array.isArray(input.models)
-      ? input.models
-          .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
-          .map((item) => item.trim())
-      : [];
-    let imageId = session.imageId;
-    if (session.vmId) {
-      const image = await this.captureImage(sessionId, `${session.title} workers`);
-      imageId = image.id;
-    }
-    if (!imageId) throw new Error("Start the container before spawning workers");
-    const hardware = session.hardware
-      ? {
-          cpuCores: session.hardware.cpuCores,
-          memoryMb: session.hardware.memoryMb,
-          diskSizeGb: session.hardware.diskSizeGb,
-        }
-      : undefined;
-    const created: AgentSession[] = [];
-    for (let i = 1; i <= count; i += 1) {
-      const role = String(i);
-      const branch = workerBranchName(role);
-      created.push(
-        await this.create({
-          title: `${session.title} · ${i}`,
-          os: session.os,
-          templateId: session.templateId,
-          runtime: "docker",
-          dockerImage: session.dockerImage,
-          providerId: session.providerId,
-          model: models[i - 1] || session.model,
-          repo: session.repo,
-          repoId: session.repoId,
-          extraRepos: session.extraRepos,
-          extraRepoIds: session.extraRepoIds,
-          hardware,
-          imageId,
-          instructions: composePersonaInstructions(session.instructions, session.persona, {
-            surface: session.surface,
-          }),
-          playbook: [session.playbook, workerPlaybook(role, count)].filter(Boolean).join("\n"),
-          allowedTools: session.allowedTools,
-          network: session.network,
-          vision: session.vision,
-          webSearch: session.webSearch,
-          startVm: true,
-        }),
-      );
-      await this.executeTool(
-        created[i - 1]!.id,
-        { name: "git_branch", args: { name: branch } },
-        { ignoreAllowlist: true },
-      ).catch(() => undefined);
-    }
-    const groupId = randomUUID();
-    const memberIds = created.map((row) => row.id);
-    const linked: AgentSession[] = [];
-    for (const [index, child] of created.entries()) {
-      const role = String(index + 1);
-      linked.push(
-        await this.patchMeta(child.id, {
-          compare: {
-            groupId,
-            kind: "workers",
-            role,
-            memberIds,
-            parentId: sessionId,
-            branch: workerBranchName(role),
-          },
-        }),
-      );
-    }
-    await this.patchMeta(sessionId, {
-      compare: {
-        groupId,
-        kind: "workers",
-        role: "parent",
-        memberIds,
-      },
-    });
-    await Promise.allSettled(linked.map((child) => this.sendChat(child.id, prompt)));
-    return Promise.all(linked.map((child) => this.require(child.id)));
+    return this.parallelWorkers.spawnWorkers(sessionId, input);
   }
 
   async workerDiffs(
     sessionId: string,
   ): Promise<Array<{ id: string; role: string; branch?: string; diff: string }>> {
-    const session = await this.require(sessionId);
-    const members =
-      session.compare?.kind === "workers"
-        ? (session.compare.memberIds ?? [sessionId])
-        : session.compare?.peerId
-          ? [sessionId, session.compare.peerId]
-          : [sessionId];
-    const sessions = await this.store.loadSessions();
-    const rows = members
-      .map((id) => sessions.find((row) => row.id === id))
-      .filter((row): row is AgentSession => Boolean(row));
-    const out: Array<{ id: string; role: string; branch?: string; diff: string }> = [];
-    for (const member of rows) {
-      let diff = "";
-      try {
-        const result = await this.executeTool(
-          member.id,
-          { name: "git_diff", args: {} },
-          { ignoreAllowlist: true },
-        );
-        diff = result.output.slice(0, 20_000);
-      } catch (err) {
-        diff = err instanceof Error ? err.message : "diff failed";
-      }
-      out.push({
-        id: member.id,
-        role: member.compare?.role ?? "?",
-        branch: member.compare?.branch,
-        diff,
-      });
-    }
-    return out;
+    return this.parallelWorkers.workerDiffs(sessionId);
   }
 
   async mergeWorker(sessionId: string, workerId: string): Promise<AgentSession> {
-    const worker = await this.require(workerId);
-    const parentId = worker.compare?.parentId || sessionId;
-    if (parentId === workerId) throw new Error("Pick a worker to merge into the parent");
-    const parent = await this.require(parentId);
-    if (sessionRuntime(parent) !== "docker" || sessionRuntime(worker) !== "docker") {
-      throw new Error("Worker merge is Docker-only");
+    return this.parallelWorkers.mergeWorker(sessionId, workerId);
+  }
+
+  /** Create the git worktree a Host agent will use as its workspace. */
+  private async prepareWorktree(
+    input: CreateSessionInput,
+    trustedSource?: string,
+  ): Promise<{ record: SessionWorktree; hostDir: string }> {
+    let from: string | undefined;
+    if (trustedSource) {
+      from = trustedSource;
+    } else if (input.worktreeFrom) {
+      const src = await this.require(input.worktreeFrom);
+      if (sessionRuntime(src) !== "host" || this.isWorkerSession(src)) {
+        throw new Error("Worktrees branch from a Host agent on this machine");
+      }
+      from = this.sessionCheckoutHostRoot(src, src.repo);
+    } else {
+      from = await resolveOptionalHostDir(input.hostDir, this.store.dataDir);
     }
-    const src = worker.vmId
-      ? this.docker.get(worker.vmId)?.diskPath
-      : join(this.store.dataDir, "docker-workspaces", worker.id);
-    const destVm = parent.vmId ? this.docker.get(parent.vmId) : undefined;
-    if (!src || !destVm) throw new Error("Start both containers before merging");
-    const restart = destVm.status === "running" || destVm.status === "ready";
-    if (restart) await this.stopVm(parent.id).catch(() => undefined);
-    await this.docker.restoreWorkspace?.(destVm.id, src);
-    if (restart) await this.startVm(parent.id).catch(() => undefined);
-    await this.appendMessage(parent.id, {
+    if (!from) throw new Error("Pick a git folder (or a Host agent) to branch a worktree from");
+    const source = await gitToplevel(from);
+    if (!source) {
+      throw new Error(`${from} is not a git checkout with a commit, so it cannot get a worktree`);
+    }
+    const id = randomUUID().replace(/-/g, "");
+    const record = await addWorktree({
+      source,
+      path: join(this.store.dataDir, "worktrees", worktreeDirName(source, id)),
+      branch: worktreeBranchName(input.title?.trim() || "agent", id.slice(0, 6)),
+    });
+    // Opening a subfolder of a repo keeps that subfolder as /workspace inside the worktree.
+    const sub = relative(source, from);
+    const hostDir = sub && !sub.startsWith("..") ? join(record.path, sub) : record.path;
+    return { record, hostDir };
+  }
+
+  /** Copy ignored local files, note the branch, and kick off `.locus/worktree.json` setup. */
+  private async finishWorktreeSetup(
+    sessionId: string,
+    wt: SessionWorktree,
+    startedAt?: number,
+  ): Promise<void> {
+    const setup = await worktreeSetupCommand(wt.source);
+    const session = await this.get(sessionId);
+    await this.boots.begin(sessionId, {
+      kind: "host",
+      key: bootHistoryKey("host", wt.source),
+      at: startedAt,
+      worktree: true,
+      repo: Boolean(session?.repo?.url),
+      setup: Boolean(setup),
+    });
+    const copied = await seedWorktree(wt.source, wt.path).catch(() => [] as string[]);
+    const from = wt.baseBranch
+      ? `${wt.baseBranch} @ ${wt.baseSha.slice(0, 7)}`
+      : wt.baseSha.slice(0, 7);
+    await this.appendMessage(sessionId, {
       id: randomUUID(),
       role: "system",
-      content: `Merged worker ${worker.compare?.role ?? worker.title} (${worker.compare?.branch ?? "branch"}) into this workspace.`,
+      // Short and on one line: multi-line or long (>180 chars) system notes render as a
+      // collapsed red log blob. The folder is in Agent settings and the Files pane.
+      content: [
+        `Working in its own git worktree on branch ${wt.branch} (from ${from}).`,
+        copied.length
+          ? `Copied ${copied.length === 1 ? copied[0] : `${copied.length} ignored files`} from the source checkout.`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
       createdAt: now(),
     });
-    return this.require(parent.id);
+    if (!setup) {
+      await this.maybeFinishBootSteps(sessionId);
+      return;
+    }
+    this.boots.step(sessionId, "setup");
+    this.bootSetupPending.add(sessionId);
+    void runWorktreeSetup(wt.path, setup)
+      .then(async (result) => {
+        this.bootSetupPending.delete(sessionId);
+        if (result.ok) await this.maybeFinishBootSteps(sessionId);
+        else this.boots.fail(sessionId, `Setup failed: ${setup}`);
+        await this.appendMessage(sessionId, {
+          id: randomUUID(),
+          role: "system",
+          content: result.ok
+            ? `Worktree setup finished: ${setup}`
+            : `Worktree setup failed: ${setup}${result.output ? `\n${result.output.slice(-1500)}` : ""}`,
+          createdAt: now(),
+        });
+      })
+      .catch(() => undefined)
+      .finally(() => this.bootSetupPending.delete(sessionId));
+  }
+
+  /** Remove the worktree folder. The branch is kept when it holds work, unless discarding. */
+  private async dropWorktree(session: AgentSession, discard: boolean): Promise<void> {
+    const wt = session.worktree;
+    if (!wt) return;
+    let deleteBranch = discard;
+    if (!deleteBranch) {
+      const status = await worktreeStatus(wt).catch(() => undefined);
+      deleteBranch = Boolean(status && status.commits === 0 && status.dirty === 0);
+    }
+    await removeWorktree(wt, { deleteBranch }).catch(() => undefined);
+  }
+
+  /** Stop a parallel agent, delete its worktree and branch, and drop the session. */
+  async discardWorker(workerId: string): Promise<void> {
+    return this.parallelWorkers.discardWorker(workerId);
+  }
+
+  /** One row per parallel agent: status, branch, diffstat against its base, commits, dirty files. */
+  async workerBoard(sessionId: string): Promise<WorkerBoardRow[]> {
+    return this.parallelWorkers.workerBoard(sessionId);
+  }
+
+  private assertAttemptNotVerifying(id: string): void {
+    this.parallelWorkers.assertAttemptNotVerifying(id);
+  }
+
+  async verifyWorkers(sessionId: string): Promise<import("@locus/shared").WorkerVerification[]> {
+    return this.parallelWorkers.verifyWorkers(sessionId);
+  }
+
+  /**
+   * Order a parallel group's attempts best-first: evidence (tests, lint/typecheck, files
+   * outside the task scope) first; the configured API model breaks ties and explains.
+   */
+  async rankWorkers(sessionId: string): Promise<WorkerRanking> {
+    return this.parallelWorkers.rankWorkers(sessionId);
+  }
+
+  /**
+   * New-agent fan-out: create a base agent (no prompt), then run `prompt` on each agent spec
+   * in its own worktree (Host) or container (Docker).
+   */
+  async fanout(input: {
+    create: CreateSessionInput;
+    agents: unknown;
+    prompt: string;
+  }): Promise<{ parent: AgentSession; workers: AgentSession[] }> {
+    return this.parallelWorkers.fanout(input);
   }
 
   async undoFile(sessionId: string): Promise<AgentSession> {
@@ -6121,6 +6022,85 @@ export class SessionService {
 
   private hostRoot(session: AgentSession): string {
     return sessionHostWorkspace(this.store.dataDir, session);
+  }
+
+  /** Resolve the actual host workspace of a Unity coding session. Never use a client-provided path. */
+  async unityProjectRoot(sessionId: string): Promise<string> {
+    const session = await this.get(sessionId);
+    if (!session) throw new Error("Session not found");
+    if (
+      sessionRuntime(session) !== "host" ||
+      this.isWorkerSession(session) ||
+      !session.playbook?.includes("LOCUS_UNITY_WORKFLOW")
+    ) {
+      throw new Error("This session was not launched as a Host Unity workflow");
+    }
+    const root = this.workspaceRoot(session);
+    if (!root) throw new Error("The Unity session has no local workspace");
+    return root;
+  }
+
+  /** Native Blender jobs can only target the session's selected Host workspace. */
+  async blenderProjectRoot(sessionId: string): Promise<string> {
+    const session = await this.get(sessionId);
+    if (!session) throw new Error("Session not found");
+    if (
+      sessionRuntime(session) !== "host" ||
+      this.isWorkerSession(session) ||
+      !session.playbook?.includes("LOCUS_BLENDER_WORKFLOW")
+    )
+      throw new Error("This session is not a local Host Blender workflow");
+    const root = this.workspaceRoot(session);
+    if (!root) throw new Error("Blender session has no selected Host workspace");
+    return root;
+  }
+
+  /** Resolve only the actual Host folder of a Godot Games coding session. */
+  async godotProjectRoot(sessionId: string): Promise<string> {
+    const session = await this.get(sessionId);
+    if (!session) throw new Error("Session not found");
+    if (
+      sessionRuntime(session) !== "host" ||
+      this.isWorkerSession(session) ||
+      !session.playbook?.includes("LOCUS_GODOT_WORKFLOW")
+    )
+      throw new Error("This session is not a local Host Godot workflow");
+    const root = this.workspaceRoot(session);
+    if (!root) throw new Error("Godot session has no selected Host workspace");
+    return root;
+  }
+
+  /** Resolve only the actual Host folder of an Unreal Engine Games coding session. */
+  async unrealProjectRoot(sessionId: string): Promise<string> {
+    const session = await this.get(sessionId);
+    if (!session) throw new Error("Session not found");
+    if (
+      sessionRuntime(session) !== "host" ||
+      this.isWorkerSession(session) ||
+      !session.playbook?.includes("LOCUS_UNREAL_WORKFLOW")
+    )
+      throw new Error("This session is not a local Host Unreal workflow");
+    const root = this.workspaceRoot(session);
+    if (!root) throw new Error("Unreal session has no selected Host workspace");
+    return root;
+  }
+
+  /** Resolve only a local Host Android workflow, never a path supplied to an operation. */
+  async androidProjectRoot(sessionId: string): Promise<string> {
+    const config = await this.store.loadConfig();
+    if (!policyAllowsHostAgents(config.managedPolicy))
+      throw new Error("Managed policy does not allow Host Android development");
+    const session = await this.get(sessionId);
+    if (!session) throw new Error("Session not found");
+    if (
+      sessionRuntime(session) !== "host" ||
+      this.isWorkerSession(session) ||
+      !session.playbook?.includes("LOCUS_ANDROID_WORKFLOW")
+    )
+      throw new Error("This session is not a local Host Android workflow");
+    const root = this.workspaceRoot(session);
+    if (!root) throw new Error("Android session has no selected Host workspace");
+    return root;
   }
 
   private workspaceRoot(session: AgentSession): string | undefined {
@@ -6259,15 +6239,23 @@ export class SessionService {
       const cached = this.publishTestCache.get(key);
       if (cached) return { ...cached, cached: true };
     }
-    const result = await runWorkspaceNpmScript(root, "test");
+    const result = await runWorkspaceVerify(root, "test");
     const retryable =
-      result.failureKind === "missing-dependencies" || result.failureKind === "runner";
+      result.failureKind === "missing-dependencies" ||
+      result.failureKind === "runner" ||
+      result.failureKind === "missing-toolchain";
     const cacheable = result.ok || !retryable;
     const enriched = { ...result, retryable };
     if (key && cacheable) {
       this.publishTestCache.set(key, enriched);
     }
     return enriched;
+  }
+
+  /** Repo verify commands (config or detected presets) that count as a verification run. */
+  private async codingVerifyOptions(session: AgentSession): Promise<{ verifyCommands: string[] }> {
+    if (!isCodingLoopSession(session)) return { verifyCommands: [] };
+    return { verifyCommands: await workspaceVerifyCommands(this.workspaceRoot(session)) };
   }
 
   private async syncChatAttachments(sessionId: string): Promise<void> {
@@ -6320,6 +6308,7 @@ export class SessionService {
   private async applyWorkspaceEnvironment(sessionId: string, vm: VmInstance): Promise<void> {
     if (this.envApplied.has(sessionId)) return;
     this.envApplied.add(sessionId);
+    this.boots.step(sessionId, "setup");
     try {
       const session = await this.require(sessionId);
       const guestRoot = workspacePath(session.os, sessionRuntime(session)).replace(/\\/g, "/");
@@ -6367,6 +6356,7 @@ export class SessionService {
     } finally {
       this.envApplied.delete(sessionId);
     }
+    await this.maybeFinishBootSteps(sessionId);
   }
 
   private async installGuestGitAuth(vm: VmInstance): Promise<void> {
@@ -6379,7 +6369,8 @@ export class SessionService {
 
   private async snapshotTurn(sessionId: string, messageCount?: number): Promise<void> {
     const session = await this.require(sessionId);
-    const vm = session.vmId ? this.getMachine(session.vmId) : undefined;
+    const vm =
+      session.vmId && !this.isWorkerSession(session) ? this.getMachine(session.vmId) : undefined;
     const next = await captureTurnCheckpoint({
       session,
       messageCount,
@@ -6470,6 +6461,51 @@ export class SessionService {
     return Math.max(0, timeCap - (Date.now() - started));
   }
 
+  /** Observe the redacted trace stream (OTLP export). */
+  onTrace(listener: TraceListener): () => void {
+    return this.traces.subscribe(listener);
+  }
+
+  private recordSpend(session: AgentSession, delta: TokenUsage): void {
+    void this.store
+      .loadConfig()
+      .then((config) => this.budgets.record(session, delta, config))
+      .catch(() => undefined);
+  }
+
+  /** Server-enforced daily caps (global / automation / project). True when the turn must stop. */
+  private async stopForDailyBudget(
+    sessionId: string,
+    turnId: string,
+    round: number,
+  ): Promise<boolean> {
+    const session = await this.require(sessionId);
+    const verdict = await this.budgets.check(session, await this.store.loadConfig());
+    if (verdict.ok) return false;
+    await this.appendMessage(sessionId, {
+      id: randomUUID(),
+      role: "system",
+      content: verdict.message,
+      createdAt: now(),
+    });
+    const updated = await this.store.mutateSession(sessionId, (current) => {
+      current.needsHuman = verdict.message;
+    });
+    if (updated) this.hub.broadcast({ type: "session.updated", session: updated });
+    await this.traces.write({
+      t: now(),
+      kind: "governor",
+      level: "warn",
+      sessionId,
+      turnId,
+      round,
+      ok: false,
+      detail: verdict.message,
+      args: { budget: verdict.scope, budgetId: verdict.id, reason: verdict.reason },
+    });
+    return true;
+  }
+
   private async reportBudgetStop(
     sessionId: string,
     turnId: string,
@@ -6551,6 +6587,19 @@ export class SessionService {
     if (!this.inSubagent.has(session.id) && allow(MANAGE_INTEGRATION_PLUGIN_TOOL.name)) {
       extras.push(MANAGE_INTEGRATION_PLUGIN_TOOL);
     }
+    // Restyling the app is an interactive request; automations and subagents never get it.
+    if (
+      !this.inSubagent.has(session.id) &&
+      !session.automationId &&
+      allow(MANAGE_THEME_TOOL.name)
+    ) {
+      extras.push(MANAGE_THEME_TOOL);
+    }
+    // Saving skills and MCP servers is an operator request in chat, never an automation's.
+    if (!this.inSubagent.has(session.id) && !session.automationId) {
+      if (allow(MANAGE_SKILL_TOOL.name)) extras.push(MANAGE_SKILL_TOOL);
+      if (allow(MANAGE_MCP_SERVER_TOOL.name)) extras.push(MANAGE_MCP_SERVER_TOOL);
+    }
     for (const tool of pluginExtraTools(config.integrationPlugins)) {
       if (allow(tool.name)) extras.push(tool);
     }
@@ -6566,6 +6615,56 @@ export class SessionService {
       await this.store.saveConfig({ ...config, integrationPlugins: result.plugins });
     }
     return { ok: result.ok, output: result.output };
+  }
+
+  /** manage_skill: edit saved skills in config. */
+  private async executeManageSkill(args: Record<string, unknown>): Promise<ToolResult> {
+    const config = await this.store.loadConfig();
+    const result = applySkillManageAction(
+      config.skills ?? [],
+      args,
+      () => randomUUID(),
+      BUILTIN_SLASH_NAMES,
+    );
+    if (result.ok && args.action !== "list") {
+      await this.store.saveConfig({ ...config, skills: result.skills });
+    }
+    return { ok: result.ok, output: result.output };
+  }
+
+  /** manage_mcp_server: edit MCP servers in config, then reconnect the pool. */
+  private async executeManageMcpServer(args: Record<string, unknown>): Promise<ToolResult> {
+    const config = await this.store.loadConfig();
+    const result = applyMcpServerManageAction(config.mcpServers ?? [], args, () => randomUUID());
+    if (!result.ok || args.action === "list") return { ok: result.ok, output: result.output };
+    const next = { ...config, mcpServers: result.servers };
+    await this.store.saveConfig(next);
+    for (const change of auditConfigChanges(config, next, "agent")) this.audit.record(change);
+    try {
+      await this.refreshMcp();
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return { ok: true, output: `${result.output} Saved, but reconnecting failed: ${reason}` };
+    }
+    return { ok: true, output: result.output };
+  }
+
+  /** manage_theme: edit generated themes in config and push the change to open windows. */
+  private async executeManageTheme(args: Record<string, unknown>): Promise<ToolResult> {
+    const config = await this.store.loadConfig();
+    const result = applyThemeManageAction(config.customThemes ?? [], args);
+    if (!result.ok) return { ok: false, output: result.output };
+    const listed = args.action === "list";
+    if (!listed) {
+      let theme = result.theme ?? config.theme;
+      // Deleting the active theme falls back to the default.
+      if (!result.theme && !isThemeId(theme) && !result.themes.some((t) => t.id === theme)) {
+        theme = DEFAULT_THEME;
+      }
+      await this.store.saveConfig({ ...config, customThemes: result.themes, theme });
+      this.hub.broadcast({ type: "theme.updated", theme, customThemes: result.themes });
+    }
+    return { ok: true, output: result.output };
   }
 
   private async executeMcpMeta(
@@ -6788,6 +6887,9 @@ export class SessionService {
       });
       return { ok: true, output };
     }
+    if (isCodeIntelToolName(req.name)) {
+      return this.executeCodeIntelTool(sessionId, req);
+    }
     if (req.name === "repo_map") {
       const session = await this.require(sessionId);
       const root = this.workspaceRoot(session);
@@ -6834,10 +6936,24 @@ export class SessionService {
       if (remaining != null && remaining <= 0) {
         return { ok: false, output: "spawn_agent refused: no time remaining in this turn." };
       }
-      const provider = config.providers.find((row) => row.id === session.providerId);
-      if (!provider || !hasUsableKey(provider.apiKey, provider.baseUrl, provider.kind)) {
+      const sessionProvider = config.providers.find((row) => row.id === session.providerId);
+      if (
+        !sessionProvider ||
+        !hasUsableKey(sessionProvider.apiKey, sessionProvider.baseUrl, sessionProvider.kind)
+      ) {
         return { ok: false, output: "A provider key is required to spawn a child agent." };
       }
+      const route = resolveModelRoute(
+        config.providers,
+        {
+          provider: typeof req.args.provider === "string" ? req.args.provider : undefined,
+          model: typeof req.args.model === "string" ? req.args.model : undefined,
+        },
+        { provider: sessionProvider, model: session.model },
+      );
+      if (!route.ok) return { ok: false, output: `spawn_agent refused: ${route.error}` };
+      const { provider, model } = route;
+      const routeLabel = route.overridden ? `${provider.name} · ${model}` : undefined;
       this.inSubagent.add(sessionId);
       const liveId = randomUUID();
       await this.patchSubagent(sessionId, {
@@ -6846,6 +6962,7 @@ export class SessionService {
         status: "running",
         lastLine: task,
         kind,
+        model: routeLabel,
         toolCallId: opts?.toolCallId,
       });
       await this.traces.write({
@@ -6853,7 +6970,7 @@ export class SessionService {
         kind: "subagent.start",
         sessionId,
         name: "spawn_agent",
-        detail: task,
+        detail: routeLabel ? `${task} [${routeLabel}]` : task,
       });
       try {
         const summary = await runIsolatedSubagent(task, focus, {
@@ -6861,7 +6978,7 @@ export class SessionService {
           chatEngine: (complete) => this.chatEngine(complete),
           complete: {
             provider,
-            model: session.model,
+            model,
             system: "",
             messages: [],
             guestOs: session.os,
@@ -6882,7 +6999,12 @@ export class SessionService {
               inputTokens: ev.inputTokens,
               outputTokens: ev.outputTokens,
             });
-            return this.applyUsage(sessionId, undefined, ev);
+            return this.applyUsage(
+              sessionId,
+              undefined,
+              ev,
+              route.overridden ? { providerId: provider.id, model } : undefined,
+            );
           },
           onEvent: (kind, detail) =>
             this.patchSubagent(sessionId, {
@@ -6993,6 +7115,48 @@ export class SessionService {
       return posted;
     }
     return { ok: false, output: `Unknown brain tool ${req.name}.` };
+  }
+
+  /** code_* language-server tools; code_rename then settles like apply_patch (undo, index, lint, hooks). */
+  private async executeCodeIntelTool(
+    sessionId: string,
+    req: { name: string; args: Record<string, unknown> },
+  ): Promise<ToolResult> {
+    const session = await this.require(sessionId);
+    const root = this.workspaceRoot(session);
+    if (!root) return { ok: false, output: CODE_INTEL_NO_WORKSPACE };
+    const rename = isCodeRenameToolName(req.name);
+    if (rename) {
+      const refused = codeRenameRefusal({
+        runtime: sessionRuntime(session),
+        worker: this.isWorkerSession(session),
+        kind: session.kind,
+        allowedTools: session.allowedTools,
+      });
+      if (refused) return { ok: false, output: refused };
+    }
+    const result = await runCodeIntelTool(req.name, req.args ?? {}, {
+      root,
+      indexCacheDir: indexCacheDir(this.store.dataDir, session.id),
+    });
+    const edited = result.edited ?? [];
+    if (!rename || !result.ok || !edited.length) return { ok: result.ok, output: result.output };
+    await this.store.mutateSession(sessionId, (current) => {
+      current.fileUndo = [
+        ...(current.fileUndo ?? []),
+        ...edited.map((file) => ({ path: file.path, previous: file.before.slice(0, 200_000) })),
+      ].slice(-8);
+    });
+    this.hub.broadcast({
+      type: "workspace.changed",
+      sessionId,
+      paths: edited.map((file) => file.path),
+    });
+    return this.settleExecutedTool(
+      session,
+      { name: "apply_patch", args: { patch: renameUnifiedDiff(edited) } },
+      { ok: true, output: result.output },
+    );
   }
 
   private async prepareBrainBrief(
@@ -7115,7 +7279,20 @@ export class SessionService {
     result: ToolResult,
     opts?: { ignoreAllowlist?: boolean },
   ): Promise<ToolResult> {
-    const hooked = await this.appendLintFeedback(session, req, result, opts);
+    const linted = await this.appendLintFeedback(session, req, result, opts);
+    const hooked = opts?.ignoreAllowlist
+      ? linted
+      : await appendPostEditDiagnostics(linted, {
+          name: req.name,
+          args: req.args,
+          root: this.workspaceRoot(session),
+          key: session.id,
+          enabled: (await this.store.loadConfig()).advanced.postEditDiagnostics !== false,
+          live:
+            !this.isWorkerSession(session) &&
+            !isCanvasSession(session) &&
+            (sessionRuntime(session) === "host" || sessionRuntime(session) === "docker"),
+        });
     const adhered = await this.appendDesignAdherence(session, req, hooked, opts);
     if (adhered.ok) await this.syncWorkspaceIndex(session, req);
     if (adhered.ok && (req.name === "file_write" || req.name === "apply_patch")) {
@@ -7224,10 +7401,39 @@ export class SessionService {
     return signal && !signal.aborted ? cliGitMcpTools() : [];
   }
 
+  /** manage_skill over the CLI MCP server: interactive operator chats only, as for the built-in agent. */
+  private cliMayManageSkills(session: AgentSession): boolean {
+    const signal = this.cliGitTurns.get(session.id);
+    if (!signal || signal.aborted) return false;
+    if (this.inSubagent.has(session.id) || session.automationId) return false;
+    if (!automationAllowsPlugin(session, MANAGE_SKILL_TOOL.name)) return false;
+    if (session.allowedTools?.length && !session.allowedTools.includes(MANAGE_SKILL_TOOL.name)) {
+      return false;
+    }
+    return true;
+  }
+
+  cliSkillTools(session: AgentSession) {
+    return this.cliMayManageSkills(session) ? cliSkillMcpTools() : [];
+  }
+
+  async executeCliSkillTool(sessionId: string, args: Record<string, unknown>): Promise<ToolResult> {
+    const session = await this.require(sessionId);
+    if (!this.cliMayManageSkills(session)) {
+      return {
+        ok: false,
+        output: "manage_skill requires an active interactive CLI coding turn on this host.",
+      };
+    }
+    return this.executeManageSkill(args);
+  }
+
   async executeCliGitTool(
     sessionId: string,
     name: string,
     args: Record<string, unknown>,
+    /** The MCP HTTP request; when the CLI hangs up, its pending approval is cancelled. */
+    requestSignal?: AbortSignal,
   ): Promise<ToolResult> {
     const signal = this.cliGitTurns.get(sessionId);
     if (!isCliGitTool(name) || !signal || signal.aborted) {
@@ -7238,7 +7444,12 @@ export class SessionService {
     }
     const session = await this.require(sessionId);
     const config = await this.store.loadConfig();
-    const policy = this.policyFor(session, config);
+    const policy = await riskGatedPolicy(
+      this.store,
+      session,
+      config,
+      this.policyFor(session, config),
+    );
     if ((name === "git_push" || name === "git_pr") && typeof args.branch !== "string") {
       const branch = await this.resolveGitHeadBranch(session, args);
       if (branch) args = { ...args, branch };
@@ -7279,7 +7490,11 @@ export class SessionService {
         approval: "needed",
         startedAt: now(),
       };
-      const pending = this.awaitApproval(sessionId, call.id, signal);
+      const pending = this.awaitApproval(
+        sessionId,
+        call.id,
+        requestSignal ? AbortSignal.any([signal, requestSignal]) : signal,
+      );
       approvalCallId = call.id;
       await this.appendMessage(sessionId, {
         id: randomUUID(),
@@ -7291,6 +7506,9 @@ export class SessionService {
       const { decision } = await pending;
       if (decision !== "approved")
         return finish({ ok: false, output: `Git operation ${decision}.` });
+    }
+    if (requestSignal?.aborted) {
+      return finish({ ok: false, output: "The Git tool caller disconnected." });
     }
     if (signal.aborted || this.cliGitTurns.get(sessionId) !== signal) {
       return finish({ ok: false, output: "CLI turn has ended." });
@@ -7417,23 +7635,50 @@ export class SessionService {
   /** One provider turn for a workflow agent node. Undefined when no usable key is configured. */
   async completeForWorkflow(
     sessionId: string,
-    input: { system: string; user: string; tools: string[] },
+    input: {
+      system: string;
+      user: string;
+      tools: string[];
+      model?: { provider?: string; model?: string };
+    },
   ): Promise<WorkflowCompletion | undefined> {
     const session = await this.get(sessionId);
     if (!session) return undefined;
     const config = await this.store.loadConfig();
-    const provider =
+    const sessionProvider =
       config.providers.find((row) => row.id === session.providerId) ??
       config.providers.find((row) => row.enabled);
-    if (!provider || !hasUsableKey(provider.apiKey, provider.baseUrl, provider.kind)) {
+    if (
+      !sessionProvider ||
+      !hasUsableKey(sessionProvider.apiKey, sessionProvider.baseUrl, sessionProvider.kind)
+    ) {
       return undefined;
     }
+    const sessionModel = session.model || sessionProvider.defaultModel;
+    // A node may name its own provider/model. Imported graphs often pin one this
+    // machine has not configured, so an unusable choice falls back to the session.
+    const route = resolveModelRoute(config.providers, input.model, {
+      provider: sessionProvider,
+      model: sessionModel,
+    });
+    if (!route.ok) {
+      await this.traces.write({
+        t: now(),
+        kind: "governor",
+        level: "warn",
+        sessionId,
+        name: "workflow_model",
+        detail: `${route.error} Using the session model.`,
+      });
+    }
+    const provider = route.ok ? route.provider : sessionProvider;
+    const model = route.ok ? route.model : sessionModel;
     const tools = input.tools.filter((name) => !isWorkflowToolName(name));
     let text = "";
     const toolCalls: WorkflowCompletion["toolCalls"] = [];
     for await (const event of runChatTurn((req) => this.chatEngine(req), {
       provider,
-      model: session.model || provider.defaultModel,
+      model,
       system: input.system,
       messages: [
         {
@@ -7476,6 +7721,9 @@ export class SessionService {
           }
         : undefined,
       executeManagePlugin: (args) => this.executeManagePlugin(args),
+      executeManageTheme: (args) => this.executeManageTheme(args),
+      executeManageSkill: (args) => this.executeManageSkill(args),
+      executeManageMcpServer: (args) => this.executeManageMcpServer(args),
       executeMcpMeta: (session, req, fence) => this.executeMcpMeta(session, req, fence),
       boards: this.boards,
       projects: this.projects,
@@ -7503,7 +7751,91 @@ export class SessionService {
       toolCallId?: string;
     },
   ): Promise<ToolResult> {
-    const result = await this.executeToolRaw(sessionId, req, opts);
+    const canonical = canonicalToolCall(req.name, req.args ?? {});
+    req = { name: canonical.name as ToolRequest["name"], args: canonical.arguments };
+    const computer =
+      isMutatingBrowserTool(req.name, req.args) ||
+      req.name === "desktop_action" ||
+      [
+        "browser_snapshot",
+        "browser_tabs",
+        "screenshot",
+        "a11y_tree",
+        "uia_tree",
+        "browser_wait",
+      ].includes(req.name);
+    let result: ToolResult;
+    let failures = 0;
+    try {
+      if (
+        (isMutatingBrowserTool(req.name, req.args) || req.name === "desktop_action") &&
+        this.computerControl.stalled(sessionId)
+      ) {
+        return {
+          ok: false,
+          category: "computer-stalled",
+          retryable: false,
+          output:
+            "Computer actions are paused after repeated failures. Request human takeover and handback before retrying.",
+        };
+      }
+      result = computer
+        ? await this.computerControl.run(sessionId, async () => {
+            if (isMutatingBrowserTool(req.name, req.args) || req.name === "desktop_action") {
+              const current = await this.require(sessionId);
+              if (isOperatorDrivingBrowser(current))
+                return { ok: false, output: OPERATOR_HAS_BROWSER };
+              if (current.control === "human")
+                return { ok: false, output: "Operator has the guest. Wait for handback." };
+              if (this.computerControl.stalled(sessionId))
+                return {
+                  ok: false,
+                  category: "computer-stalled",
+                  output: "Request human takeover after repeated computer failures.",
+                };
+              if (this.computerControl.needsObservation(sessionId))
+                return {
+                  ok: false,
+                  output:
+                    "Control changed. Take a fresh screenshot or accessibility snapshot before acting.",
+                };
+            }
+            const executed = await this.executeToolRaw(sessionId, req, opts);
+            if (isMutatingBrowserTool(req.name, req.args) || req.name === "desktop_action")
+              failures = this.computerControl.failed(sessionId, executed.ok);
+            if (
+              executed.ok &&
+              ["screenshot", "browser_snapshot", "a11y_tree", "uia_tree"].includes(req.name)
+            )
+              this.computerControl.observed(sessionId);
+            return executed;
+          })
+        : await this.executeToolRaw(sessionId, req, opts);
+    } catch (error) {
+      if (!(error instanceof ComputerControlChanged)) throw error;
+      result = {
+        ok: false,
+        output: error instanceof Error ? error.message : "Computer action failed",
+      };
+    }
+    if (
+      (isMutatingBrowserTool(req.name, req.args) || req.name === "desktop_action") &&
+      !/Operator has|Control changed|control changed/.test(result.output)
+    ) {
+      if (failures === 2)
+        result.output +=
+          "\nRecovery: take a fresh snapshot/screenshot and choose a different interaction. Do not repeat the same ineffective action.";
+      if (failures >= 3) {
+        result = {
+          ...result,
+          category: "computer-stalled",
+          retryable: false,
+          output:
+            result.output +
+            "\nComputer actions repeatedly failed. Request human takeover before continuing.",
+        };
+      }
+    }
     const config = await this.store.loadConfig();
     const output = redactText(
       stripSensitiveListing(req.name, result.output ?? ""),
@@ -7529,6 +7861,15 @@ export class SessionService {
     const fenceHostile = (name: string, output: string) =>
       opts?.fence === false ? output : wrapHostileToolOutput(name, output);
     const session = await this.require(sessionId);
+    if (session.offline && !offlineProjectTool(req.name, isProjectSession(session))) {
+      return { ok: false, output: "Tool unavailable in an offline project" };
+    }
+    if (
+      session.control === "human" &&
+      (isMutatingBrowserTool(req.name, req.args) || req.name === "desktop_action")
+    ) {
+      return { ok: false, output: "Operator has the guest. Wait for handback." };
+    }
     if (isOperatorDrivingBrowser(session) && isMutatingBrowserTool(req.name, req.args)) {
       return { ok: false, output: OPERATOR_HAS_BROWSER };
     }
@@ -7558,7 +7899,7 @@ export class SessionService {
     if (req.name === "git_push" || req.name === "git_pr") {
       await this.prepareHostWorkspace(session);
     }
-    if (!opts?.ignoreAllowlist) {
+    if (!session.offline && !opts?.ignoreAllowlist) {
       const blocked = await this.runPreToolUseHooks(session, req.name);
       if (blocked) return blocked;
     }
@@ -7583,6 +7924,28 @@ export class SessionService {
       gateToolRequest(req.name, req.args, { ...gateCtx, stage: "access" }),
     );
     if (accessGate) return accessGate;
+    if (req.name === "blender_editor" || req.name === "blender_result") {
+      const result = await executeBlenderMcp(this, sessionId, req.name, req.args);
+      return {
+        ok: result.ok,
+        output: result.output,
+        ...(result.screenshotBase64 ? { screenshotBase64: result.screenshotBase64 } : {}),
+      };
+    }
+    if (req.name === "godot_editor" || req.name === "godot_result") {
+      return executeGodotMcp(this, sessionId, req.name, req.args);
+    }
+    if (req.name === "unreal_editor" || req.name === "unreal_result") {
+      return executeUnrealMcp(this, sessionId, req.name, req.args);
+    }
+    if (req.name === "unity_editor" || req.name === "unity_result") {
+      const result = await executeUnityMcp(this, sessionId, req.name, req.args);
+      return {
+        ok: result.ok,
+        output: result.output,
+        ...(result.screenshotBase64 ? { screenshotBase64: result.screenshotBase64 } : {}),
+      };
+    }
     if (req.name === "file_read" && isAssetSession(session)) {
       const paths = fileReadPaths(req.args);
       if (paths.some((path) => isAssetRasterPath(path))) {
@@ -7598,7 +7961,7 @@ export class SessionService {
         url: typeof req.args.url === "string" ? req.args.url : undefined,
       });
       const tests = await this.runPublishTestGate(session, checkout);
-      if (tests.ran && !tests.ok) {
+      if (isBlockingVerifyFailure(tests)) {
         return {
           ok: false,
           status: "blocked",
@@ -7613,9 +7976,24 @@ export class SessionService {
             ...(tests.exitCode !== undefined ? { exitCode: tests.exitCode } : {}),
             ...(tests.durationMs !== undefined ? { durationMs: tests.durationMs } : {}),
             ...(tests.cached ? { cached: true } : {}),
+            ...(tests.report ? { report: tests.report } : {}),
           },
-          output: formatNpmTestGateFailure(req.name, tests),
+          output: formatVerifyGateFailure(req.name, tests),
         };
+      }
+      if (tests.failureKind === "missing-toolchain") {
+        // The host lacks the repo's toolchain: report it, but do not block the push.
+        await this.traces
+          .write({
+            t: now(),
+            kind: "blocked",
+            level: "warn",
+            sessionId: session.id,
+            name: "test-gate",
+            ok: true,
+            detail: `Test gate skipped: \`${tests.command ?? "verify"}\` is not available on the host.`,
+          })
+          .catch(() => undefined);
       }
     }
     if (
@@ -7928,25 +8306,29 @@ export class SessionService {
       cachedInputTokens?: number;
       cacheWriteTokens?: number;
       window?: number;
+      contextTokens?: number;
     },
   ): Promise<void> {
+    // `inputTokens` already includes cache reads/writes (see readTokenUsage).
     const delta = {
       inputTokens: ev.inputTokens,
       outputTokens: ev.outputTokens,
       ...(ev.cachedInputTokens ? { cachedInputTokens: ev.cachedInputTokens } : {}),
+      ...(ev.cacheWriteTokens ? { cacheWriteTokens: ev.cacheWriteTokens } : {}),
     };
     const stats = this.promptStats.get(sessionId);
     const session = await this.store.mutateSession(sessionId, (current) => {
       const msg = current.messages.find((m) => m.id === messageId);
       if (msg) msg.usage = addUsage(msg.usage, delta);
       current.usage = addUsage(current.usage, delta);
-      if (ev.inputTokens <= 0 && !ev.cachedInputTokens && !ev.cacheWriteTokens) return;
-      if (stats && ev.inputTokens > 0) {
-        current.charsPerToken = calibrateCharsPerToken(
-          stats.chars,
-          ev.inputTokens,
-          current.charsPerToken,
-        );
+      if (ev.inputTokens <= 0) return;
+      // Prefer the last call's prompt size: run totals sum every call and overstate occupancy.
+      const prompt =
+        typeof ev.contextTokens === "number" && ev.contextTokens > 0
+          ? ev.contextTokens
+          : ev.inputTokens;
+      if (stats) {
+        current.charsPerToken = calibrateCharsPerToken(stats.chars, prompt, current.charsPerToken);
       }
       const window =
         typeof ev.window === "number" && Number.isFinite(ev.window) && ev.window > 0
@@ -7954,9 +8336,8 @@ export class SessionService {
           : (stats?.window ?? modelContextWindow(current.model, "cursor-cli"));
       const reserved = stats?.reserved ?? 0;
       const occupancy = occupancyFromCursorCliUsage({
-        inputTokens: ev.inputTokens,
-        cachedInputTokens: ev.cachedInputTokens,
-        cacheWriteTokens: ev.cacheWriteTokens,
+        inputTokens: prompt,
+        cachedInputTokens: Math.min(prompt, ev.cachedInputTokens ?? 0),
         window,
       });
       current.context = buildContextBreakdown({
@@ -7970,7 +8351,10 @@ export class SessionService {
         ],
       });
     });
-    if (session) this.hub.broadcast({ type: "session.updated", session });
+    if (session) {
+      this.hub.broadcast({ type: "session.updated", session });
+      this.recordSpend(session, delta);
+    }
   }
 
   private async recordPromptContext(
@@ -8034,6 +8418,8 @@ export class SessionService {
     sessionId: string,
     messageId: string | undefined,
     ev: { inputTokens: number; outputTokens: number; cachedInputTokens?: number },
+    /** Price the spend at this provider/model instead of the session's (a routed child). */
+    pricedAs?: { providerId: string; model: string },
   ): Promise<void> {
     const delta = {
       inputTokens: ev.inputTokens,
@@ -8060,7 +8446,10 @@ export class SessionService {
       }
       current.usage = addUsage(current.usage, delta);
     });
-    if (session) this.hub.broadcast({ type: "session.updated", session });
+    if (session) {
+      this.hub.broadcast({ type: "session.updated", session });
+      this.recordSpend(pricedAs ? { ...session, ...pricedAs } : session, delta);
+    }
   }
 
   private async appendDelta(sessionId: string, messageId: string, delta: string): Promise<void> {
@@ -8149,9 +8538,45 @@ export class SessionService {
       const sessions = await this.store.loadSessions();
       const session = sessions.find((s) => s.vmId === id);
       if (!session) return;
+      if (status === "stopped" || status === "error")
+        this.computerCapabilitiesProbed.delete(session.id);
+      if (
+        vm &&
+        isGuestReady(status) &&
+        sessionRuntime(session) === "vm" &&
+        !this.computerCapabilitiesProbed.has(session.id)
+      ) {
+        const guest = this.guests.forVm(vm);
+        if (guest.liveGuest) {
+          this.computerCapabilitiesProbed.add(session.id);
+          void (async () => {
+            const abort = new AbortController();
+            const timer = setTimeout(() => abort.abort(), 5000);
+            try {
+              const result = await guest.execute(
+                { name: "computer_capabilities", args: {} },
+                abort.signal,
+              );
+              if (!abort.signal.aborted)
+                await this.appendMessage(session.id, {
+                  id: randomUUID(),
+                  role: "system",
+                  content: `Computer capabilities at boot:\n${wrapHostileToolOutput("computer_capabilities", result.output.slice(0, 8000))}`,
+                  createdAt: now(),
+                });
+            } catch {
+              /* A missing desktop must not prevent the guest booting. */
+            } finally {
+              clearTimeout(timer);
+            }
+          })();
+        }
+      }
       if (isGuestReady(status) || status === "error" || status === "stopped") {
         this.guestBoot.dropExpected(session.id);
       }
+      if (status === "error") this.boots.fail(session.id, error || "Guest entered an error state.");
+      if (status === "stopped" && this.boots.isRunning(session.id)) this.boots.clear(session.id);
       if (status === "error" || status === "stopped") {
         this.imageBuildNoted.delete(session.id);
         this.imageBuildFinished.delete(session.id);
@@ -8194,6 +8619,7 @@ export class SessionService {
         await this.syncChatAttachments(session.id);
         await this.syncWindowsShare(session.id);
         await this.attachGuestMcp(session.id);
+        await this.maybeFinishBootSteps(session.id);
       }
       if (isGuestReady(status)) {
         await this.syncGuestTree(session.id);
@@ -8226,9 +8652,11 @@ export class SessionService {
     const inflight = this.cloneInflight.get(sessionId);
     if (inflight) return inflight;
     if (this.cloned.has(sessionId)) return;
-    const work = this.runCloneRepo(sessionId).finally(() => {
-      if (this.cloneInflight.get(sessionId) === work) this.cloneInflight.delete(sessionId);
-    });
+    const work = this.runCloneRepo(sessionId)
+      .finally(() => {
+        if (this.cloneInflight.get(sessionId) === work) this.cloneInflight.delete(sessionId);
+      })
+      .then(() => this.maybeFinishBootSteps(sessionId));
     this.cloneInflight.set(sessionId, work);
     return work;
   }
@@ -8242,6 +8670,14 @@ export class SessionService {
     this.cloned.add(sessionId);
     const config = await this.store.loadConfig();
     const checkouts = isCanvasSession(session) ? [session.repo] : sessionRepoCheckouts(session);
+    if (
+      runtime === "host" &&
+      !this.isWorkerSession(session) &&
+      checkouts.some((checkout) => !this.liveCheckoutReady(session, checkout))
+    ) {
+      await this.boots.begin(sessionId, { kind: "host", key: bootHistoryKey("host"), repo: true });
+    }
+    this.boots.step(sessionId, "clone");
     const workspace = workspacePath(session.os, runtime).replace(/\\/g, "/");
     let anyOk = false;
     try {
@@ -8306,6 +8742,7 @@ export class SessionService {
         if (result.ok) anyOk = true;
       }
       this.clearCloneProgress(sessionId);
+      if (!anyOk) this.boots.fail(sessionId, "Clone failed");
       if (anyOk && !isCanvasSession(session) && session.vmId) {
         const live = this.getMachine(session.vmId);
         if (live) await this.applyWorkspaceEnvironment(sessionId, live).catch(() => undefined);
@@ -8314,6 +8751,7 @@ export class SessionService {
     } catch (err) {
       this.cloned.delete(sessionId);
       const message = err instanceof Error ? err.message : "clone failed";
+      this.boots.fail(sessionId, message);
       await this.appendMessage(sessionId, {
         id: randomUUID(),
         role: "system",
@@ -8520,6 +8958,25 @@ export class SessionService {
     return withFreshForgeToken(this.store, account, this.fetchFn);
   }
 
+  /**
+   * The workspace clone's `origin` as a checkout, for sessions with no attached repo.
+   * Read-only: it is not saved on the session, because an attached repo makes git_push
+   * rewrite origin to a token HTTPS URL, and an SSH origin the operator chose must stay.
+   */
+  private async originCheckout(
+    session: AgentSession,
+  ): Promise<import("@locus/shared").RepoCheckout | undefined> {
+    if (this.isWorkerSession(session)) return undefined;
+    const runtime = sessionRuntime(session);
+    if (runtime !== "host" && runtime !== "docker") return undefined;
+    const root = this.workspaceRoot(session);
+    const remote = root ? await workspaceOriginUrl(root) : undefined;
+    const parsed = remote ? parseRepoUrl(remote) : null;
+    if (!parsed) return undefined;
+    const match = matchLinkedRepo(await this.store.loadRepos(), parsed.url);
+    return { forge: parsed.forge, url: parsed.url, accountId: match?.checkout.accountId };
+  }
+
   private async requireForge(
     session: AgentSession,
     args?: Record<string, unknown>,
@@ -8530,7 +8987,10 @@ export class SessionService {
       path: typeof args?.path === "string" ? args.path : undefined,
       url: typeof args?.url === "string" ? args.url : undefined,
     });
-    const url = checkout?.url ?? session.repo?.url;
+    // A session started in a folder that already holds a clone has no attached repo;
+    // fall back to that clone's origin so PR and issue tools still work.
+    const target = checkout ?? session.repo ?? (await this.originCheckout(session));
+    const url = target?.url;
     const config = await this.store.loadConfig();
     if (!url) {
       return {
@@ -8539,7 +8999,7 @@ export class SessionService {
           "No repository is attached to this agent. git_clone a GitHub, GitLab, or Bitbucket URL to check out the code (that attaches this session), or pick a linked repo when creating the agent. git_pr_list and git_issue_list will not work until then.",
       };
     }
-    const account = this.sessionForge(config, session, checkout);
+    const account = this.sessionForge(config, session, target);
     if (!account) return { ok: false, output: "Sign in or add a forge token in Settings → Git" };
     const fresh = await withFreshForgeToken(this.store, account, this.fetchFn);
     if (!fresh.token)
@@ -8614,6 +9074,46 @@ export class SessionService {
     return updated;
   }
 
+  /**
+   * Queue a Needs-you approval for an action that is not a model tool call (a risk-gated
+   * merge from Codebase, Compare, or the CLI). Approve (Inbox, chat, `locus agent approve`)
+   * runs `run`; Deny or the approval timeout records the refusal on the card.
+   */
+  async requestOperatorApproval(
+    sessionId: string,
+    call: { name: string; arguments: Record<string, unknown> },
+    run: () => Promise<ToolResult>,
+  ): Promise<{ toolCallId: string }> {
+    await this.require(sessionId);
+    const id = randomUUID();
+    const pending = this.awaitApproval(sessionId, id, new AbortController().signal);
+    await this.appendMessage(sessionId, {
+      id: randomUUID(),
+      role: "assistant",
+      content: "",
+      toolCalls: [{ id, ...call, approval: "needed", startedAt: now() }],
+      createdAt: now(),
+    });
+    void pending.then(async ({ decision }) => {
+      let result: ToolResult = { ok: false, output: `Operator ${decision} ${call.name}.` };
+      if (decision === "approved") {
+        result = await run().catch((err: unknown) => ({
+          ok: false,
+          output: err instanceof Error ? err.message : String(err),
+        }));
+      }
+      const updated = await this.store.mutateSession(sessionId, (current) => {
+        const row = current.messages.flatMap((m) => m.toolCalls ?? []).find((t) => t.id === id);
+        if (!row) return;
+        row.finishedAt = now();
+        row.result = result.output;
+        if (!result.ok) row.error = result.output;
+      });
+      if (updated) this.hub.broadcast({ type: "session.updated", session: updated });
+    });
+    return { toolCallId: id };
+  }
+
   async patchMeta(id: string, patch: PatchSessionInput): Promise<AgentSession> {
     const session = await this.require(id);
     let config: LocusConfig | undefined;
@@ -8656,6 +9156,7 @@ export class SessionService {
         | "defaultSubagent"
         | "subscriptions"
         | "needsHuman"
+        | "viewMode"
       >
     > = {};
     if (typeof patch.title === "string") {
@@ -8663,6 +9164,15 @@ export class SessionService {
       if (!title) throw new Error("Title is required");
       next.title = title;
     }
+    if (
+      session.offline &&
+      (patch.providerId !== undefined ||
+        patch.model !== undefined ||
+        (patch.network !== undefined && patch.network !== "none") ||
+        patch.webSearch ||
+        patch.liveChrome)
+    )
+      throw new Error("Offline project sessions use the saved local model and network settings");
     if (typeof patch.pinned === "boolean") next.pinned = patch.pinned;
     if (typeof patch.archived === "boolean") next.archived = patch.archived;
     if (typeof patch.providerId === "string") {
@@ -8878,6 +9388,11 @@ export class SessionService {
       next.subscriptions = rows.length ? rows : undefined;
     }
     if (patch.needsHuman === null) next.needsHuman = undefined;
+    if (patch.viewMode === null || patch.viewMode === "chat") next.viewMode = undefined;
+    else if (patch.viewMode !== undefined) {
+      if (!isSessionViewMode(patch.viewMode)) throw new Error("Unknown view mode");
+      next.viewMode = patch.viewMode;
+    }
     const saved = await this.patch(id, next);
     if (typeof next.designSystemId === "string") {
       if (isGameSession(session)) {
@@ -9130,7 +9645,7 @@ export class SessionService {
     result: ToolResult,
     opts?: { ignoreAllowlist?: boolean },
   ): Promise<ToolResult> {
-    if (opts?.ignoreAllowlist || !result.ok) return result;
+    if (session.offline || opts?.ignoreAllowlist || !result.ok) return result;
     if (!isCanvasSession(session)) return result;
     if (req.name !== "file_write" && req.name !== "apply_patch") return result;
     const path =
@@ -9173,14 +9688,19 @@ export class SessionService {
     result: ToolResult,
     opts?: { ignoreAllowlist?: boolean },
   ): Promise<ToolResult> {
-    if (opts?.ignoreAllowlist) return result;
+    if (session.offline || opts?.ignoreAllowlist) return result;
     let next = result;
     if (result.ok && (req.name === "file_write" || req.name === "apply_patch")) {
-      const lint = await runWorkspaceNpmScript(this.workspaceRoot(session), "lint");
+      const lint = await runWorkspaceVerify(this.workspaceRoot(session), "lint", {
+        skipSlow: true,
+      });
       if (lint.ran && !lint.ok) {
-        const extra = lintOutputLooksLikeMissingDeps(lint.output)
-          ? "Lint skipped: workspace dependencies are not installed (`npm install`). The edit was kept."
-          : `Lint (not reverted):\n${lint.output}`;
+        const extra =
+          lint.failureKind === "missing-toolchain"
+            ? `Lint skipped: \`${lint.command ?? "lint"}\` is not available on the host. The edit was kept.`
+            : lintOutputLooksLikeMissingDeps(lint.output)
+              ? "Lint skipped: workspace dependencies are not installed (`npm install`). The edit was kept."
+              : `Lint (not reverted):\n${lint.output}`;
         next = { ...next, output: next.output ? `${next.output}\n\n${extra}` : extra };
       }
     }
@@ -9233,6 +9753,7 @@ export class SessionService {
   }
 
   private async runStopHooks(session: AgentSession): Promise<void> {
+    if (session.offline) return;
     const hooks = (await loadRepoHooks(this.workspaceRoot(session))).Stop;
     for (const hook of hooks) {
       const ran = await runRepoHook(this.workspaceRoot(session), hook);
@@ -9434,7 +9955,7 @@ export class SessionService {
 
   private async applyCodingVerify(sessionId: string, session: AgentSession): Promise<void> {
     if (!isCodingLoopSession(session) || session.needsHuman) return;
-    const message = codingTurnNeedsHuman(session.messages);
+    const message = codingTurnNeedsHuman(session.messages, await this.codingVerifyOptions(session));
     if (!message) return;
     await this.traces.write({
       t: now(),
@@ -9481,6 +10002,7 @@ export class SessionService {
     }
     return {
       ...policy,
+      confirmComputerActions: sessionLiveChrome(session) || policy.confirmComputerActions,
       autoAllow,
       alwaysAsk: alwaysAskMinusSticky(alwaysAsk, session.autoAllow),
     };
@@ -9623,6 +10145,7 @@ export class SessionService {
       Pick<
         AgentSession,
         | "status"
+        | "workerInterrupted"
         | "vmId"
         | "error"
         | "title"
@@ -9683,6 +10206,7 @@ export class SessionService {
         | "backgroundProcesses"
         | "autoAllow"
         | "needsHuman"
+        | "viewMode"
       >
     >,
   ): Promise<AgentSession> {
@@ -9718,7 +10242,3 @@ export {
 } from "./sessionTurnHelpers.js";
 export { EMPTY_CANVAS_NUDGE, DESIGN_MUTATE_NUDGE, INCOMPLETE_CANVAS_NUDGE };
 export { EMPTY_CANVAS_NOTE };
-
-async function mkdirShare(path: string): Promise<void> {
-  await mkdir(path, { recursive: true }).catch(() => undefined);
-}

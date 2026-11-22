@@ -7,3 +7,7 @@ npm run dev:worker
 ```
 
 Paste the printed `locus-worker:add` line in Settings → Workers. QEMU cloud images go in `LOCUS_WORKER_HOME/media`. Live VNC is loopback on the worker and proxied to the laptop over WSS `/v1/guests/:id/display`. Golden VM disks are `PUT /v1/images/:id`. Control planes send `X-Locus-Plane` so one token can namespace guests. See [docs/agent-backends.md](../../docs/agent-backends.md).
+
+CLI agents (Cursor CLI, Claude Code, Codex, Kiro, Custom CLI) on Docker guests run on the worker host inside bubblewrap (Linux) or `sandbox-exec` (macOS), which hides `LOCUS_WORKER_HOME` except that guest's workspace. Install `bubblewrap` on Linux workers; without a working sandbox those turns fail closed unless the worker runs with `LOCUS_CLI_SANDBOX=off`. See [docs/cli-agent-sandbox.md](../../docs/cli-agent-sandbox.md).
+
+Provisioned Fargate workers use the container image in [`images/worker`](../../images/worker/README.md): the control plane injects the token and a minted TLS identity per task, and each chat runs as a Host guest inside its own task.

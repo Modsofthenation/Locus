@@ -6,6 +6,8 @@ export type CompareKind = "ab" | "workers";
 export const WORKER_COUNT_MIN = 2;
 export const WORKER_COUNT_MAX = 4;
 export const WORKER_COUNT_DEFAULT = 3;
+/** Largest worker group (worktree fan-out can mix up to this many agents; Docker spawn stays at WORKER_COUNT_MAX). */
+export const WORKER_GROUP_MAX = 8;
 
 export const WORKER_LOCK_FILES = [
   "package-lock.json",
@@ -68,7 +70,7 @@ export function parseSessionCompare(value: unknown): SessionCompare | undefined 
   if (!groupId || !role) return undefined;
   if (raw.kind === "workers") {
     const memberIds = uniqueIds(raw.memberIds);
-    if (memberIds.length < WORKER_COUNT_MIN || memberIds.length > WORKER_COUNT_MAX)
+    if (memberIds.length < WORKER_COUNT_MIN || memberIds.length > WORKER_GROUP_MAX)
       return undefined;
     const parentId = typeof raw.parentId === "string" ? raw.parentId.trim() : "";
     const branch = typeof raw.branch === "string" ? raw.branch.trim() : "";

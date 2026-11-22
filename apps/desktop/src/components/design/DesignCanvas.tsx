@@ -163,10 +163,13 @@ import { canvasFrameSrc, isCanvasFrameReady, postCanvasFrameHtml } from "@/lib/c
 import { useStore } from "@/state/store";
 import { matchModKey } from "@/lib/shortcuts";
 import { useDeferredCollapse } from "@/lib/useDeferredCollapse";
+import { useWorkspaceFullscreen } from "@/lib/useWorkspaceFullscreen";
+import { WorkspaceFullscreenButton } from "@/components/workspace/WorkspaceFullscreenButton";
 import { DesignPalettePicker } from "./DesignPalettePicker";
 import { DesignSystemPicker } from "./DesignSystemPicker";
 import { DesignInspector, type CanvasInspectPick } from "./DesignInspector";
 import { DesignVariantsStrip } from "./DesignVariantsStrip";
+import { PresentBar } from "./DesignPresentBar";
 import { GameStudioPanel } from "../game/GameStudioPanel";
 import { AssetStylePicker } from "@/components/assets/AssetStylePicker";
 import { GameStylePicker } from "@/components/game/GameStylePicker";
@@ -726,6 +729,8 @@ export function DesignCanvas() {
   const [controlsOpen, setControlsOpen] = useState(false);
   const [touchStick, setTouchStick] = useState(false);
   const [playMode, setPlayMode] = useState(false);
+  const [presenting, setPresenting] = useState(false);
+  const presentOsFullscreen = useRef(false);
   const [muted, setMuted] = useState(false);
   const [aspectLock, setAspectLock] = useState(true);
   const [lastKeys, setLastKeys] = useState<string[]>([]);
@@ -877,6 +882,7 @@ export function DesignCanvas() {
     setPaused(false);
     setTouchStick(false);
     setPlayMode(false);
+    setPresenting(false);
     setMuted(false);
     setAspectLock(true);
     setLastKeys([]);
@@ -1615,6 +1621,42 @@ export function DesignCanvas() {
       postGame({ type: "locus-game-gamepad", on: true });
       queueMicrotask(() => frame.current?.contentWindow?.focus());
     }
+  }
+
+  /** Present: cover the screen with the design alone (no chrome). Esc exits. */
+  function enterPresent(on = true) {
+    setPresenting(on);
+    if (on) {
+      setCommenting(false);
+      setEditing(false);
+      setInspecting(false);
+      setInspectPick(null);
+      setTuneOpen(false);
+      // Let window key handlers (Esc, arrows) see keys until the viewer clicks in.
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      const root = document.documentElement;
+      if (!document.fullscreenElement && typeof root.requestFullscreen === "function") {
+        root
+          .requestFullscreen()
+          .then(() => {
+            presentOsFullscreen.current = true;
+          })
+          .catch(() => undefined);
+      }
+      return;
+    }
+    if (presentOsFullscreen.current) {
+      presentOsFullscreen.current = false;
+      if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => undefined);
+    }
+  }
+
+  function stepPresentVariant(dir: 1 | -1) {
+    const list = session?.designVariants ?? [];
+    if (list.length < 2) return;
+    const at = list.findIndex((row) => row.id === session?.activeVariantId);
+    const next = list[(at < 0 ? 0 : at + dir + list.length) % list.length];
+    if (next) void activateVariant(next.id);
   }
 
   function popOutPlay() {
@@ -2382,6 +2424,63 @@ export function DesignCanvas() {
   }, [game, playMode, paused]);
 
   useEffect(() => {
+    if (!presenting) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        enterPresent(false);
+      } else if (event.key === "ArrowRight" || event.key === "PageDown") {
+        event.preventDefault();
+        stepPresentVariant(1);
+      } else if (event.key === "ArrowLeft" || event.key === "PageUp") {
+        event.preventDefault();
+        stepPresentVariant(-1);
+      }
+    }
+    // Leaving OS full screen (Esc while the design has focus) ends the presentation.
+    function onFullscreen() {
+      if (presentOsFullscreen.current && !document.fullscreenElement) {
+        presentOsFullscreen.current = false;
+        setPresenting(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("fullscreenchange", onFullscreen);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("fullscreenchange", onFullscreen);
+    };
+  });
+
+  const canvasFs = useWorkspaceFullscreen();
+
+  // Escape drops the active canvas tool before it leaves full screen.
+  const canvasTool = commenting || editing || inspecting;
+  useEffect(() => {
+    if (!canvasTool) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      )
+        return;
+      event.preventDefault();
+      setCommenting(false);
+      setEditing(false);
+      setInspecting(false);
+      setInspectPick(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canvasTool]);
+
+  useEffect(() => {
     if (game || assets) return;
     function typing(target: EventTarget | null) {
       return (
@@ -2455,28 +2554,31 @@ export function DesignCanvas() {
   const poseRanges = parseCanvasPoseAttrs(previewHtml ?? "");
   const guestComingUp =
     starting || waitingStart || (session.status === "provisioning" && !guestReady);
+  // Sentence case here: the pane keeps the file name lowercase (no CSS capitalize).
   const canvasMeta = swapping
-    ? "loading…"
+    ? "Loading…"
     : building
-      ? "building image"
+      ? "Building image"
       : guestComingUp
-        ? "starting container"
+        ? "Starting container"
         : working
           ? previewHtml?.trim()
-            ? "agent updating canvas"
-            : "agent working"
+            ? "Agent updating canvas"
+            : "Agent working"
           : previewHtml?.trim()
             ? "index.html"
-            : "waiting for a draft";
+            : "Waiting for a draft";
 
   return (
     <aside
-      className={`vm-pane design-pane${working ? " is-working" : ""}${playMode ? " is-play-mode" : ""}${assets ? " is-asset" : ""}`}
+      className={`vm-pane design-pane${working ? " is-working" : ""}${playMode ? " is-play-mode" : ""}${presenting ? " is-presenting" : ""}${assets ? " is-asset" : ""}${canvasFs.isFullscreen ? ` ${canvasFs.className}` : ""}`}
     >
       <div className="vm-toolbar">
-        <span className="vm-status">
+        <span className="vm-status" title={`Canvas status: ${canvasMeta}`}>
           <span
             className={`dot ${working ? "running" : guestReady ? "idle" : (vm?.status ?? "stopped")}`}
+            role="img"
+            aria-label={`Canvas status: ${canvasMeta}`}
           />
           <span className="vm-status-copy">
             <strong>Canvas</strong>
@@ -3058,6 +3160,18 @@ export function DesignCanvas() {
               )}
             </>
           )}
+          {game || assets ? null : (
+            <button
+              type="button"
+              className="btn small"
+              disabled={!html?.trim()}
+              title="Present the design full screen (Esc exits, arrows step variants)"
+              data-testid="canvas-present"
+              onClick={() => enterPresent(true)}
+            >
+              Present
+            </button>
+          )}
           <OverflowMenu
             label={<IconMore />}
             title="Canvas actions"
@@ -3353,15 +3467,24 @@ export function DesignCanvas() {
                   : "Promote"}
             </MenuItem>
           </OverflowMenu>
-          <button
-            type="button"
-            className="btn icon ghost"
-            title="Collapse canvas"
-            aria-label="Collapse canvas"
-            onClick={() => dispatch({ type: "toggleVmPane" })}
-          >
-            <IconPanelRight />
-          </button>
+          {canvasFs.isFullscreen ? null : (
+            <button
+              type="button"
+              className="btn icon ghost"
+              title="Collapse canvas"
+              aria-label="Collapse canvas"
+              onClick={() => dispatch({ type: "toggleVmPane" })}
+            >
+              <IconPanelRight />
+            </button>
+          )}
+          {/* Last, so it stays under the pointer when Collapse hides on entering full screen. */}
+          <WorkspaceFullscreenButton
+            isFullscreen={canvasFs.isFullscreen}
+            onToggle={canvasFs.toggle}
+            label="Full screen canvas"
+            testId="canvas-fullscreen"
+          />
         </div>
       </div>
       {assets ? (
@@ -4052,6 +4175,14 @@ export function DesignCanvas() {
               <button type="button" className="game-play-exit" onClick={() => enterPlay(false)}>
                 Exit play · Esc
               </button>
+            ) : null}
+            {presenting ? (
+              <PresentBar
+                variants={session.designVariants ?? []}
+                activeId={session.activeVariantId}
+                onStep={stepPresentVariant}
+                onExit={() => enterPresent(false)}
+              />
             ) : null}
             {assets ? (
               <>

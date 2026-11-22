@@ -28,6 +28,12 @@ const name = process.env.LOCUS_WORKER_NAME?.trim() || hostname();
 const loaded = await loadOrCreateWorkerToken(dataDir);
 const token = loaded.token;
 const tls = await loadOrCreateWorkerTls(dataDir);
+const tokenFromEnv = Boolean(process.env.LOCUS_WORKER_TOKEN?.trim());
+// Guest commands and CLI agents are children of this process: keep the bearer token and
+// TLS private key out of their environment once loaded.
+for (const key of ["LOCUS_WORKER_TOKEN", "LOCUS_WORKER_TLS_CERT_B64", "LOCUS_WORKER_TLS_KEY_B64"]) {
+  delete process.env[key];
+}
 const engine = await createDockerEngine(dataDir);
 const { key: hostKey, error: hostKeyError } = await tryEnsureHostKey(dataDir);
 if (hostKeyError) console.warn(hostKeyWarning(hostKeyError));
@@ -69,7 +75,7 @@ console.log(
     fingerprint: tls.fingerprint,
     token,
     tokenCreated: loaded.created,
-    tokenFromEnv: Boolean(process.env.LOCUS_WORKER_TOKEN?.trim()),
+    tokenFromEnv,
     printToken: Boolean(process.stdout.isTTY),
   }),
 );

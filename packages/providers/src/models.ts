@@ -5,11 +5,13 @@ import {
   isCursorCliProvider,
   isCursorProvider,
   isKiroCliProvider,
+  isGenericCliProvider,
   type AiProvider,
 } from "@locus/shared";
 import { checkClaudeCode, listClaudeCodeModels } from "./claudeCode.js";
 import { checkCodexCli, listCodexCliModels } from "./codexCli.js";
 import { checkKiroCli, listKiroCliModels } from "./kiroCli.js";
+import { checkGenericCli, listGenericCliModels } from "./genericCli.js";
 import { listCursorCliModels, type CursorCliSpawner } from "./cursorCli.js";
 import { openAiSignedHeaders } from "./openai.js";
 import { ProviderError, type FetchFn } from "./types.js";
@@ -30,6 +32,9 @@ export async function listProviderModels(
   }
   if (isKiroCliProvider(provider)) {
     return listKiroCliModels(provider);
+  }
+  if (isGenericCliProvider(provider)) {
+    return listGenericCliModels(provider);
   }
   if (!hasUsableKey(provider.apiKey, provider.baseUrl, provider.kind)) {
     throw new ProviderError("Provider API key is not set");
@@ -96,6 +101,12 @@ export function cursorMissingCompletionsError(kind?: string): ProviderError {
       404,
     );
   }
+  if (kind === "cli-agent") {
+    return new ProviderError(
+      "Custom CLI agents have no OpenAI-compatible POST /v1/chat/completions. Chat turns spawn the configured CLI (argv template + text / jsonl / claude-stream-json / ACP output). Test connection runs `<command> --version`.",
+      404,
+    );
+  }
   return new ProviderError(
     "Cursor Cloud has no OpenAI-compatible POST /v1/chat/completions. Chat turns use the Cloud Agents API (POST /v1/agents). Refresh models uses GET /v1/models.",
     404,
@@ -156,6 +167,17 @@ export async function testProvider(
       models: (await listKiroCliModels(provider)).length,
       ...(health.version ? { version: health.version } : {}),
       authMode: health.authMode,
+      command: health.command,
+      scope: "control-plane",
+    };
+  }
+  if (isGenericCliProvider(provider)) {
+    const health = await checkGenericCli(provider, spawnFn);
+    if (!health.ok) throw new ProviderError(health.message ?? "CLI agent health check failed");
+    return {
+      ok: true,
+      models: (await listGenericCliModels(provider)).length,
+      ...(health.version ? { version: health.version } : {}),
       command: health.command,
       scope: "control-plane",
     };

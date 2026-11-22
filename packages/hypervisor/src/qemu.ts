@@ -25,7 +25,7 @@ import { appendVmLog, formatStatusLine } from "./logs.js";
 import { attachSerialLog } from "./serial.js";
 import { isGuestDiskImage } from "./media.js";
 import type { CommandRunner, SpawnedProcess } from "./runner.js";
-import type { CreateVmRequest, Hypervisor, VmListener } from "./types.js";
+import type { BootStepListener, CreateVmRequest, Hypervisor, VmListener } from "./types.js";
 import { writeUnattendDir } from "./unattend.js";
 
 function now(): string {
@@ -199,6 +199,10 @@ export class QemuHypervisor extends EventEmitter implements Hypervisor {
     this.on("status", listener);
   }
 
+  onBootStep(listener: BootStepListener): void {
+    this.on("bootStep", listener);
+  }
+
   list(): VmInstance[] {
     return [...this.vms.values()].map((v) => v.instance);
   }
@@ -344,6 +348,7 @@ export class QemuHypervisor extends EventEmitter implements Hypervisor {
 
     const diskImage = Boolean(golden) || isGuestDiskImage(sourcePath);
     const backing = golden || (isGuestDiskImage(sourcePath) ? sourcePath : undefined);
+    this.emit("bootStep", id, "disk");
     const vmDir = join(this.opts.dataDir, "vms", id);
     await mkdir(vmDir, { recursive: true });
     const diskExisted = await this.opts.runner.exists(live.instance.diskPath);
@@ -463,6 +468,7 @@ export class QemuHypervisor extends EventEmitter implements Hypervisor {
       hostSharePath: live.hostSharePath,
     };
     const argv = buildQemuArgv(template, ctx);
+    this.emit("bootStep", id, "boot");
     const child = this.opts.runner.spawn(this.qemuBinaryFor(arch), argv, { cwd: vmDir });
     live.process = child;
     live.instance.pid = child.pid;
@@ -499,6 +505,7 @@ export class QemuHypervisor extends EventEmitter implements Hypervisor {
     live.readyAbort?.abort();
     live.readyAbort = new AbortController();
     if (this.opts.waitGuest && (live.instance.ssh || live.instance.winrm)) {
+      this.emit("bootStep", id, "connect");
       void this.waitUntilReady(id);
     } else {
       setTimeout(() => {

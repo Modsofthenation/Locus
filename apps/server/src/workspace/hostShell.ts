@@ -1,26 +1,50 @@
 import { execFile, spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 
+/** POSIX single-quote one argument for `sh -c` / `script -c`. */
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * The PTY-wrapped process for a workspace terminal: the user's interactive shell, or
+ * `command` run through that shell (`-ic`, so rc-file PATH entries like ~/.local/bin apply).
+ */
 export function hostShellCommand(
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
+  command?: string,
 ): { cmd: string; args: string[] } {
+  const line = command?.trim();
   if (platform === "win32") {
-    return { cmd: env.ComSpec?.trim() || "cmd.exe", args: [] };
+    const comspec = env.ComSpec?.trim() || "cmd.exe";
+    return line ? { cmd: comspec, args: ["/d", "/s", "/c", line] } : { cmd: comspec, args: [] };
   }
   const shell = env.SHELL?.trim() || "/bin/bash";
   if (platform === "darwin") {
-    return { cmd: "script", args: ["-q", "/dev/null", shell, "-i"] };
+    return {
+      cmd: "script",
+      args: line ? ["-q", "/dev/null", shell, "-ic", line] : ["-q", "/dev/null", shell, "-i"],
+    };
   }
-  return { cmd: "script", args: ["-qefc", `${shell} -i`, "/dev/null"] };
+  return {
+    cmd: "script",
+    args: ["-qefc", line ? `${shell} -ic ${shellQuote(line)}` : `${shell} -i`, "/dev/null"],
+  };
 }
 
 export function spawnHostShell(
   cwd: string,
-  opts: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv; spawn?: typeof spawn } = {},
+  opts: {
+    platform?: NodeJS.Platform;
+    env?: NodeJS.ProcessEnv;
+    spawn?: typeof spawn;
+    /** Run this command line through the shell instead of a bare interactive shell. */
+    command?: string;
+  } = {},
 ): ChildProcess {
   const platform = opts.platform ?? process.platform;
   const env = opts.env ?? process.env;
-  const { cmd, args } = hostShellCommand(platform, env);
+  const { cmd, args } = hostShellCommand(platform, env, opts.command);
   const spawnFn = opts.spawn ?? spawn;
   const childOpts: SpawnOptions = {
     cwd,

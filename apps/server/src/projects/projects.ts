@@ -28,6 +28,8 @@ import {
   parseAgentPlacement,
   parseProductMode,
   parseProjectDocument,
+  parseProjectOfflineProfile,
+  parseDockerImage,
   parseSessionSurface,
   parseSwarmTeamHandoff,
   playbookForStarter,
@@ -77,6 +79,7 @@ import {
   type SwarmTeamStatus,
 } from "@locus/shared";
 import type { ToolResult } from "@locus/guest-agent";
+import { inspectOfflineProfile } from "./offlineProject.js";
 import { replaceFile } from "../core/atomic.js";
 import type { Hub } from "../core/hub.js";
 import type { JsonStore } from "../core/store.js";
@@ -486,6 +489,16 @@ export class ProjectService {
     return saved;
   }
 
+  async offlinePreflight(id: string, raw?: unknown) {
+    const project = await this.require(id);
+    const profile = raw === undefined ? project.offlineProfile : parseProjectOfflineProfile(raw);
+    if (!profile) throw new Error("Choose an Ollama provider, model, and Docker image");
+    return inspectOfflineProfile(this.store, profile, {
+      hasImage: (image) => this.sessions?.hasCachedDockerImage(image) ?? Promise.resolve(false),
+      fetchFn: this.sessions?.fetchFn ?? fetch,
+    });
+  }
+
   async patch(id: string, input: PatchProjectInput): Promise<ProjectDocument> {
     const project = await this.require(id);
     const previousTeamName = projectTeamName(project);
@@ -528,6 +541,31 @@ export class ProjectService {
     if (input.backendId === null) delete project.backendId;
     else if (typeof input.backendId === "string")
       project.backendId = input.backendId.trim() || undefined;
+    if (input.offlineProfile !== undefined) {
+      const previous = project.offlineProfile;
+      if (input.offlineProfile === null) delete project.offlineProfile;
+      else {
+        const profile = parseProjectOfflineProfile(input.offlineProfile);
+        const image = profile && parseDockerImage(profile.dockerImage);
+        if (
+          !profile ||
+          !image ||
+          image.startsWith("-") ||
+          /(?:^|[:-])cloud$/i.test(profile.model)
+        ) {
+          throw new Error("Choose a local Ollama model and Docker image");
+        }
+        if (project.groupChat)
+          throw new Error("Offline profiles are for projects with their own agents");
+        project.offlineProfile = { ...profile, dockerImage: image };
+      }
+      if (
+        previous?.providerId !== project.offlineProfile?.providerId ||
+        previous?.model !== project.offlineProfile?.model
+      ) {
+        delete project.coordinatorSessionId;
+      }
+    }
     if (input.namedEnvId === null) delete project.namedEnvId;
     else if (typeof input.namedEnvId === "string")
       project.namedEnvId = input.namedEnvId.trim() || undefined;
@@ -950,7 +988,13 @@ export class ProjectService {
     const project = await this.require(id);
     if (project.coordinatorSessionId) {
       const existing = await this.sessions?.get(project.coordinatorSessionId);
-      if (existing) {
+      const offline = project.offlineProfile;
+      if (
+        existing &&
+        Boolean(existing.offline) === Boolean(offline) &&
+        (!offline ||
+          (existing.providerId === offline.providerId && existing.model === offline.model))
+      ) {
         await this.syncGroupChatCoordinator(project, existing);
         await this.syncFleetPulls(project);
         if (prompt?.trim()) {
@@ -984,7 +1028,7 @@ export class ProjectService {
       ...(project.groupChat ? { persona: { displayName: "Locus", hubRole: "Coordinator" } } : {}),
     });
     const next = await this.patch(project.id, { coordinatorSessionId: session.id });
-    if (project.recipeId === "gardening") {
+    if (project.recipeId === "gardening" && !project.offlineProfile) {
       await this.seedGardenTimer(session.id);
     }
     const fresh = (await this.get(next.id)) ?? next;
@@ -1526,7 +1570,7 @@ export class ProjectService {
   }
 
   private async wakeMembers(project: ProjectDocument): Promise<void> {
-    if (!this.sessions || !this.repos) return;
+    if (project.offlineProfile || !this.sessions || !this.repos) return;
     const debounce = this.opts?.wakeDebounceMs ?? 60_000;
     const last = this.wakeAt.get(project.id) ?? 0;
     if (Date.now() - last < debounce) return;
@@ -1630,7 +1674,7 @@ export class ProjectService {
    * `project_get` runs. Quietly keeps the cached pull on failure. Debounced per project.
    */
   async syncFleetPulls(project: ProjectDocument): Promise<void> {
-    if (!this.sessions || !this.repos) return;
+    if (project.offlineProfile || !this.sessions || !this.repos) return;
     const last = this.pullRefreshAt.get(project.id) ?? 0;
     if (Date.now() - last < PULL_REFRESH_DEBOUNCE_MS) return;
     this.pullRefreshAt.set(project.id, Date.now());

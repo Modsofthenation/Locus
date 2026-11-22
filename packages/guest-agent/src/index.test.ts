@@ -370,14 +370,13 @@ describe("commandFor", () => {
     expect(win).toContain("Wait-Job");
     expect(win).toContain("C:\\Users\\locus\\workspace");
     const a11y = commandFor("ubuntu", { name: "a11y_tree", args: { title: "Terminal" } });
-    expect(a11y).toContain("wmctrl -lG");
-    expect(a11y).toContain("wmctrl -lx");
-    expect(a11y).toContain("getwindowfocus");
-    expect(a11y).toContain("Terminal");
+    expect(a11y).toContain("pyatspi");
+    expect(a11y).toContain("queryEditableText");
+    expect(a11y).toContain("get_process_id");
     const uia = commandFor("windows-11", { name: "uia_tree", args: { title: "Notepad" } });
     expect(uia).toContain("UIAutomationClient");
     expect(uia).toContain("TreeWalker");
-    expect(uia).toContain("Notepad");
+    expect(uia).toContain("GetRuntimeId");
     expect(uia).not.toContain("Get-Process");
     expect(
       commandFor("ubuntu", {

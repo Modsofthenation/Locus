@@ -28,6 +28,7 @@ import {
   type ChatMessage,
   type CloneProgress,
   type ImageBuildProgress,
+  type BootProgress,
   type SubagentLive,
   type TeamEventKind,
   type TeamSpeaker,
@@ -54,6 +55,7 @@ import { IconCopy } from "@/components/layout/Icons";
 import { Mascot } from "@/components/layout/Mascot";
 import { PersonaAvatar } from "@/components/layout/PersonaAvatar";
 import { CloneProgressCard, ImageBuildCard } from "./CloneProgressCard";
+import { BootStepsCard } from "./BootStepsCard";
 import { ThinkingTrace } from "./ThinkingTrace";
 import { ChatScrollIndicator } from "./ChatScrollIndicator";
 import { NewMessagesDivider } from "./NewMessagesDivider";
@@ -279,6 +281,8 @@ export const ChatThread = memo(function ChatThread({
   cloneProgress,
   buildStartId,
   imageProgress,
+  bootProgress,
+  onRetryBoot,
   waitingGuest,
   waitingStartNote,
   workingOnBlank,
@@ -300,6 +304,8 @@ export const ChatThread = memo(function ChatThread({
   onRemoveSubscription,
   onContinue,
   onUndoTurn,
+  turnUsageText,
+  onMergeWorktree,
 }: {
   threadRef: RefObject<HTMLDivElement | null>;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
@@ -321,6 +327,9 @@ export const ChatThread = memo(function ChatThread({
   cloneProgress?: CloneProgress;
   buildStartId?: string;
   imageProgress?: ImageBuildProgress;
+  /** Live or failed guest boot step list; replaces the tail spinner. */
+  bootProgress?: BootProgress;
+  onRetryBoot?: () => void;
   waitingGuest: boolean;
   waitingStartNote: boolean;
   workingOnBlank?: string;
@@ -342,6 +351,8 @@ export const ChatThread = memo(function ChatThread({
   onRemoveSubscription: (id: string) => void;
   onContinue?: () => void;
   onUndoTurn?: (checkpointId: string) => void;
+  turnUsageText?: string;
+  onMergeWorktree?: () => Promise<void>;
 }) {
   const swarmWhoBase = { session, teamName, members: teamMembers };
   const workingWho = swarmMode
@@ -712,6 +723,8 @@ export const ChatThread = memo(function ChatThread({
                     onOpenPath={onOpenPath}
                     onContinue={() => onContinue?.()}
                     onUndo={onUndoTurn}
+                    usageText={turnUsageText}
+                    onMerge={onMergeWorktree}
                   />
                 ) : null}
               </div>
@@ -725,6 +738,11 @@ export const ChatThread = memo(function ChatThread({
             <div className="compact-notice" data-testid="compact-notice">
               {formatCompactNotice(session.lastCompact)}
             </div>
+          </div>
+        ) : null}
+        {bootProgress && !showTailWorking ? (
+          <div className="msg assistant">
+            <BootStepsCard progress={bootProgress} onRetry={onRetryBoot} />
           </div>
         ) : null}
         {showTailWorking ? (
@@ -741,12 +759,16 @@ export const ChatThread = memo(function ChatThread({
               ) : null}
               {workingWho.name}
             </div>
-            <WorkingIndicator
-              label={workingLabel}
-              thought={thoughtTraces ? thinkingSnippet : undefined}
-              ticking
-              resetKey={session.id}
-            />
+            {bootProgress ? (
+              <BootStepsCard progress={bootProgress} onRetry={onRetryBoot} />
+            ) : (
+              <WorkingIndicator
+                label={workingLabel}
+                thought={thoughtTraces ? thinkingSnippet : undefined}
+                ticking
+                resetKey={session.id}
+              />
+            )}
             {viewing ? null : (
               <SubagentFold
                 agents={session.subagents?.filter((row) => row.status === "running")}

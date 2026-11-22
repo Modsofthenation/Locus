@@ -19,6 +19,7 @@ import {
   isProjectSession,
   lastUserPrompt,
   parseProductMode,
+  policyAllowsHostAgents,
   sessionRuntime,
   setupHasRemainingTodos,
   type AgentSession,
@@ -33,6 +34,8 @@ import {
   type SetupStatus,
   type SlackConversation,
   type VmInstance,
+  isUsageCapableProvider,
+  themeFamilyLabel,
 } from "@locus/shared";
 import { featurePaletteItems } from "./discoverability";
 import { SHORTCUTS, shortcutHint } from "./shortcuts";
@@ -46,6 +49,7 @@ export type PaletteGroup =
   | "Design"
   | "Games"
   | "Assets"
+  | "Android"
   | "Board"
   | "Project"
   | "IDE"
@@ -134,6 +138,13 @@ export function paletteItems(input: {
     hint: "2D/3D studio from a photo or prompt",
     group: "Assets",
     keywords: "assets 3d 2d mesh rig sprite voxel image-to-3d texture glb",
+  });
+  items.push({
+    id: "section:android",
+    title: "Android",
+    hint: "Native apps, device canvas, tests and APK builds",
+    group: "Android",
+    keywords: "android app mobile kotlin compose emulator device tablet foldable gradle apk",
   });
   items.push({
     id: "new-asset",
@@ -277,11 +288,22 @@ export function paletteItems(input: {
     const game = isGameSession(row);
     const assets = isAssetSession(row);
     const ide = isIdeSession(row);
+    const android = row.playbook?.includes("LOCUS_ANDROID_WORKFLOW");
     items.push({
       id: `session:${row.id}`,
       title: row.title,
       hint: design || game || assets ? row.model : `${guestLabel(row.os)} · ${row.model}`,
-      group: design ? "Design" : game ? "Games" : assets ? "Assets" : ide ? "IDE" : "Agents",
+      group: android
+        ? "Android"
+        : design
+          ? "Design"
+          : game
+            ? "Games"
+            : assets
+              ? "Assets"
+              : ide
+                ? "IDE"
+                : "Agents",
       keywords: `${row.title} ${row.os} ${row.model} ${lastUserPrompt(row.messages) ?? ""} ${design ? "design canvas" : game ? "game playable" : assets ? "asset mesh rig 3d 2d" : ide ? "ide workspace host folder" : "agent"} jump`,
     });
   }
@@ -304,7 +326,8 @@ export function paletteItems(input: {
         : `${waitingNames.slice(0, 2).join(", ")} +${waitingNames.length - 2}`
       : "Agents waiting on you",
     group: "Needs you",
-    keywords: "needs you inbox waiting approval gated human agents board comments brain",
+    keywords:
+      "home dashboard needs you inbox waiting approval gated human agents board comments brain",
   });
   for (const row of waiting) {
     const detail =
@@ -556,6 +579,19 @@ export function paletteItems(input: {
     group: "Assets",
     keywords: "asset style look mesh sprite save reuse clay",
   });
+  const usageProviders = (input.config?.providers ?? []).filter(
+    (row) => row.enabled && isUsageCapableProvider(row),
+  );
+  if (usageProviders.length) {
+    items.push({
+      id: "plan-usage",
+      title: "Plan usage",
+      hint: `Quota left · ${usageProviders.map((row) => row.name).join(", ")}`,
+      group: "Settings",
+      keywords:
+        "plan usage quota limit remaining credits rate limit reset 5-hour weekly monthly codex claude cursor kiro subscription billing",
+    });
+  }
   for (const group of SETTINGS_NAV_GROUPS) {
     for (const tab of group.items) {
       const label = settingsNavLabel(tab);
@@ -577,7 +613,7 @@ export function paletteItems(input: {
       title: `Theme · ${opt.name}`,
       hint: opt.summary,
       group: "Appearance",
-      keywords: `theme ${opt.name} ${opt.id} appearance${opt.chatScene ? " space photo chat" : ""}${opt.gradient ? " gradient" : ""}${opt.contrast ? " contrast" : ""}${opt.terminal ? " terminal console tty crt" : ""}`,
+      keywords: `theme ${opt.name} ${opt.id} appearance${opt.chatScene ? " space photo chat" : ""}${opt.gradient ? " gradient" : ""}${opt.contrast ? " contrast" : ""}${opt.terminal ? " terminal console tty crt" : ""}${opt.style ? ` ${opt.style} ${themeFamilyLabel(opt.style).toLowerCase()}` : ""}`,
     });
   }
   items.push({
@@ -587,6 +623,17 @@ export function paletteItems(input: {
     group: "Help",
     keywords: "keyboard shortcuts cheat sheet keys help question ?",
   });
+  if (policyAllowsHostAgents(input.config?.managedPolicy)) {
+    const ready =
+      input.setup?.hasProvider ?? Boolean(input.config?.providers.some((row) => row.enabled));
+    items.push({
+      id: "sample-task",
+      title: "Try a sample task",
+      hint: ready ? "Host agent fixes a failing test" : "Add a provider first",
+      group: "Help",
+      keywords: "try sample task demo first run tutorial example failing test host onboarding",
+    });
+  }
   if (input.setup && setupHasRemainingTodos(input.setup)) {
     items.push({
       id: "finish-setup",

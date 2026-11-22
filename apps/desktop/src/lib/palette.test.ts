@@ -212,7 +212,10 @@ describe("paletteItems", () => {
     ).toBe(false);
     expect(items.some((i) => i.id === "design-systems")).toBe(true);
     expect(items.some((i) => i.id === "asset-styles")).toBe(true);
-    expect(filterPaletteItems(items, "canvas").map((i) => i.id)).toEqual(["session:d1"]);
+    expect(filterPaletteItems(items, "canvas").map((i) => i.id)).toEqual([
+      "session:d1",
+      "section:android",
+    ]);
   });
 
   it("groups game sessions separately from design", () => {
@@ -237,7 +240,10 @@ describe("paletteItems", () => {
     expect(items.find((i) => i.id === "session:as1")?.group).toBe("Assets");
     expect(items.find((i) => i.id === "section:games")?.group).toBe("Games");
     expect(items.find((i) => i.id === "section:assets")?.group).toBe("Assets");
-    expect(filterPaletteItems(items, "canvas").map((i) => i.id)).toEqual(["session:d1"]);
+    expect(filterPaletteItems(items, "canvas").map((i) => i.id)).toEqual([
+      "session:d1",
+      "section:android",
+    ]);
     expect(filterPaletteItems(items, "playable").map((i) => i.id)).toContain("session:g1");
     expect(filterPaletteItems(items, "playable").map((i) => i.id)).not.toContain("session:d1");
     expect(filterPaletteItems(items, "rig").map((i) => i.id)).toContain("session:as1");
@@ -342,6 +348,7 @@ describe("paletteItems", () => {
       "environments",
       "git",
       "integrations",
+      "reviewers",
       "appearance",
       "notifications",
       "phone",

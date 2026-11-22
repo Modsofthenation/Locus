@@ -23,6 +23,7 @@ export interface ToolResult {
 }
 
 export interface GuestRuntime {
+  dispose?(): void;
   readonly os: GuestOs;
   /**
    * Live guests exec against a real container, VM, or host tree.

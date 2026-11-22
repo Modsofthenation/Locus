@@ -1,0 +1,9 @@
+{
+  "name": "retry-kit",
+  "version": "1.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-reporter=tap test/*.test.ts"
+  }
+}

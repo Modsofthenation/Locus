@@ -17,10 +17,12 @@ import {
   type CodexReasoningEffort,
   type AiProvider,
 } from "@locus/shared";
-import { Fragment } from "react";
+import { Fragment, useContext } from "react";
 import { modelsForProvider } from "@/lib/lastAgent";
+import { ProviderUsageMeter, useProviderUsageLabels } from "./ProviderUsageMeter";
 import { MenuItem, MenuLabel, MenuSep, OverflowMenu } from "@/components/layout/OverflowMenu";
 import { Select } from "@/components/layout/Select";
+import { Store, openSettings } from "@/state/store";
 
 /**
  * One label for "what the next turn runs on", shared by the composer model chip and the
@@ -58,6 +60,8 @@ export function ModelPicker(props: {
   /** Cost table under the pickers; off where the model option label already shows the rate. */
   showCosts?: boolean;
 }) {
+  // Optional: the picker also renders outside the app shell (tests, previews).
+  const store = useContext(Store);
   const provider = props.providers.find((p) => p.id === props.providerId);
   const selectedModel =
     provider && isCodexCliProvider(provider) ? normalizeCodexCliModel(props.model) : props.model;
@@ -78,6 +82,7 @@ export function ModelPicker(props: {
 
   const setModel = (model: string) => props.onChange({ providerId: props.providerId, model });
 
+  const usageLabel = useProviderUsageLabels(props.providers, Boolean(props.compact));
   const listedProviders = props.compact
     ? props.providers.filter((p) => p.enabled || p.id === props.providerId)
     : props.providers;
@@ -148,20 +153,28 @@ export function ModelPicker(props: {
   const modelControls = cursorControls || codexControls;
 
   if (props.compact) {
-    const combinedLabel = composerModelLabel(props.providers, props.providerId, props.model).label;
+    const combined = composerModelLabel(props.providers, props.providerId, props.model);
     return (
       <div className="model-picker-wrap">
         <div className="model-picker compact">
           <OverflowMenu
-            className={`model-picker-combined${provider?.enabled ? " on" : ""}`}
+            className={`model-picker-combined${provider?.enabled ? " on" : ""}${combined.off ? " off" : ""}`}
             title="Model"
             align="left"
             prefer="up"
             wide
             disabled={props.disabled}
             toggleClassName="btn small ghost model-picker-combined-toggle"
-            label={<span className="model-picker-combined-label">{combinedLabel}</span>}
+            label={<span className="model-picker-combined-label">{combined.label}</span>}
           >
+            {combined.off && store ? (
+              <>
+                <MenuItem onClick={() => openSettings(store.dispatch, "providers")}>
+                  Turn on a provider…
+                </MenuItem>
+                <MenuSep />
+              </>
+            ) : null}
             {listedProviders.length ? (
               listedProviders.map((row) => {
                 const listed = modelsForProvider(
@@ -174,6 +187,9 @@ export function ModelPicker(props: {
                     <MenuLabel>
                       {row.name}
                       {row.enabled ? "" : " (off)"}
+                      {usageLabel(row.id) ? (
+                        <span className="model-picker-usage"> · {usageLabel(row.id)}</span>
+                      ) : null}
                     </MenuLabel>
                     {ids.length ? (
                       ids.map((m) => (
@@ -207,7 +223,24 @@ export function ModelPicker(props: {
             ) : (
               <MenuItem disabled>No provider</MenuItem>
             )}
+            {store && listedProviders.some((row) => usageLabel(row.id)) ? (
+              <>
+                <MenuSep />
+                <MenuItem
+                  onClick={() =>
+                    store.dispatch({
+                      type: "planUsage",
+                      open: true,
+                      providerId: props.providerId || undefined,
+                    })
+                  }
+                >
+                  Plan usage…
+                </MenuItem>
+              </>
+            ) : null}
           </OverflowMenu>
+          <ProviderUsageMeter provider={provider} />
           {modelControls ? (
             <OverflowMenu
               className="model-picker-more"

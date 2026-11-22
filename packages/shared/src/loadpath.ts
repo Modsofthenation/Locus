@@ -654,12 +654,30 @@ export function formatFixPrompt(input: {
   number: number;
   verdict?: { verdict: string; reasons: string[]; risk: string };
   loadpath?: { markdown: string };
+  /** Failing CI section (`formatCiFixPrompt`). When set, CI comes first and the review is context. */
+  ci?: string;
 }): string {
   const verdict = input.verdict
     ? `Reviewer ${input.verdict.verdict} (risk ${input.verdict.risk}): ${
         input.verdict.reasons.length ? input.verdict.reasons.join("; ") : "no reasons given"
       }`
-    : "No reviewer JSON verdict yet. Read the latest review thread if needed, then fix the PR.";
+    : input.ci
+      ? "No reviewer JSON verdict yet."
+      : "No reviewer JSON verdict yet. Read the latest review thread if needed, then fix the PR.";
+  if (input.ci?.trim()) {
+    return [
+      input.ci.trim(),
+      "",
+      "Pull request context:",
+      `PR: ${input.pull.url}`,
+      `#${input.number} ${input.pull.title}`,
+      `${input.pull.headRef} → ${input.pull.baseRef}`,
+      verdict,
+      input.loadpath?.markdown ? `\n${input.loadpath.markdown}` : undefined,
+    ]
+      .filter((line): line is string => line !== undefined)
+      .join("\n");
+  }
   return [
     "Implement the reviewer's findings on this pull request. Stay on the PR branch. Open or update the PR when the fix is ready. Wait for Approve / Deny before push or merge.",
     "",

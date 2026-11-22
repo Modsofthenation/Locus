@@ -47,6 +47,7 @@ export class SlackGateway {
   private conversationRefresh: Promise<void> | undefined;
   private emojiRefresh: Promise<void> | undefined;
   private readonly historyRefresh = new Map<string, Promise<void>>();
+  private readonly messageListeners = new Set<(event: SlackMessageEvent) => void>();
 
   constructor(
     private readonly store: JsonStore,
@@ -543,9 +544,32 @@ export class SlackGateway {
     return { sessionId: session.id, created: true };
   }
 
+  /**
+   * Hear about new channel messages and thread replies as Socket Mode delivers them. Only arrives
+   * when the Slack app subscribes to `message.channels` / `message.groups` bot events and the bot
+   * is in the channel; listeners must keep polling as the fallback. Returns an unsubscribe.
+   */
+  onChannelMessage(listener: (event: SlackMessageEvent) => void): () => void {
+    this.messageListeners.add(listener);
+    return () => this.messageListeners.delete(listener);
+  }
+
   private async onEnvelope(envelope: SlackSocketEnvelope): Promise<void> {
     const payload = envelope.payload ?? {};
     const type = typeof payload.type === "string" ? payload.type : envelope.type;
+    if (envelope.type === "events_api" || type === "event_callback") {
+      const event = parseSlackMessageEvent(payload.event);
+      if (event) {
+        for (const listener of this.messageListeners) {
+          try {
+            listener(event);
+          } catch {
+            /* a listener's failure must not stop the others */
+          }
+        }
+      }
+      return;
+    }
     if (type === "slash_commands" || typeof payload.command === "string") {
       const command = String(payload.command ?? "");
       if (command && command !== "/locus") return;
@@ -835,4 +859,45 @@ export class SlackGateway {
 
 function payloadString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * A `message` (or `app_mention`) event from Socket Mode: enough to know where to look. `text` is
+ * only a hint for cheap filtering; listeners read the message itself from the API before acting.
+ */
+export interface SlackMessageEvent {
+  channelId: string;
+  ts: string;
+  /** Set on thread replies (and on a thread root that has replies). */
+  threadTs?: string;
+  text?: string;
+}
+
+export function parseSlackMessageEvent(raw: unknown): SlackMessageEvent | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const event = raw as Record<string, unknown>;
+  if (event.type !== "message" && event.type !== "app_mention") return undefined;
+  const channelId = typeof event.channel === "string" ? event.channel : "";
+  const nested = event.message as Record<string, unknown> | undefined;
+  const ts =
+    typeof event.ts === "string" ? event.ts : typeof nested?.ts === "string" ? nested.ts : "";
+  if (!channelId || !ts) return undefined;
+  const threadTs =
+    typeof event.thread_ts === "string"
+      ? event.thread_ts
+      : typeof nested?.thread_ts === "string"
+        ? nested.thread_ts
+        : undefined;
+  const text =
+    typeof event.text === "string"
+      ? event.text
+      : typeof nested?.text === "string"
+        ? nested.text
+        : undefined;
+  return {
+    channelId,
+    ts,
+    ...(threadTs ? { threadTs } : {}),
+    ...(text !== undefined ? { text } : {}),
+  };
 }

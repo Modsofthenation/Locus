@@ -1,3 +1,6 @@
+import type { ReviewSettings } from "./reviewGate.js";
+import type { SlackReviewer } from "./slackReviewer.js";
+import type { SlackReviewerPolling } from "./slackReviewerPolling.js";
 import type { ApprovalPolicy } from "./approval.js";
 import type { AutonomyTier } from "./autonomy.js";
 import type { BrainSettings } from "./brain.js";
@@ -7,13 +10,14 @@ import type { IntegrationPlugin } from "./plugin.js";
 import type { McpServerConfig } from "./mcp.js";
 import type { AiProvider } from "./provider.js";
 import type { AgentSkill } from "./skill.js";
-import type { ThemeId } from "./theme.js";
+import type { CustomTheme, ThemeRef } from "./customTheme.js";
 import type { RepoHardwareProfile, VmTemplate } from "./vm.js";
 import type { WorkerBackend } from "./worker.js";
 import type { NamedEnvironment } from "./namedEnv.js";
 import type { PhoneRemote } from "./phone.js";
 import type { ChromeExtensionSettings } from "./chromeExtension.js";
 import type { ManagedPolicyStatus } from "./policy.js";
+import type { BudgetSettings, TelemetrySettings } from "./controls.js";
 
 export interface AdvancedSettings {
   dataDir: string;
@@ -42,6 +46,11 @@ export interface AdvancedSettings {
   hostSharePath: string;
   /** Host-side n-gram grep for Docker/Host bind mounts. Default on. */
   workspaceGrepIndex?: boolean;
+  /**
+   * After file_write / apply_patch / code_rename, append new language-server errors for the
+   * touched files (capped, ~3s budget). Host and Docker sessions only. Default on.
+   */
+  postEditDiagnostics?: boolean;
   /** Guest boot wait before a turn gives up, in ms. Default 15 minutes. */
   guestBootTimeoutMs?: number;
   /** How long a Needs-you approval waits before auto-deny, in ms. Default 30 minutes. */
@@ -96,7 +105,10 @@ export function parseProductMode(raw: unknown): ProductMode {
 }
 
 export interface LocusConfig {
-  theme: ThemeId;
+  /** A built-in theme id, or the id of one of `customThemes`. */
+  theme: ThemeRef;
+  /** Generated themes: built in Appearance or by Locus (manage_theme). */
+  customThemes?: CustomTheme[];
   /**
    * Product shell: Agents (full control plane) or Swarm (teammate-first).
    * Default developer so existing installs keep today’s UI.
@@ -162,6 +174,16 @@ export interface LocusConfig {
   diffLayout?: DiffLayout;
   /** Shared knowledge brain (distiller model, auto-index, pause ingest). */
   brain?: BrainSettings;
+  /** Opt-in OpenTelemetry (OTLP/HTTP) export of turn spans and usage metrics. Off by default. */
+  telemetry?: TelemetrySettings;
+  /** Server-enforced daily spend caps (global, per automation, per project). */
+  budgets?: BudgetSettings;
+  /** Review policy: risk-gated merge threshold and the CI fix attempt cap. */
+  review?: ReviewSettings;
+  /** Slack channel watchers that review every PR link posted in the channel. */
+  slackReviewers?: SlackReviewer[];
+  /** How often reviewers poll while Socket Mode isn't delivering events (fixed, adaptive, smart). */
+  slackReviewerPolling?: SlackReviewerPolling;
   /** Runtime-only admin policy. Loaded from disk, never written back to config.json. */
   managedPolicy?: ManagedPolicyStatus;
 }

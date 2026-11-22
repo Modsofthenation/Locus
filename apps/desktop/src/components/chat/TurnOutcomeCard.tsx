@@ -1,12 +1,19 @@
+import { verdictLabel, verdictTone } from "@/lib/riskGate";
 import { useState } from "react";
-import { turnOutcomeHeadline, turnTestsLabel, type TurnOutcome } from "@/lib/turnOutcome";
+import {
+  formatTurnDuration,
+  turnOutcomeHeadline,
+  turnTestsLabel,
+  type TurnOutcome,
+} from "@/lib/turnOutcome";
 import { PatchStackCard } from "./PatchStackCard";
 
 const FILES_SHOWN = 5;
 
 /**
  * Summary under the last reply of a finished turn: what changed, whether tests
- * passed, and the next step (review, open the PR, continue, or undo the turn).
+ * passed, what it cost, and the next step (review, merge a worktree, open the PR,
+ * continue, or undo the turn).
  */
 export function TurnOutcomeCard({
   sessionId,
@@ -14,14 +21,38 @@ export function TurnOutcomeCard({
   onOpenPath,
   onContinue,
   onUndo,
+  usageText,
+  onMerge,
+  mergeLabel = "Merge",
 }: {
   sessionId: string;
   outcome: TurnOutcome;
+  /** Tokens and cost for the turn, formatted like the composer's usage line. */
+  usageText?: string;
+  /** Worktree agents in a parallel group: merge this branch into the base checkout. */
+  onMerge?: () => Promise<void>;
+  mergeLabel?: string;
   onOpenPath: (path: string, line?: number) => void;
   onContinue: () => void;
   onUndo?: (checkpointId: string) => void;
 }) {
   const [reviewing, setReviewing] = useState(false);
+  const [merging, setMerging] = useState(false);
+  const [mergeError, setMergeError] = useState<string>();
+  const meta = [usageText, formatTurnDuration(outcome.durationMs)].filter(Boolean).join(" · ");
+
+  async function merge() {
+    if (!onMerge) return;
+    setMerging(true);
+    setMergeError(undefined);
+    try {
+      await onMerge();
+    } catch (err) {
+      setMergeError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setMerging(false);
+    }
+  }
   const tests = turnTestsLabel(outcome.tests);
   const shown = outcome.files.slice(0, FILES_SHOWN);
   const more = outcome.files.length - shown.length;
@@ -48,9 +79,23 @@ export function TurnOutcomeCard({
             {tests.ok ? "✓" : "✕"} {tests.text}
           </span>
         ) : null}
+        {outcome.verdict ? (
+          <span
+            className={`turn-outcome-tests ${verdictTone(outcome.verdict) === "ok" ? "ok" : "failed"}`}
+            data-testid="turn-outcome-verdict"
+            title={outcome.verdict.reasons.join("\n") || undefined}
+          >
+            {verdictLabel(outcome.verdict)}
+          </span>
+        ) : null}
         {outcome.commands ? (
           <span className="turn-outcome-meta">
             {outcome.commands === 1 ? "1 command" : `${outcome.commands} commands`}
+          </span>
+        ) : null}
+        {meta ? (
+          <span className="turn-outcome-meta turn-outcome-usage" data-testid="turn-outcome-usage">
+            {meta}
           </span>
         ) : null}
       </header>
@@ -83,6 +128,17 @@ export function TurnOutcomeCard({
             {reviewing ? "Hide changes" : "Review changes"}
           </button>
         ) : null}
+        {onMerge ? (
+          <button
+            type="button"
+            className="btn small"
+            disabled={merging}
+            title="Commit this agent's work and merge its branch into the base checkout"
+            onClick={() => void merge()}
+          >
+            {merging ? "Merging…" : mergeLabel}
+          </button>
+        ) : null}
         {outcome.prUrl ? (
           <a className="btn small" href={outcome.prUrl} target="_blank" rel="noreferrer">
             Open PR
@@ -102,6 +158,11 @@ export function TurnOutcomeCard({
           </button>
         ) : null}
       </div>
+      {mergeError ? (
+        <p className="turn-outcome-error" role="alert">
+          {mergeError}
+        </p>
+      ) : null}
       {reviewing && outcome.patches.length ? (
         <PatchStackCard
           files={outcome.patches}

@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -223,6 +224,67 @@ describe("repos api", () => {
     });
     const prBody = (await pr.json()) as { output: string };
     expect(prBody.output).toMatch(/No repository is attached/i);
+  });
+
+  it("uses the origin of a host folder that already holds a clone for forge tools", async () => {
+    const calls: string[] = [];
+    const fetchFn: typeof fetch = async (input) => {
+      calls.push(String(input));
+      return json({ values: [] });
+    };
+    const ctx = await setup(fetchFn);
+    cleanup.push(ctx.dir);
+    const config = await ctx.store.loadConfig();
+    config.forges = config.forges.map((row) =>
+      row.kind === "bitbucket" ? { ...row, token: "bb", username: "me" } : row,
+    );
+    await ctx.store.saveConfig(config);
+
+    const tree = await mkdtemp(join(tmpdir(), "locus-existing-clone-"));
+    cleanup.push(tree);
+    await writeFile(join(tree, "README.md"), "hi\n");
+    const origin = "git@ssh.bitbucket.org:acme/mobile.git";
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", tree, ...args], { stdio: "pipe" })
+        .toString()
+        .trim();
+    git("init", "-q", "-b", "feature");
+    git("add", ".");
+    git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "init");
+    git("remote", "add", "origin", origin);
+
+    const created = await ctx.app.request("/api/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        os: "ubuntu",
+        templateId: config.templates[0]!.id,
+        providerId: config.providers[0]!.id,
+        model: config.providers[0]!.defaultModel,
+        runtime: "host",
+        hostDir: tree,
+        startVm: false,
+      }),
+    });
+    expect(created.status).toBe(201);
+    const session = (await created.json()) as AgentSession;
+    expect(session.repo).toBeUndefined();
+
+    const issues = await ctx.app.request(`/api/sessions/${session.id}/tools`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "git_issue_list", args: {} }),
+    });
+    const issuesBody = (await issues.json()) as { output: string };
+    expect(issuesBody.output).not.toMatch(/No repository is attached/i);
+    // The SSH alias host resolves to the Bitbucket repo and its saved token.
+    expect(calls.some((url) => url.includes("/repositories/acme/mobile/"))).toBe(true);
+    // Resolving the forge must not attach the repo or touch the operator's SSH origin.
+    expect(git("remote", "get-url", "origin")).toBe(origin);
+    const after = (await (
+      await ctx.app.request(`/api/sessions/${session.id}`)
+    ).json()) as AgentSession;
+    expect(after.repo).toBeUndefined();
   });
 
   it("computes a load path from PR files and stores operator notes for the reviewer", async () => {
@@ -1242,5 +1304,188 @@ describe("repos api without a forge token", () => {
       expect(((await res.json()) as { error: string }).error).toMatch(/token/);
     }
     expect(calls.filter((row) => row.method !== "GET")).toEqual([]);
+  });
+});
+
+describe("fix session on failing CI", () => {
+  it("puts the failing check, condensed log, head SHA, and reproduce-first steps in the prompt", async () => {
+    const logRequests: string[] = [];
+    const fetchFn: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes("/repos/acme/app/pulls?") && !url.includes("/pulls/")) {
+        return json([]);
+      }
+      if (
+        url.includes("/pulls/12/files") ||
+        url.includes("/pulls/12/comments") ||
+        url.includes("/issues/12/comments") ||
+        url.includes("/pulls/12/commits")
+      ) {
+        return json([]);
+      }
+      if (url.endsWith("/commits/headsha99/status")) return json({ statuses: [] });
+      if (url.includes("/commits/headsha99/check-runs")) {
+        return json({
+          check_runs: [
+            {
+              id: 55,
+              name: "test",
+              status: "completed",
+              conclusion: "failure",
+              app: { slug: "github-actions" },
+            },
+            { id: 56, name: "lint", status: "completed", conclusion: "success" },
+          ],
+        });
+      }
+      if (url.endsWith("/actions/jobs/55/logs")) {
+        logRequests.push(new Headers(init?.headers).get("authorization") ?? "");
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://blob.example/logs/55" },
+        });
+      }
+      if (url === "https://blob.example/logs/55") {
+        logRequests.push(new Headers(init?.headers).get("authorization") ?? "none");
+        return new Response(
+          [
+            "2026-11-14T10:00:00.0000000Z > vitest run",
+            "2026-11-14T10:00:01.0000000Z  FAIL  src/cart.test.ts > cart > applies discount",
+            "2026-11-14T10:00:01.0000000Z AssertionError: expected 90 to be 80",
+            "2026-11-14T10:00:02.0000000Z ##[error]Process completed with exit code 1.",
+          ].join("\n"),
+        );
+      }
+      if (url.includes("/repos/acme/app/pulls/12")) {
+        return json({
+          number: 12,
+          title: "Add currency",
+          html_url: "https://github.com/acme/app/pull/12",
+          state: "open",
+          head: { ref: "feat", sha: "headsha99" },
+          base: { ref: "main" },
+        });
+      }
+      return json({ error: url }, 404);
+    };
+    const ctx = await setup(fetchFn);
+    cleanup.push(ctx.dir);
+    const config = await ctx.store.loadConfig();
+    const github = config.forges.find((row) => row.kind === "github")!;
+    config.forges = [{ ...github, token: "tok" }];
+    await ctx.store.saveConfig(config);
+    const created = await ctx.app.request("/api/repos", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: "https://github.com/acme/app" }),
+    });
+    const repo = (await created.json()) as LinkedRepo;
+
+    const fixRes = await ctx.app.request(`/api/repos/${repo.id}/pulls/12/fix-session`, {
+      method: "POST",
+    });
+    expect(fixRes.status).toBe(201);
+    const fix = (await fixRes.json()) as AgentSession;
+    const prompt = fix.messages.find((row) => row.role === "user")?.content ?? "";
+    expect(prompt.startsWith("CI failed on this pull request: test.")).toBe(true);
+    expect(prompt).toContain("Head commit: headsha99");
+    expect(prompt).toContain("Reproduce the failure locally");
+    expect(prompt).toContain("AssertionError: expected 90 to be 80");
+    expect(prompt).toContain("Failing tests: src/cart.test.ts > cart > applies discount");
+    expect(prompt).toContain("never force-push");
+    expect(prompt).not.toContain("## lint");
+    expect(logRequests).toEqual(["Bearer tok", "none"]);
+  });
+});
+
+describe("risk-gated merge", () => {
+  it("refuses a high-risk merge, merges on approveRisk, and queues a Needs-you approval", async () => {
+    let merges = 0;
+    const fetchFn: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/pulls/12/merge") && init?.method === "PUT") {
+        merges += 1;
+        return json({ merged: true, message: "merged" });
+      }
+      if (url.includes("/repos/acme/app/pulls?") && !url.includes("/pulls/")) return json([]);
+      if (url.includes("/pulls/12/") || url.includes("/issues/12/")) return json([]);
+      if (url.endsWith("/status")) return json({ statuses: [] });
+      if (url.includes("/check-runs")) return json({ check_runs: [] });
+      if (url.includes("/repos/acme/app/pulls/12")) {
+        return json({
+          number: 12,
+          title: "Add currency",
+          html_url: "https://github.com/acme/app/pull/12",
+          state: "open",
+          head: { ref: "feat", sha: "abc" },
+          base: { ref: "main" },
+        });
+      }
+      return json({ error: url }, 404);
+    };
+    const ctx = await setup(fetchFn);
+    cleanup.push(ctx.dir);
+    const config = await ctx.store.loadConfig();
+    const github = config.forges.find((row) => row.kind === "github")!;
+    config.forges = [{ ...github, token: "tok" }];
+    await ctx.store.saveConfig(config);
+    const repo = (await (
+      await ctx.app.request("/api/repos", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: "https://github.com/acme/app" }),
+      })
+    ).json()) as LinkedRepo;
+    const review = (await (
+      await ctx.app.request(`/api/repos/${repo.id}/pulls/12/review-session`, { method: "POST" })
+    ).json()) as AgentSession;
+    await ctx.store.mutateSession(review.id, (current) => {
+      current.messages.push({
+        id: "a1",
+        role: "assistant",
+        content: '{"verdict":"PASS","reasons":["touches auth"],"risk":"high"}',
+        createdAt: "2020-01-01T00:00:01.000Z",
+      });
+    });
+    const post = (body: unknown) =>
+      ctx.app.request(`/api/repos/${repo.id}/pulls/12/merge`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    const refused = await post({});
+    expect(refused.status).toBe(409);
+    const refusal = (await refused.json()) as { riskGate: { reason: string } };
+    expect(refusal.riskGate.reason).toContain("risk high");
+    expect(merges).toBe(0);
+
+    const queued = await post({ requestApproval: true });
+    expect(queued.status).toBe(202);
+    const pending = (await queued.json()) as { sessionId: string; toolCallId: string };
+    expect(pending.sessionId).toBe(review.id);
+    const waiting = (await ctx.store.loadSessions()).find((row) => row.id === review.id)!;
+    const call = waiting.messages
+      .flatMap((m) => m.toolCalls ?? [])
+      .find((row) => row.id === pending.toolCallId);
+    expect(call).toMatchObject({ name: "git_pr_merge", approval: "needed" });
+    expect(merges).toBe(0);
+
+    const approved = await ctx.app.request(`/api/sessions/${review.id}/approvals`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ toolCallId: pending.toolCallId, decision: "approved" }),
+    });
+    expect(approved.status).toBe(200);
+    for (let i = 0; i < 50 && merges === 0; i += 1) await new Promise((r) => setTimeout(r, 10));
+    expect(merges).toBe(1);
+
+    const direct = await post({ approveRisk: true });
+    expect(direct.status).toBe(200);
+    expect(merges).toBe(2);
+
+    const low = await ctx.store.loadConfig();
+    await ctx.store.saveConfig({ ...low, review: { requireApprovalAtRisk: "never" } });
+    expect((await post({})).status).toBe(200);
   });
 });

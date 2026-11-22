@@ -34,6 +34,19 @@ export function inboxKindLabel(kind: InboxKind, mode: ProductMode = "developer")
   return mode === "swarm" ? "Routine" : "Job";
 }
 
+/**
+ * What a row asks for: an agent row is an Approval (Approve / Deny) or a Question (needs an
+ * answer in the chat); other rows name where they come from.
+ */
+export function inboxRowLabel(
+  row: Pick<InboxRow, "kind" | "callId">,
+  canDecide: boolean,
+  mode: ProductMode = "developer",
+): string {
+  if (row.kind === "session") return row.callId && canDecide ? "Approval" : "Question";
+  return inboxKindLabel(row.kind, mode);
+}
+
 /** Agents, boards, Brain, and failing / Needs-you automations waiting on the operator. */
 export function buildInboxRows(opts: {
   sessions: AgentSession[];

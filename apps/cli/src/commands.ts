@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { applyBrainSetup } from "./brainSetup.js";
 import {
+  providerUsageWindowPercent,
+  type ProviderUsage,
   AGENT_RECIPES,
   DESIGN_RECIPES,
   GAME_RECIPES,
@@ -62,6 +64,9 @@ import { startServer } from "./serve.js";
 import { CLI_VERSION } from "./version.js";
 import {
   cmdBackup,
+  cmdBenchCompare,
+  cmdBenchHistory,
+  cmdBenchMine,
   cmdEvalCancel,
   cmdEvalCases,
   cmdEvalList,
@@ -70,6 +75,18 @@ import {
   cmdRestore,
   cmdUpdate,
 } from "./maintenance.js";
+import {
+  cmdAuditExport,
+  cmdAuditVerify,
+  cmdBudgetOverride,
+  cmdBudgetSet,
+  cmdBudgetStatus,
+  cmdConfigBudget,
+  cmdConfigTelemetry,
+  cmdConfigTelemetrySet,
+  cmdConfigTelemetryTest,
+} from "./controls.js";
+import { cmdCiRun } from "./ci.js";
 
 export interface Ctx {
   client: LocusClient;
@@ -367,6 +384,7 @@ const ROUTES: Array<{ path: string[]; run: Handler }> = [
   { path: ["config", "providers"], run: cmdProviders },
   { path: ["config", "provider", "test"], run: cmdProviderTest },
   { path: ["config", "provider", "models"], run: cmdProviderModels },
+  { path: ["config", "provider", "usage"], run: cmdProviderUsage },
   { path: ["config", "mcp"], run: cmdMcp },
   { path: ["config", "skills"], run: cmdSkills },
   { path: ["config", "git"], run: cmdGit },
@@ -389,6 +407,21 @@ const ROUTES: Array<{ path: string[]; run: Handler }> = [
   { path: ["config", "funnel", "disable"], run: (ctx) => cmdFunnelSet(ctx, false) },
   { path: ["config", "theme"], run: cmdTheme },
   { path: ["config", "reset"], run: cmdReset },
+  { path: ["config", "telemetry"], run: cmdConfigTelemetry },
+  { path: ["config", "telemetry", "enable"], run: (ctx) => cmdConfigTelemetrySet(ctx, true) },
+  { path: ["config", "telemetry", "disable"], run: (ctx) => cmdConfigTelemetrySet(ctx, false) },
+  { path: ["config", "telemetry", "test"], run: cmdConfigTelemetryTest },
+  { path: ["config", "budget"], run: cmdConfigBudget },
+
+  { path: ["audit", "verify"], run: cmdAuditVerify },
+  { path: ["audit", "export"], run: cmdAuditExport },
+  { path: ["audit"], run: (ctx) => Promise.resolve(ctx.writeln(helpFor(["audit"]))) },
+  { path: ["budget", "set"], run: cmdBudgetSet },
+  { path: ["budget", "override"], run: cmdBudgetOverride },
+  { path: ["budget", "status"], run: cmdBudgetStatus },
+  { path: ["budget"], run: cmdBudgetStatus },
+  { path: ["ci", "run"], run: cmdCiRun },
+  { path: ["ci"], run: (ctx) => Promise.resolve(ctx.writeln(helpFor(["ci"]))) },
   { path: ["config"], run: cmdConfigShow },
 
   { path: ["image", "list"], run: cmdImageList },
@@ -408,6 +441,15 @@ const ROUTES: Array<{ path: string[]; run: Handler }> = [
   { path: ["eval", "show"], run: cmdEvalShow },
   { path: ["eval", "cancel"], run: cmdEvalCancel },
   { path: ["eval"], run: cmdEvalList },
+  { path: ["bench", "cases"], run: cmdEvalCases },
+  { path: ["bench", "run"], run: cmdEvalRun },
+  { path: ["bench", "list"], run: cmdEvalList },
+  { path: ["bench", "show"], run: cmdEvalShow },
+  { path: ["bench", "cancel"], run: cmdEvalCancel },
+  { path: ["bench", "history"], run: cmdBenchHistory },
+  { path: ["bench", "compare"], run: cmdBenchCompare },
+  { path: ["bench", "mine"], run: cmdBenchMine },
+  { path: ["bench"], run: cmdEvalList },
 
   { path: ["debug", "logs"], run: cmdDebugLogs },
   { path: ["debug", "log"], run: cmdDebugLog },
@@ -621,7 +663,9 @@ async function cmdUi(ctx: Ctx): Promise<void> {
     const res = await fetch(ctx.client.url("/"));
     const html = await res.text();
     if (res.ok && /<html/i.test(html)) {
-      done(ctx, { url: ctx.client.baseUrl }, () => ctx.client.baseUrl);
+      // The sign-in URL sets the operator cookie in a plain browser; the desktop app does that itself.
+      const url = ctx.client.signInUrl("/");
+      done(ctx, { url }, () => url);
       return;
     }
   } catch {
@@ -1235,10 +1279,30 @@ async function cmdWorkersDiff(ctx: Ctx): Promise<void> {
 async function cmdWorkersMerge(ctx: Ctx): Promise<void> {
   const session = await resolveSession(ctx, need(ctx.args, 0, "session id"));
   const workerId = need(ctx.args, 1, "worker id");
-  const next = await ctx.client.post<AgentSession>(`/api/sessions/${session.id}/workers/merge`, {
-    workerId,
-  });
-  done(ctx, next, () => `Merged ${workerId} into ${session.id}`);
+  const next = await ctx.client.post<AgentSession & Record<string, unknown>>(
+    `/api/sessions/${session.id}/workers/merge`,
+    { workerId, ...riskGateBody(ctx) },
+  );
+  done(ctx, next, () => riskGatePending(next) ?? `Merged ${workerId} into ${session.id}`);
+}
+
+/**
+ * Risk-gated merges: `--approve-risk` is the explicit human approval; otherwise a gated
+ * merge is queued as a Needs-you approval (Inbox / `locus agent approve`).
+ */
+function riskGateBody(ctx: Ctx): { approveRisk?: boolean; requestApproval: true } {
+  return {
+    ...(flagBool(ctx.flags, "approve-risk") ? { approveRisk: true } : {}),
+    requestApproval: true,
+  };
+}
+
+function riskGatePending(result: Record<string, unknown>): string | undefined {
+  if (result.pending !== true) return undefined;
+  const reason = typeof result.error === "string" ? result.error : "Merge needs your approval.";
+  const sessionId = String(result.sessionId ?? "");
+  const callId = String(result.toolCallId ?? "");
+  return `${reason}\nWaiting in Needs you on ${sessionId}. Approve with: locus agent approve ${sessionId} ${callId} (or rerun with --approve-risk).`;
 }
 
 async function cmdRoleCycle(ctx: Ctx): Promise<void> {
@@ -1751,8 +1815,11 @@ async function cmdRepoReview(ctx: Ctx): Promise<void> {
 async function cmdRepoMerge(ctx: Ctx): Promise<void> {
   const repo = await resolveRepo(ctx, need(ctx.args, 0, "repo id"));
   const number = need(ctx.args, 1, "pull number");
-  const result = await ctx.client.post(`/api/repos/${repo.id}/pulls/${number}/merge`);
-  done(ctx, result, () => `Merged ${repo.name}#${number}`);
+  const result = await ctx.client.post<Record<string, unknown>>(
+    `/api/repos/${repo.id}/pulls/${number}/merge`,
+    riskGateBody(ctx),
+  );
+  done(ctx, result, () => riskGatePending(result) ?? `Merged ${repo.name}#${number}`);
 }
 
 async function cmdRepoAgent(ctx: Ctx): Promise<void> {
@@ -2769,6 +2836,41 @@ async function cmdProviderModels(ctx: Ctx): Promise<void> {
   done(ctx, result, () => result.models.join("\n"));
 }
 
+async function cmdProviderUsage(ctx: Ctx): Promise<void> {
+  const qs = new URLSearchParams();
+  if (flagBool(ctx.flags, "refresh")) qs.set("refresh", "1");
+  const id = ctx.args[0];
+  if (id) qs.set("id", id);
+  const query = qs.toString();
+  const result = await ctx.client.get<{ usage: ProviderUsage[] }>(
+    `/api/providers/usage${query ? `?${query}` : ""}`,
+  );
+  done(ctx, result, () => formatProviderUsage(result.usage));
+}
+
+export function formatProviderUsage(rows: ProviderUsage[]): string {
+  if (!rows.length) return "No enabled Codex, Claude Code, Cursor or Kiro CLI providers.";
+  const lines: string[] = [];
+  for (const row of rows) {
+    lines.push(`${row.providerName}${row.plan ? ` (${row.plan})` : ""}`);
+    for (const w of row.windows) {
+      const pct = providerUsageWindowPercent(w);
+      const amount =
+        w.used != null && w.limit != null
+          ? `${w.used} of ${w.limit}${w.unit && w.unit !== "percent" ? ` ${w.unit}` : ""}`
+          : "";
+      const parts = [
+        pct != null ? `${Math.round(pct)}% used` : "",
+        amount,
+        w.resetsAt ? `${w.id === "bonus" ? "expires" : "resets"} ${w.resetsAt}` : "",
+      ].filter(Boolean);
+      lines.push(`  ${w.label}: ${parts.join(" · ")}`);
+    }
+    if (row.message) lines.push(`  ${row.message}`);
+  }
+  return lines.join("\n");
+}
+
 async function cmdMcp(ctx: Ctx): Promise<void> {
   const config = await loadConfig(ctx);
   const rows = config.mcpServers ?? [];
@@ -2917,9 +3019,14 @@ async function cmdTheme(ctx: Ctx): Promise<void> {
     done(ctx, { theme: config.theme }, () => config.theme);
     return;
   }
-  if (!isThemeId(theme)) throw new UsageError(`Unknown theme ${theme}`);
-  const next = await ctx.client.put("/api/config", { ...config, theme });
-  done(ctx, next, () => `Theme ${theme}`);
+  // Generated themes can be picked by id (custom-…) or by name.
+  const custom = (config.customThemes ?? []).find(
+    (row) => row.id === theme || row.name.toLowerCase() === theme.toLowerCase(),
+  );
+  if (!isThemeId(theme) && !custom) throw new UsageError(`Unknown theme ${theme}`);
+  const id = custom?.id ?? theme;
+  const next = await ctx.client.put("/api/config", { ...config, theme: id });
+  done(ctx, next, () => `Theme ${custom?.name ?? theme}`);
 }
 
 async function cmdReset(ctx: Ctx): Promise<void> {

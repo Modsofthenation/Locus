@@ -1,0 +1,25 @@
+PASS src/ok.test.js
+FAIL src/math.test.js
+  math
+    ✓ adds (2 ms)
+    ✕ fails (3 ms)
+    ○ skipped later
+
+  ● math › fails
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 3
+    Received: 2
+
+      3 |   it("adds", () => expect(1 + 1).toBe(2));
+    > 4 |   it("fails", () => expect(1 + 1).toBe(3));
+        |                                   ^
+
+      at Object.toBe (src/math.test.js:4:35)
+
+Test Suites: 1 failed, 1 passed, 2 total
+Tests:       1 failed, 1 skipped, 2 passed, 4 total
+Snapshots:   0 total
+Time:        0.512 s, estimated 1 s
+Ran all test suites.

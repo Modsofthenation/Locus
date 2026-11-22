@@ -15,6 +15,7 @@ import type { ChromiumDriver, ScreencastFrame, ToolResult } from "@locus/guest-a
 import type { GuestHub } from "../core/guests.js";
 
 export type BrowserLockHooks = {
+  run?: <T>(sessionId: string, work: () => Promise<T>) => Promise<T>;
   takeover: (sessionId: string) => Promise<unknown>;
   handback: (sessionId: string) => Promise<unknown>;
   allowHosts?: (session: AgentSession) => Promise<string[]>;
@@ -75,12 +76,26 @@ export class BrowserStreams {
     });
   }
 
+  async releaseInput(sessionId: string): Promise<void> {
+    const found = await this.resolve(sessionId);
+    const driver = this.drivers.get(sessionId) ?? (found ? this.driverFor(found) : undefined);
+    await driver?.releaseInput?.();
+  }
+
+  async invalidateObservation(sessionId: string): Promise<void> {
+    const found = await this.resolve(sessionId);
+    const driver = this.drivers.get(sessionId) ?? (found ? this.driverFor(found) : undefined);
+    await driver?.invalidateObservation?.();
+  }
+
   private detach(sessionId: string, ws: WebSocket): void {
     const set = this.viewers.get(sessionId);
     if (!set) return;
     set.delete(ws);
     if (set.size > 0) return;
     this.viewers.delete(sessionId);
+    const release = () => this.releaseInput(sessionId);
+    void (this.locks?.run ? this.locks.run(sessionId, release) : release()).catch(() => undefined);
     this.lastTabs.delete(sessionId);
     this.lastDownloads.delete(sessionId);
     const timer = this.tabTimer.get(sessionId);
@@ -176,9 +191,16 @@ export class BrowserStreams {
     const message = parseBrowserClientMessage(raw);
     if (!message) return;
     try {
-      await this.handleClient(sessionId, message);
-    } catch {
-      /* keep the pane attached */
+      if (message.type === "takeover" || message.type === "handback" || !this.locks?.run)
+        await this.handleClient(sessionId, message);
+      else await this.locks.run(sessionId, () => this.handleClient(sessionId, message));
+    } catch (error) {
+      const found = await this.resolve(sessionId);
+      this.send(sessionId, {
+        type: "status",
+        controller: found ? controllerOf(found.session) : "agent",
+        error: error instanceof Error ? error.message : "Browser action failed",
+      });
     }
   }
 
@@ -200,20 +222,27 @@ export class BrowserStreams {
       return;
     }
     if (!isOperatorDrivingBrowser(found.session)) return;
+    if (message.type === "invalidate-observation") return;
+    if (message.type === "release-input") {
+      await driver.releaseInput?.();
+      return;
+    }
     if (message.type === "input") {
       await driver.dispatchInput?.(message);
       return;
     }
     if (message.type === "navigate") {
-      await driver.navigate(message.url);
+      const result = await driver.navigate(message.url);
+      if (!result.ok) throw new Error(result.output);
       this.lastTabs.delete(sessionId);
       await this.pushTabs(sessionId, driver, found.session);
       return;
     }
-    await driver.handle({
+    const result = await driver.handle({
       name: "browser_tabs",
       args: { action: message.action, targetId: message.targetId, url: message.url },
     });
+    if (!result.ok) throw new Error(result.output);
     this.lastTabs.delete(sessionId);
     await this.pushTabs(sessionId, driver, found.session);
   }
@@ -225,6 +254,7 @@ export class BrowserStreams {
   ): Promise<void> {
     if (!driver.listPages) return;
     try {
+      session = (await this.resolve(sessionId))?.session ?? session;
       const tabs = await driver.listPages();
       const key = JSON.stringify(tabs);
       if (this.lastTabs.get(sessionId) === key) return;

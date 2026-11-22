@@ -1,7 +1,7 @@
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MockHypervisor } from "@locus/hypervisor";
 import {
   computeNextRunAt,
@@ -38,10 +38,10 @@ async function setup(now = () => new Date("2026-08-17T12:00:00.000Z"), chatEngin
 
 let cleanup: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
+  // A run can still be writing its session files when the test ends (ENOTEMPTY).
   await Promise.all(
-    cleanup.map((d) =>
-      rm(d, { recursive: true, force: true, maxRetries: 8, retryDelay: 50 }).catch(() => undefined),
-    ),
+    cleanup.map((d) => rm(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })),
   );
   cleanup = [];
 });
@@ -90,6 +90,148 @@ describe("computeNextRunAt", () => {
 });
 
 describe("AutomationService", () => {
+  it("previews matched and filtered webhook samples without creating a job or turn", async () => {
+    const ctx = await setup();
+    cleanup.push(ctx.dir);
+    const config = await ctx.store.loadConfig();
+    const job = {
+      name: "Main branch check",
+      prompt: "Check the project",
+      os: "ubuntu" as const,
+      runtime: "host" as const,
+      templateId: "host",
+      providerId: config.providers[0]!.id,
+      model: "test-model",
+      schedule: { kind: "pull_request" as const },
+      repo: { forge: "github" as const, url: "https://github.com/example/project", ref: "main" },
+      allowedMcpTools: ["slack_history"],
+    };
+    const raw = (ref: string) =>
+      JSON.stringify({ pull_request: { base: { ref }, head: { sha: "abc" } } });
+    const matched = await ctx.automations.previewTrigger({
+      job,
+      raw: raw("main"),
+      headerEvent: "pull_request",
+    });
+    expect(matched).toMatchObject({ matches: true, integrationAllowlist: ["slack_history"] });
+    expect(matched.tools).toContain("exec");
+    expect(matched.tools).not.toContain("slack_history");
+    expect(matched.model).toContain("test-model");
+    await expect(
+      ctx.automations.previewTrigger({ job, raw: raw("release"), headerEvent: "pull_request" }),
+    ).resolves.toMatchObject({ matches: false });
+    expect(await ctx.automations.list()).toEqual([]);
+    expect(await ctx.sessions.list()).toEqual([]);
+  });
+
+  it.each(["succeeded", "failed", "needs_you", "missing", "stopped", "session_stopped"] as const)(
+    "keeps a long-running turn active until its actual outcome: %s",
+    async (outcome) => {
+      const ctx = await setup();
+      cleanup.push(ctx.dir);
+      const automations = new AutomationService(ctx.store, ctx.sessions, new Hub(), {
+        waitMs: 40,
+        pollMs: 5,
+      });
+      const config = await ctx.store.loadConfig();
+      const created = await automations.create({
+        name: "Long-running job",
+        prompt: "work",
+        os: "ubuntu",
+        runtime: "host",
+        templateId: config.templates[0]!.id,
+        providerId: config.providers[0]!.id,
+        model: config.providers[0]!.defaultModel,
+        schedule: { kind: "interval", everyMinutes: 10 },
+      });
+      let started!: () => void;
+      const turning = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const send = vi.spyOn(ctx.sessions, "sendChat").mockImplementation(async (id) => {
+        await ctx.store.mutateSession(id, (session) => {
+          session.status = "running";
+        });
+        started();
+      });
+      const completion = automations.execute(created.id, "manual");
+      try {
+        await turning;
+        const [run] = await waitForRuns(automations, created.id, (rows) =>
+          rows.some((row) => Boolean(row.sessionId)),
+        );
+        if (!run?.sessionId) throw new Error("Run has no session");
+        // Exceed the readiness deadline while the agent is still working.
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        const [active] = await automations.listRuns(created.id);
+        expect(active?.status).toBe("running");
+        expect(active?.finishedAt).toBeUndefined();
+        expect((await ctx.sessions.get(run.sessionId!))?.status).toBe("running");
+        expect((await automations.execute(created.id, "manual")).status).toBe("skipped");
+        expect(send).toHaveBeenCalledTimes(1);
+
+        if (outcome === "stopped") {
+          await automations.abort(created.id);
+        } else if (outcome === "missing") {
+          vi.spyOn(ctx.sessions, "get").mockResolvedValue(undefined);
+        } else {
+          await ctx.store.mutateSession(run.sessionId!, (session) => {
+            session.status =
+              outcome === "failed" ? "error" : outcome === "session_stopped" ? "stopped" : "idle";
+            session.error = outcome === "failed" ? "Agent disconnected" : undefined;
+            session.needsHuman = outcome === "needs_you" ? "Approve deployment" : undefined;
+          });
+        }
+        const finished = await completion;
+        expect(finished.status).toBe(
+          outcome === "missing" || outcome === "stopped" || outcome === "session_stopped"
+            ? "failed"
+            : outcome,
+        );
+        expect(finished.finishedAt).toBeTruthy();
+        if (outcome === "failed") expect(finished.error).toBe("Agent disconnected");
+        if (outcome === "missing") expect(finished.error).toBe("Session not found");
+        if (outcome === "stopped" || outcome === "session_stopped")
+          expect(finished.error).toBe("Stopped");
+        if (outcome === "needs_you") expect(finished.summary).toBe("Approve deployment");
+      } finally {
+        await automations.abort(created.id);
+        await completion;
+        send.mockRestore();
+        ctx.hypervisor.shutdown();
+      }
+    },
+  );
+
+  it("still fails a guest that never becomes ready", async () => {
+    const ctx = await setup();
+    cleanup.push(ctx.dir);
+    const automations = new AutomationService(ctx.store, ctx.sessions, new Hub(), {
+      waitMs: 40,
+      pollMs: 5,
+    });
+    const config = await ctx.store.loadConfig();
+    const created = await automations.create({
+      name: "Unready guest",
+      prompt: "work",
+      os: "ubuntu",
+      templateId: config.templates.find((row) => row.os === "ubuntu")!.id,
+      startVm: true,
+      providerId: config.providers[0]!.id,
+      model: config.providers[0]!.defaultModel,
+      schedule: { kind: "interval", everyMinutes: 10 },
+    });
+    const session = seedChat("unready", created.id, Date.now(), { status: "provisioning" });
+    vi.spyOn(ctx.sessions, "create").mockResolvedValue(session);
+    vi.spyOn(ctx.sessions, "get").mockResolvedValue(session);
+    const send = vi.spyOn(ctx.sessions, "sendChat");
+    const run = await automations.execute(created.id, "manual");
+    expect(run.status).toBe("failed");
+    expect(run.error).toContain("Guest did not become ready");
+    expect(send).not.toHaveBeenCalled();
+    ctx.hypervisor.shutdown();
+  });
+
   it("creates an automation and runs it into a chat session", async () => {
     const ctx = await setup();
     cleanup.push(ctx.dir);

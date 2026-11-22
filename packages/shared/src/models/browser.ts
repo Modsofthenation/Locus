@@ -62,7 +62,11 @@ export interface BrowserDownloadsMessage {
 }
 
 export type BrowserServerMessage =
-  BrowserFrameMessage | BrowserTabsMessage | BrowserStatusMessage | BrowserDownloadsMessage;
+  | { type: "action-result"; requestId: string; ok: boolean; output?: string }
+  | BrowserFrameMessage
+  | BrowserTabsMessage
+  | BrowserStatusMessage
+  | BrowserDownloadsMessage;
 
 export type BrowserInputKind =
   | "mouseMoved"
@@ -83,6 +87,9 @@ export interface BrowserInputMessage {
   deltaX?: number;
   deltaY?: number;
   key?: string;
+  code?: string;
+  modifiers?: number;
+  windowsVirtualKeyCode?: number;
   text?: string;
 }
 
@@ -111,33 +118,97 @@ export interface BrowserOpenDownloadMessage {
   name: string;
 }
 
-export type BrowserClientMessage =
+export type BrowserClientMessage = (
+  | { type: "invalidate-observation" }
+  | { type: "release-input" }
   | BrowserInputMessage
   | BrowserNavigateMessage
   | BrowserTabActionMessage
   | BrowserTakeoverMessage
   | BrowserHandbackMessage
-  | BrowserOpenDownloadMessage;
+  | BrowserOpenDownloadMessage
+) & { requestId?: string };
 
 export const OPERATOR_HAS_BROWSER = "Operator has the browser. Wait for handback.";
 
 export function isBrowserServerMessage(value: unknown): value is BrowserServerMessage {
   if (!value || typeof value !== "object") return false;
   const type = (value as { type?: unknown }).type;
-  return type === "frame" || type === "tabs" || type === "status" || type === "downloads";
+  return (
+    type === "frame" ||
+    type === "tabs" ||
+    type === "status" ||
+    type === "downloads" ||
+    type === "action-result"
+  );
 }
 
 export function isBrowserClientMessage(value: unknown): value is BrowserClientMessage {
   if (!value || typeof value !== "object") return false;
-  const type = (value as { type?: unknown }).type;
-  return (
-    type === "input" ||
-    type === "navigate" ||
-    type === "tab" ||
-    type === "takeover" ||
-    type === "handback" ||
-    type === "open-download"
-  );
+  const row = value as Record<string, unknown>;
+  const short = (v: unknown, max = 8192) => typeof v === "string" && v.length <= max;
+  if (row.requestId !== undefined && !short(row.requestId, 100)) return false;
+  if (
+    row.type === "takeover" ||
+    row.type === "handback" ||
+    row.type === "release-input" ||
+    row.type === "invalidate-observation"
+  )
+    return true;
+  if (row.type === "navigate") return short(row.url);
+  if (row.type === "open-download") return short(row.name, 255);
+  if (row.type === "tab")
+    return (
+      ["new", "close", "select"].includes(String(row.action)) &&
+      (row.targetId === undefined || short(row.targetId, 255)) &&
+      (row.url === undefined || short(row.url))
+    );
+  if (
+    row.type !== "input" ||
+    ![
+      "mouseMoved",
+      "mousePressed",
+      "mouseReleased",
+      "mouseWheel",
+      "keyDown",
+      "keyUp",
+      "insertText",
+    ].includes(String(row.kind))
+  )
+    return false;
+  if (
+    ["x", "y", "deltaX", "deltaY"].some(
+      (k) =>
+        row[k] !== undefined &&
+        (typeof row[k] !== "number" ||
+          !Number.isFinite(row[k]) ||
+          Math.abs(row[k] as number) > 1e7),
+    )
+  )
+    return false;
+  if (
+    row.modifiers !== undefined &&
+    (!Number.isInteger(row.modifiers) || Number(row.modifiers) < 0 || Number(row.modifiers) > 15)
+  )
+    return false;
+  if (row.button !== undefined && !["left", "middle", "right"].includes(String(row.button)))
+    return false;
+  if (
+    row.clickCount !== undefined &&
+    (!Number.isInteger(row.clickCount) || Number(row.clickCount) < 1 || Number(row.clickCount) > 3)
+  )
+    return false;
+  if (row.code !== undefined && !short(row.code, 80)) return false;
+  if (
+    row.windowsVirtualKeyCode !== undefined &&
+    (!Number.isInteger(row.windowsVirtualKeyCode) ||
+      Number(row.windowsVirtualKeyCode) < 0 ||
+      Number(row.windowsVirtualKeyCode) > 255)
+  )
+    return false;
+  if (row.kind === "insertText") return short(row.text, 65536);
+  if (row.kind === "keyDown" || row.kind === "keyUp") return short(row.key, 80);
+  return true;
 }
 
 export function parseBrowserServerMessage(raw: string): BrowserServerMessage | undefined {
@@ -231,6 +302,8 @@ export function isDockerBrowserActivity(name: string, args: Record<string, unkno
 /** Agent tools that must wait while the operator has the Chromium lock. */
 export function isMutatingBrowserTool(name: string, args: Record<string, unknown> = {}): boolean {
   if (
+    name === "window_focus" ||
+    name === "clipboard_set" ||
     name === "mouse_move" ||
     name === "mouse_click" ||
     name === "mouse_drag" ||
@@ -239,7 +312,8 @@ export function isMutatingBrowserTool(name: string, args: Record<string, unknown
     name === "type_text" ||
     name === "browser_navigate" ||
     name === "browser_click" ||
-    name === "browser_type"
+    name === "browser_type" ||
+    name === "browser_action"
   ) {
     return true;
   }
