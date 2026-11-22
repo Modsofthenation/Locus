@@ -60,6 +60,9 @@ export interface SshCliHandle {
   lines: AsyncIterable<string>;
   wait(): Promise<{ code: number; stderr: string }>;
   kill?: () => void;
+  /** Present when spawned with `interactive` (stdin piped through ssh). */
+  write?: (data: string) => void;
+  endInput?: () => void;
 }
 
 export function sshTargetFromInstance(vm: {
@@ -83,6 +86,8 @@ export function spawnCliOverSsh(
     cwd?: string;
     env?: NodeJS.ProcessEnv;
     signal?: AbortSignal;
+    /** Pipe stdin through ssh (prompt-on-stdin CLIs, ACP JSON-RPC). */
+    interactive?: boolean;
   },
   extra: { reverseForwards?: SshCliForward[]; shell?: "posix" | "powershell" } = {},
 ): SshCliHandle {
@@ -93,9 +98,10 @@ export function spawnCliOverSsh(
   }
   const argv = sshArgv(target, sshRemoteCommand(req, extra.shell ?? "posix"), forwards);
   const child = spawn(argv[0]!, argv.slice(1), {
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [req.interactive ? "pipe" : "ignore", "pipe", "pipe"],
     windowsHide: true,
   });
+  child.stdin?.on("error", () => undefined);
   let stderr = "";
   child.stderr?.on("data", (chunk: Buffer | string) => {
     stderr += String(chunk);
@@ -123,10 +129,21 @@ export function spawnCliOverSsh(
     });
   });
   void wait.catch(() => undefined);
+  const stdin = child.stdin;
   return {
     lines: readStdoutLines(child.stdout),
     wait: () => wait,
     kill,
+    ...(stdin
+      ? {
+          write: (data: string) => {
+            if (!stdin.destroyed && stdin.writable) stdin.write(data);
+          },
+          endInput: () => {
+            if (!stdin.destroyed) stdin.end();
+          },
+        }
+      : {}),
   };
 }
 

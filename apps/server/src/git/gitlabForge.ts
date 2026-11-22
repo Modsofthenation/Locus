@@ -10,12 +10,14 @@ import {
   type IssueRef,
   type PullCheck,
   type PullComment,
+  type PullFile,
   type PullListState,
   type PullRequestDetail,
   type PullRequestRef,
   type RepoBranchList,
 } from "@locus/shared";
 import {
+  apiRoot,
   fail,
   forgeJson,
   gitlabAuthHeaders,
@@ -23,14 +25,18 @@ import {
   pullFlags,
   type ForgeFetcher,
 } from "./forgeHttp.js";
-import type {
-  CreatePullInput,
-  CreatedPull,
-  ForgeAdapter,
-  PostCommentInput,
-  PostIssueCommentInput,
-  PostReviewInput,
+import {
+  READ_FILE_MAX_BYTES,
+  type CommitFileInput,
+  type CreatePullInput,
+  type CreatedPull,
+  type ForgeAdapter,
+  type PostCommentInput,
+  type PostIssueCommentInput,
+  type PostReviewInput,
+  type ReviewThreadInfo,
 } from "./forgeAdapter.js";
+import { fetchGitlabCheckLog, listGitlabCheckRuns } from "./forgeCi.js";
 
 function gitlabJson<T>(
   fetchFn: ForgeFetcher,
@@ -39,6 +45,32 @@ function gitlabJson<T>(
   init?: RequestInit,
 ) {
   return forgeJson<T>(fetchFn, account, path, init, gitlabAuthHeaders);
+}
+
+type GitlabDiffRow = {
+  new_path?: string;
+  old_path?: string;
+  new_file?: boolean;
+  deleted_file?: boolean;
+  renamed_file?: boolean;
+  diff?: string;
+};
+
+/** MR changes / compare diffs as pull files; `diff` is already hunk-only, like GitHub's `patch`. */
+function gitlabFiles(rows: GitlabDiffRow[] | undefined): PullFile[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row) => ({
+    path: row.new_path || row.old_path || "",
+    previousPath: row.old_path && row.old_path !== row.new_path ? row.old_path : undefined,
+    status: row.new_file
+      ? "added"
+      : row.deleted_file
+        ? "removed"
+        : row.renamed_file
+          ? "renamed"
+          : "modified",
+    patch: row.diff,
+  }));
 }
 
 export async function listGitlabRepos(
@@ -170,18 +202,15 @@ export async function getGitlabPull(
     target_branch?: string;
     sha?: string;
     diff_refs?: { base_sha?: string; start_sha?: string; head_sha?: string };
+    labels?: string[];
   }>(fetchFn, account, `/projects/${id}/merge_requests/${number}`);
   if (!mr.ok) throw fail({ status: mr.status } as Response, mr.text);
   const [changes, notes, commits, pipelines] = await Promise.all([
-    gitlabJson<{
-      changes?: Array<{
-        new_path?: string;
-        old_path?: string;
-        new_file?: boolean;
-        deleted_file?: boolean;
-        diff?: string;
-      }>;
-    }>(fetchFn, account, `/projects/${id}/merge_requests/${number}/changes`),
+    gitlabJson<{ changes?: GitlabDiffRow[] }>(
+      fetchFn,
+      account,
+      `/projects/${id}/merge_requests/${number}/changes`,
+    ),
     gitlabJson<
       Array<{
         id?: number;
@@ -229,12 +258,8 @@ export async function getGitlabPull(
   return {
     ...summary,
     body: mr.json.description ?? "",
-    files: (changes.json.changes ?? []).map((row) => ({
-      path: row.new_path || row.old_path || "",
-      previousPath: row.old_path && row.old_path !== row.new_path ? row.old_path : undefined,
-      status: row.new_file ? "added" : row.deleted_file ? "removed" : "modified",
-      patch: row.diff,
-    })),
+    labels: gitlabLabels(mr.json.labels),
+    files: gitlabFiles(changes.json.changes),
     comments: (Array.isArray(notes.json) ? notes.json : []).flatMap((row) => {
       if (!row.id || !row.body) return [];
       return [
@@ -265,6 +290,14 @@ export async function getGitlabPull(
       url: row.web_url,
     })),
   };
+}
+
+function gitlabLabels(rows: unknown): string[] | undefined {
+  if (!Array.isArray(rows)) return undefined;
+  const names = rows.flatMap((name) =>
+    typeof name === "string" && name.trim() ? [name.trim()] : [],
+  );
+  return names.length ? names : undefined;
 }
 
 export async function createGitlabPull(
@@ -552,6 +585,151 @@ export async function commentGitlabIssue(
   return { ok, output: text.slice(0, 4000) };
 }
 
+/**
+ * Changed files from `base` to `head`; undefined unless `base` is a strict ancestor of `head`
+ * (checked with the merge base, so a force-push or rebase reads as undefined).
+ */
+export async function compareGitlabCommits(
+  fetchFn: ForgeFetcher,
+  account: GitForgeAccount,
+  owner: string,
+  repo: string,
+  base: string,
+  head: string,
+): Promise<PullFile[] | undefined> {
+  const id = gitlabProject(owner, repo);
+  const from = encodeURIComponent(base);
+  const to = encodeURIComponent(head);
+  const [mergeBase, compare] = await Promise.all([
+    gitlabJson<{ id?: string }>(
+      fetchFn,
+      account,
+      `/projects/${id}/repository/merge_base?refs[]=${from}&refs[]=${to}`,
+    ),
+    gitlabJson<{ commits?: unknown[]; diffs?: GitlabDiffRow[] }>(
+      fetchFn,
+      account,
+      `/projects/${id}/repository/compare?from=${from}&to=${to}&straight=false`,
+    ),
+  ]);
+  const baseId = mergeBase.json.id;
+  if (!mergeBase.ok || typeof baseId !== "string" || !sameSha(baseId, base)) return undefined;
+  if (!compare.ok || !Array.isArray(compare.json.diffs)) return undefined;
+  if (!Array.isArray(compare.json.commits) || !compare.json.commits.length) return undefined;
+  return gitlabFiles(compare.json.diffs);
+}
+
+/** Full and abbreviated SHAs match when one is a prefix of the other. */
+function sameSha(a: string, b: string): boolean {
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  if (x.length < 7 || y.length < 7) return x === y;
+  return x.startsWith(y) || y.startsWith(x);
+}
+
+/** A file's text at `ref`; undefined when missing or over `READ_FILE_MAX_BYTES`. */
+export async function readGitlabFile(
+  fetchFn: ForgeFetcher,
+  account: GitForgeAccount,
+  owner: string,
+  repo: string,
+  path: string,
+  ref: string,
+): Promise<string | undefined> {
+  const { ok, text } = await gitlabJson(
+    fetchFn,
+    account,
+    `/projects/${gitlabProject(owner, repo)}/repository/files/${encodeURIComponent(path)}/raw?ref=${encodeURIComponent(ref)}`,
+  );
+  if (!ok) return undefined;
+  if (Buffer.byteLength(text, "utf8") > READ_FILE_MAX_BYTES) return undefined;
+  return text;
+}
+
+/** Resolve unresolved MR discussions whose first note `pick` selects. */
+export async function resolveGitlabReviewThreads(
+  fetchFn: ForgeFetcher,
+  account: GitForgeAccount,
+  owner: string,
+  repo: string,
+  number: number,
+  pick: (thread: ReviewThreadInfo) => boolean,
+): Promise<number> {
+  const base = `/projects/${gitlabProject(owner, repo)}/merge_requests/${number}/discussions`;
+  const { ok, json } = await gitlabJson<
+    Array<{
+      id?: string;
+      notes?: Array<{
+        body?: string;
+        resolvable?: boolean;
+        resolved?: boolean;
+        author?: { username?: string };
+        position?: { new_path?: string | null; new_line?: number | null } | null;
+      }>;
+    }>
+  >(fetchFn, account, `${base}?per_page=100`);
+  if (!ok || !Array.isArray(json)) return 0;
+  let resolved = 0;
+  for (const discussion of json) {
+    const first = discussion.notes?.[0];
+    if (!discussion.id || !first?.resolvable || first.resolved) continue;
+    const picked = pick({
+      path: first.position?.new_path ?? undefined,
+      line: first.position?.new_line ?? undefined,
+      body: first.body ?? "",
+      author: first.author?.username,
+    });
+    if (!picked) continue;
+    const done = await gitlabJson(
+      fetchFn,
+      account,
+      `${base}/${encodeURIComponent(discussion.id)}?resolved=true`,
+      { method: "PUT" },
+    );
+    if (done.ok) resolved += 1;
+  }
+  return resolved;
+}
+
+/** Cut `branch` from `base` and create or replace one file, in one commits-API call. */
+export async function commitGitlabFileToNewBranch(
+  fetchFn: ForgeFetcher,
+  account: GitForgeAccount,
+  owner: string,
+  repo: string,
+  input: CommitFileInput,
+): Promise<void> {
+  const id = gitlabProject(owner, repo);
+  const head = await fetchFn(
+    `${apiRoot(account)}/projects/${id}/repository/files/${encodeURIComponent(input.path)}?ref=${encodeURIComponent(input.base)}`,
+    { method: "HEAD", headers: gitlabAuthHeaders(account) },
+  );
+  if (head.ok && input.expectNew) {
+    throw new Error(`${input.path} exists on ${input.base} but couldn't be read; try again`);
+  }
+  const { ok, status, text } = await gitlabJson(
+    fetchFn,
+    account,
+    `/projects/${id}/repository/commits`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        branch: input.branch,
+        start_branch: input.base,
+        commit_message: input.message,
+        actions: [
+          {
+            action: head.ok ? "update" : "create",
+            file_path: input.path,
+            content: input.content,
+          },
+        ],
+      }),
+    },
+  );
+  if (!ok) throw fail({ status } as Response, text);
+}
+
 export function createGitlabForgeAdapter(fetchFn: ForgeFetcher): ForgeAdapter {
   return {
     listRepos: (account) => listGitlabRepos(fetchFn, account),
@@ -576,5 +754,17 @@ export function createGitlabForgeAdapter(fetchFn: ForgeFetcher): ForgeAdapter {
     latestOpenPullCursor: (account, owner, repo) =>
       gitlabLatestOpenPullCursor(fetchFn, account, owner, repo),
     listBranches: (account, owner, repo) => listGitlabBranches(fetchFn, account, owner, repo),
+    listCheckRuns: (account, owner, repo, input) =>
+      listGitlabCheckRuns(fetchFn, account, owner, repo, input),
+    fetchCheckLog: (account, owner, repo, run) =>
+      fetchGitlabCheckLog(fetchFn, account, owner, repo, run),
+    compareCommits: (account, owner, repo, base, head) =>
+      compareGitlabCommits(fetchFn, account, owner, repo, base, head),
+    readFile: (account, owner, repo, path, ref) =>
+      readGitlabFile(fetchFn, account, owner, repo, path, ref),
+    resolveReviewThreads: (account, owner, repo, number, pick) =>
+      resolveGitlabReviewThreads(fetchFn, account, owner, repo, number, pick),
+    commitFileToNewBranch: (account, owner, repo, input) =>
+      commitGitlabFileToNewBranch(fetchFn, account, owner, repo, input),
   };
 }

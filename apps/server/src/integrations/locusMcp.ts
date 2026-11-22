@@ -4,6 +4,7 @@ import {
   isForgeMcpToolName,
   isHostSessionsToolName,
   isIntegrationToolName,
+  isManageSkillName,
 } from "@locus/shared";
 import { isCliGitTool } from "./cliGitMcp.js";
 
@@ -78,7 +79,7 @@ export async function handleLocusMcpRpc(
     const result = {
       protocolVersion: requested.trim() || "2024-11-05",
       capabilities: { tools: { listChanged: false } },
-      serverInfo: { name: "locus", version: "0.21.0" },
+      serverInfo: { name: "locus", version: "0.24.0" },
       ...(ctx.instructions?.trim() ? { instructions: ctx.instructions.trim() } : {}),
     };
     return {
@@ -100,8 +101,17 @@ export async function handleLocusMcpRpc(
       !isForgeMcpToolName(name) &&
       !isBrainMcpToolName(name) &&
       !isCliGitTool(name) &&
+      !isManageSkillName(name) &&
       !isCanvasMcpToolName(name) &&
-      !isHostSessionsToolName(name)
+      !isHostSessionsToolName(name) &&
+      name !== "unity_editor" &&
+      name !== "unity_result" &&
+      name !== "godot_editor" &&
+      name !== "godot_result" &&
+      name !== "unreal_editor" &&
+      name !== "unreal_result" &&
+      name !== "blender_editor" &&
+      name !== "blender_result"
     ) {
       return {
         jsonrpc: "2.0",

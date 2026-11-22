@@ -60,17 +60,26 @@ export function WorkspaceTerminal({
   cwd,
   run,
   active = true,
+  url,
+  connecting = "Connecting to workspace…",
+  onClose,
 }: {
   sessionId: string;
   terminalId?: string;
   cwd?: string;
   run?: string;
   active?: boolean;
+  /** PTY websocket to attach instead of the workspace shell (Terminal mode agent CLIs). */
+  url?: string;
+  connecting?: string;
+  onClose?: (event: { code: number; reason: string }) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | undefined>(undefined);
   const activeRef = useRef(active);
   activeRef.current = active;
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     const node = host.current;
@@ -124,8 +133,8 @@ export function WorkspaceTerminal({
       scheduleSize();
       if (activeRef.current) focusWorkspaceTerminal(session);
       else releaseTerminalFocus(node, session);
-      session.write("Connecting to workspace…\r\n");
-      ws = new WebSocket(workspaceTerminalWsUrl(sessionId, location, cwd, terminalId));
+      session.write(`${connecting}\r\n`);
+      ws = new WebSocket(url ?? workspaceTerminalWsUrl(sessionId, location, cwd, terminalId));
       ws.binaryType = "arraybuffer";
       ws.onopen = () => {
         scheduleSize();
@@ -134,12 +143,16 @@ export function WorkspaceTerminal({
         }
       };
       ws.onmessage = (ev) => {
-        const chunk =
-          typeof ev.data === "string" ? ev.data : new TextDecoder().decode(ev.data as ArrayBuffer);
-        session.write(chunk);
+        // Bytes, not per-frame decoded text: xterm keeps UTF-8 split across frames intact.
+        session.write(
+          typeof ev.data === "string" ? ev.data : new Uint8Array(ev.data as ArrayBuffer),
+        );
       };
       ws.onerror = () => session.writeln("\r\n[pty error]");
-      ws.onclose = () => session.writeln("\r\n[disconnected]");
+      ws.onclose = (ev) => {
+        session.writeln(ev?.reason ? `\r\n[disconnected: ${ev.reason}]` : "\r\n[disconnected]");
+        if (!cancelled) onCloseRef.current?.({ code: ev?.code ?? 1006, reason: ev?.reason ?? "" });
+      };
       dataSub = session.onData((data) => {
         if (ws?.readyState === WebSocket.OPEN) ws.send(data);
       });
@@ -162,7 +175,7 @@ export function WorkspaceTerminal({
       termRef.current = undefined;
       term?.dispose();
     };
-  }, [sessionId, terminalId, cwd, run]);
+  }, [sessionId, terminalId, cwd, run, url, connecting]);
 
   useEffect(() => {
     const session = termRef.current;

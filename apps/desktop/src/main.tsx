@@ -8,6 +8,8 @@ import "./index.css";
 import "./styles/phone.css";
 import "./styles/swarm.css";
 import "./styles/ux.css";
+import "./styles/themeStyles.css";
+import "./styles/themeEditor.css";
 
 initPhoneAuth();
 initUiShell();

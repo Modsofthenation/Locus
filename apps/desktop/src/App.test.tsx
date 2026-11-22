@@ -14,6 +14,7 @@ vi.mock("@/lib/net", async (importOriginal) => {
 
 vi.mock("@/lib/api", () => ({
   api: {
+    providerUsage: vi.fn(async () => ({ usage: [] })),
     config: vi.fn(),
     sessions: vi.fn(async () => []),
     session: vi.fn(),
@@ -47,7 +48,7 @@ vi.mock("@/lib/api", () => ({
       connected: false,
       tabs: [],
     })),
-    checkUpdates: vi.fn(async () => ({ status: "unavailable", current: "0.21.0" })),
+    checkUpdates: vi.fn(async () => ({ status: "unavailable", current: "0.24.0" })),
     workersStatus: vi.fn(async () => []),
     tailscale: vi.fn(async () => ({
       installed: false,

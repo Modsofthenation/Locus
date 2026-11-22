@@ -2,6 +2,7 @@ import { looksLikeVerifyCommand } from "./codingLoop.js";
 import { isDockerSwarmToolName, looksLikeDockerSwarmPrompt } from "./models/dockerSwarm.js";
 import { isIntegrationToolName, type IntegrationKind } from "./models/integration.js";
 import { isMcpDiscoveryToolName, isMcpToolName } from "./models/mcp.js";
+import { CODE_INTEL_READ_TOOL_NAMES } from "./models/codeIntel.js";
 import { canonicalToolName } from "./models/toolChip.js";
 import { execArgCommands } from "./models/tools.js";
 
@@ -21,6 +22,7 @@ const SEARCH_TOOLS = new Set([
   "file_read",
   "file_list",
   "repo_map",
+  ...CODE_INTEL_READ_TOOL_NAMES,
   "exec",
   "powershell",
 ]);

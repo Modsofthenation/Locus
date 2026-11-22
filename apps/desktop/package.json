@@ -1,6 +1,6 @@
 {
   "name": "@locus/desktop",
-  "version": "0.21.0",
+  "version": "0.24.0",
   "private": true,
   "author": "Locus contributors",
   "license": "MIT",
@@ -34,10 +34,10 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",
-    "@playwright/test": "^1.65.0",
+    "@playwright/test": "^1.65.1",
     "@types/node": "^26.6.5",
     "@types/react": "^19.1.4",
-    "@types/react-dom": "^19.2.7",
+    "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "45.2.2",
     "electron-builder": "^26.18.0",
@@ -75,6 +75,10 @@
       {
         "from": "build/server-typescript-ls",
         "to": "server/node_modules/typescript-ls"
+      },
+      {
+        "from": "build/server-playwright-core",
+        "to": "server/node_modules/playwright-core"
       },
       {
         "from": "../../images",

@@ -258,7 +258,7 @@ describe("codex CLI chat loop", () => {
     await sessions.sendChat(created.id, "Add a README");
     const fresh = await waitFor(sessions, created.id);
 
-    expect(fresh?.codexCli).toEqual({ sessionId: "cx-sess-1" });
+    expect(fresh?.codexCli).toEqual({ sessionId: "cx-sess-1", mcpPrompt: "git" });
     expect(fresh?.messages.find((message) => message.role === "assistant")?.content).toContain(
       "Updated README.md.",
     );
@@ -304,6 +304,9 @@ describe("codex CLI chat loop", () => {
     expect(captured[1]?.args).toContain(
       `mcp_servers.locus_git.url="http://127.0.0.1:7420/mcp/sessions/${created.id}"`,
     );
+    // The resumed thread already has the Locus Git instructions; do not resend them.
+    expect(captured[1]?.args.at(-1)).not.toContain("Locus Git integration");
+    expect(captured[1]?.args.at(-1)).toContain("also tests");
     const trace = await new SessionTraceLog(dir).read(created.id);
     const requests = trace.filter((event) => event.kind === "llm.request");
     expect(requests[0]?.args).toMatchObject({

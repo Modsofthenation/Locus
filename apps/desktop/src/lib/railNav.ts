@@ -1,8 +1,10 @@
 import type { ProductMode } from "@locus/shared";
 import type { UiSection } from "@/state/store";
 
-/** Daily coding surfaces — always on the icon rail. */
-export const PRIMARY_RAIL_SECTIONS = [
+/** Default pinned rail for new installs. Everything else waits in More until pinned. */
+export const PRIMARY_RAIL_SECTIONS = ["agents", "codebase"] as const;
+/** Pinned rail before the slimmer default. Kept for installs that never customized pins. */
+export const LEGACY_PRIMARY_RAIL_SECTIONS = [
   "agents",
   "design",
   "ide",
@@ -11,8 +13,12 @@ export const PRIMARY_RAIL_SECTIONS = [
 ] as const;
 /** Secondary surfaces — behind the More overflow. */
 export const MORE_RAIL_SECTIONS = [
+  "design",
   "games",
   "assets",
+  "android",
+  "ide",
+  "automations",
   "board",
   "project",
   "brain",
@@ -21,11 +27,32 @@ export const MORE_RAIL_SECTIONS = [
   "docker",
 ] as const;
 
+/**
+ * Which default pinned list applies when no pins are saved.
+ * `legacy` is an install that ran before the slimmer default; it keeps the old rail.
+ */
+export type RailDefaults = "legacy" | "current";
+
+/**
+ * Saved pins win. With none saved, a legacy Developer install keeps the old five-icon rail;
+ * new installs (and Swarm) fall through to the mode default.
+ */
+export function effectiveRailPins(
+  mode: ProductMode,
+  saved: readonly string[] | undefined,
+  defaults: RailDefaults,
+): readonly string[] | undefined {
+  if (saved?.length) return saved;
+  if (defaults === "legacy" && mode === "developer") return LEGACY_PRIMARY_RAIL_SECTIONS;
+  return undefined;
+}
+
 export const SWARM_PRIMARY_RAIL_SECTIONS = ["agents", "project"] as const;
 export const SWARM_MORE_RAIL_SECTIONS = [
   "design",
   "games",
   "assets",
+  "android",
   "ide",
   "automations",
   "board",

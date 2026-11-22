@@ -72,12 +72,21 @@ export interface CursorCliSpawnRequest {
   cwd: string;
   env: NodeJS.ProcessEnv;
   signal?: AbortSignal;
+  /**
+   * Keep stdin open as a pipe (prompt-on-stdin CLIs, ACP JSON-RPC). Spawners that can
+   * honor it expose `write` / `endInput` on the handle; the rest leave stdin closed.
+   */
+  interactive?: boolean;
 }
 
 export interface CursorCliSpawnHandle {
   lines: AsyncIterable<string>;
   wait(): Promise<{ code: number; stderr: string }>;
   kill?: () => void;
+  /** Write to the child's stdin. Present only when spawned with `interactive`. */
+  write?: (data: string) => void;
+  /** Close the child's stdin. */
+  endInput?: () => void;
 }
 
 /** After a terminal `result` event, wait this long for the CLI process to exit before killing it. */
@@ -265,6 +274,8 @@ export async function* streamCursorCli(input: {
   webSearch?: boolean;
   review?: boolean;
   excludeTools?: string;
+  /** The child's environment before the provider key is added; defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   spawnFn?: CursorCliSpawner;
 }): AsyncGenerator<CursorCliEvent> {
@@ -396,10 +407,12 @@ export function spawnCursorCli(req: CursorCliSpawnRequest): CursorCliSpawnHandle
   const child = spawn(resolved.command, resolved.args, {
     cwd: req.cwd,
     env: { ...req.env, ...resolved.envPatch },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [req.interactive ? "pipe" : "ignore", "pipe", "pipe"],
     windowsHide: true,
     windowsVerbatimArguments: resolved.windowsVerbatimArguments === true,
   });
+  // EPIPE when the child exits before reading stdin must not crash the control plane.
+  child.stdin?.on("error", () => undefined);
   let stderr = "";
   child.stderr?.on("data", (chunk: Buffer | string) => {
     stderr += String(chunk);
@@ -428,10 +441,21 @@ export function spawnCursorCli(req: CursorCliSpawnRequest): CursorCliSpawnHandle
   // Spawn ENOENT fires on the next tick, before callers await wait(). Without
   // a handler here that rejection kills the control plane after listen.
   void wait.catch(() => undefined);
+  const stdin = child.stdin;
   return {
     lines: readStdoutLines(child.stdout),
     wait: () => wait,
     kill,
+    ...(stdin
+      ? {
+          write: (data: string) => {
+            if (!stdin.destroyed && stdin.writable) stdin.write(data);
+          },
+          endInput: () => {
+            if (!stdin.destroyed) stdin.end();
+          },
+        }
+      : {}),
   };
 }
 

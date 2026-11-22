@@ -56,6 +56,9 @@ RUN chmod +x /usr/local/bin/git-credential-locus \
     && git config --system user.email locus@local \
     && git config --system user.name Locus
 
+# Must match LOCUS_AGENT_IMAGE_REVISION in packages/shared/src/models/vm.ts.
+LABEL dev.locus.agent.revision="2"
+
 WORKDIR /workspace
 USER node
 CMD ["tail", "-f", "/dev/null"]

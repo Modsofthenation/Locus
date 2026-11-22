@@ -78,7 +78,7 @@ export function serverEsbuildOptions({ entryPoints, outfile, logLevel = "info" }
     // Keep the compiler on disk as CJS (it uses __filename). electron-builder's
     // extraResources filter drops a nested node_modules directory, so the copy
     // lives beside build/server and is mapped to server/node_modules/typescript-ls.
-    external: ["typescript-ls"],
+    external: ["typescript-ls", "playwright-core"],
     // vscode-* ship UMD as "main". Bundling that wraps factory(require, …) and
     // the banner's createRequire then resolves ./parser/cssParser against the
     // outfile instead of the package. Prefer the ESM build so esbuild inlines it.
@@ -139,6 +139,13 @@ export async function bundleControlPlane(
     }),
   );
   await copyTypescriptPackage(join(desktopRoot, "build", "server-typescript-ls"));
+  // Playwright resolves browsers and its protocol files relative to its own package.
+  await cp(
+    dirname(require.resolve("playwright-core/package.json")),
+    join(desktopRoot, "build", "server-playwright-core"),
+    { recursive: true },
+  );
+
   await copyRipgrep(dirname(outfile));
   return outfile;
 }

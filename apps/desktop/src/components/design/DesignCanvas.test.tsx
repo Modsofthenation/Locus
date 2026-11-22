@@ -299,6 +299,132 @@ describe("DesignCanvas", () => {
     expect(host.querySelector(".design-frame")?.getAttribute("data-viewport")).toBe("tablet");
   });
 
+  it("toggles the canvas to full screen and exits on Escape", async () => {
+    vi.mocked(api.canvas).mockResolvedValue({
+      html: "<html><body><h1>Hello</h1></body></html>",
+      path: "/workspace/index.html",
+      mtime: "2020-01-01T00:00:00.000Z",
+    });
+    render({
+      ...initialState,
+      section: "design",
+      selectedId: session.id,
+      sessions: [session],
+      vms: [vm],
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const button = host.querySelector('[data-testid="canvas-fullscreen"]') as HTMLButtonElement;
+    expect(button.getAttribute("aria-label")).toBe("Full screen canvas");
+    expect(host.querySelector(".design-pane.workspace-fs")).toBeNull();
+    // Full screen is the last toolbar control, so hiding Collapse does not move it.
+    expect(
+      host.querySelector(".design-pane .vm-toolbar-actions")?.lastElementChild?.contains(button),
+    ).toBe(true);
+    act(() => button.click());
+    expect(host.querySelector(".design-pane.workspace-fs")).toBeTruthy();
+    expect(host.querySelector('[aria-label="Collapse canvas"]')).toBeNull();
+    expect(
+      host.querySelector(".design-pane .vm-toolbar-actions")?.lastElementChild?.contains(button),
+    ).toBe(true);
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(host.querySelector(".design-pane.workspace-fs")).toBeNull();
+    expect(host.querySelector('[aria-label="Collapse canvas"]')).toBeTruthy();
+  });
+
+  it("presents the design alone, steps variants with arrows, and exits on Escape", async () => {
+    vi.mocked(api.canvas).mockResolvedValue({
+      html: "<html><body><h1>Hero</h1></body></html>",
+      path: "/workspace/index.html",
+    });
+    vi.mocked(api.activateDesignVariant).mockImplementation(() => new Promise(() => undefined));
+    const withVariants: AgentSession = {
+      ...session,
+      designVariants: [
+        { id: "vhero", name: "Hero" },
+        { id: "vprice", name: "Pricing" },
+      ],
+      activeVariantId: "vhero",
+    };
+    render({
+      ...initialState,
+      section: "design",
+      selectedId: withVariants.id,
+      sessions: [withVariants],
+      vms: [vm],
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const present = host.querySelector('[data-testid="canvas-present"]') as HTMLButtonElement;
+    expect(present.disabled).toBe(false);
+    expect(host.querySelector(".design-present-bar")).toBeNull();
+    act(() => present.click());
+    expect(host.querySelector(".design-pane.is-presenting")).toBeTruthy();
+    expect(host.querySelector(".design-present-count")?.textContent).toBe("Hero · 1 / 2");
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", cancelable: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(api.activateDesignVariant).toHaveBeenCalledWith(withVariants.id, "vprice");
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(host.querySelector(".design-pane.is-presenting")).toBeNull();
+    expect(host.querySelector(".design-pane.workspace-fs")).toBeNull();
+  });
+
+  it("drops the active canvas tool on Escape before leaving full screen", async () => {
+    vi.mocked(api.canvas).mockResolvedValue({
+      html: "<html><body><h1>Hello</h1></body></html>",
+      path: "/workspace/index.html",
+      mtime: "2020-01-01T00:00:00.000Z",
+    });
+    render({
+      ...initialState,
+      section: "design",
+      selectedId: session.id,
+      sessions: [session],
+      vms: [vm],
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const escape = async () => {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    };
+    act(() =>
+      (host.querySelector('[data-testid="canvas-fullscreen"]') as HTMLButtonElement).click(),
+    );
+    const comment = [...host.querySelectorAll<HTMLButtonElement>(".design-toolbar-mode")].find(
+      (el) => el.textContent === "Comment",
+    )!;
+    act(() => comment.click());
+    expect(comment.getAttribute("aria-pressed")).toBe("true");
+    await escape();
+    expect(comment.getAttribute("aria-pressed")).toBe("false");
+    expect(host.querySelector(".design-pane.workspace-fs")).toBeTruthy();
+    await escape();
+    expect(host.querySelector(".design-pane.workspace-fs")).toBeNull();
+  });
+
+  it("keeps notices above a full screen pane and the file name uncapitalised", () => {
+    expect(css).toMatch(
+      /html:has\(\.vm-pane\.workspace-fs\) \.app-notices[\s\S]*?z-index:\s*calc\(var\(--z-overlay\) \+ 1\)/,
+    );
+    expect(css).toMatch(/\.design-pane \.vm-status-copy \.meta \{\s*text-transform:\s*none/);
+  });
+
   it("loads vendored ES modules from the canvas-files origin instead of srcdoc", async () => {
     vi.mocked(api.canvas).mockResolvedValue({
       html: `<!DOCTYPE html><html><head></head><body><canvas id="view"></canvas>
@@ -407,11 +533,11 @@ describe("DesignCanvas", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(host.querySelector('[aria-label="Viewport"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Viewport"], [aria-label^="Viewport: "]')).toBeNull();
     expect([...host.querySelectorAll("button")].some((btn) => btn.textContent === "Desktop")).toBe(
       false,
     );
-    const picker = host.querySelector('[aria-label="Phone model"]');
+    const picker = host.querySelector('[aria-label="Phone model"], [aria-label^="Phone model: "]');
     expect(picker).toBeTruthy();
     expect(selectValue(host, "Phone model")).toBe("iphone-15");
     expect(selectOptionLabels(host, "Phone model")).toEqual([
@@ -813,6 +939,16 @@ describe("DesignCanvas", () => {
       await Promise.resolve();
     });
     expect(host.querySelector(".vm-status-copy .meta")?.textContent).toMatch(/agent working/i);
+    // The status dot still explains itself when the copy is hidden in a narrow pane.
+    expect(host.querySelector(".vm-status .dot")?.getAttribute("aria-label")).toMatch(
+      /^Canvas status: Agent working/,
+    );
+    expect(host.querySelector(".vm-status")?.getAttribute("title")).toMatch(/^Canvas status:/);
+    // The design system picker is labelled instead of a bare "None".
+    expect(host.querySelector(".design-system-picker-prefix")?.textContent).toBe("System");
+    expect(host.querySelector(".design-system-picker-row")?.getAttribute("title")).toBe(
+      "Design system: None",
+    );
     expect(host.querySelector("[data-testid='design-working']")?.textContent).toMatch(
       /Agent is working/,
     );
@@ -2548,12 +2684,18 @@ describe("DesignCanvas", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(host.querySelector("[aria-label='Game kit']")).toBeTruthy();
-    expect(host.querySelector("[aria-label='Game kit']")?.getAttribute("title")).toBe("Game kit");
-    expect(host.querySelector("[aria-label='Design system']")).toBeNull();
-    expect(host.querySelector("[aria-label='Color palette']")).toBeNull();
+    expect(host.querySelector("[aria-label='Game kit'], [aria-label^='Game kit: ']")).toBeTruthy();
+    expect(
+      host
+        .querySelector("[aria-label='Game kit'], [aria-label^='Game kit: ']")
+        ?.getAttribute("title"),
+    ).toBe("Game kit");
+    expect(
+      host.querySelector("[aria-label='Design system'], [aria-label^='Design system: ']"),
+    ).toBeNull();
+    expect(host.querySelector("[aria-label^='Color palette']")).toBeNull();
     expect(host.querySelector(".palette-swatch-row")).toBeNull();
-    expect(host.querySelector("[aria-label='Viewport']")).toBeTruthy();
+    expect(host.querySelector("[aria-label='Viewport'], [aria-label^='Viewport: ']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Iterate']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Game']")).toBeTruthy();
     expect(host.querySelector(".game-iterate")).toBeNull();
@@ -2589,7 +2731,9 @@ describe("DesignCanvas", () => {
     expect(host.textContent).toContain("Generate Mesh");
     expect(host.textContent).toContain("Generate SFX");
     expect(host.textContent).toContain("Manage game styles");
-    expect(host.querySelector("[aria-label='Game style']")).toBeTruthy();
+    expect(
+      host.querySelector("[aria-label='Game style'], [aria-label^='Game style: ']"),
+    ).toBeTruthy();
     expect(host.querySelector(".design-toolbar-overflow-modes")?.textContent).toContain("Feel");
     const feel = [...host.querySelectorAll("button")].find((btn) => btn.textContent === "Feel");
     act(() => {
@@ -2617,7 +2761,7 @@ describe("DesignCanvas", () => {
     expect(api.exportGameZip).toHaveBeenCalledWith("g1");
     createObjectURL.mockRestore();
     revokeObjectURL.mockRestore();
-    expect(host.querySelector("[aria-label='Viewport']")).toBeTruthy();
+    expect(host.querySelector("[aria-label='Viewport'], [aria-label^='Viewport: ']")).toBeTruthy();
     act(() => {
       setSelectValue(host, "Viewport", "landscape");
     });
@@ -2947,15 +3091,21 @@ describe("DesignCanvas", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(host.querySelector("[aria-label='Asset kit']")).toBeTruthy();
-    expect(host.querySelector("[aria-label='Design system']")).toBeNull();
-    expect(host.querySelector("[aria-label='Color palette']")).toBeNull();
-    expect(host.querySelector("[aria-label='Asset style']")).toBeTruthy();
+    expect(
+      host.querySelector("[aria-label='Asset kit'], [aria-label^='Asset kit: ']"),
+    ).toBeTruthy();
+    expect(
+      host.querySelector("[aria-label='Design system'], [aria-label^='Design system: ']"),
+    ).toBeNull();
+    expect(host.querySelector("[aria-label^='Color palette']")).toBeNull();
+    expect(
+      host.querySelector("[aria-label='Asset style'], [aria-label^='Asset style: ']"),
+    ).toBeTruthy();
     expect(host.textContent).toContain("Manage asset styles");
     expect(host.textContent).toContain("Save style from this studio");
     expect(host.querySelector("[aria-label='Studio']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Iterate']")).toBeTruthy();
-    expect(host.querySelector("[aria-label='Clip']")).toBeTruthy();
+    expect(host.querySelector("[aria-label='Clip'], [aria-label^='Clip: ']")).toBeTruthy();
     expect(host.textContent).toContain("Orbit");
     expect(host.textContent).toContain("Wireframe");
     expect(host.querySelector("[aria-label='Studio zoom']")).toBeTruthy();
@@ -2981,7 +3131,7 @@ describe("DesignCanvas", () => {
     expect(host.querySelector("[aria-label='Source photos']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Recents']")).toBeTruthy();
     expect(host.querySelector("[aria-label='Units']")).toBeTruthy();
-    expect(host.querySelector("[aria-label='Viewport']")).toBeNull();
+    expect(host.querySelector("[aria-label='Viewport'], [aria-label^='Viewport: ']")).toBeNull();
     expect(host.querySelector("[aria-label='Mesh stats']")).toBeTruthy();
     const buildBtn = [...host.querySelectorAll("button")].find(
       (btn) => btn.textContent === "Build",

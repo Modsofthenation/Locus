@@ -4,6 +4,7 @@ import { UsageError, flagBool, flagStr, parseArgv } from "./args.js";
 import { HttpError, LocusClient, defaultApiUrl } from "./client.js";
 import { HELP_ROOT } from "./help.js";
 import { CLI_VERSION } from "./version.js";
+import { CliExitError } from "./exit.js";
 
 export interface RunResult {
   code: number;
@@ -54,6 +55,10 @@ export async function runCli(argv: string[], options: RunOptions = {}): Promise<
     await dispatch(ctx, parsed.tokens);
     return { code: 0, stdout, stderr };
   } catch (err) {
+    if (err instanceof CliExitError) {
+      if (err.message) errln(err.message);
+      return { code: err.code, stdout, stderr };
+    }
     if (err instanceof ApprovalPendingError) {
       errln(err.message);
       return { code: 2, stdout, stderr };

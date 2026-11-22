@@ -180,6 +180,16 @@ async function handleCommand(message) {
   if (name === "browser_type") {
     return tabReply({ type: "type", tabId: tab.id, ref: args.ref, text: args.text });
   }
+  if (name === "browser_action") return tabReply({ type: "action", tabId: tab.id, ...args });
+  if (name === "browser_wait") {
+    const deadline = Date.now() + Math.min(30000, Math.max(100, Number(args.timeout_ms) || 8000));
+    do {
+      const result = await tabReply({ type: "ready", tabId: tab.id, text: args.text });
+      if (result.ok) return result;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } while (Date.now() < deadline);
+    return { ok: false, output: "Browser wait timed out; observe again" };
+  }
   if (name === "mouse_move") {
     pointer = { x: Number(args.x) || 0, y: Number(args.y) || 0 };
     return tabReply({ type: "mouse", tabId: tab.id, kind: "mouseMoved", ...pointer });
@@ -226,8 +236,21 @@ async function handleCommand(message) {
     });
   }
   if (name === "key") {
-    await tabReply({ type: "key", tabId: tab.id, kind: "keyDown", key: args.key });
-    return tabReply({ type: "key", tabId: tab.id, kind: "keyUp", key: args.key });
+    const down = await tabReply({
+      type: "key",
+      tabId: tab.id,
+      kind: "keyDown",
+      key: args.key,
+      modifiers: args.modifiers,
+    });
+    if (!down.ok) return down;
+    return tabReply({
+      type: "key",
+      tabId: tab.id,
+      kind: "keyUp",
+      key: args.key,
+      modifiers: args.modifiers,
+    });
   }
   if (name === "type_text") {
     return tabReply({ type: "insertText", tabId: tab.id, text: args.text });

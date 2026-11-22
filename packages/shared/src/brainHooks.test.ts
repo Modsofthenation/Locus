@@ -20,6 +20,13 @@ describe("brain hooks", () => {
     expect(script).not.toContain("0.0.0.0");
   });
 
+  it("sends the operator token so the control plane accepts the transcript", () => {
+    const script = brainIngestScript(7420);
+    expect(script).toContain('"operator.token"');
+    expect(script).toContain("LOCUS_OPERATOR_TOKEN");
+    expect(script).toContain('"x-locus-operator"');
+  });
+
   it("merges personal hook commands without dropping existing keys", () => {
     const command = brainHookCommand("cursor");
     const cursor = mergeCursorHooks(

@@ -76,7 +76,9 @@ describe("ComposerRepoPicker", () => {
   }
 
   function openList() {
-    const toggle = host.querySelector("[aria-label='Repository']") as HTMLButtonElement;
+    const toggle = host.querySelector(
+      "[aria-label='Repository'], [aria-label^='Repository: ']",
+    ) as HTMLButtonElement;
     act(() => {
       toggle.click();
     });
@@ -116,7 +118,7 @@ describe("ComposerRepoPicker", () => {
 
   it("keeps a single-select picker for design context", () => {
     render([], { multiple: false, repos: repos.slice(0, 1) });
-    const picker = host.querySelector("[aria-label='Repository']");
+    const picker = host.querySelector("[aria-label='Repository'], [aria-label^='Repository: ']");
     expect(picker).toBeTruthy();
     expect(picker instanceof HTMLSelectElement).toBe(false);
     const labels = selectOptionLabels(host, "Repository");
@@ -211,7 +213,9 @@ describe("ComposerRepoPicker", () => {
 
   it("moves the active option with arrow keys and selects with Enter", async () => {
     render();
-    const toggle = host.querySelector("[aria-label='Repository']") as HTMLButtonElement;
+    const toggle = host.querySelector(
+      "[aria-label='Repository'], [aria-label^='Repository: ']",
+    ) as HTMLButtonElement;
     act(() => {
       toggle.click();
     });
@@ -256,7 +260,9 @@ describe("ComposerRepoPicker", () => {
         new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
       );
     });
-    const toggle = host.querySelector("[aria-label='Repository']") as HTMLButtonElement;
+    const toggle = host.querySelector(
+      "[aria-label='Repository'], [aria-label^='Repository: ']",
+    ) as HTMLButtonElement;
     expect(toggle.getAttribute("aria-activedescendant")).toBe("composer-repo-opt-r1");
     expect(filter.getAttribute("aria-activedescendant")).toBe("composer-repo-opt-r1");
     expect(

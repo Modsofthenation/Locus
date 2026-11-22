@@ -6,7 +6,7 @@
 
 Locus is a desktop control plane for AI coding agents that run on hardware you own — a Docker container, a QEMU virtual machine, or a folder on disk. Chat on one side, the live guest on the other. Code, keys, sessions, and disks stay under `~/.locus`.
 
-This is **v0.21.0** (MIT). The API binds to loopback. Linux, macOS, and Windows. Bring any LLM provider you have a key for.
+This is **v0.24.0** (MIT). The API binds to loopback. Linux, macOS, and Windows. Bring any LLM provider you have a key for.
 
 ## Install
 
@@ -38,17 +38,17 @@ You describe a task. Locus runs the agent in a guest you own. Review diffs, stee
 
 The runtime is chosen per agent and stays fixed. New agents default to Docker when the engine is present, otherwise Host.
 
-**Where** defaults to this machine. Docker, VM, and Host are shapes of a guest; placement is which computer runs it. Other LAN machines running `npm run dev:worker` can host **Docker, Host, or QEMU VM** agents — paste the printed `locus-worker:add` line in Settings → Workers (or `locus config workers add`), then New agent → Where. Worker VMs resolve cloud images from `LOCUS_WORKER_HOME/media`; live VNC is proxied to the laptop over pinned WSS (the worker still binds VNC to localhost). Golden VM disks upload to the worker once. Azure and GCP workers use the same recorded-HTTP placement as Fargate. Locus does not scan the LAN. Each app only lists workers it registered. Two apps can share one worker, or run isolated workers on the same host with different `LOCUS_WORKER_PORT` and `LOCUS_WORKER_HOME` — [docs/agent-backends.md](docs/agent-backends.md#multiple-locus-apps-one-worker-host). Cursor Cloud is a provider that skips the guest, not a placement.
+**Where** defaults to this machine. Docker, VM, and Host are shapes of a guest; placement is which computer runs it. Other LAN machines running `npm run dev:worker` can host **Docker, Host, or QEMU VM** agents — paste the printed `locus-worker:add` line in Settings → Workers (or `locus config workers add`), then New agent → Where. Worker VMs resolve cloud images from `LOCUS_WORKER_HOME/media`; live VNC is proxied to the laptop over pinned WSS (the worker still binds VNC to localhost). Golden VM disks upload to the worker once. Azure and GCP workers use the same recorded-HTTP placement as Fargate. A Fargate worker opens as a chat straight away: each agent gets its own ECS task running `locus-worker` and runs there as a Host guest. Locus does not scan the LAN. Each app only lists workers it registered. Two apps can share one worker, or run isolated workers on the same host with different `LOCUS_WORKER_PORT` and `LOCUS_WORKER_HOME` — [docs/agent-backends.md](docs/agent-backends.md#multiple-locus-apps-one-worker-host). Cursor Cloud is a provider that skips the guest, not a placement.
 
 ## Tour
 
-The icon rail starts with **Inbox** (everything waiting on you), then **Agents, Design, IDE, Codebase, Jobs** (Automations), then **More** for Games, Assets, Board, Projects, Brain, Slack, Grafana, and Docker. Pin a More surface onto the rail from that menu, then drag it or use Move up / down. Hover a collapsed rail icon to peek that list. Alt+1–9 jumps Inbox then pinned sections. Drag the sidebar edge to resize. Session lists share All / Needs you / Running / Unread chips and can group by day, repo, or status; Docker uses All / Running chips. Inbox rows are tagged and can Approve / Deny waiting tools. Settings is a full page. Developer / Swarm lives in Appearance (and the command palette) — Developer is this control plane; Swarm hides the rail and is teammate-first (Teammates, Teams, Routines).
+The icon rail starts with **Home** (everything waiting on you, with Needs you / Active agents / Reviews running / Jobs running tiles, a decision card, Recent, Reviewers, and Jobs), then **Agents** and **Codebase**, then **More** for Design, Games, Assets, Android, IDE, Jobs (Automations), Board, Projects, Brain, Slack, Grafana, and Docker. Pin a More surface onto the rail from that menu, then drag it or use Move up / down. When a More surface comes into use (a design, an automation, a Grafana token, Docker agents), More shows a dot and offers once to pin it. Rails saved before this keep their layout. Hover a collapsed rail icon to peek that list. Alt+1–9 jumps Home then pinned sections. Drag the sidebar edge to resize. Session lists share All / Needs you / Running / Unread chips and can group by day, repo, or status; Docker uses All / Running chips. Home rows are tagged and can Approve / Deny waiting tools. Settings is a full page. Developer / Swarm lives in Appearance (and the command palette) — Developer is this control plane; Swarm hides the rail and is teammate-first (Teammates, Teams, Routines).
 
-![Inbox](docs/screenshots/inbox.png)
+![Home](docs/screenshots/home.png)
 
 ### Setup
 
-First-run wizard: provider key, then Developer or Swarm. Docker and QEMU sit under **Set up later**. **Skip for now** leaves a one-line Finish setup hint until you Continue or Dismiss it. The command palette **Finish setup** reopens the wizard.
+First-run wizard: provider key, then Developer or Swarm. Docker and QEMU sit under **Set up later**. **Try a sample task** finishes setup and starts a Host agent on a tiny repo with one failing test (`~/.locus/samples/sum`, reset each run) in its own worktree, so you see edits, approvals, and Merge without Docker or QEMU; the first-task card and the command palette offer it too while nothing is linked. **Skip for now** leaves a one-line Finish setup hint until you Continue or Dismiss it. The command palette **Finish setup** reopens the wizard.
 
 ![Set up Locus wizard](docs/screenshots/setup_wizard.png)
 
@@ -56,7 +56,15 @@ First-run wizard: provider key, then Developer or Swarm. Docker and QEMU sit und
 
 New agent is a full-page composer: Docker / VM / Host, a private folder or a folder you open, a repo (defaults to **No repo**; several linked remotes clone side by side under `/workspace/<name>`, then the repo is locked), then **More options** for image, jail, spend, named environment, and recipes. Recipes are **PR reviewer**, **Installer QA** (Windows VM), **Repo fixer**, **Setup environment** (install, start, verify, write `.locus/environment.json`), **Web QA** (headed Chromium), and **Ops loop** (Grafana, Jira, Confluence, Linear, Slack, incident.io, AWS IAM, Portainer, Kubernetes, Sentry). Sidebar overflow **Duplicate** forks the workspace into a new empty chat. Missing Docker or QEMU is a blocking callout — **Use Host instead**, or Finish setup.
 
+**Worktrees and parallel agents.** On Host, tick **Work in a new git worktree** to give the agent its own branch (`locus/<task>-<id>`) in `~/.locus/worktrees` — the folder you opened stays untouched. **Run in parallel** on New agent (or **Run in parallel…** in the agent menu) sends one task to 2–8 agents at once; mix Claude Code, Codex CLI, Cursor CLI, Kiro CLI, and API models, one worktree and branch each, all sharing one git object store. Docker runs up to four, one container each. The **Board** button on the workers banner shows every agent's status, branch, and diffstat with **Diff**, **Merge** (commits the agent's work, then `git merge --no-ff` into the base checkout; conflicts abort cleanly), **Open PR**, and **Discard** (deletes the worktree and branch). **Compare** puts the attempts side by side (model, status, diffstat, last test result, cost, changed files); **Pick this one** merges it and offers to discard the rest, and **Rank** has a model judge them against the task (a heuristic **Suggested** order without an API model). Deleting an agent removes its worktree and keeps the branch only if it has work. New worktrees get the source's ignored `.env*` / `.envrc` / `.npmrc`; list more files and a setup command in `.locus/worktree.json` (`{"copy": ["config/local.json"], "setup": "npm ci"}`). Forking a worktree agent makes a fresh worktree carrying its uncommitted files.
+
+![Compare parallel attempts](docs/screenshots/workers_compare.png)
+
 Chat sits on the left. **Files** in the header opens the guest pane on the right (Docker opens on **Files**; Host uses the same editor on `/workspace`). `.html` has a Browser preview, `.md` / `.svg` open in Preview, and `.pdf` renders inline. A listening HTTP port stacks **Preview** under Files. Host agents also get a **Browser** tab on the isolated Chrome profile. A coding or review agent can `canvas_write` a self-contained HTML report on a **Canvas** tab, separate from the repo and from Design's canvas.
+
+**Chat / Terminal** in the header switches an agent to Terminal mode: the guest pane's **Terminal** tab runs an interactive agent CLI in a real PTY inside that agent's workspace — the session provider's CLI by default (`claude`, `codex`, `cursor-agent`, `kiro-cli`), or `gemini`, `opencode`, `aider`, a shell, or any command. Up to four terminals per agent, each with Restart and Close. Processes outlive a reload and replay their scrollback. Host and local Docker (`docker exec -it` in `/workspace`) only; VM and worker agents say so. When a CLI goes quiet on a question (`?`, `>`, `(y/n)`, Allow / Approve) after you sent it something, the agent shows **Needs you** until your next keystroke.
+
+Starting a guest shows its steps (Pull image → Start container → Install; Prepare disk → Boot → Connect agent; Create worktree → Install) with elapsed time and an estimate from past starts. A finished turn ends with a summary card: files changed with +/−, whether tests passed, tokens, cost and time, and **Review changes**, **Merge** (worktree agents in a parallel group), **Open PR**, **Continue**, and **Undo this turn**.
 
 Consecutive reads, searches, and commands collapse into one summary (`Explored 8 files, 4 searches, ran 1 command`). Expand the row for the per-call chips. Edits, questions, sub-agents, and pending approvals stay on their own rows.
 
@@ -65,7 +73,7 @@ Ask an agent to **subscribe** to a Slack channel or thread, a GitHub/GitLab/Bitb
 <table>
 <tr>
 <td align="center" valign="top" width="50%"><img src="docs/screenshots/new_agent.png" alt="New agent"><br>New agent</td>
-<td align="center" valign="top" width="50%"><img src="docs/screenshots/agents_workspace.png" alt="Agent workspace with collapsed tool activity"><br>Workspace</td>
+<td align="center" valign="top" width="50%"><img src="docs/screenshots/agents_workspace.png" alt="Agent workspace with a turn summary card"><br>Workspace</td>
 </tr>
 <tr>
 <td align="center" valign="top" colspan="2"><img src="docs/screenshots/agent_settings.png" alt="Agent settings"><br>Agent settings</td>
@@ -74,7 +82,7 @@ Ask an agent to **subscribe** to a Slack channel or thread, a GitHub/GitLab/Bitb
 
 ### Design
 
-Composer first, then **Or start from** pills (Landing page, App dashboard, Slide deck, One-pager, Mobile screen). A linked repo on create is **read-only design context** — the agent reads UI and tokens and does not commit or open PRs. Chat plus a live HTML canvas (Desktop / Tablet / Phone, Comment, Export, **Promote to agent**). **Save variant** snapshots the live HTML; **Design systems** reuse a named palette across canvases (`locus design variant` / `locus design systems`). Promote writes `DESIGN.md` into a Vite + React, Next.js, Astro, or static scaffold. The Design sidebar shows a preview of each canvas. **Where** can be a LAN worker — the canvas is still `/workspace/index.html` on that bind-mount. Thin briefs get a short questionnaire before the first canvas.
+Composer first, then **Or start from** pills (Landing page, App dashboard, Slide deck, One-pager, Mobile screen). A linked repo on create is **read-only design context** — the agent reads UI and tokens and does not commit or open PRs. Chat plus a live HTML canvas (Desktop / Tablet / Phone, Comment, Export, **Promote to agent**). **Save variant** snapshots the live HTML; **Design systems** reuse a named palette across canvases (`locus design variant` / `locus design systems`). Promote writes `DESIGN.md` into a Vite + React, Next.js, Astro, or static scaffold. The Design sidebar shows a preview of each canvas. **Where** can be a LAN worker — the canvas is still `/workspace/index.html` on that bind-mount. Thin briefs get a short questionnaire before the first canvas. **Present** shows the prototype alone, full screen, for a review or demo; ← / → step through saved variants and Esc exits.
 
 <table>
 <tr>
@@ -88,7 +96,7 @@ Composer first, then **Or start from** pills (Landing page, App dashboard, Slide
 
 ### Games
 
-A rail next to Design for **playable web games**. Same live `/workspace/index.html` canvas, chat, Comment, Export, and **Promote to agent**. Starters (Arcade, Platformer, Grid puzzle, Cards, Twin-stick, Match-3, Trivia, Tower defense, Racing, Maze, Juice, Hold-to-move, Mobile touch, Speedrun, Roguelike, Endless drive) require a real game loop, input, and a win/lose or score on the first draft. New game also has 2D / 3D and Hotseat chips, plus remixable one-sentence prompts (Vegas match-3, Saloon match-3, Recycle drop, City siege, Deep maze, Trivia night).
+A rail next to Design for **playable web games**. **Build with** picks Web game, Unity, Godot, or Unreal before anything else. Same live `/workspace/index.html` canvas, chat, Comment, Export, and **Promote to agent**. Starters (Arcade, Platformer, Grid puzzle, Cards, Twin-stick, Match-3, Trivia, Tower defense, Racing, Maze, Juice, Hold-to-move, Mobile touch, Speedrun, Roguelike, Endless drive) require a real game loop, input, and a win/lose or score on the first draft. New game also has 2D / 3D and Hotseat chips, plus remixable one-sentence prompts (Vegas match-3, Saloon match-3, Recycle drop, City siege, Deep maze, Trivia night).
 
 Operator chrome includes Play mode, feel sliders and presets, Playtest, Fix from playtest, iterate chips (Soften / Crunch / Juice / Teach / Fail-state / Balance), Apply brief, Keep feel, reset/pause, mute/clear-save, audio unlock, a control legend with last keys and a replay tape, landscape aspect lock, touch sticks, gamepad, debug HUD, pop-out, an Unlisted play link with a phone QR and a per-token scoreboard, generate sprite/sheet/mesh/SFX, a seed slider, Explore 3 loops, Export zip (PWA + itch), and a 15s Record. Grow this into a project promotes to a Vite, Three.js, Phaser, or static scaffold. The Studio panel pins the tape as a moment, pins named builds, and edits rooms, waves, and the deck. A one-page `GDD.md`, living `GAME.md`, content JSON (`rooms.json` / `waves.json` / `deck.json`), and `.locus-game/last-run.json` ground the next turn. **Game styles** save tile, HUD, and juice. Asset kits (pixel / Three.js / Phaser / SFX) land under `vendor/`. Promote writes `GAME.md` and a Vite canvas, Three.js, Phaser, or static scaffold. Scores persist in `localStorage` key `locus-game`. Phone **More → Games** lists those canvases.
 
@@ -99,9 +107,31 @@ Operator chrome includes Play mode, feel sliders and presets, Playtest, Fix from
 </tr>
 </table>
 
+#### Unity
+
+The Games launcher supports **playable web games** and a **Unity** entry point. Unity projects stay listed under **Games**, with an Editor/preview panel beside the coding chat rather than being moved into Agents. Choose **Web game** to use the live HTML canvas, or **Unity** to launch a Host coding agent for a new or existing Unity project. For existing projects, select the actual Unity project directory as the Host workspace (containing `Assets/`, `Packages/manifest.json` and `ProjectSettings/ProjectVersion.txt`). For a new project, select a writable parent directory; the agent uses a locally installed Unity Editor to initialise a new child project. Unity Editor/Hub must be installed for project creation, importing, compiling, builds and playtesting. **Security:** Unity imports may execute project and package Editor code on the host. Only open trusted Unity projects; these batch operations are not a sandbox. Unity projects do **not** render inside the Games HTML preview; the launched coding agent is accessed through the agent workspace. **Unity Editor** controls in that agent can inspect scenes and hierarchy, create a scene, import/compile, run PlayMode tests, capture a scene camera to PNG, and build standalone Linux/Windows/macOS players. Jobs report Editor logs, test results, and errors; Unity Editor must be installed, and the project must be closed in the interactive Editor while batch jobs run. Camera capture needs a functional graphics context. Build modules and licensing depend on the local Unity installation. The agent preserves `.meta` GUIDs and existing project settings when editing. For playable previews, **Build / Preview → WebGL** compiles the Unity project with its WebGL support module and embeds the resulting real Unity player in a sandboxed browser frame. WebGL previews are interactive, but **not a live Editor Game View**: rebuild after edits to see changes. Scene capture also provides static camera renders when supported. Native Host agents and CLI agents can call `unity_editor` and `unity_result` to inspect, compile, run tests, capture, build and inspect results autonomously. Generated reports, screenshots and WebGL builds persist under `.locus-unity/runs/`; add `.locus-unity/` to the project's `.gitignore`.
+
+#### Godot Engine
+
+The **Games → Godot** launch option works with Godot 4 GDScript projects and existing Godot 4 `project.godot` workspaces. Choose **Create project** and a writable Host parent folder to start a new playable game, or **Edit existing** and the project folder to modify one. Godot projects stay in Games alongside Unity and browser games.
+
+The local Host coding agent can create or edit GDScript files, `.tscn` scenes, resources and project settings. Dedicated agent tools `godot_editor` and `godot_result` support headless **scene inspection**, **resource import/parsing**, **120-frame smoke runs**, **scene creation**, and **exporting** Web, Linux, Windows and macOS builds. Results and logs are saved under `<project>/.locus-godot/runs/<job-id>/`, and previous completed results are restored after a server restart.
+
+For an interactive preview, configure a **Web** export preset and install Godot export templates, select **Export / Preview → Web**, and run the job. Locus displays the actual Godot HTML5 game in a sandboxed Games preview pane; this is a built player, **not a live native Godot Editor Game View**. Rebuild after code changes. Web previews support compatible single-threaded Godot 4 GDScript exports; C# and threaded/GDExtension Web exports are not supported in this integration. Godot 4's Web renderer has platform requirements.
+
+**Prerequisites and safety:** Install a Godot 4 Editor executable on the Host and add it to `PATH` (as `godot4` or `godot`), or set `LOCUS_GODOT_PATH` to its full path. Configure export presets/templates for target platforms. C# projects require a Godot .NET Editor. Godot plugins and project scripts can execute on the Host during import and tests, so **only use trusted projects**. Commit source projects, not generated `.godot/` or `.locus-godot/` directories.
+
+#### Unreal Engine
+
+The **Games → Unreal** launch option works with Unreal Engine 5 projects (C++ or Blueprint-only). Choose **New project** and a writable Host parent folder to have the agent scaffold a new child project, or **Open existing** and the folder that contains the `.uproject`. Unreal projects stay listed under **Games** with an Unreal Engine panel beside the coding chat.
+
+Dedicated agent tools `unreal_editor` and `unreal_result` (and the matching panel buttons) run real engine operations on the Host: **Inspect project** (descriptor, matching engine install, modules, plugins, maps, default map — works even when no engine is found), **Compile** (the C++ `*Editor` target through UnrealBuildTool, then `CompileAllBlueprints`), **Run tests** (headless automation tests, filtered by test name, defaulting to the project name), **Run Python script** (a project `.py` run with the editor's Python scripting, for creating levels, actors and Blueprint assets — `.uasset`/`.umap` files are binary and are never edited as text) and **Package** (`RunUAT BuildCookRun` for Windows, Linux or macOS). Logs, automation reports and packaged builds are saved under `<project>/.locus-unreal/runs/<job-id>/`, and completed results are restored after a server restart.
+
+**Prerequisites and safety:** Locus finds the engine that matches the project's `EngineAssociation` — Epic Games Launcher installs (`UE_5.x`), registered source builds, or a project inside a source engine tree. It never falls back to a different engine version, because opening a project in another version converts its assets. Set `LOCUS_UNREAL_ENGINE` to an engine root (the folder containing `Engine/`) to choose one explicitly. C++ projects need the platform toolchain Unreal requires (Visual Studio on Windows, Xcode on macOS, the bundled clang toolchain on Linux); Python scripts need `PythonScriptPlugin` enabled in the `.uproject`. There is no web preview: Unreal no longer exports to HTML5. Builds, commandlets and project plugins execute on the Host, so **only use trusted projects**, and close the interactive Unreal Editor while jobs run. Commit sources, not `Binaries/`, `Intermediate/`, `Saved/`, `DerivedDataCache/` or `.locus-unreal/`.
+
 ### Assets
 
-A rail next to Games for **2D sprites and rigged 3D models**. Same live canvas, chat, Comment, Export, and **Promote to agent**. Starters are Image to 3D, Text to 3D, Cutout, Sprite sheet, Voxel, Low poly, Rig, Walk cycle, Hold, Attacks, and PBR. Drop a front, side, and back photo, or describe a prop.
+A rail next to Games for **2D sprites and rigged 3D models**. **Build with** picks **Web asset** (the live canvas) or **Blender** (a real `.blend` workflow on a Host workspace: create, inspect, validate, render, and export — [docs/blender-assets.md](docs/blender-assets.md)). Same live canvas, chat, Comment, Export, and **Promote to agent**. Starters are Image to 3D, Text to 3D, Cutout, Sprite sheet, Voxel, Low poly, Rig, Walk cycle, Hold, Attacks, and PBR. Drop a front, side, and back photo, or describe a prop.
 
 Operator chrome includes Orbit, Wireframe, clip Play (idle / walk / jump / pickup / carry / attack, plus heavy and ranged variants), pose sliders and presets, **Build** (High detail / Smart topology, Flagship quality, Ultra 2x/4x, A-Pose / T-Pose, texture, split, multi-view, enhance, printability), a topology / faces / verts / printability overlay, iterate chips (Retopo / Texture / Rig / Animate / Low poly / Split / Printability), Apply brief, Apply build, Keep pose, Export zip / PNG / GLB, and Explore 3 directions. A living `ASSET.md` grounds the next turn. **Asset styles** save silhouette, materials, and palette. Kits land under `vendor/`. The agent writes the studio HTML locally. Phone **More → Assets** lists those studios.
 
@@ -111,6 +141,12 @@ Operator chrome includes Orbit, Wireframe, clip Play (idle / walk / jump / picku
 <td align="center" valign="top" width="50%"><img src="docs/screenshots/assets_workspace.png" alt="Assets studio"><br>Studio</td>
 </tr>
 </table>
+
+### Android
+
+**More → Android** creates and edits native Android apps with a local Host coding agent. Pick **New Kotlin / Compose app**, **New React Native app**, or **Open existing project**, choose a folder, and describe the app. Chat sits beside an emulator canvas: start an Android Studio virtual device, **Build & run** the debug APK, then tap, swipe, rotate, and type into the live device. Gradle unit and device tests, lint, and the debug APK run from the same pane. Needs the Android SDK, an emulator, and a JDK on this machine. Setup: [docs/android-builder.md](docs/android-builder.md).
+
+![Android](docs/screenshots/android_empty.png)
 
 ### IDE
 
@@ -177,6 +213,8 @@ A local knowledge graph plus distilled memory (`~/.locus/brain`). Index a repo f
 
 A local Slack client on the icon rail. Sign in as yourself in Settings → Integrations (OAuth or a pasted user token). Read as you; send as you by default, or **as Locus** when a bot token is stored. Opening a channel marks it read. Edit or delete your own messages, mention someone with `@`, and resize a thread from its left edge. **Open in Slack** jumps to Slack.app. HTML, CSV, video, and PDF files preview inline. **Ask Locus** runs a local agent against a thread; recipe shortcuts start Review, Design, or Ops with that thread attached. **Catch me up** summarizes the channel locally. **Listen** pins a channel or thread onto an agent. Pending `slack_post` drafts edit in the thread before Send. File, PR, and session cites jump into Locus. Slack.com stays Slack. Operator notes: [docs/slack.md](docs/slack.md).
 
+**PR reviewers.** Settings → Reviewers points a reviewer at a channel. When someone posts a GitHub, GitLab or Bitbucket PR link there, it makes a shallow read-only clone, checks the change against callers, types and tests, and replies in that post's thread and on the PR (a comment review, or approve / request changes in verdict mode). Each reviewer has its own prompt (up to 100,000 characters), model (an API provider or a CLI agent such as Claude Code or Codex), identity, severity floor, repo filter, token budget and cost cap. Reviews also read the repo's `AGENTS.md` / `CLAUDE.md` / `REVIEW.md` from the base branch, failing CI logs and existing PR comments. In the thread, reply **re-review** after pushing fixes, **won't fix #2** to dismiss a finding for later reviews, or @-mention the reviewer to ask about the review. Settings → Reviewers lists in-progress runs, open review chats and recent reviews, each with a **Trace** of the prompt, reasoning and tool calls. Guide: [docs/slack-pr-reviewer.md](docs/slack-pr-reviewer.md).
+
 ![Slack](docs/screenshots/slack_empty.png)
 
 ### Grafana
@@ -206,15 +244,15 @@ The **Services** tab on that rail lists Swarm nodes and services when this engin
 
 ### Settings
 
-Grouped as **Models** (Providers, MCP, Skills, Benchmark), **Workspace** (Machines, Workers, Environments, Git, Integrations), and **System** (Appearance, Notifications, Phone, Chrome, Advanced, About). The page can find a provider, MCP server, skill, worker, environment, Git account, or integration by name.
+Grouped as **Models** (Providers, MCP, Skills, Benchmark), **Workspace** (Machines, Workers, Environments, Git, Integrations, Reviewers), and **System** (Appearance, Notifications, Phone, Chrome, Advanced, About). The page can find a provider, MCP server, skill, worker, environment, Git account, or integration by name. Reviewers configures Slack PR reviewers (see [Slack](#slack)). Codex CLI, Claude Code, Cursor CLI and Kiro CLI show a **Plan usage** meter beside the model picker (and a card on Settings → Providers).
 
 Git includes **Sign in with GitHub** / **Sign in with GitLab** / **Sign in with Bitbucket**. MCP defaults to deferred tool schemas (**Preload tool schemas** per server). HTTP MCP to an AWS API Gateway signs SigV4 when AWS keys are in that server's env. Traces live on the agent or design ⋯ menu → **View trace**.
 
 Settings → About checks GitHub Releases at launch and every six hours. **Install** verifies the download against `SHA256SUMS`, then swaps a Linux AppImage in place and relaunches, runs the Windows installer, or opens the dmg / deb / rpm. Settings → Advanced → **Back up and restore** writes one passphrase-encrypted `.locusbak` with sessions, settings, stored keys, boards, projects, Jobs and Brain, and restores it on another machine at the next start (`locus backup` / `locus restore`). Settings → **Benchmark** runs five small coding tasks as real Host turns against the models you pick and compares pass rate, cost and time (`locus eval run`).
 
-Settings → Phone mints a LAN pairing token (QR on that tab). Settings → Workers lists LAN / Cloud VM / Fargate hosts. Settings → Environments lists named boxes saved from New agent or Automations. Settings → Notifications toggles desktop alerts and quiet hours. Settings → Appearance filters themes and sets editor font size, format on save, and the minimap. Settings → Advanced **Tailscale Funnel** exposes **only** `/api/hooks` (never the whole control plane) so GitHub can reach forge webhooks; `locus config funnel enable|disable`.
+Settings → Phone mints a LAN pairing token (QR on that tab). Settings → Workers lists LAN / Cloud VM / Fargate hosts. Settings → Environments lists named boxes saved from New agent or Automations. Settings → Notifications toggles desktop alerts and quiet hours. Settings → Appearance searches and filters themes by colour and style, and sets chat density, editor font size, format on save, and the minimap. Its **Generated** tab builds a theme in an editor (colours with a contrast check, fonts including any Google font, shapes, backdrops, motion and effects) or generates one from a sentence with any enabled provider; agents can do the same in chat with `manage_theme`. Themes are stored as validated data, never raw CSS. Settings → Advanced **Tailscale Funnel** exposes **only** `/api/hooks` (never the whole control plane) so GitHub can reach forge webhooks; `locus config funnel enable|disable`.
 
-Integrations: Slack, Grafana, Jira, Confluence, Linear, Miro, Figma, incident.io, AWS IAM, Portainer, Kubernetes, Sentry, Gmail, Google Calendar, Google Drive, and agent-authored HTTP plugins. Settings → About is **0.21.0**.
+Integrations: Slack, Grafana, Jira, Confluence, Linear, Miro, Figma, incident.io, AWS IAM, Portainer, Kubernetes, Sentry, Gmail, Google Calendar, Google Drive, and agent-authored HTTP plugins. Settings → About is **0.24.0**.
 
 <table>
 <tr>
@@ -232,6 +270,9 @@ Integrations: Slack, Grafana, Jira, Confluence, Linear, Miro, Figma, incident.io
 <tr>
 <td align="center" valign="top"><img src="docs/screenshots/settings_git.png" alt="Git"><br>Git</td>
 <td align="center" valign="top"><img src="docs/screenshots/settings_integrations.png" alt="Integrations"><br>Integrations</td>
+</tr>
+<tr>
+<td align="center" valign="top" colspan="2"><img src="docs/screenshots/settings_reviewers.png" alt="Reviewers"><br>Reviewers</td>
 </tr>
 <tr>
 <td align="center" valign="top"><img src="docs/screenshots/settings_appearance.png" alt="Appearance"><br>Appearance</td>
@@ -281,11 +322,13 @@ Developer / Swarm in the sidebar switches the product shell. Developer keeps the
 
 **Workspace.** Chat while the guest boots. Queue follow-ups, **Send now** to interrupt the current turn, or **Steer** so the next model round sees the new instruction. Stop still aborts. Type `/` for takeover, handback, undo, fork, **clear**, workers, record, vision, **websearch**, **plan**, **roles**, and custom **skills**. `/plan` may read the repo, then lands a proposed plan; **Accept** / **Run** executes it. `/roles` cycles planner → implementer → reviewer. `/clear` drops the transcript and model context and keeps linked repos. Composer **⋯** repeats Plan / Web / Vision / Record / Roles / Undo / Fork / Clear. Workers snapshot `/workspace` on `locus/worker-N` and can **merge into parent**. Coding chats can `remember` short facts in `.locus/memories.json`. Paste an image or a clipboard chip into the composer — hover the chip to preview. Toggle **Vision** and **Web search** there. The Files tree shows `+`/`−` on files the agent changed, with **All / Updated**. A listening HTTP port stacks live **Preview** under Files.
 
-**Workflows.** Agent Loop Builder graphs run inside a coding chat. `list_workflows` / `run_workflow` / `resume_workflow` use that session's tools (still gated). Import a `.alb.json` or add a template (`locus workflow templates|add|import|run|resume`). Templates include Research Agent, ReAct, Plan-and-Execute, Human-in-the-Loop, Magentic-One, Tree of Thoughts, plus Locus-native file-read and tool-agent graphs. Runs pause on human gates until you Approve. Saved under `~/.locus/workflows`. CLI: [docs/cli.md](docs/cli.md#workflows).
+**Workflows.** Agent Loop Builder graphs run inside a coding chat. `list_workflows` / `run_workflow` / `resume_workflow` use that session's tools (still gated). Import a `.alb.json` or add a template (`locus workflow templates|add|import|run|resume`). Templates include Research Agent, ReAct, Plan-and-Execute, Human-in-the-Loop, Magentic-One, Tree of Thoughts, plus Locus-native file-read and tool-agent graphs. Runs pause on human gates until you Approve. Agent nodes run on their own provider/model when it is configured here, otherwise on the session's (ALB's default `openai` / `gpt-4o-mini` counts as unset). Saved under `~/.locus/workflows`. CLI: [docs/cli.md](docs/cli.md#workflows).
 
 **Host peers.** A Host agent can list, read, grep, and copy files from other Locus chats on this machine — Games, Assets, Design, and other agents. Type `@game:` / `@asset:` / `@agent:` or ask it to look. Copy lands under `/workspace/peers/<slug>/`. Docker and VM agents stay isolated.
 
 **MCP.** Settings → MCP lists stdio servers or an HTTP/SSE URL, with an optional tool allowlist. HTTP MCP to an AWS API Gateway signs SigV4 when AWS keys are in that server's env. Schemas stay deferred until the model calls `mcp_list_tools` unless you check **Preload tool schemas**. **Host** MCP runs on this machine. **Guest** MCP stdio runs inside the Docker container. Tool calls wait for Approve / Deny unless autonomy is **Autonomous**.
+
+**Add from chat.** Ask an agent to save something as a skill ("make this a /release-notes skill") or to add an MCP server ("add the GitHub MCP server") and it calls `manage_skill` or `manage_mcp_server`, which edit Settings → Skills and Settings → MCP. Saving, changing or removing waits for Approve / Deny, even under **Autonomous** (add the tool name to auto-allow to skip it); `list` does not. Secrets never come from chat: a secret-looking env name such as `GITHUB_TOKEN` is stored blank, the server starts off, and the agent tells you to paste the value in Settings → MCP. Automations and subagents do not get these tools.
 
 **Integrations.** Each connected account gives the agent host-side tools. Writes (send, create, update, apply, scale, comment) wait for Approve / Deny. Tokens stay in the vault.
 
@@ -308,15 +351,16 @@ Developer / Swarm in the sidebar switches the product shell. Developer keeps the
 
 **CLI.** `npx locus` / `npm run locus --` is a loopback client for the same control plane: agents, design, games, assets, IDE, projects, Codebase, Brain, Slack, Grafana, Docker, automations, workflows, Settings, phone remote, and Funnel. `locus serve` starts the server when the app is not running. `locus project keep` leaves that control plane up after the desktop quits. `locus workflow` imports and runs Agent Loop Builder graphs. `locus brain setup` writes personal editor hooks that send a redacted transcript tail to the local brain. Live VNC and canvas clicking stay in the desktop. Guide: [docs/cli.md](docs/cli.md).
 
-**App.** 106 themes (Ember default). Settings → About is **0.21.0**. Electron packages (Linux AppImage, macOS dmg, Windows NSIS), or `npm run dev` in the browser. **Ctrl/Cmd+K** command palette. **Ctrl/Cmd+N** new agent, new automation, or (on Design, Games, Assets) the empty composer. **Ctrl/Cmd+F** find in chat. **Ctrl/Cmd+,** settings.
+**App.** 186 built-in themes with colour and style filters (Ember default), plus generated themes. Settings → About is **0.24.0**. Electron packages (Linux AppImage, macOS dmg, Windows NSIS), or `npm run dev` in the browser. **Ctrl/Cmd+K** command palette. **Ctrl/Cmd+N** new agent, new automation, or (on Design, Games, Assets) the empty composer. **Ctrl/Cmd+F** find in chat. **Ctrl/Cmd+,** settings.
 
 ## Security model
 
 - **Encrypted vault.** Provider keys, forge tokens, and guest passwords in AES-256-GCM `secrets.enc`. Wrapped with OS keychain when available.
-- **Loopback by default.** The control plane binds to `127.0.0.1`. Non-local origins are rejected. Settings → Phone is an opt-in LAN pairing token. Tailscale Funnel exposes only `/api/hooks`. Do not publish port 7420 to the internet.
+- **Loopback by default.** The control plane binds to `127.0.0.1`. Non-local origins are rejected. Loopback alone is not enough: `/api` and `/ws` also need the operator token in `<LOCUS_HOME>/operator.token` (0600), which the desktop app, the `locus` CLI and `npm run dev` send for you; `locus ui` prints a sign-in link for a plain browser. Re-run `locus brain setup` after upgrading so brain hooks send it. Settings → Phone is an opt-in LAN pairing token. Tailscale Funnel exposes only `/api/hooks`. Do not publish port 7420 to the internet.
 - **Approval gates.** Push, PR, MCP tools, and package installs wait for Approve / Deny. Protected branches always stay gated. **Supervised** shows every mutating command.
 - **Network jail.** Guests start **restricted** (forge + provider allowlist, logged CONNECT). Open and none remain selectable unless a managed policy locks the jail. VMs and Docker both support it.
 - **Managed policy.** `/etc/locus/policy.json` or a signed `~/.locus/policy.json` allow-lists enterprise providers, pins Brain, forces sandboxing, and greys those Settings controls. [docs/managed-policy.md](docs/managed-policy.md).
+- **CLI agent sandbox.** Cursor CLI, Claude Code, Codex, Kiro and custom CLI agents on Docker sessions run inside bubblewrap (Linux, plus `passt` for networking) or `sandbox-exec` (macOS): `~/.locus` is hidden except that session's workspace, `LOCUS_*` secrets are dropped, and the only local port they can reach is a per-turn MCP gateway for their own session. Worker Docker guests get the same filesystem sandbox on the worker. VM guests reach that same gateway, never `/api`. Without a sandbox the turn stops; `LOCUS_CLI_SANDBOX=off` opts out. [docs/cli-agent-sandbox.md](docs/cli-agent-sandbox.md).
 - **Secrets stay out of prompts.** Keys are injected as env vars at guest runtime. `.env` and cloud credential files are blocked from `file_read`.
 - **Untrusted input.** Webhooks, web search, MCP, and PR comments are wrapped in nonce-tagged data fences. Restricted-jail CONNECT allow/deny is traced as egress.
 
@@ -366,7 +410,7 @@ Docker agents skip QEMU, ISOs, and VNC.
 - **Network.** Restricted by default (HTTP(S)_PROXY to the same allowlist proxy VMs use — on a worker the proxy runs on that host). Open is the default bridge; none is `--network none`.
 - **Tools.** `exec`, files (`file_read`, `file_write`, `file_list`, `grep`, `glob`, `apply_patch`), `git_*`, `start_process`, `preview`, `playwright`, headed Chromium (`screenshot`, mouse, `key`, `browser_*`), and `record_screen` on `locus/agent`. Bind web apps to `0.0.0.0` so the right pane can proxy the port. Logins persist under `/workspace/.locus-chrome`.
 
-Docker agents support undo, fork, workers (2–4 parallel containers from the same snapshot), golden workspace images, automations, and operator takeover of guest Chromium. A repo `.locus/environment.json` can list an `install` command, extra packages, ports, env, and a start command. `.locus/skills/*.md` and `.locus/memory.md` load into the agent.
+Docker agents support undo, fork, workers (2–4 parallel containers from the same snapshot), golden workspace images, automations, and operator takeover of guest Chromium. A repo `.locus/environment.json` can list an `install` command, extra packages, ports, env, and a start command. `.locus/skills/*.md`, skill folders (`<name>/SKILL.md`) under `.locus/skills`, `.agents/skills` or `.claude/skills`, and `.locus/memory.md` load into the agent.
 
 ## VM and host tools
 
@@ -378,7 +422,7 @@ Docker agents support undo, fork, workers (2–4 parallel containers from the sa
 
 ## Git
 
-Clone a GitHub, GitLab, Bitbucket, Gitea, Forgejo, Azure DevOps, or generic git remote into the guest on boot. Pick several linked repos on New agent to clone them side by side under `/workspace/<name>`. Sign in with GitHub, GitLab, or Bitbucket in Settings → Git, or paste a PAT for Gitea, Forgejo, or Azure DevOps. `.devcontainer/devcontainer.json` maps onto `.locus/environment.json` install, start, ports, image, and env. Container engines can be Docker, Podman, or nerdctl (`LOCUS_CONTAINER_ENGINE`). Linux QEMU guests follow the host arch (`qemu-system-aarch64` + `virt` on arm64). Cursor / Claude / Codex / Kiro CLIs can run inside a Linux VM over SSH. GitHub uses device flow; GitLab and Bitbucket open a browser and return to `http://127.0.0.1:<port>/api/oauth/callback`. Each Sign in row needs an OAuth client ID (GitLab and Bitbucket also need the application secret), or set `LOCUS_GITHUB_OAUTH_CLIENT_ID` / `LOCUS_GITLAB_OAUTH_CLIENT_ID` / `LOCUS_BITBUCKET_OAUTH_CLIENT_ID`.
+Clone a GitHub, GitLab, Bitbucket, Gitea, Forgejo, Azure DevOps, or generic git remote into the guest on boot. Pick several linked repos on New agent to clone them side by side under `/workspace/<name>`. Sign in with GitHub, GitLab, or Bitbucket in Settings → Git, or paste a PAT for Gitea, Forgejo, or Azure DevOps. `.devcontainer/devcontainer.json` maps onto `.locus/environment.json` install, start, ports, image, and env. Container engines can be Docker, Podman, or nerdctl (`LOCUS_CONTAINER_ENGINE`). Linux QEMU guests follow the host arch (`qemu-system-aarch64` + `virt` on arm64). Cursor, Claude Code, Codex, Kiro and custom CLI agents run inside a Linux or Windows VM guest over SSH (the CLI must be installed and signed in there). GitHub uses device flow; GitLab and Bitbucket open a browser and return to `http://127.0.0.1:<port>/api/oauth/callback`. Each Sign in row needs an OAuth client ID (GitLab and Bitbucket also need the application secret), or set `LOCUS_GITHUB_OAUTH_CLIENT_ID` / `LOCUS_GITLAB_OAUTH_CLIENT_ID` / `LOCUS_BITBUCKET_OAUTH_CLIENT_ID`.
 
 Commit, branch, stash, revert, push, open a PR (optional draft), post a `git_pr_review`, and list/get/comment issues (`git_issue_list` / `git_issue_get` / `git_issue_comment`). Push, PR, review, comment, merge, and issue comments wait for Approve / Deny. Protected branches (`main`/`master`) stay gated. Forge tokens stay in Settings and can be injected as `GIT_TOKEN` in the container.
 
@@ -404,17 +448,19 @@ VNC displays start at `:10` (TCP 5910). Guest network jail: open, restricted (fo
 
 ## Providers
 
-Settings lists OpenCode Zen first (`https://opencode.ai/zen/v1`, default `big-pickle`), then OpenAI, Anthropic, Grok (xAI), DeepSeek, Cursor Cloud, Cursor CLI, Claude Code, Codex CLI, Kiro CLI, OpenRouter, Ollama (`http://127.0.0.1:11434/v1`), Gemini, Groq, Mistral, Together, Amazon Bedrock, Fireworks, and any OpenAI-compatible base URL.
+Settings lists OpenCode Zen first (`https://opencode.ai/zen/v1`, default `big-pickle`), then OpenAI, Anthropic, Grok (xAI), DeepSeek, Cursor Cloud, Cursor CLI, Claude Code, Codex CLI, Kiro CLI, OpenRouter, Ollama (`http://127.0.0.1:11434/v1`), Gemini, Groq, Mistral, Together, Amazon Bedrock, Fireworks, any OpenAI-compatible base URL, and **Add CLI agent** presets (Gemini CLI, Gemini CLI over ACP, OpenCode, Aider, Amp, GitHub Copilot CLI, or a custom command).
 
 Cursor Cloud launches or follows a [Cloud Agent](https://cursor.com/docs/cloud-agent/api/endpoints). The local Docker/VM guest is skipped. A linked **GitHub** repo is passed as `repos[]`.
 
-Cursor CLI spawns [`agent -p`](https://cursor.com/docs/cli/headless) against the session workspace. The Locus tool loop is skipped. The composer **Web** toggle still applies. Docker, Host, and **worker** sessions work; VMs do not. **Steer** interrupts a running CLI process. The model picker can turn Fast on or off and set thinking / effort. Worker Cursor CLI sessions write `.cursor/mcp.json` to a loopback MCP proxy on the worker so Design, Games, Assets, review, and Grafana/Slack/Jira tools tunnel back to Locus.
+Cursor CLI spawns [`agent -p`](https://cursor.com/docs/cli/headless) against the session workspace. The Locus tool loop is skipped. The composer **Web** toggle still applies. Docker, Host, VM, and **worker** sessions work; on a VM it runs inside the guest over SSH. **Steer** interrupts a running CLI process. The model picker can turn Fast on or off and set thinking / effort. Worker Cursor CLI sessions write `.cursor/mcp.json` to a loopback MCP proxy on the worker so Design, Games, Assets, review, and Grafana/Slack/Jira tools tunnel back to Locus.
 
-Claude Code spawns [`claude -p`](https://code.claude.com/docs/en/headless) (print / headless mode, `stream-json`) against the session workspace. The Locus tool loop is skipped. The composer **Web** toggle still applies. Docker, Host, and **worker** sessions work; VMs do not. **Steer** interrupts a running CLI process. Enable it in Settings → Providers (`claude` on PATH, then `claude auth login` or a pasted key). Worker sessions write `.mcp.json` so Design, Games, Assets, review, and Grafana/Slack/Jira tools tunnel back to Locus.
+Claude Code spawns [`claude -p`](https://code.claude.com/docs/en/headless) (print / headless mode, `stream-json`) against the session workspace. The Locus tool loop is skipped. The composer **Web** toggle still applies. Docker, Host, VM, and **worker** sessions work; on a VM it runs inside the guest over SSH. **Steer** interrupts a running CLI process. Enable it in Settings → Providers (`claude` on PATH, then `claude auth login` or a pasted key). Worker sessions write `.mcp.json` so Design, Games, Assets, review, and Grafana/Slack/Jira tools tunnel back to Locus.
 
-Codex CLI spawns `codex exec --json` against the session workspace. The Locus tool loop is skipped. The composer **Web** toggle still applies. Docker, Host, and **worker** sessions work; VMs do not. **Steer** interrupts a running CLI process. Enable it in Settings → Providers (`codex` on PATH, then `codex login` or a pasted OpenAI key). Git, Design/Games/Assets `playwright`, and review `git_pr_*` go through a session `locus_git` MCP connection (credentials stay in the vault). Worker sessions rewrite that URL onto the worker-loopback MCP proxy. Follow-up turns resume the same Codex thread with `exec resume`.
+Codex CLI spawns `codex exec --json` against the session workspace. The Locus tool loop is skipped. The composer **Web** toggle still applies. Docker, Host, VM, and **worker** sessions work; on a VM it runs inside the guest over SSH. **Steer** interrupts a running CLI process. Enable it in Settings → Providers (`codex` on PATH, then `codex login` or a pasted OpenAI key). Git, Design/Games/Assets `playwright`, and review `git_pr_*` go through a session `locus_git` MCP connection (credentials stay in the vault). Worker sessions rewrite that URL onto the worker-loopback MCP proxy. Follow-up turns resume the same Codex thread with `exec resume`.
 
-Kiro CLI spawns [`kiro-cli chat --no-interactive`](https://kiro.dev/docs/cli/headless/) (`stream-json`) against the session workspace. The Locus tool loop is skipped. Docker, Host, and **worker** sessions work; VMs do not. **Steer** interrupts a running CLI process. Enable it in Settings → Providers (`kiro-cli` on PATH, then `kiro-cli login` or a pasted `KIRO_API_KEY`). Worker sessions write `.kiro/settings/mcp.json` so Design, Games, Assets, review, and Grafana/Slack/Jira tools tunnel back to Locus.
+Kiro CLI spawns [`kiro-cli chat --no-interactive`](https://kiro.dev/docs/cli/headless/) (`stream-json`) against the session workspace. The Locus tool loop is skipped. Docker, Host, VM, and **worker** sessions work; on a VM it runs inside the guest over SSH. **Steer** interrupts a running CLI process. Enable it in Settings → Providers (`kiro-cli` on PATH, then `kiro-cli login` or a pasted `KIRO_API_KEY`). Worker sessions write `.kiro/settings/mcp.json` so Design, Games, Assets, review, and Grafana/Slack/Jira tools tunnel back to Locus.
+
+Custom CLI agents (`cli-agent`) run any coding-agent CLI from a command plus an argv template (`{prompt}`, `{model}`, `{workspace}`, `{resume}`; no `{prompt}` means stdin). Output is plain text, JSONL, Claude Code `stream-json`, or [ACP](https://agentclientprotocol.com) (JSON-RPC over stdio: `session/new`, `session/prompt`, `session/load` resume; permission requests are auto-allowed). Gemini presets get `.gemini/settings.json` MCP. Test connection runs `<command> --version`. ACP and stdin prompts need Host, Docker, or VM placement; workers cannot pipe stdin yet.
 
 OpenCode Zen still needs a key from [opencode.ai/auth](https://opencode.ai/auth). Loopback OpenAI-compatible URLs (Ollama, local OpenCode) do not need a key. With no usable key, Locus uses a local mock stream and shows a **Demo reply** banner.
 
@@ -432,7 +478,7 @@ Each automation has a **When** trigger, a **Then** prompt, guest OS, provider/mo
 - **on pull request** — same URL. Codebase **Auto-review new pull requests** starts a dedicated review session for each new PR
 - **on webhook** — same URL, no git repo. Slack URL verification (`challenge`) is answered automatically. A Slack incoming notify webhook receives the last assistant message as `text`
 
-A run creates a Docker, VM, or **host** session (or reuses the last machine / chat), sends the prompt, and records the outcome. Overlap can skip if busy, run the latest event when free, or queue one. On webhook automations, MCP tools listed on the job skip chat approval. Without **Reuse the last chat**, each run opens a new thread; Locus keeps the newest 60 chats for that job.
+A run creates a Docker, VM, or **host** session (or reuses the last machine / chat), sends the prompt, and records the outcome. To hand a step to another model, say so in the prompt ("have Anthropic claude-haiku-5-5 summarise the logs, then…"): the agent calls `spawn_agent` with that `provider` / `model` and continues from the child's summary. Overlap can skip if busy, run the latest event when free, or queue one. On webhook automations, MCP tools listed on the job skip chat approval. Without **Reuse the last chat**, each run opens a new thread; Locus keeps the newest 60 chats for that job.
 
 ## Guest network
 
@@ -476,11 +522,23 @@ Index: [docs/README.md](docs/README.md).
 |-------|----------------|
 | [SECURITY.md](SECURITY.md) | Threat model, vault, jail, how to report a vulnerability |
 | [docs/architecture.md](docs/architecture.md) | Control plane and repository layout |
+| [docs/cli-agent-sandbox.md](docs/cli-agent-sandbox.md) | Where CLI agents run and how they are sandboxed |
+| [docs/ci.md](docs/ci.md) | `locus ci run`, budgets, audit log, OpenTelemetry |
+| [docs/ci-fix-loop.md](docs/ci-fix-loop.md) | Turning a red PR into a fix, and when it stops |
+| [docs/verify.md](docs/verify.md) | Verification plans and checks on agent work |
+| [docs/operator-tools.md](docs/operator-tools.md) | Comparing, verifying and recovering agent attempts |
+| [docs/code-intelligence.md](docs/code-intelligence.md) | Language-server tools for agents |
+| [docs/computer-use.md](docs/computer-use.md) | Driving Chromium and VM desktops |
+| [docs/benchmarks.md](docs/benchmarks.md) | Settings → Benchmark and `locus bench` |
+| [docs/harness.md](docs/harness.md) | The checks every agent turn must pass |
 | [docs/cli.md](docs/cli.md) | `npx locus` command map, including `locus workflow` |
 | [docs/docker-swarm.md](docs/docker-swarm.md) | Local Docker Swarm rail, CLI, and `docker_swarm` |
 | [docs/codebase.md](docs/codebase.md) | Linked repos, PR review, Change Stack |
 | [docs/slack.md](docs/slack.md) | Local Slack client and Ask Locus |
+| [docs/slack-pr-reviewer.md](docs/slack-pr-reviewer.md) | Slack PR reviewers: clone, re-review, dismissals, traces |
 | [docs/phone.md](docs/phone.md) | LAN pairing, Android app, phone shell |
+| [docs/android-builder.md](docs/android-builder.md) | Native and React Native Android app builder, device canvas, tests and APK builds |
+| [docs/blender-assets.md](docs/blender-assets.md) | Native Blender projects in Assets |
 | [docs/agent-backends.md](docs/agent-backends.md) | Workers, Host-on-worker, Fargate |
 | [docs/webhook-automations.md](docs/webhook-automations.md) | Git push / PR / Slack webhooks |
 | [docs/grafana.md](docs/grafana.md) | Grafana dashboards and Explore |

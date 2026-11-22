@@ -1,5 +1,18 @@
-import { formatPrCard, parseOwnerRepo, type GitForgeAccount } from "@locus/shared";
-import type { CreatedPull, ForgeAdapter } from "./forgeAdapter.js";
+import {
+  formatPrCard,
+  parseOwnerRepo,
+  type CiFailureReport,
+  type GitForgeAccount,
+  type PullCheck,
+  type PullFile,
+} from "@locus/shared";
+import { buildCiReport } from "./forgeCi.js";
+import type {
+  CommitFileInput,
+  CreatedPull,
+  ForgeAdapter,
+  ReviewThreadInfo,
+} from "./forgeAdapter.js";
 import { createBitbucketForgeAdapter } from "./bitbucketForge.js";
 import {
   assertPrComment,
@@ -14,12 +27,14 @@ import { createAzureDevOpsForgeAdapter } from "./azureDevopsForge.js";
 export type { ForgeFetcher } from "./forgeHttp.js";
 export type {
   ForgeAdapter,
+  CommitFileInput,
   CreatePullInput,
   CreatedPull,
   PostCommentInput,
   PostIssueCommentInput,
   PostReviewInput,
   ReviewCommentInput,
+  ReviewThreadInfo,
 } from "./forgeAdapter.js";
 
 function selectForgeAdapter(kind: GitForgeAccount["kind"], fetchFn: ForgeFetcher): ForgeAdapter {
@@ -177,8 +192,119 @@ export class ForgeClient {
     return adapter.about ? adapter.about(account, owner, repo) : undefined;
   }
 
+  /** Files changed from `base` to `head`; undefined after a force-push or on forges without it. */
+  async compareCommits(
+    account: GitForgeAccount,
+    owner: string,
+    repo: string,
+    base: string,
+    head: string,
+  ): Promise<PullFile[] | undefined> {
+    const adapter = this.adapter(account);
+    if (!adapter.compareCommits) return undefined;
+    try {
+      return await adapter.compareCommits(account, owner, repo, base, head);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** A file's text at `ref`; undefined when missing, too large, or the forge can't read files. */
+  async readFile(
+    account: GitForgeAccount,
+    owner: string,
+    repo: string,
+    path: string,
+    ref: string,
+  ): Promise<string | undefined> {
+    const adapter = this.adapter(account);
+    if (!adapter.readFile) return undefined;
+    try {
+      return await adapter.readFile(account, owner, repo, path, ref);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Resolve open review threads `pick` selects; 0 on failure or forges without threads. */
+  async resolveReviewThreads(
+    account: GitForgeAccount,
+    owner: string,
+    repo: string,
+    number: number,
+    pick: (thread: ReviewThreadInfo) => boolean,
+  ): Promise<number> {
+    const adapter = this.adapter(account);
+    if (!adapter.resolveReviewThreads) return 0;
+    try {
+      return await adapter.resolveReviewThreads(account, owner, repo, number, pick);
+    } catch {
+      return 0;
+    }
+  }
+
+  /** Create `branch` from `base` with one file written on it. Throws on forges without it. */
+  async commitFileToNewBranch(
+    account: GitForgeAccount,
+    owner: string,
+    repo: string,
+    input: CommitFileInput,
+  ): Promise<void> {
+    const adapter = this.adapter(account);
+    if (!adapter.commitFileToNewBranch) {
+      throw new Error(`Committing files is not supported on ${account.kind}`);
+    }
+    await adapter.commitFileToNewBranch(account, owner, repo, input);
+  }
+
   async listBranches(account: GitForgeAccount, owner: string, repo: string) {
     return this.adapter(account).listBranches(account, owner, repo);
+  }
+
+  /**
+   * Failing CI checks for a pull head with condensed job logs. Reads the pull when the head
+   * SHA or checks are not passed. Forges without job logs list names and status only.
+   */
+  async ciReport(
+    account: GitForgeAccount,
+    owner: string,
+    repo: string,
+    input: {
+      number: number;
+      headSha?: string;
+      checks?: PullCheck[];
+      check?: string;
+      maxChars?: number;
+      maxLogs?: number;
+    },
+  ): Promise<CiFailureReport> {
+    let headSha = input.headSha;
+    let checks = input.checks;
+    if (!headSha || !checks) {
+      const pull = await this.getPull(account, owner, repo, input.number);
+      headSha = headSha || pull.headSha;
+      checks = checks ?? pull.checks;
+    }
+    const adapter = this.adapter(account);
+    return buildCiReport(
+      {
+        kind: account.kind,
+        listCheckRuns: adapter.listCheckRuns
+          ? (sha) =>
+              adapter.listCheckRuns!(account, owner, repo, { number: input.number, headSha: sha })
+          : undefined,
+        fetchCheckLog: adapter.fetchCheckLog
+          ? (run) => adapter.fetchCheckLog!(account, owner, repo, run)
+          : undefined,
+      },
+      {
+        headSha: headSha ?? "",
+        checks: checks ?? [],
+        check: input.check,
+        maxChars: input.maxChars,
+        maxLogs: input.maxLogs,
+      },
+    );
   }
 }
 

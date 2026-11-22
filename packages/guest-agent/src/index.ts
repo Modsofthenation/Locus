@@ -10,7 +10,7 @@ export {
   DOCKER_AGENT_HOME,
 } from "./docker.js";
 export { HostGuestRuntime, hostCommand } from "./host.js";
-export { launchHostChrome } from "./hostChrome.js";
+export { launchHostChrome, resolveHostChromeBin } from "./hostChrome.js";
 export type { HostChromeHandle } from "./hostChrome.js";
 export { LiveCdp } from "./cdpSession.js";
 export type { WsCtor } from "./cdpSession.js";

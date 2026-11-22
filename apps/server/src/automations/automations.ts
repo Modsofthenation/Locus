@@ -2,6 +2,10 @@ import { randomBytes, randomUUID } from "node:crypto";
 import {
   CANCELLED_TURN_NOTE,
   automationLifetimeSpendUsd,
+  automationAllowsIntegration,
+  configuredToolsForRuntime,
+  isProjectToolName,
+  isSwarmTeamToolName,
   automationRunReason,
   automationScheduleOpts,
   cloneAutomationInput,
@@ -201,6 +205,13 @@ export class AutomationService {
   }
 
   private async createUnlocked(input: CreateAutomationInput): Promise<Automation> {
+    const item = await this.prepareAutomation(input);
+    await this.store.replaceAutomation(item);
+    this.hub.broadcast({ type: "automation.updated", automation: item });
+    return item;
+  }
+
+  private async prepareAutomation(input: CreateAutomationInput): Promise<Automation> {
     const config = await this.store.loadConfig();
     const runtime = sessionRuntime(input);
     if (runtime === "host" && !policyAllowsHostAutomations(config.managedPolicy)) {
@@ -305,9 +316,96 @@ export class AutomationService {
       updatedAt: stamp(created),
     };
     await this.assertNamedEnvironment(item);
-    await this.store.replaceAutomation(item);
-    this.hub.broadcast({ type: "automation.updated", automation: item });
     return item;
+  }
+
+  async previewTrigger(input: {
+    job: CreateAutomationInput;
+    jobId?: string;
+    runId?: string;
+    raw?: string;
+    headerEvent?: string;
+  }): Promise<import("@locus/shared").AutomationTriggerPreview> {
+    const item = await this.prepareAutomation(input.job);
+    const saved = input.jobId ? await this.get(input.jobId) : undefined;
+    const config = await this.store.loadConfig();
+    const env = namedEnvironmentById(config.namedEnvironments, item.namedEnvironmentId);
+    const fields = namedEnvironmentSessionFields(item, env);
+    const runtime = sessionRuntime(fields);
+    const reused =
+      saved && item.reuseSession
+        ? (await this.sessions.list()).find(
+            (session) =>
+              session.automationId === saved.id &&
+              (runtimeNeedsGuest(runtime)
+                ? Boolean(session.vmId)
+                : sessionRuntime(session) === "host"),
+          )
+        : undefined;
+    let raw = input.raw ?? "";
+    let headerEvent = input.headerEvent;
+    let contentType: string | undefined = "application/json";
+    if (input.runId) {
+      const prior = saved && (await this.listRuns(saved.id)).find((row) => row.id === input.runId);
+      if (!prior?.event) throw new Error("Run has no recorded event");
+      const payload = prior.event.payload;
+      if (prior.trigger === "forge" || prior.trigger === "pull_request") {
+        const forge = payload as { repoUrl?: string; ref?: string; sha?: string } | undefined;
+        raw = JSON.stringify({
+          repository: { clone_url: forge?.repoUrl },
+          ref: forge?.ref,
+          after: forge?.sha,
+        });
+        headerEvent = prior.trigger === "forge" ? "push" : "pull_request";
+      } else {
+        raw = typeof payload === "string" ? payload : JSON.stringify(payload ?? {});
+        contentType = typeof payload === "string" ? "text/plain" : "application/json";
+      }
+    }
+    if (!raw.trim()) throw new Error("Enter a sample payload or choose a recent event");
+    if (Buffer.byteLength(raw) > MAX_WEBHOOK_BYTES) throw new Error("Webhook payload is too large");
+    if (contentType === "application/json") JSON.parse(raw);
+    const decision = decideWebhook({ item, raw, contentType, headerEvent });
+    const providerId = reused?.providerId ?? item.providerId;
+    const provider = config.providers.find((row) => row.id === providerId);
+    const model = reused?.model || item.model || provider?.defaultModel;
+    const worker = (config.workers ?? []).find((row) => row.id === fields.backendId);
+    const location = worker?.name ?? (fields.placement === "worker" ? "worker" : "this machine");
+    const target =
+      reused?.title || (runtime === "host" ? item.hostDir : fields.dockerImage) || item.repo?.url;
+    const allowedTools = reused?.allowedTools ?? fields.allowedTools;
+    const integrationAllowlist = item.allowedMcpTools ?? [];
+    const tools = configuredToolsForRuntime(
+      reused?.os ?? fields.os ?? item.os,
+      reused ? sessionRuntime(reused) : runtime,
+      config.integrations,
+    )
+      .map((tool) => tool.name)
+      .filter(
+        (name) =>
+          (!allowedTools?.length || allowedTools.includes(name)) &&
+          !isProjectToolName(name) &&
+          !isSwarmTeamToolName(name) &&
+          automationAllowsIntegration(
+            { automationId: item.id, allowedMcpTools: integrationAllowlist, allowedTools },
+            name,
+          ),
+      );
+    return {
+      matches: decision.kind === "queue",
+      explanation:
+        decision.kind === "queue"
+          ? "Matches the trigger. Live delivery also checks authentication, duplicate events, and job availability."
+          : decision.kind === "reject"
+            ? decision.message
+            : decision.kind === "skip"
+              ? "The event is filtered out by this trigger."
+              : "The event is a handshake and does not start a run.",
+      workspace: [env?.name, runtime, location, target].filter(Boolean).join(" · "),
+      model: [provider?.name ?? providerId, model].filter(Boolean).join(" · "),
+      tools,
+      integrationAllowlist,
+    };
   }
 
   async clone(id: string): Promise<Automation> {
@@ -870,8 +968,8 @@ export class AutomationService {
         await this.waitForSession(
           sessionId,
           (status) => status === "idle" || status === "error",
-          "Guest did not become ready",
           id,
+          "Guest did not become ready",
         );
       }
       const ready = await this.sessions.get(sessionId);
@@ -894,13 +992,15 @@ export class AutomationService {
       }
 
       await this.sessions.sendChat(sessionId, formatAutomationPrompt(item.prompt, event));
-      await this.waitForSession(
-        sessionId,
-        (status) => status !== "running",
-        "Agent turn did not finish",
-        id,
-      );
+      // The session owns turn limits and cancellation. A monitoring deadline
+      // must not fail a live turn and release the automation's overlap guard.
+      await this.waitForSession(sessionId, (status) => status !== "running", id);
       const finished = await this.sessions.get(sessionId);
+      if (!finished) throw new Error("Session not found");
+      if (finished.status === "error") {
+        throw new Error(finished.error || "Agent entered an error state");
+      }
+      if (finished.status === "stopped") throw new Error("Stopped");
       if (
         finished?.messages?.some(
           (message) => message.role === "system" && message.content === CANCELLED_TURN_NOTE,
@@ -1240,18 +1340,19 @@ export class AutomationService {
   private async waitForSession(
     sessionId: string,
     done: (status: SessionStatus) => boolean,
-    timeoutMessage: string,
-    automationId?: string,
+    automationId: string,
+    timeoutMessage?: string,
   ): Promise<void> {
     const timeoutMs = this.opts.waitMs ?? 600_000;
     const pollMs = this.opts.pollMs ?? 200;
-    const deadline = Date.now() + timeoutMs;
+    const deadline = timeoutMessage ? Date.now() + timeoutMs : Infinity;
     while (Date.now() < deadline) {
       if (automationId && (this.cancelled.has(automationId) || this.removed.has(automationId))) {
         throw new Error("Stopped");
       }
       const session = await this.sessions.get(sessionId);
-      if (session && done(session.status)) return;
+      if (!session) throw new Error("Session not found");
+      if (done(session.status)) return;
       await new Promise((r) => setTimeout(r, pollMs));
     }
     throw new Error(

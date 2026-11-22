@@ -1,13 +1,24 @@
+/**
+ * Test helper: find a native <select> or themed Select trigger by its label. Themed Select
+ * toggles are named "Label: Selected value" (WCAG 2.5.3), so match that prefix too.
+ */
+export function selectTrigger(host: ParentNode, ariaLabel: string): Element | null {
+  const name = cssEscape(ariaLabel);
+  return host.querySelector(
+    `[aria-label="${name}"], [aria-label^="${cssEscape(`${ariaLabel}: `)}"]`,
+  );
+}
+
 /** Test helper: read a native <select> or themed Select value. */
 export function selectValue(host: ParentNode, ariaLabel: string): string {
-  const trigger = host.querySelector(`[aria-label="${cssEscape(ariaLabel)}"]`);
+  const trigger = selectTrigger(host, ariaLabel);
   if (!trigger) return "";
   if (trigger instanceof HTMLSelectElement) return trigger.value;
   return trigger.closest("[data-value]")?.getAttribute("data-value") ?? "";
 }
 
 export function selectOptionValues(host: ParentNode, ariaLabel: string): string[] {
-  const trigger = host.querySelector(`[aria-label="${cssEscape(ariaLabel)}"]`);
+  const trigger = selectTrigger(host, ariaLabel);
   if (!trigger) return [];
   if (trigger instanceof HTMLSelectElement) {
     return [...trigger.options].map((opt) => opt.value);
@@ -21,7 +32,7 @@ export function selectOptionValues(host: ParentNode, ariaLabel: string): string[
 }
 
 export function selectOptionLabels(host: ParentNode, ariaLabel: string): string[] {
-  const trigger = host.querySelector(`[aria-label="${cssEscape(ariaLabel)}"]`);
+  const trigger = selectTrigger(host, ariaLabel);
   if (!trigger) return [];
   if (trigger instanceof HTMLSelectElement) {
     return [...trigger.options].map((opt) => opt.textContent ?? "");
@@ -36,7 +47,7 @@ export function selectOptionLabels(host: ParentNode, ariaLabel: string): string[
 
 /** Test helper: set a native <select> or themed Select value. */
 export function setSelectValue(host: ParentNode, ariaLabel: string, value: string): boolean {
-  const trigger = host.querySelector(`[aria-label="${cssEscape(ariaLabel)}"]`);
+  const trigger = selectTrigger(host, ariaLabel);
   if (!trigger) return false;
   if (trigger instanceof HTMLSelectElement) {
     trigger.value = value;

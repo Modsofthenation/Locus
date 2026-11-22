@@ -19,7 +19,8 @@ export interface BenchmarkTarget {
   model: string;
 }
 
-export type BenchmarkCaseStatus = "pending" | "running" | "passed" | "failed" | "error";
+/** `skipped`: the case could not run here (for example its toolchain is missing). Not scored. */
+export type BenchmarkCaseStatus = "pending" | "running" | "passed" | "failed" | "error" | "skipped";
 
 export interface BenchmarkCaseResult {
   caseId: string;
@@ -37,6 +38,12 @@ export interface BenchmarkCaseResult {
   usd?: number;
   toolCalls?: number;
   testOutput?: string;
+  /** Spec cases: required tests (fail-to-pass / pass-to-pass) that did not pass. */
+  failingTests?: string[];
+  /** Spec cases: the case language, when the spec names one. */
+  language?: string;
+  /** Copy of the run's harness key, so a result row stands on its own. */
+  harnessVersion?: string;
 }
 
 export type BenchmarkRunStatus = "running" | "done" | "cancelled" | "error";
@@ -51,6 +58,19 @@ export interface BenchmarkRun {
   caseIds: string[];
   repeat: number;
   results: BenchmarkCaseResult[];
+  /** Locus version, app git sha and a hash of the prompt inputs the run used. */
+  harness?: BenchmarkHarness;
+  /** Suite path the spec cases came from, when not the built-in suite. */
+  suite?: string;
+}
+
+export interface BenchmarkHarness {
+  locusVersion: string;
+  gitSha?: string;
+  /** Short hash of the system prompt, tool list and benchmark prompt/scoring inputs. */
+  configHash: string;
+  /** `<locusVersion>[+<sha7>].<hash8>`; the history groups by it. */
+  key: string;
 }
 
 export interface BenchmarkTargetSummary {

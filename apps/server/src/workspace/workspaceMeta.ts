@@ -1,5 +1,6 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import type { Dirent } from "node:fs";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { join, sep } from "node:path";
 import {
   formatMemoriesPrompt,
   memoriesForRepo,
@@ -13,22 +14,55 @@ import {
   type RepoMemory,
 } from "@locus/shared";
 
-export async function loadRepoSkills(workspaceRoot?: string): Promise<AgentSkill[]> {
-  if (!workspaceRoot) return [];
-  const dir = join(workspaceRoot, ".locus", "skills");
-  let names: string[] = [];
+/**
+ * Repo skill folders, highest priority first. `.locus/skills` is Locus's own; `.agents/skills`
+ * and `.claude/skills` hold Agent Skills-standard folders other tools already use.
+ */
+export const REPO_SKILL_DIRS = [
+  join(".locus", "skills"),
+  join(".agents", "skills"),
+  join(".claude", "skills"),
+] as const;
+
+async function loadSkillDir(workspaceRoot: string, rel: string): Promise<AgentSkill[]> {
+  let entries: Dirent[] = [];
   try {
-    names = (await readdir(dir)).filter((name) => name.toLowerCase().endsWith(".md"));
+    entries = await readdir(join(workspaceRoot, rel), { withFileTypes: true });
   } catch {
     return [];
   }
   const out: AgentSkill[] = [];
-  for (const name of names) {
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     try {
-      const skill = parseSkillMarkdown(name, await readFile(join(dir, name), "utf8"));
+      if (entry.name.toLowerCase().endsWith(".md") && entry.isFile()) {
+        const skill = parseSkillMarkdown(
+          entry.name,
+          await readFile(join(workspaceRoot, rel, entry.name), "utf8"),
+        );
+        if (skill) out.push(skill);
+        continue;
+      }
+      // Folder skill: <name>/SKILL.md. Symlinked folders count (stat follows the link).
+      const folder = join(rel, entry.name);
+      const file = join(workspaceRoot, folder, "SKILL.md");
+      if (!(await stat(file)).isFile()) continue;
+      const skill = parseSkillMarkdown(`${entry.name}.md`, await readFile(file, "utf8"), {
+        folder: folder.split(sep).join("/"),
+      });
       if (skill) out.push(skill);
     } catch {
-      /* skip unreadable skill files */
+      /* skip unreadable or non-skill entries */
+    }
+  }
+  return out;
+}
+
+export async function loadRepoSkills(workspaceRoot?: string): Promise<AgentSkill[]> {
+  if (!workspaceRoot) return [];
+  const out: AgentSkill[] = [];
+  for (const rel of REPO_SKILL_DIRS) {
+    for (const skill of await loadSkillDir(workspaceRoot, rel)) {
+      if (!out.some((row) => row.name === skill.name)) out.push(skill);
     }
   }
   return out;

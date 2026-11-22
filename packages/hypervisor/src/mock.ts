@@ -9,7 +9,7 @@ import type {
 import { defaultNetworking, isLinux, isWindows, qemuPathUnsafe } from "@locus/shared";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import type { CreateVmRequest, Hypervisor, VmListener } from "./types.js";
+import type { BootStepListener, CreateVmRequest, Hypervisor, VmListener } from "./types.js";
 import type { HostCapabilities } from "./detect.js";
 import { appendVmLog, formatStatusLine } from "./logs.js";
 
@@ -56,6 +56,10 @@ export class MockHypervisor extends EventEmitter implements Hypervisor {
 
   onStatus(listener: VmListener): void {
     this.on("status", listener);
+  }
+
+  onBootStep(listener: BootStepListener): void {
+    this.on("bootStep", listener);
   }
 
   list(): VmInstance[] {
@@ -146,8 +150,13 @@ export class MockHypervisor extends EventEmitter implements Hypervisor {
 
   async start(id: string): Promise<VmInstance> {
     this.clearTimers(id);
+    this.emit("bootStep", id, "disk");
+    this.emit("bootStep", id, "boot");
     this.setStatus(id, "booting");
-    const t1 = setTimeout(() => this.setStatus(id, "ready"), BOOT_MS);
+    const t1 = setTimeout(() => {
+      this.emit("bootStep", id, "connect");
+      this.setStatus(id, "ready");
+    }, BOOT_MS);
     const t2 = setTimeout(() => this.setStatus(id, "running", undefined, 4242), READY_MS);
     this.timers.set(id, [t1, t2]);
     return this.require(id);

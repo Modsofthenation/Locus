@@ -17,8 +17,11 @@ jobs:
       - run: npm ci
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-      - run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - run: sudo apt-get update && sudo apt-get install -y ripgrep bubblewrap passt
       - run: npm test
+        env:
+          # Docker-session CLI sandbox: fail if bwrap + pasta cannot run, instead of skipping its tests.
+          LOCUS_REQUIRE_CLI_SANDBOX: "1"
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
         working-directory: apps/desktop
@@ -55,7 +58,7 @@ jobs:
         run: |
           mkdir -p images/agent/vendor
           node scripts/prefetch-github-release-asset.mjs --owner coder --repo code-server --tag v4.96.4 --file code-server-4.96.4-linux-amd64.tar.gz --out images/agent/vendor/code-server.tar.gz
-      - run: docker build -t locus/agent:0.1 -t locus/agent:0.21.0 images/agent
+      - run: docker build -t locus/agent:0.1 -t locus/agent:0.24.0 images/agent
 
   android:
     runs-on: ubuntu-latest

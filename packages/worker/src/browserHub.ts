@@ -68,6 +68,7 @@ export class WorkerBrowserHub {
     this.tabTimer.delete(vmId);
     if (!this.live.delete(vmId)) return;
     const driver = this.drivers.get(vmId);
+    void driver?.releaseInput?.().catch(() => undefined);
     this.drivers.delete(vmId);
     void driver?.stopScreencast?.();
   }
@@ -150,8 +151,16 @@ export class WorkerBrowserHub {
     }
     try {
       await this.handleClient(vmId, message);
-    } catch {
-      /* keep the pane attached */
+      if (message.requestId)
+        this.send(vmId, { type: "action-result", requestId: message.requestId, ok: true });
+    } catch (error) {
+      if (message.requestId)
+        this.send(vmId, {
+          type: "action-result",
+          requestId: message.requestId,
+          ok: false,
+          output: error instanceof Error ? error.message : "Worker browser action failed",
+        });
     }
   }
 
@@ -160,8 +169,17 @@ export class WorkerBrowserHub {
     if (!vm) return;
     const driver = this.drivers.get(vmId) ?? this.guests.forVm(vm).chromium();
     if (!driver) return;
+    if (message.type === "release-input") {
+      await driver.releaseInput?.();
+      return;
+    }
+    if (message.type === "invalidate-observation") {
+      await driver.invalidateObservation?.();
+      return;
+    }
     if (message.type === "input") {
-      await driver.dispatchInput?.(message);
+      const { requestId: _requestId, ...input } = message;
+      await driver.dispatchInput?.(input);
       return;
     }
     if (message.type === "navigate") {

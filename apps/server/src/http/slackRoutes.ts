@@ -9,6 +9,7 @@ import { redactConfig } from "../core/redact.js";
 import type { JsonStore } from "../core/store.js";
 import type { SlackGateway } from "../slack/slackGateway.js";
 import type { SlackOauth } from "../slack/slackOauth.js";
+import type { SlackReviewerService } from "../slack/slackReviewer.js";
 import { errorMessage } from "./sessionJson.js";
 
 export function registerSlackRoutes(
@@ -16,7 +17,105 @@ export function registerSlackRoutes(
   slack: SlackGateway,
   slackOauth: SlackOauth,
   store: JsonStore,
+  reviewers?: SlackReviewerService,
 ): void {
+  /** Recent runs with 👍 / 👎 on their final Slack message, plus per-reviewer vote totals. */
+  app.get("/api/slack/reviewers/runs", async (c) =>
+    c.json(
+      reviewers
+        ? await reviewers.runsWithFeedback()
+        : { runs: [], feedback: {}, active: [], threads: [] },
+    ),
+  );
+
+  /**
+   * Live logs: the Slack and forge calls the reviewers made (polls and reviews), with redacted
+   * request and response. `after` returns only entries newer than that `seq`.
+   */
+  app.get("/api/slack/reviewers/logs", (c) => {
+    const after = Number(c.req.query("after") ?? 0);
+    return c.json(
+      reviewers
+        ? reviewers.apiLogs(Number.isFinite(after) ? after : 0)
+        : { entries: [], lastSeq: 0 },
+    );
+  });
+
+  /** One run's trace: prompt, model reasoning, tool calls with output, and reply. Live while running. */
+  app.get("/api/slack/reviewers/traces/:traceId", async (c) => {
+    const trace = reviewers ? await reviewers.trace(c.req.param("traceId")) : undefined;
+    return trace ? c.json(trace) : c.json({ error: "No trace for that run" }, 404);
+  });
+
+  /**
+   * Run one reviewer on a PR now. `threadTs` posts progress into that Slack thread. `dryRun`
+   * posts nothing anywhere and returns the findings.
+   */
+  app.post("/api/slack/reviewers/:id/review", async (c) => {
+    if (!reviewers) return c.json({ error: "Slack reviewers are not running" }, 503);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      url?: string;
+      threadTs?: string;
+      dryRun?: boolean;
+    };
+    const url = body.url?.trim();
+    if (!url) return c.json({ error: "url is required" }, 400);
+    try {
+      return c.json(
+        await reviewers.reviewNow(c.req.param("id"), url, body.threadTs?.trim() || undefined, {
+          dryRun: body.dryRun === true,
+        }),
+      );
+    } catch (err) {
+      return c.json({ error: errorMessage(err) }, 400);
+    }
+  });
+
+  /** A reviewer's accuracy over the last `days` days (default 30, at most 90). */
+  app.get("/api/slack/reviewers/:id/stats", async (c) => {
+    if (!reviewers) return c.json({ error: "Slack reviewers are not running" }, 503);
+    const raw = Number(c.req.query("days") ?? 30);
+    const days = Number.isFinite(raw) ? Math.min(90, Math.max(1, Math.round(raw))) : 30;
+    return c.json(await reviewers.reviewerStats(c.req.param("id"), days));
+  });
+
+  /** Findings a reviewer remembers as dismissed, by repo (`host/owner/repo`). */
+  app.get("/api/slack/reviewers/:id/notes", async (c) =>
+    c.json(reviewers ? await reviewers.repoNotes(c.req.param("id")) : {}),
+  );
+
+  /**
+   * Forget remembered dismissals: `{ repo, index }` one note, `{ repo }` a repo's, `{}` all of a
+   * reviewer's. Returns `{ removed }`.
+   */
+  app.post("/api/slack/reviewers/:id/notes/forget", async (c) => {
+    if (!reviewers) return c.json({ error: "Slack reviewers are not running" }, 503);
+    const body = (await c.req.json().catch(() => ({}))) as { repo?: unknown; index?: unknown };
+    const repo = typeof body.repo === "string" && body.repo.trim() ? body.repo.trim() : undefined;
+    const index =
+      typeof body.index === "number" && Number.isInteger(body.index) && body.index >= 0
+        ? body.index
+        : undefined;
+    if (index !== undefined && !repo) return c.json({ error: "repo is required with index" }, 400);
+    return c.json({ removed: await reviewers.forgetRepoNotes(c.req.param("id"), repo, index) });
+  });
+
+  /**
+   * Open a PR adding a repo's remembered dismissals to its REVIEW.md (`{ repo }`, a
+   * `host/owner/repo` key). Returns `{ url, number, branch, notes }`. GitHub and GitLab only.
+   */
+  app.post("/api/slack/reviewers/:id/notes/propose", async (c) => {
+    if (!reviewers) return c.json({ error: "Slack reviewers are not running" }, 503);
+    const body = (await c.req.json().catch(() => ({}))) as { repo?: unknown };
+    const repo = typeof body.repo === "string" ? body.repo.trim() : "";
+    if (!repo) return c.json({ error: "repo is required" }, 400);
+    try {
+      return c.json(await reviewers.proposeRepoNotes(c.req.param("id"), repo));
+    } catch (err) {
+      return c.json({ error: errorMessage(err) }, 400);
+    }
+  });
+
   app.post("/api/slack/oauth/start", async (c) => {
     try {
       const body = (await c.req.json().catch(() => ({}))) as {

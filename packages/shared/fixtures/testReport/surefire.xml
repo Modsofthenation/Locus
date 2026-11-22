@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Maven surefire 3.x report -->
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="3.0" name="com.example.CalculatorTest" time="0.045" tests="4" errors="1" skipped="1" failures="1">
+  <properties>
+    <property name="java.version" value="21"/>
+  </properties>
+  <testcase name="adds" classname="com.example.CalculatorTest" time="0.002"/>
+  <testcase name="divides" classname="com.example.CalculatorTest" time="0.010">
+    <failure message="expected: &lt;2&gt; but was: &lt;3&gt;" type="org.opentest4j.AssertionFailedError"><![CDATA[org.opentest4j.AssertionFailedError: expected: <2> but was: <3>
+	at com.example.CalculatorTest.divides(CalculatorTest.java:21)
+]]></failure>
+    <system-out><![CDATA[dividing 6 by 2
+]]></system-out>
+  </testcase>
+  <testcase name="overflows" classname="com.example.CalculatorTest" time="0.001">
+    <error message="boom" type="java.lang.IllegalStateException">java.lang.IllegalStateException: boom</error>
+  </testcase>
+  <testcase name="later" classname="com.example.CalculatorTest" time="0">
+    <skipped message="disabled"/>
+  </testcase>
+</testsuite>

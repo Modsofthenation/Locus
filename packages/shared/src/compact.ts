@@ -157,6 +157,11 @@ const INSPECTED_PATH_TOOLS = new Set([
   "grep",
   "glob",
   "file_list",
+  "code_definition",
+  "code_references",
+  "code_symbols",
+  "code_diagnostics",
+  "code_rename",
 ]);
 
 export const MAX_INSPECTED_FILES = 48;

@@ -1,9 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
+import { customThemeFromInput } from "@locus/shared";
 import { defaultConfig } from "../defaults.js";
 import { normalizeSavedConfig, prepareSavedConfig, providerBaseUrlError } from "./configSave.js";
 
 describe("normalizeSavedConfig", () => {
+  it("accepts a generated theme id only when that theme is in the config", () => {
+    const config = defaultConfig("/data");
+    const theme = customThemeFromInput(
+      { name: "Neon Rain", colors: { bg: "#05060a", text: "#e6f1ff", accent: "#ff2a6d" } },
+      { now: "2026-01-01T00:00:00.000Z" },
+    );
+    const withTheme = { ...config, customThemes: [theme], theme: theme.id };
+    const saved = normalizeSavedConfig(withTheme, theme.id, "/data");
+    expect(saved.ok).toBe(true);
+    expect(
+      normalizeSavedConfig({ ...config, customThemes: [] }, "custom-missing", "/data"),
+    ).toEqual({ ok: false, error: "Unknown theme" });
+  });
+
   it("rejects an unknown theme and a non-loopback bind host", () => {
     const config = defaultConfig("/data");
     expect(normalizeSavedConfig(config, "not-a-theme" as never, "/data")).toEqual({
@@ -86,6 +101,60 @@ describe("prepareSavedConfig", () => {
     if (!saved.ok) return;
     expect(saved.config.providers[0]?.apiKey).toBe("sk-live");
     expect(saved.config.managedPolicy).toEqual(current.managedPolicy);
+  });
+});
+
+describe("Custom CLI agent providers", () => {
+  const cliProvider = (cli: unknown, enabled = true) => ({
+    id: "cli-agent:Gemini CLI",
+    name: "Gemini CLI",
+    kind: "cli-agent" as const,
+    baseUrl: "",
+    models: [],
+    defaultModel: "",
+    enabled,
+    extraHeaders: {},
+    cli: cli as never,
+  });
+
+  it("normalizes a valid config and fills the placeholder base URL", () => {
+    const config = defaultConfig("/data");
+    config.providers.push(
+      cliProvider({ command: " gemini ", args: ["-p", "{prompt}"], output: "jsonl", junk: 1 }),
+    );
+    const saved = normalizeSavedConfig(config, config.theme, "/data");
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+    const row = saved.config.providers.find((p) => p.kind === "cli-agent");
+    expect(row?.baseUrl).toBe("cli-agent://local");
+    expect(row?.cli).toEqual({ command: "gemini", args: ["-p", "{prompt}"], output: "jsonl" });
+  });
+
+  it("rejects a bad enabled config with a clear message", () => {
+    const config = defaultConfig("/data");
+    config.providers.push(cliProvider({ command: "gemini", args: ["{promt}"], output: "text" }));
+    expect(normalizeSavedConfig(config, config.theme, "/data")).toEqual({
+      ok: false,
+      error:
+        "Gemini CLI: unknown placeholder {promt} — use {prompt}, {model}, {workspace}, or {resume}",
+    });
+    config.providers[config.providers.length - 1] = cliProvider({ args: [], output: "text" });
+    expect(normalizeSavedConfig(config, config.theme, "/data")).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/command is required/),
+    });
+  });
+
+  it("lets a disabled card without a command save as a draft", () => {
+    const config = defaultConfig("/data");
+    config.providers.push(cliProvider({ command: "", args: ["{prompt}"], output: "text" }, false));
+    expect(normalizeSavedConfig(config, config.theme, "/data").ok).toBe(true);
+  });
+
+  it("skips the base URL check", () => {
+    expect(
+      providerBaseUrlError({ name: "Aider", kind: "cli-agent", baseUrl: "not-a-url" }),
+    ).toBeUndefined();
   });
 });
 

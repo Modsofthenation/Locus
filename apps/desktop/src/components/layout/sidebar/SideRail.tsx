@@ -7,7 +7,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { AgentSession } from "@locus/shared";
-import { IconGear, IconInbox, IconMore, IconPanel, IconPin, IconWrench } from "../Icons";
+import { IconGear, IconHome, IconMore, IconPanel, IconPin, IconPlus, IconWrench } from "../Icons";
 import { MenuItem, OverflowMenu } from "../OverflowMenu";
 import { sessionFitsSection } from "@/state/store";
 import type { UiSection } from "@/state/store";
@@ -15,6 +15,9 @@ import { isLockedRailSection } from "@/lib/railNav";
 import type { SectionMeta } from "./sectionMeta";
 
 export type RailPeekRow = { key: string; title: string; detail?: string };
+
+/** A create action shown at the top of the collapsed-rail flyout. */
+export type RailPeekAction = { key: string; label: string; run: () => void };
 
 export type RailSectionItem = { id: UiSection } & SectionMeta;
 
@@ -38,6 +41,9 @@ export function SideRail(props: {
   onInbox: () => void;
   onSection: (section: UiSection) => void;
   onPin: (section: UiSection) => void;
+  /** A More section worth pinning, shown once at the top of More. */
+  suggestion?: RailSectionItem | null;
+  onSuggestion?: (section: UiSection, pin: boolean) => void;
   onReorder: (section: UiSection, target: UiSection) => void;
   onMove?: (section: UiSection, delta: -1 | 1) => void;
   onSettings: () => void;
@@ -45,6 +51,7 @@ export function SideRail(props: {
   onSetup?: () => void;
   peekRows: (target: "inbox" | UiSection) => RailPeekRow[];
   onPeekOpen: (target: "inbox" | UiSection, row: RailPeekRow) => void;
+  peekActions?: (target: "inbox" | UiSection) => RailPeekAction[];
 }) {
   const [peek, setPeek] = useState<null | { target: "inbox" | UiSection; top: number }>(null);
   const hideTimer = useRef<number | null>(null);
@@ -117,6 +124,7 @@ export function SideRail(props: {
   }
 
   const mode = props.swarmMode ? "swarm" : "developer";
+  const suggestion = props.suggestion;
 
   function canMove(section: UiSection, delta: -1 | 1): boolean {
     const ids = props.primary.map((row) => row.id);
@@ -124,9 +132,10 @@ export function SideRail(props: {
     return next >= 0 && next < ids.length && !isLockedRailSection(ids[next], mode);
   }
   const peekItems = peek ? props.peekRows(peek.target) : [];
+  const peekCreate = peek ? (props.peekActions?.(peek.target) ?? []) : [];
   const peekLabel =
     peek?.target === "inbox"
-      ? "Inbox"
+      ? "Home"
       : (props.primary.find((row) => row.id === peek?.target)?.label ?? "Section");
 
   return (
@@ -136,10 +145,10 @@ export function SideRail(props: {
         <button
           type="button"
           className={props.inboxOpen ? "active" : ""}
-          aria-label={props.inboxCount ? `Inbox, ${props.inboxCount} waiting` : "Inbox"}
+          aria-label={props.inboxCount ? `Home, ${props.inboxCount} waiting` : "Home"}
           aria-current={props.inboxOpen ? "page" : undefined}
           data-testid="sidebar-inbox"
-          title={props.shortcutHint("inbox") ? `Inbox · ${props.shortcutHint("inbox")}` : "Inbox"}
+          title={props.shortcutHint("inbox") ? `Home · ${props.shortcutHint("inbox")}` : "Home"}
           onClick={props.onInbox}
           onMouseEnter={(event) => showPeek("inbox", event.currentTarget)}
           onMouseLeave={scheduleHide}
@@ -147,13 +156,12 @@ export function SideRail(props: {
           onBlur={scheduleHide}
         >
           <span className="rail-icon icon-badge-wrap" aria-hidden="true">
-            <IconInbox />
+            <IconHome />
             {props.inboxCount ? (
               <span className="icon-badge danger">{props.inboxCount}</span>
             ) : null}
           </span>
-          {props.inboxCount ? <span className="unread-dot" aria-hidden="true" /> : null}
-          <span className="rail-label">Inbox</span>
+          <span className="rail-label">Home</span>
         </button>
         {props.primary.map((row) => {
           const sectionWaiting = props.waiting.filter((session) =>
@@ -223,7 +231,8 @@ export function SideRail(props: {
                 <span className="rail-icon" aria-hidden="true">
                   <IconMore />
                 </span>
-                {props.secondary.some(
+                {suggestion ||
+                props.secondary.some(
                   (row) =>
                     (row.id === "slack" && props.slackUnread) ||
                     (row.id === "board" && props.boardWaiting > 0),
@@ -235,6 +244,16 @@ export function SideRail(props: {
             }
             toggleClassName="rail-more-toggle"
           >
+            {suggestion ? (
+              <div data-testid="rail-suggestion">
+                <p className="menu-label">Pin {suggestion.label}?</p>
+                <MenuItem onClick={() => props.onSuggestion?.(suggestion.id, true)}>Pin</MenuItem>
+                <MenuItem onClick={() => props.onSuggestion?.(suggestion.id, false)}>
+                  Not now
+                </MenuItem>
+                <div className="menu-sep" role="separator" />
+              </div>
+            ) : null}
             {props.secondary.map((row) => {
               const unread =
                 (row.id === "slack" && props.slackUnread) ||
@@ -384,6 +403,26 @@ export function SideRail(props: {
           onMouseLeave={scheduleHide}
         >
           <p className="rail-peek-head">{peekLabel}</p>
+          {peekCreate.length ? (
+            <div className="rail-peek-actions">
+              {peekCreate.map((action) => (
+                <button
+                  key={action.key}
+                  type="button"
+                  className="rail-peek-item rail-peek-action"
+                  data-testid="rail-peek-action"
+                  onClick={() => {
+                    setPeek(null);
+                    action.run();
+                  }}
+                >
+                  <span className="title-text">
+                    <IconPlus /> {action.label}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
           {peekItems.length ? (
             peekItems.slice(0, 8).map((row) => (
               <button

@@ -181,7 +181,10 @@ export class ChromeExtensionHub {
       text: event.text,
     });
     const mapped = inputToTool(event);
-    if (mapped) await this.call(mapped);
+    if (mapped) {
+      const result = await this.call(mapped);
+      if (!result.ok) throw new Error(result.output);
+    }
   }
 
   private send(message: ChromeExtensionServerMessage): void {
@@ -205,7 +208,7 @@ function inputToTool(event: BrowserInputMessage): ToolRequest | undefined {
     return { name: "type_text", args: { text: event.text ?? "" } };
   }
   if (event.kind === "keyDown") {
-    return { name: "key", args: { key: event.key ?? "" } };
+    return { name: "key", args: { key: event.key ?? "", modifiers: event.modifiers ?? 0 } };
   }
   if (event.kind === "mousePressed") {
     return { name: "mouse_click", args: { x: event.x, y: event.y, count: event.clickCount } };

@@ -35,7 +35,11 @@ import {
   parseDiffLayout,
   parseChatDensity,
   parseBrainSettings,
-  resolveTheme,
+  parseReviewSettings,
+  parseSlackReviewers,
+  parseSlackReviewerPolling,
+  normalizeCustomThemes,
+  resolveThemeRef,
   stampIntegrationToken,
   inspectIntegrationToken,
   stripManagedPolicy,
@@ -58,6 +62,8 @@ import {
   type PullRequestDetail,
   type PullRequestRef,
   type VmInstance,
+  type BootHistory,
+  parseBootHistory,
 } from "@locus/shared";
 import { replaceFile } from "./atomic.js";
 import {
@@ -195,6 +201,7 @@ export class JsonStore {
   private designSystemsPath: string;
   private assetStylesPath: string;
   private gameStylesPath: string;
+  private bootHistoryPath: string;
   private configCache: LocusConfig | undefined;
   private configEpoch = 0;
   private configSave: Promise<void> | undefined;
@@ -219,6 +226,7 @@ export class JsonStore {
     this.designSystemsPath = join(dataDir, "design-systems.json");
     this.assetStylesPath = join(dataDir, "asset-styles.json");
     this.gameStylesPath = join(dataDir, "game-styles.json");
+    this.bootHistoryPath = join(dataDir, "boot-history.json");
   }
 
   async init(): Promise<void> {
@@ -318,13 +326,15 @@ export class JsonStore {
 
   /** Merge builtins/defaults so a cached save still looks like a disk load. */
   private hydrateConfig(raw: LocusConfig): LocusConfig {
+    const customThemes = normalizeCustomThemes(raw.customThemes);
     const templates = [...(raw.templates ?? [])];
     for (const builtin of builtinTemplates({ randomPasswords: true })) {
       if (!templates.some((t) => t.id === builtin.id)) templates.push(builtin);
     }
     return {
       ...raw,
-      theme: resolveTheme(raw.theme),
+      theme: resolveThemeRef(raw.theme, customThemes),
+      customThemes,
       providers: mergeBuiltinProviders(raw.providers ?? [], builtinProviders()),
       templates,
       hardwareProfiles: raw.hardwareProfiles ?? [],
@@ -350,6 +360,9 @@ export class JsonStore {
       diffLayout: parseDiffLayout(raw.diffLayout),
       chatDensity: parseChatDensity(raw.chatDensity),
       brain: parseBrainSettings(raw.brain),
+      review: parseReviewSettings(raw.review),
+      slackReviewers: parseSlackReviewers(raw.slackReviewers),
+      slackReviewerPolling: parseSlackReviewerPolling(raw.slackReviewerPolling),
       ...parseDesktopNotifyPrefs(raw),
       advanced: {
         ...DEFAULT_ADVANCED,
@@ -853,6 +866,19 @@ export class JsonStore {
 
   async replaceAssetStyle(item: AssetStyle): Promise<void> {
     await replaceCatalogItem(this.assetStylesPath, item, parseAssetStyle);
+  }
+
+  /** Per kind/image boot step durations for "usually ~40s" estimates. */
+  async loadBootHistory(): Promise<BootHistory> {
+    try {
+      return parseBootHistory(JSON.parse(await readFile(this.bootHistoryPath, "utf8")) as unknown);
+    } catch {
+      return {};
+    }
+  }
+
+  async saveBootHistory(history: BootHistory): Promise<void> {
+    await atomicWrite(this.bootHistoryPath, JSON.stringify(history, null, 2));
   }
 
   async loadGameStyles(): Promise<GameStyle[]> {

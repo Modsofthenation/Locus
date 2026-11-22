@@ -12,7 +12,7 @@ import {
 } from "@locus/shared";
 import type { ToolResult } from "@locus/guest-agent";
 import type { SessionService } from "../session/sessions.js";
-import { resumeLocusWorkflow, runLocusWorkflow, type WorkflowCompletion } from "./run.js";
+import { resumeLocusWorkflow, runLocusWorkflow, type WorkflowCompleter } from "./run.js";
 import { createWorkflowTemplate, listWorkflowTemplates } from "./templates.js";
 
 const WORKFLOW_ID = /^[A-Za-z0-9_-]{1,80}$/;
@@ -197,11 +197,7 @@ export class WorkflowService {
         name: string,
         args: Record<string, unknown>,
       ) => Promise<{ ok: boolean; output: string }>;
-      complete: (input: {
-        system: string;
-        user: string;
-        tools: string[];
-      }) => Promise<WorkflowCompletion | undefined>;
+      complete: WorkflowCompleter;
     }) => Promise<WorkflowRun>,
   ): Promise<WorkflowRun> {
     if (this.running.has(session.id)) {

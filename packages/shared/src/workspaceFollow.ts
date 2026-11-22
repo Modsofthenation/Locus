@@ -1,5 +1,6 @@
 import { canonicalToolCall, canonicalToolName } from "./models/toolChip.js";
-import { patchFilesFromTool } from "./patch.js";
+import { codeRenameDiffFromResult } from "./models/codeIntel.js";
+import { parseUnifiedDiff, patchFilesFromTool } from "./patch.js";
 import { wrapUntrusted } from "./untrusted.js";
 import { workspaceRelFromToolPath } from "./workspaceChanges.js";
 
@@ -8,8 +9,8 @@ export type WorkspaceFollow = {
   line?: number;
 };
 
-const WRITE_TOOLS = new Set(["file_write", "apply_patch"]);
-const READ_TOOLS = new Set(["file_read", "file_write", "apply_patch"]);
+const WRITE_TOOLS = new Set(["file_write", "apply_patch", "code_rename"]);
+const READ_TOOLS = new Set(["file_read", "file_write", "apply_patch", "code_rename"]);
 
 export function isWorkspaceWriteTool(name: string): boolean {
   return WRITE_TOOLS.has(canonicalToolName(name));
@@ -33,7 +34,10 @@ export function workspaceFollowFromTool(
     if (!path) return undefined;
     return { path, line: 1 };
   }
-  const files = patchFilesFromTool(canonical.name, canonical.arguments, result);
+  const files =
+    canonical.name === "code_rename"
+      ? parseUnifiedDiff(codeRenameDiffFromResult(result))
+      : patchFilesFromTool(canonical.name, canonical.arguments, result);
   const file = files[0];
   if (!file) return undefined;
   const line = file.hunks[0]?.newStart;

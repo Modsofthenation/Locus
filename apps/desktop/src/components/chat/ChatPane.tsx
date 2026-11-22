@@ -1,3 +1,5 @@
+import { UnityProjectPanel } from "@/components/game/UnityProjectPanel";
+import { withRiskConfirm } from "@/lib/riskGate";
 import { DockerDownSessionNotice } from "@/components/layout/DockerDownCallout";
 import {
   useCallback,
@@ -79,6 +81,7 @@ import {
   type SubagentLive,
 } from "@locus/shared";
 import { api, retryEvents } from "@/lib/api";
+import { useDailySpendHint } from "@/lib/dailySpend";
 import { showErrorNotice, showNotice } from "@/lib/notice";
 import { askPrompt } from "@/lib/dialog";
 import { configForSave } from "@/lib/configPersist";
@@ -98,7 +101,7 @@ import {
 } from "@/lib/chatTurn";
 import { CHAT_RECOVERY_TIMEOUT_MS } from "@/lib/net";
 import { turnDiffByAssistantId } from "@/lib/artifacts";
-import { latestTurnOutcome } from "@/lib/turnOutcome";
+import { latestTurnOutcome, worktreeMergeParent } from "@/lib/turnOutcome";
 import { saveLastAgent } from "@/lib/lastAgent";
 import { chatFindHits, stepChatFindIndex } from "@/lib/chatFind";
 import { isStuckToBottom, pinThreadToLatest, schedulePinThreadToLatest } from "@/lib/threadScroll";
@@ -245,6 +248,17 @@ export function ChatPane() {
   const buildStartId = viewing ? undefined : latestImageBuildStartMessageId(messages);
   const imageProgress = session ? state.imageProgress[session.id] : undefined;
   const waitingBuild = !viewing && isImageBuildWaiting(imageProgress);
+  const bootRow = session && !viewing ? state.bootProgress[session.id] : undefined;
+  const bootProgress = bootRow && !bootRow.done ? bootRow : undefined;
+  const canRetryBoot = Boolean(
+    bootProgress?.error &&
+    bootProgress.kind !== "host" &&
+    !bootProgress.steps.some((step) => step.id === "clone" && step.state === "error"),
+  );
+  const onRetryBoot = useCallback(() => {
+    if (!sessionId) return;
+    void api.startVm(sessionId).catch((err: unknown) => showErrorNotice(err, "Could not start"));
+  }, [sessionId]);
   const queue = pendingPromptQueue(session?.queue, lastUserMessage(storedMessages)?.content);
   const vm = state.vms.find((v) => v.id === session?.vmId);
   const turning = viewing ? viewing.status === "running" : busy || session?.status === "running";
@@ -926,6 +940,11 @@ export function ChatPane() {
     void copyText(value);
   };
 
+  const dailySpendHint = useDailySpendHint(
+    state.config?.budgets,
+    (session?.usage?.inputTokens ?? 0) + (session?.usage?.outputTokens ?? 0),
+  );
+
   if (!session) return null;
   const hostChat = sessionRuntime(session) === "host";
   const docker = sessionRuntime(session) === "docker";
@@ -939,6 +958,19 @@ export function ChatPane() {
     resolveUsageRates(provider, session.model),
     workerComputeUsd(session, worker),
   );
+  const turnUsageText = turnOutcome?.usage
+    ? formatUsageHint(turnOutcome.usage, resolveUsageRates(provider, session.model))
+    : undefined;
+  const parentId = worktreeMergeParent(session);
+  const mergeWorktree =
+    parentId && turnOutcome?.files.length
+      ? async () => {
+          const parent = await withRiskConfirm((approveRisk) =>
+            api.mergeWorker(parentId, session.id, { approveRisk }),
+          );
+          dispatch({ type: "session", session: parent });
+        }
+      : undefined;
   const lastUser = lastUserMessage(messages);
   const last = messages[messages.length - 1];
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
@@ -1005,12 +1037,16 @@ export function ChatPane() {
     composerWorking,
     queue.length ? `${queue.length} queued` : null,
     usageHint,
+    dailySpendHint,
   ]
     .filter(Boolean)
     .join(" · ");
 
   return (
     <section className="chat" id="chat-pane" tabIndex={-1}>
+      {session?.playbook?.includes("LOCUS_UNITY_WORKFLOW") && state.section !== "games" ? (
+        <UnityProjectPanel sessionId={session.id} />
+      ) : null}
       {state.setup && !state.setup.hasProvider ? (
         <div className="net-banner warn" role="status" data-testid="demo-mode-banner">
           Demo mode — replies are simulated until you add a provider.
@@ -1160,6 +1196,8 @@ export function ChatPane() {
           cloneProgress={cloneProgress}
           buildStartId={buildStartId}
           imageProgress={imageProgress}
+          bootProgress={bootProgress}
+          onRetryBoot={canRetryBoot ? onRetryBoot : undefined}
           waitingGuest={waitingGuest}
           waitingStartNote={waitingStartNote}
           workingOnBlank={workingOnBlank}
@@ -1181,6 +1219,8 @@ export function ChatPane() {
           onRemoveSubscription={onRemoveSubscription}
           onContinue={() => box.current?.focus()}
           onUndoTurn={(checkpointId) => setConfirmAction({ kind: "undo", checkpointId })}
+          turnUsageText={turnUsageText}
+          onMergeWorktree={mergeWorktree}
         />
         {showJump ? (
           <button
@@ -1415,7 +1455,7 @@ export function ChatPane() {
                   isHumanDriving(session)
                     ? "Send a message to hand the guest back to the agent…"
                     : turning
-                      ? "Send steers this turn…"
+                      ? "Add guidance for the running turn…"
                       : planning
                         ? "Describe the task to plan…"
                         : isGameSession(session)

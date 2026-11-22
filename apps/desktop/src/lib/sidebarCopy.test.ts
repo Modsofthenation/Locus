@@ -29,7 +29,14 @@ describe("sidebarCopy", () => {
     expect(sidebarBrandSubtitle({ ...base, inboxOpen: true, inboxCount: 0 })).toBe("Caught up");
     expect(sidebarBrandSubtitle({ ...base, section: "settings" })).toBe("Providers");
     expect(sidebarBrandSubtitle({ ...base, section: "docker", dockerKind: "mock" })).toBe(
-      "Docker · mock",
+      "Mock engine",
+    );
+    expect(sidebarBrandSubtitle({ ...base, section: "docker", dockerKind: "docker" })).toBe(
+      "Local engine",
+    );
+    expect(sidebarBrandSubtitle({ ...base, section: "grafana" })).toBe("Not connected");
+    expect(sidebarBrandSubtitle({ ...base, section: "grafana", grafanaConnected: true })).toBe(
+      "Connected",
     );
     expect(
       sidebarBrandSubtitle({

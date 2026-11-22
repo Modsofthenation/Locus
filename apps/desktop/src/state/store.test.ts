@@ -8,7 +8,7 @@ import {
   sessionFitsSection,
   type Action,
 } from "./store";
-import type { AgentSession } from "@locus/shared";
+import { beginBootProgress, type AgentSession } from "@locus/shared";
 import { formatWhen } from "@/components/automations/Automations";
 
 const session = (id: string, title: string): AgentSession => ({
@@ -323,6 +323,17 @@ describe("reducer", () => {
     });
     state = reducer(state, { type: "imageProgress", sessionId: "a", progress: null });
     expect(state.imageProgress.a).toBeUndefined();
+  });
+
+  it("stores guest boot steps until cleared or the session is deleted", () => {
+    const progress = beginBootProgress({ kind: "docker", key: "docker:x", at: 1 });
+    let state = reducer(initialState, { type: "bootProgress", sessionId: "a", progress });
+    expect(state.bootProgress.a?.steps[0]?.id).toBe("pull");
+    state = reducer(state, { type: "bootProgress", sessionId: "a", progress: null });
+    expect(state.bootProgress.a).toBeUndefined();
+    state = reducer(state, { type: "bootProgress", sessionId: "b", progress });
+    state = reducer(state, { type: "deleted", id: "b" });
+    expect(state.bootProgress.b).toBeUndefined();
   });
 
   it("stores live QEMU install progress until it is cleared", () => {

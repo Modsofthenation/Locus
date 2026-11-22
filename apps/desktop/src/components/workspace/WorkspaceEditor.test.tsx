@@ -1598,10 +1598,14 @@ describe("WorkspaceEditor", () => {
       });
       await flush();
       expect(host.querySelector('[data-mode="git"]')?.textContent).toMatch(/Git 2/);
-      expect(host.querySelector('[aria-label="Git branch"]')).toBeTruthy();
+      expect(
+        host.querySelector('[aria-label="Git branch"], [aria-label^="Git branch: "]'),
+      ).toBeTruthy();
       expect(host.querySelector(".workspace-git-branch")?.textContent).toMatch(/↑1/);
       const branchRow = host.querySelector(".workspace-git-branch-row");
-      expect(branchRow?.querySelector('[aria-label="Git branch"]')).toBeTruthy();
+      expect(
+        branchRow?.querySelector('[aria-label="Git branch"], [aria-label^="Git branch: "]'),
+      ).toBeTruthy();
       expect(branchRow?.querySelector(".workspace-git-branch")?.textContent).toMatch(/↑1/);
       expect(
         [...(branchRow?.querySelectorAll("button") ?? [])].some(
@@ -2660,7 +2664,9 @@ describe("WorkspaceEditor", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(host.querySelector('[aria-label="Git branch"]')).toBeTruthy();
+    expect(
+      host.querySelector('[aria-label="Git branch"], [aria-label^="Git branch: "]'),
+    ).toBeTruthy();
     expect(host.querySelector('[aria-label="Merge branch"]')).toBeNull();
     expect(host.querySelector('[data-testid="workspace-git-stash"]')).toBeNull();
     await act(async () => {
@@ -3098,7 +3104,9 @@ describe("WorkspaceEditor", () => {
       (host.querySelector('[data-mode="git"]') as HTMLButtonElement).click();
     });
     await flush();
-    expect(host.querySelector('[aria-label="Git repository"]')).toBeTruthy();
+    expect(
+      host.querySelector('[aria-label="Git repository"], [aria-label^="Git repository: "]'),
+    ).toBeTruthy();
     expect(selectValue(host, "Git repository")).toBe("app");
     expect(host.querySelector('[data-path="src/app.ts"]')).toBeTruthy();
     await act(async () => {
@@ -3107,7 +3115,9 @@ describe("WorkspaceEditor", () => {
     });
     await flush();
     expect(api.workspaceGit).toHaveBeenCalledWith("s1", "lib");
-    expect(host.querySelector('[aria-label="Git repository"]')).toBeTruthy();
+    expect(
+      host.querySelector('[aria-label="Git repository"], [aria-label^="Git repository: "]'),
+    ).toBeTruthy();
     expect(selectValue(host, "Git repository")).toBe("lib");
     expect(host.querySelector('[data-path="src/a.ts"]')).toBeTruthy();
     await act(async () => {

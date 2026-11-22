@@ -23,10 +23,15 @@ export function Select<T extends string>(props: {
 }) {
   const selected = props.options.find((row) => row.value === props.value);
   const label = selected?.label ?? props.value;
+  // WCAG 2.5.3 (label in name): the toggle shows the chosen value, so its accessible name
+  // must contain that text too — "Provider: OpenAI", not just "Provider".
+  const accessibleName =
+    label && label !== props.ariaLabel ? `${props.ariaLabel}: ${label}` : props.ariaLabel;
   return (
     <OverflowMenu
       className={`ui-select${props.compact ? " compact" : ""}${props.className ? ` ${props.className}` : ""}`}
       title={props.ariaLabel}
+      ariaLabel={accessibleName}
       align={props.align ?? "left"}
       prefer={props.prefer}
       disabled={props.disabled}

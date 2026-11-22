@@ -87,6 +87,12 @@ export function NewAutomationModal() {
   const workers = state.config?.workers ?? [];
   const editing = state.automations.find((a) => a.id === state.editingAutomationId);
 
+  const [samplePayload, setSamplePayload] = useState("");
+  const [sampleEvent, setSampleEvent] = useState("");
+  const [previewRunId, setPreviewRunId] = useState("");
+  const [recentEvents, setRecentEvents] = useState<import("@locus/shared").AutomationRun[]>([]);
+  const [triggerPreview, setTriggerPreview] =
+    useState<import("@locus/shared").AutomationTriggerPreview>();
   const [name, setName] = useState(editing?.name ?? "");
   const [prompt, setPrompt] = useState(editing?.prompt ?? "");
   const [os, setOs] = useState<GuestOs>(editing?.os ?? "ubuntu");
@@ -383,7 +389,18 @@ export function NewAutomationModal() {
     });
   }
 
-  async function submit(opts?: { hostConfirmed?: boolean }) {
+  async function loadRecentEvents() {
+    if (!editing) return;
+    try {
+      setRecentEvents(
+        (await api.automationRuns(editing.id, { limit: 30 })).filter((run) => run.event),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load recent events");
+    }
+  }
+
+  async function submit(opts?: { hostConfirmed?: boolean; preview?: boolean }) {
     setError(null);
     const parsed = parsedRepo;
     if ((kind === "forge" || kind === "pull_request") && !parsed) {
@@ -475,6 +492,26 @@ export function NewAutomationModal() {
       backendId: backendId || undefined,
       network: hostChat ? undefined : network,
     };
+    if (opts?.preview) {
+      setBusy(true);
+      setTriggerPreview(undefined);
+      try {
+        setTriggerPreview(
+          await api.previewAutomationTrigger({
+            job: input,
+            jobId: editing?.id,
+            runId: previewRunId || undefined,
+            raw: previewRunId ? undefined : samplePayload,
+            headerEvent: sampleEvent.trim() || undefined,
+          }),
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not preview trigger");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     if (!editing && runtime === "host" && !opts?.hostConfirmed) {
       setConfirmHost(true);
       return;
@@ -701,6 +738,91 @@ export function NewAutomationModal() {
             </div>
             <p className="hint">All checked means every day. Uncheck a day to skip it.</p>
           </div>
+        ) : null}
+        {kind === "webhook" || kind === "forge" || kind === "pull_request" ? (
+          <details
+            onToggle={(event) => {
+              if (event.currentTarget.open) void loadRecentEvents();
+            }}
+          >
+            <summary>Preview trigger</summary>
+            {recentEvents.length ? (
+              <label>
+                Recent event
+                <select
+                  value={previewRunId}
+                  onChange={(event) => {
+                    setPreviewRunId(event.target.value);
+                    setTriggerPreview(undefined);
+                  }}
+                >
+                  <option value="">Paste a sample</option>
+                  {recentEvents.map((run) => (
+                    <option key={run.id} value={run.id}>
+                      {new Date(run.startedAt).toLocaleString()} · {run.trigger}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {!previewRunId ? (
+              <>
+                <label>
+                  Sample JSON
+                  <textarea
+                    value={samplePayload}
+                    onChange={(event) => {
+                      setSamplePayload(event.target.value);
+                      setTriggerPreview(undefined);
+                    }}
+                  />
+                </label>
+                <label>
+                  Event header (optional)
+                  <input
+                    value={sampleEvent}
+                    onChange={(event) => {
+                      setSampleEvent(event.target.value);
+                      setTriggerPreview(undefined);
+                    }}
+                    placeholder="push"
+                  />
+                </label>
+              </>
+            ) : null}
+            <button
+              className="btn small"
+              type="button"
+              disabled={busy || (!previewRunId && !samplePayload.trim())}
+              onClick={() => void submit({ preview: true })}
+            >
+              Check sample
+            </button>
+            {triggerPreview ? (
+              <div aria-live="polite">
+                <p>{triggerPreview.explanation}</p>
+                <dl>
+                  <dt>Workspace</dt>
+                  <dd>{triggerPreview.workspace}</dd>
+                  <dt>Model</dt>
+                  <dd>{triggerPreview.model || "Provider default"}</dd>
+                  <dt>Runtime tools</dt>
+                  <dd>
+                    {triggerPreview.tools.length ? (
+                      <details>
+                        <summary>{triggerPreview.tools.length} available</summary>
+                        {triggerPreview.tools.join(", ")}
+                      </details>
+                    ) : (
+                      "None available"
+                    )}
+                  </dd>
+                  <dt>Integration tool allowlist</dt>
+                  <dd>{triggerPreview.integrationAllowlist.join(", ") || "None"}</dd>
+                </dl>
+              </div>
+            ) : null}
+          </details>
         ) : null}
         {(() => {
           try {

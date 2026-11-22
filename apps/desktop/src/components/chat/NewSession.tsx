@@ -10,9 +10,12 @@ import type {
   NetworkJail,
   CodexReasoningEffort,
   VisionMode,
+  WorktreeAgentSpec,
 } from "@locus/shared";
 import {
   DEFAULT_DOCKER_IMAGE,
+  WORKER_COUNT_MAX,
+  WORKER_GROUP_MAX,
   applyNamedEnvironment,
   defaultNetworkJail,
   isNetworkJail,
@@ -28,7 +31,8 @@ import {
   policyAllowsLiveChrome,
   policyForcedJail,
   workerIsMetered,
-  workerWhereLabel,
+  workerPlacementHint,
+  workerRunsInTask,
 } from "@locus/shared";
 import { useEffect, useMemo, useState } from "react";
 import { FormTabs, Select } from "@/components/layout/Select";
@@ -61,6 +65,7 @@ import {
 } from "@/components/settings/RuntimePicker";
 import { HostFolderField } from "@/components/workspace/HostFolderField";
 import { EnvironmentPicker } from "@/components/settings/EnvironmentPicker";
+import { AgentRows } from "@/components/workers/AgentRows";
 
 export function NewSessionModal() {
   const { state, dispatch } = useStore();
@@ -104,9 +109,14 @@ export function NewSessionModal() {
   const [netDirty, setNetDirty] = useState(false);
   const [namedEnvId, setNamedEnvId] = useState("");
   const [branchLock, setBranchLock] = useState(false);
+  /** Extra agents beyond the primary model pick; non-empty means fan-out. */
+  const [parallel, setParallel] = useState<WorktreeAgentSpec[]>([]);
+  const [worktree, setWorktree] = useState(false);
   const [advancedTab, setAdvancedTab] = useState<"agent" | "tools" | "runtime">("agent");
   const [images, setImages] = useState<GoldenImage[]>([]);
   const selectedWorker = workers.find((row) => row.id === backendId);
+  /** Fargate: the agent gets its own task and runs as Host inside it; no runtime choice. */
+  const cloudTask = Boolean(selectedWorker && workerRunsInTask(selectedWorker));
 
   const osTemplates = useMemo(() => templates.filter((t) => t.os === os), [templates, os]);
   const provider = providers.find((p) => p.id === providerId);
@@ -237,6 +247,8 @@ export function NewSessionModal() {
     setStartVm((applied.runtime ?? env.runtime) !== "host");
   }
 
+  const canParallel = (runtime === "host" && !backendId) || runtime === "docker";
+
   async function submit() {
     setError(null);
     if (repo.trim() && !parsed) {
@@ -250,6 +262,11 @@ export function NewSessionModal() {
         ? { cpuCores, memoryMb, diskSizeGb }
         : undefined;
     const hostChat = runtime === "host";
+    const fanout = canParallel && parallel.length > 0;
+    if (fanout && !prompt.trim()) {
+      setError("Write the task first — every agent gets the same prompt.");
+      return;
+    }
     const input: CreateSessionInput = {
       os:
         (runtime === "docker" || hostChat) && (os === "windows-11" || os === "windows-10")
@@ -293,11 +310,25 @@ export function NewSessionModal() {
       ...(branchLock && (repoId || parsed) ? { branchLock: true } : {}),
       prompt: prompt.trim() || undefined,
       hostDir: hostChat ? hostDir.trim() || undefined : undefined,
+      ...(hostChat && !backendId && worktree && hostDir.trim() && !fanout
+        ? { worktree: true }
+        : {}),
       ...(backendId ? { placement: "worker" as const, backendId } : {}),
     };
     setBusy(true);
     try {
-      const session: AgentSession = await api.createSession(input);
+      let session: AgentSession;
+      if (fanout) {
+        const out = await api.fanout({
+          create: { ...input, prompt: undefined },
+          agents: [{ providerId: input.providerId, model: input.model }, ...parallel],
+          prompt: prompt.trim(),
+        });
+        for (const worker of out.workers) dispatch({ type: "session", session: worker });
+        session = out.parent;
+      } else {
+        session = await api.createSession(input);
+      }
       saveLastAgent({
         os: input.os,
         runtime,
@@ -345,34 +376,39 @@ export function NewSessionModal() {
             setVision("off");
             setStartVm(true);
             setImageId("");
+            const picked = workers.find((row) => row.id === id);
+            if (picked && workerRunsInTask(picked)) {
+              setRuntime("host");
+              setHostDir("");
+              setWorktree(false);
+            }
           }
         }}
       />
-      <RuntimeToggle
-        value={runtime}
-        disabledRuntimes={policyAllowsHostAgents(state.config?.managedPolicy) ? [] : ["host"]}
-        onChange={(next) => {
-          setRuntime(next);
-          const nextOs =
-            next !== "vm" && (os === "windows-11" || os === "windows-10") ? "ubuntu" : os;
-          if (nextOs !== os) setOs(nextOs);
-          setVision(next === "vm" ? "latest" : "off");
-          setStartVm(next !== "host" || Boolean(backendId));
-          if (next === "host") setAllowedTools("");
-          setImageId(
-            next === "host" || backendId
-              ? ""
-              : (latestGoldenImage(images, nextOs, next === "docker" ? "docker" : "vm")?.id ?? ""),
-          );
-        }}
-      />
+      {cloudTask ? null : (
+        <RuntimeToggle
+          value={runtime}
+          disabledRuntimes={policyAllowsHostAgents(state.config?.managedPolicy) ? [] : ["host"]}
+          onChange={(next) => {
+            setRuntime(next);
+            const nextOs =
+              next !== "vm" && (os === "windows-11" || os === "windows-10") ? "ubuntu" : os;
+            if (nextOs !== os) setOs(nextOs);
+            setVision(next === "vm" ? "latest" : "off");
+            setStartVm(next !== "host" || Boolean(backendId));
+            if (next === "host") setAllowedTools("");
+            setImageId(
+              next === "host" || backendId
+                ? ""
+                : (latestGoldenImage(images, nextOs, next === "docker" ? "docker" : "vm")?.id ??
+                    ""),
+            );
+          }}
+        />
+      )}
       <p className="hint">
         {backendId
-          ? `${runtime === "host" ? "The host workspace" : runtime === "vm" ? "The VM" : "The container"} runs on ${selectedWorker ? workerWhereLabel(selectedWorker) : "the worker"}. Chat and keys stay on this machine.${
-              selectedWorker && workerIsMetered(selectedWorker)
-                ? " Stop destroys the guest. Idle TTL applies on the metered VM."
-                : ""
-            }`
+          ? workerPlacementHint(selectedWorker, runtime)
           : runtime === "host"
             ? "A coding agent on this machine. No VM or container — files, shell, and git run here (a security exception)."
             : runtime === "docker"
@@ -393,7 +429,7 @@ export function NewSessionModal() {
           }
         />
       </div>
-      {runtime === "host" ? (
+      {runtime === "host" && !cloudTask ? (
         <HostFolderField value={hostDir} onChange={setHostDir} remote={Boolean(backendId)} />
       ) : null}
       {runtime === "docker" ? (
@@ -448,6 +484,36 @@ export function NewSessionModal() {
         value={reasoningEffort}
         onChange={setReasoningEffort}
       />
+      {canParallel ? (
+        <details className="advanced parallel-agents" open={parallel.length > 0}>
+          <summary>
+            Run in parallel{parallel.length ? ` · ${parallel.length + 1} agents` : ""}
+          </summary>
+          <p className="hint">
+            {runtime === "host"
+              ? "Send the task to several agents at once — mix Claude Code, Codex, and any other provider. Each gets its own git worktree and branch off the folder or repo above; compare and merge on the board."
+              : "Send the task to several agents at once, each in its own container. Compare and keep one on the board."}
+          </p>
+          <AgentRows
+            providers={providers}
+            rows={parallel}
+            onChange={setParallel}
+            reserved={1}
+            taken={[providerId]}
+            max={runtime === "docker" ? WORKER_COUNT_MAX : WORKER_GROUP_MAX}
+          />
+        </details>
+      ) : null}
+      {runtime === "host" && !backendId && hostDir.trim() && parallel.length === 0 ? (
+        <label className="hint check">
+          <input
+            type="checkbox"
+            checked={worktree}
+            onChange={(e) => setWorktree(e.target.checked)}
+          />
+          Work in a new git worktree and branch (this folder stays untouched)
+        </label>
+      ) : null}
       <details className="advanced">
         <summary>More options</summary>
         <p className="hint">Repo, jail, tools, and hardware. Runtime stays fixed after create.</p>
@@ -721,7 +787,13 @@ export function NewSessionModal() {
           disabled={busy || (runtime === "docker" && !parseDockerImage(dockerImage))}
           onClick={() => void submit()}
         >
-          {busy ? "Creating…" : runtime === "host" ? "Start chat" : "Create agent"}
+          {busy
+            ? "Creating…"
+            : canParallel && parallel.length
+              ? `Start ${parallel.length + 1} agents`
+              : runtime === "host"
+                ? "Start chat"
+                : "Create agent"}
         </button>
       </div>
     </Modal>

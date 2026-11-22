@@ -1,6 +1,6 @@
 {
   "name": "@locus/shared",
-  "version": "0.21.0",
+  "version": "0.24.0",
   "private": true,
   "description": "Shared types and pure helpers used by the Locus apps and packages",
   "type": "module",
@@ -9,7 +9,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./awsSign": "./src/awsSign.ts",
-    "./windowsCliSpawn": "./src/windowsCliSpawn.ts"
+    "./auditChain": "./src/auditChain.ts",
+    "./windowsCliSpawn": "./src/windowsCliSpawn.ts",
+    "./cliSandbox": "./src/cliSandbox.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

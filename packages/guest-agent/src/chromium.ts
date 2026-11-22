@@ -8,11 +8,12 @@ import {
   LOCUS_CHROME_PROFILE_DIR,
   LOCUS_CHROME_PROFILE_GUEST,
   sanitizeArtifactStem,
+  computerKey,
   type BrowserInputMessage,
   type BrowserTab,
 } from "@locus/shared";
 import { guestLoopbackRelayScript, listenGuestLoopbackTunnel } from "./tunnel.js";
-import { LiveCdp, cdpCall, withCdpSession, type WsCtor } from "./cdpSession.js";
+import { LiveCdp, withCdpSession, type WsCtor } from "./cdpSession.js";
 
 export type { WsLike, WsCtor } from "./cdpSession.js";
 export { cdpCall, withCdpSession } from "./cdpSession.js";
@@ -32,6 +33,8 @@ export const DOCKER_BROWSER_TOOLS = new Set([
   "browser_snapshot",
   "browser_click",
   "browser_type",
+  "browser_action",
+  "browser_wait",
   "browser_console",
   "browser_network",
   "browser_pdf",
@@ -92,6 +95,17 @@ interface CdpTarget {
   webSocketDebuggerUrl?: string;
 }
 
+export interface BrowserSnapshotRef {
+  backendDOMNodeId: number;
+  role: string;
+  name: string;
+  frameId?: string;
+  states: Record<string, unknown>;
+  parent?: string;
+  nodeId?: string;
+  bounds?: number[];
+}
+
 export interface ScreencastFrame {
   data: string;
   mime: "image/jpeg";
@@ -105,6 +119,7 @@ export interface ScreencastFrame {
 }
 
 export interface ChromiumDriver {
+  close?(): void;
   handle(req: ToolRequest): Promise<ToolResult>;
   navigate(url: string): Promise<ToolResult>;
   startScreencast?(onFrame: (frame: ScreencastFrame) => void): Promise<void>;
@@ -113,6 +128,8 @@ export interface ChromiumDriver {
   listDownloads?(): Promise<string[]>;
   copyDownload?(name?: string): Promise<ToolResult>;
   dispatchInput?(event: BrowserInputMessage): Promise<void>;
+  releaseInput?(): Promise<void>;
+  invalidateObservation?(): void | Promise<void>;
 }
 
 export interface CdpEndpoint {
@@ -163,7 +180,15 @@ export class CdpChromiumDriver implements ChromiumDriver {
   private tracing = false;
   private screencast?: LiveCdp;
   private onScreencastFrame?: (frame: ScreencastFrame) => void;
-  private snapshotRefs = new Map<string, { backendDOMNodeId: number }>();
+  private snapshotRefs = new Map<string, BrowserSnapshotRef>();
+  private activeTargetId?: string;
+  private snapshotDocument?: { targetId?: string; backendNodeId?: number };
+  private snapshotSequence = 0;
+  private heldKeys = new Map<string, BrowserInputMessage>();
+  private heldButton?: "left" | "middle" | "right";
+  private commandSession?: LiveCdp;
+  private commandUrl?: string;
+  private commandConnecting?: Promise<LiveCdp>;
 
   constructor(
     private readonly containerId: string,
@@ -171,6 +196,17 @@ export class CdpChromiumDriver implements ChromiumDriver {
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly options: CdpDriverOptions = {},
   ) {}
+
+  close(): void {
+    this.commandSession?.close();
+    this.screencast?.close();
+    this.tunnel?.close?.();
+    this.commandSession = undefined;
+    this.screencast = undefined;
+    this.tunnel = undefined;
+    this.ready = false;
+    this.invalidateObservation();
+  }
 
   async handle(req: ToolRequest): Promise<ToolResult> {
     const started = await this.ensure();
@@ -203,7 +239,7 @@ export class CdpChromiumDriver implements ChromiumDriver {
           const y2 = num(req.args, "y2");
           await this.input({ type: "mouseMoved", x: x1, y: y1 });
           await this.input({ type: "mousePressed", x: x1, y: y1, button: "left", clickCount: 1 });
-          await this.input({ type: "mouseMoved", x: x2, y: y2, button: "left" });
+          await this.input({ type: "mouseMoved", x: x2, y: y2, button: "left", buttons: 1 });
           await this.input({ type: "mouseReleased", x: x2, y: y2, button: "left", clickCount: 1 });
           this.pointer = { x: x2, y: y2 };
           return { ok: true, output: `mouse_drag ${x2},${y2}` };
@@ -223,10 +259,12 @@ export class CdpChromiumDriver implements ChromiumDriver {
           });
           return { ok: true, output: `mouse_scroll ${delta}` };
         }
-        case "key":
-          await this.call("Input.dispatchKeyEvent", { type: "keyDown", key: str(req.args, "key") });
-          await this.call("Input.dispatchKeyEvent", { type: "keyUp", key: str(req.args, "key") });
+        case "key": {
+          const key = computerKey(str(req.args, "key"));
+          await this.call("Input.dispatchKeyEvent", { type: "keyDown", ...key });
+          await this.call("Input.dispatchKeyEvent", { type: "keyUp", ...key });
           return { ok: true, output: `key ${str(req.args, "key")}` };
+        }
         case "type_text":
           await this.call("Input.insertText", { text: str(req.args, "text") });
           return { ok: true, output: "type_text" };
@@ -244,6 +282,10 @@ export class CdpChromiumDriver implements ChromiumDriver {
           await this.call("Input.insertText", { text: str(req.args, "text") });
           return { ok: true, output: `typed into ${normalizeSnapshotRef(str(req.args, "ref"))}` };
         }
+        case "browser_action":
+          return await this.semanticAction(req);
+        case "browser_wait":
+          return await this.waitReady(req.args);
         case "browser_console":
           return await this.consoleLog();
         case "browser_network":
@@ -267,8 +309,21 @@ export class CdpChromiumDriver implements ChromiumDriver {
     if (!started.ok) return started;
     try {
       await this.call("Page.enable", {});
-      await this.call("Page.navigate", { url });
-      return { ok: true, output: `opened ${url}` };
+      this.invalidateObservation();
+      const result = (await this.call("Page.navigate", { url })) as {
+        errorText?: string;
+        isDownload?: boolean;
+      };
+      if (result.errorText)
+        return {
+          ok: false,
+          output: `Navigation failed: ${result.errorText}`,
+          category: "navigation",
+          retryable: true,
+        };
+      if (result.isDownload)
+        return { ok: true, output: "Navigation started a download; verify with browser_download." };
+      return await this.waitReady({});
     } catch (err) {
       return { ok: false, output: err instanceof Error ? err.message : "navigate failed" };
     }
@@ -280,7 +335,8 @@ export class CdpChromiumDriver implements ChromiumDriver {
     const target = await this.cdpTarget();
     const res = await this.fetchImpl(`http://${target.host}:${target.port}/json/list`);
     const targets = (await res.json()) as CdpTarget[];
-    return parseBrowserPages(targets);
+    await this.selectAvailableTarget(targets);
+    return parseBrowserPages(targets, this.activeTargetId);
   }
 
   async startScreencast(onFrame: (frame: ScreencastFrame) => void): Promise<void> {
@@ -358,21 +414,83 @@ export class CdpChromiumDriver implements ChromiumDriver {
       return;
     }
     if (event.kind === "keyDown" || event.kind === "keyUp") {
-      await this.call("Input.dispatchKeyEvent", { type: event.kind, key: event.key ?? "" });
+      const key = { ...computerKey(event.key ?? ""), ...event };
+      await this.call("Input.dispatchKeyEvent", {
+        type: event.kind,
+        key: key.key,
+        code: key.code,
+        modifiers: key.modifiers,
+        windowsVirtualKeyCode: key.windowsVirtualKeyCode,
+      });
+      if (event.kind === "keyDown") this.heldKeys.set(event.code ?? event.key ?? "", event);
+      else this.heldKeys.delete(event.code ?? event.key ?? "");
       return;
     }
     const x = event.x ?? this.pointer.x;
     const y = event.y ?? this.pointer.y;
     this.pointer = { x, y };
+    if (event.kind === "mousePressed") this.heldButton = event.button;
+    if (event.kind === "mouseReleased") this.heldButton = undefined;
     await this.input({
       type: event.kind,
       x,
       y,
       button: event.button,
+      buttons:
+        this.heldButton === "left"
+          ? 1
+          : this.heldButton === "right"
+            ? 2
+            : this.heldButton === "middle"
+              ? 4
+              : 0,
       clickCount: event.clickCount,
       deltaX: event.deltaX,
       deltaY: event.deltaY,
+      modifiers: event.modifiers,
     });
+  }
+
+  async releaseInput(): Promise<void> {
+    const keys = [...this.heldKeys.values()];
+    this.heldKeys.clear();
+    for (const key of keys) await this.dispatchInput({ ...key, kind: "keyUp", modifiers: 0 });
+    if (this.heldButton) {
+      const button = this.heldButton;
+      this.heldButton = undefined;
+      await this.input({ type: "mouseReleased", ...this.pointer, button, clickCount: 1 });
+    }
+  }
+
+  invalidateObservation(): void {
+    this.snapshotRefs.clear();
+    this.snapshotDocument = undefined;
+  }
+
+  private async waitReady(args: Record<string, unknown>): Promise<ToolResult> {
+    const timeout = Math.min(30_000, Math.max(100, optNum(args, "timeout_ms") ?? 8000));
+    const deadline = Date.now() + timeout;
+    do {
+      const result = (await this.call(
+        "Runtime.evaluate",
+        {
+          expression: `({ ready: document.readyState !== 'loading', url: location.href, found: ${typeof args.text === "string" ? `document.body?.innerText.includes(${JSON.stringify(args.text)})` : "true"} })`,
+          returnByValue: true,
+        },
+        Math.max(1, Math.min(8000, deadline - Date.now())),
+      )) as { result?: { value?: { ready?: boolean; url?: string; found?: boolean } } };
+      const value = result.result?.value;
+      if (value?.ready && value.found)
+        return { ok: true, output: `ready ${value.url ?? ""}`, details: value };
+      await new Promise((r) => setTimeout(r, 100));
+    } while (Date.now() < deadline);
+    return {
+      ok: false,
+      output:
+        "Browser wait timed out. Take a fresh browser_snapshot before choosing another action.",
+      category: "timeout",
+      retryable: true,
+    };
   }
 
   private async tabs(req: ToolRequest): Promise<ToolResult> {
@@ -381,11 +499,14 @@ export class CdpChromiumDriver implements ChromiumDriver {
     const base = `http://${target.host}:${target.port}`;
     if (action === "new") {
       const url = str(req.args, "url") || "about:blank";
-      const res = await this.fetchImpl(
-        `${base}/json/new?${new URLSearchParams({ url }).toString()}`,
-        { method: "PUT" },
-      );
+      const res = await this.fetchImpl(`${base}/json/new?${encodeURIComponent(url)}`, {
+        method: "PUT",
+      });
       const body = await res.text();
+      if (res.ok) {
+        const page = JSON.parse(body) as CdpTarget;
+        await this.changeTarget(page.id);
+      }
       return { ok: res.ok, output: body.slice(0, 2000) || "tab created" };
     }
     if (action === "close" || action === "select") {
@@ -396,6 +517,12 @@ export class CdpChromiumDriver implements ChromiumDriver {
           ? `/json/close/${encodeURIComponent(id)}`
           : `/json/activate/${encodeURIComponent(id)}`;
       const res = await this.fetchImpl(`${base}${path}`);
+      if (res.ok) {
+        if (action === "select") await this.changeTarget(id);
+        else if (id === this.activeTargetId) {
+          await this.listPages();
+        }
+      }
       return { ok: res.ok, output: (await res.text()).slice(0, 500) || action };
     }
     const res = await this.fetchImpl(`${base}/json/list`);
@@ -438,12 +565,44 @@ export class CdpChromiumDriver implements ChromiumDriver {
   }
 
   private async screenshot(): Promise<ToolResult> {
-    const shot = (await this.call("Page.captureScreenshot", { format: "png" })) as {
+    const measured = (await this.call("Runtime.evaluate", {
+      expression: "({width:innerWidth,height:innerHeight,dpr:devicePixelRatio})",
+      returnByValue: true,
+    })) as { result?: { value?: { width?: number; height?: number; dpr?: number } } };
+    const viewport = measured.result?.value;
+    let shot = (await this.call("Page.captureScreenshot", { format: "png" })) as {
       data?: string;
     };
+    const png = Buffer.from(shot.data ?? "", "base64");
+    if (
+      viewport?.width &&
+      viewport.height &&
+      png.length > 24 &&
+      png.readUInt32BE(16) !== viewport.width
+    ) {
+      // Native display scaling and per-client CDP emulation do not always agree.
+      // Measure the returned raster rather than assuming devicePixelRatio is its scale.
+      shot = (await this.call("Page.captureScreenshot", {
+        format: "png",
+        clip: {
+          x: 0,
+          y: 0,
+          width: viewport.width,
+          height: viewport.height,
+          scale: viewport.width / png.readUInt32BE(16),
+        },
+      })) as { data?: string };
+    }
     const data = shot.data?.replace(/\s/g, "");
     if (!data) return { ok: false, output: "Chromium screenshot was empty" };
-    return { ok: true, output: "screenshot captured", screenshotBase64: data };
+    return {
+      ok: true,
+      output: "screenshot captured",
+      screenshotBase64: data,
+      ...(viewport?.width
+        ? { details: { width: viewport.width, height: viewport.height, coordinateSpace: "css" } }
+        : {}),
+    };
   }
 
   private async printPdf(req: ToolRequest): Promise<ToolResult> {
@@ -606,30 +765,189 @@ export class CdpChromiumDriver implements ChromiumDriver {
   }
 
   private async snapshot(): Promise<ToolResult> {
+    await this.debuggerUrl();
+    const document = (await this.call("DOM.getDocument", { depth: 0 })) as {
+      root?: { backendNodeId?: number };
+    };
     await this.call("Accessibility.enable", {});
     const tree = (await this.call("Accessibility.getFullAXTree", {})) as {
       nodes?: Array<Record<string, unknown>>;
     };
-    const { text, refs } = formatAccessibilitySnapshot(tree.nodes ?? []);
+    const layout = (await this.call("DOMSnapshot.captureSnapshot", { computedStyles: [] })) as {
+      strings?: string[];
+      documents?: Array<{
+        frameId?: number;
+        scrollOffsetX?: number;
+        scrollOffsetY?: number;
+        nodes?: { backendNodeId?: number[] };
+        layout?: { nodeIndex?: number[]; bounds?: number[][] };
+      }>;
+    };
+    const geometry = new Map<number, { bounds: number[]; frameId?: string }>();
+    for (const doc of layout.documents ?? []) {
+      for (const [i, index] of (doc.layout?.nodeIndex ?? []).entries()) {
+        const id = doc.nodes?.backendNodeId?.[index];
+        const b = doc.layout?.bounds?.[i];
+        if (id !== undefined && b?.length === 4)
+          geometry.set(id, {
+            bounds: [
+              b[0]! - (doc.scrollOffsetX ?? 0),
+              b[1]! - (doc.scrollOffsetY ?? 0),
+              b[2]!,
+              b[3]!,
+            ],
+            frameId: typeof doc.frameId === "number" ? layout.strings?.[doc.frameId] : undefined,
+          });
+      }
+    }
+    for (const node of tree.nodes ?? []) {
+      const box = geometry.get(Number(node.backendDOMNodeId));
+      if (box) Object.assign(node, box);
+    }
+    const { text, refs } = formatAccessibilitySnapshot(
+      tree.nodes ?? [],
+      `@s${++this.snapshotSequence}e`,
+    );
     this.snapshotRefs = refs;
-    return { ok: true, output: text || "(empty tree)" };
+    this.snapshotDocument = {
+      targetId: this.activeTargetId,
+      backendNodeId: document.root?.backendNodeId,
+    };
+    return {
+      ok: true,
+      output: text || "(empty tree)",
+      details: {
+        targetId: this.activeTargetId,
+        snapshotId: this.snapshotSequence,
+        nodes: [...refs].map(([ref, node]) => ({ ref, ...node })),
+      },
+    };
+  }
+
+  private async resolveRef(raw: string): Promise<number> {
+    await this.debuggerUrl();
+    const ref = normalizeSnapshotRef(raw);
+    const target = this.snapshotRefs.get(ref);
+    if (!target || this.snapshotDocument?.targetId !== this.activeTargetId)
+      throw new Error(`Unknown or stale ref ${ref}. Call browser_snapshot first.`);
+    const document = (await this.call("DOM.getDocument", { depth: 0 })) as {
+      root?: { backendNodeId?: number };
+    };
+    if (document.root?.backendNodeId !== this.snapshotDocument?.backendNodeId) {
+      this.invalidateObservation();
+      throw new Error("Page changed. Call browser_snapshot before acting.");
+    }
+    return target.backendDOMNodeId;
+  }
+
+  private async onRef(raw: string, declaration: string, args: unknown[] = []): Promise<unknown> {
+    const backendNodeId = await this.resolveRef(raw);
+    const resolved = (await this.call("DOM.resolveNode", { backendNodeId })) as {
+      object?: { objectId?: string };
+    };
+    if (!resolved.object?.objectId)
+      throw new Error("Element detached. Call browser_snapshot again.");
+    const result = (await this.call("Runtime.callFunctionOn", {
+      objectId: resolved.object.objectId,
+      functionDeclaration: declaration,
+      arguments: args.map((value) => ({ value })),
+      returnByValue: true,
+    })) as { result?: { value?: unknown }; exceptionDetails?: { text?: string } };
+    if (result.exceptionDetails)
+      throw new Error(result.exceptionDetails.text ?? "Element action failed");
+    return result.result?.value;
+  }
+
+  private async semanticAction(req: ToolRequest): Promise<ToolResult> {
+    const ref = str(req.args, "ref");
+    const action = str(req.args, "action");
+    if ((action === "fill" || action === "select") && typeof req.args.value !== "string")
+      return { ok: false, output: "fill and select require a string value" };
+    if (action === "invoke") return this.clickRef(ref);
+    const result =
+      action === "check"
+        ? undefined
+        : await this.onRef(
+            ref,
+            `function(action, value) {
+      if (!this.isConnected || this.disabled || this.getAttribute('aria-disabled') === 'true') return { ok: false, reason: 'Element is detached or disabled' };
+      if (action === 'fill') {
+        if (!(this instanceof HTMLInputElement || this instanceof HTMLTextAreaElement) || this.readOnly) return { ok: false, reason: 'Expected an editable text field' };
+        this.focus();
+        const proto = this instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, 'value').set.call(this, String(value));
+        this.dispatchEvent(new Event('input', { bubbles: true })); this.dispatchEvent(new Event('change', { bubbles: true }));
+        return { ok: this.value === String(value), value: this.type === 'password' ? '[redacted]' : this.value };
+      }
+      if (action === 'select') {
+        if (!(this instanceof HTMLSelectElement)) return { ok: false, reason: 'Expected a select control' };
+        if (![...this.options].some(o => o.value === String(value) && !o.disabled)) return { ok: false, reason: 'Option is unavailable' };
+        this.value = String(value); this.dispatchEvent(new Event('input', { bubbles: true })); this.dispatchEvent(new Event('change', { bubbles: true }));
+        return { ok: this.value === String(value), value: this.value };
+      }
+      return { ok: false, reason: 'Unsupported action' };
+    }`,
+            [action, req.args.value],
+          );
+    if (action === "check") {
+      const wanted = req.args.checked !== false;
+      const current = (await this.onRef(
+        ref,
+        "function() { return { supported: this.matches('input[type=checkbox],input[type=radio],[role=checkbox],[role=switch]') && !this.disabled, checked: this.checked, aria: this.getAttribute('aria-checked') }; }",
+      )) as { supported?: boolean; checked?: boolean; aria?: string };
+      if (!current.supported)
+        return { ok: false, output: "Expected an enabled checkbox, radio or switch" };
+      if ((current.checked ?? current.aria === "true") !== wanted) {
+        const clicked = await this.clickRef(ref);
+        if (!clicked.ok) return clicked;
+      }
+      const verified = await this.onRef(
+        ref,
+        "function() { return this.checked ?? (this.getAttribute('aria-checked') === 'true'); }",
+      );
+      return {
+        ok: verified === wanted,
+        output:
+          verified === wanted ? `checked=${wanted}` : "Checkbox did not reach the requested state",
+        details: { checked: verified },
+      };
+    }
+    const observed = result as { ok?: boolean; reason?: string } | undefined;
+    return {
+      ok: observed?.ok === true,
+      output: JSON.stringify(observed ?? { ok: false }),
+      details: { action, observed },
+    };
   }
 
   private async clickRef(raw: string): Promise<ToolResult> {
     const ref = normalizeSnapshotRef(raw);
-    const target = this.snapshotRefs.get(ref);
-    if (!target) return { ok: false, output: `Unknown ref ${ref}. Call browser_snapshot first.` };
+    const backendNodeId = await this.resolveRef(ref);
     await this.call("DOM.enable", {});
-    await this.call("DOM.scrollIntoViewIfNeeded", { backendNodeId: target.backendDOMNodeId }).catch(
-      () => undefined,
-    );
+    await this.call("DOM.scrollIntoViewIfNeeded", { backendNodeId });
     const box = (await this.call("DOM.getBoxModel", {
-      backendNodeId: target.backendDOMNodeId,
+      backendNodeId,
     })) as {
       model?: { content?: number[] };
     };
     const point = boxCenter(box.model?.content);
     if (!point) return { ok: false, output: `Could not find a box for ${ref}` };
+    const actionable = await this.onRef(
+      ref,
+      `function(x,y) {
+      const hit = this.ownerDocument.elementFromPoint(x,y);
+      return this.isConnected && !this.disabled && this.getAttribute('aria-disabled') !== 'true' && (hit === this || this.contains(hit));
+    }`,
+      [point.x, point.y],
+    );
+    if (!actionable)
+      return {
+        ok: false,
+        output:
+          "Element is disabled, obscured, or outside the viewport. Take a fresh snapshot or screenshot.",
+        category: "not-actionable",
+        retryable: true,
+      };
     this.pointer = point;
     await this.input({ type: "mouseMoved", x: point.x, y: point.y });
     await this.input({
@@ -672,6 +990,10 @@ export class CdpChromiumDriver implements ChromiumDriver {
       ]);
       if (probe.code === 0) return { ok: true, output: "ready" };
       this.ready = false;
+      this.commandSession?.close();
+      this.commandSession = undefined;
+      this.commandUrl = undefined;
+      this.invalidateObservation();
       this.tunnel?.close?.();
       this.tunnel = undefined;
     }
@@ -705,9 +1027,12 @@ export class CdpChromiumDriver implements ChromiumDriver {
       try {
         const res = await this.fetchImpl(`http://${target.host}:${target.port}/json/list`);
         const targets = (await res.json()) as CdpTarget[];
-        const page =
-          targets.find((row) => row.type === "page" && row.webSocketDebuggerUrl) ??
-          targets.find((row) => row.webSocketDebuggerUrl);
+        await this.selectAvailableTarget(targets);
+        const page = targets.find(
+          (row) =>
+            (row.id ?? row.webSocketDebuggerUrl?.split("/").pop()) === this.activeTargetId &&
+            row.webSocketDebuggerUrl,
+        );
         if (page?.webSocketDebuggerUrl)
           return rewriteCdpWs(page.webSocketDebuggerUrl, target.host, target.port);
       } catch (err) {
@@ -716,6 +1041,31 @@ export class CdpChromiumDriver implements ChromiumDriver {
       await new Promise((r) => setTimeout(r, 150));
     }
     throw new Error(last);
+  }
+
+  private async selectAvailableTarget(targets: CdpTarget[]): Promise<void> {
+    const pages = targets.filter((row) => row.type === "page" && row.webSocketDebuggerUrl);
+    if (
+      pages.some(
+        (row) => (row.id ?? row.webSocketDebuggerUrl?.split("/").pop()) === this.activeTargetId,
+      )
+    )
+      return;
+    const page = pages[0];
+    await this.changeTarget(page?.id ?? page?.webSocketDebuggerUrl?.split("/").pop());
+  }
+
+  private async changeTarget(id: string | undefined): Promise<void> {
+    if (this.activeTargetId === id) return;
+    const callback = this.screencast ? this.onScreencastFrame : undefined;
+    await this.releaseInput();
+    await this.stopScreencast();
+    this.commandSession?.close();
+    this.commandSession = undefined;
+    this.commandUrl = undefined;
+    this.activeTargetId = id;
+    this.invalidateObservation();
+    if (callback && id) await this.startScreencast(callback);
   }
 
   private async cdpTarget(): Promise<CdpEndpoint> {
@@ -733,7 +1083,24 @@ export class CdpChromiumDriver implements ChromiumDriver {
     timeoutMs = 8000,
   ): Promise<unknown> {
     const url = await this.debuggerUrl();
-    return cdpCall(url, method, params, this.options.wsCtor, timeoutMs);
+    if (!this.commandSession || this.commandUrl !== url) {
+      this.commandSession?.close();
+      this.commandConnecting ??= LiveCdp.connect(
+        url,
+        this.options.wsCtor ?? (WsWebSocket as unknown as WsCtor),
+      );
+      try {
+        const session = await this.commandConnecting;
+        this.commandSession = session;
+        this.commandUrl = url;
+        session.onClose(() => {
+          if (this.commandSession === session) this.commandSession = undefined;
+        });
+      } finally {
+        this.commandConnecting = undefined;
+      }
+    }
+    return this.commandSession.call(method, params, timeoutMs);
   }
 }
 
@@ -757,13 +1124,15 @@ export function rewriteCdpWs(url: string, host: string, port = CHROMIUM_CDP_PORT
   }
 }
 
-export function parseBrowserPages(targets: CdpTarget[]): BrowserTab[] {
+export function parseBrowserPages(targets: CdpTarget[], activeTargetId?: string): BrowserTab[] {
   const pages = targets.filter((row) => row.type === "page");
   return pages.map((row, index) => ({
     targetId: row.id || row.webSocketDebuggerUrl?.split("/").pop() || `tab-${index}`,
     url: row.url || "about:blank",
     title: row.title,
-    active: index === 0,
+    active: activeTargetId
+      ? (row.id || row.webSocketDebuggerUrl?.split("/").pop()) === activeTargetId
+      : index === 0,
   }));
 }
 
@@ -824,14 +1193,20 @@ function axString(field: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-export function formatAccessibilitySnapshot(nodes: Array<Record<string, unknown>>): {
+export function formatAccessibilitySnapshot(
+  nodes: Array<Record<string, unknown>>,
+  prefix = "@e",
+): {
   text: string;
-  refs: Map<string, { backendDOMNodeId: number }>;
+  refs: Map<string, BrowserSnapshotRef>;
 } {
-  const refs = new Map<string, { backendDOMNodeId: number }>();
+  const refs = new Map<string, BrowserSnapshotRef>();
   const lines: string[] = [];
   let used = 0;
   let index = 0;
+  const parents = new Map<unknown, Record<string, unknown>>();
+  for (const node of nodes)
+    if (Array.isArray(node.childIds)) for (const child of node.childIds) parents.set(child, node);
   for (const node of nodes) {
     if (node.ignored === true) continue;
     const backendDOMNodeId = node.backendDOMNodeId;
@@ -841,10 +1216,57 @@ export function formatAccessibilitySnapshot(nodes: Array<Record<string, unknown>
     const name = axString(node.name).replace(/"/g, "'").trim();
     if (!INTERACTIVE_AX_ROLES.has(role) && !name) continue;
     index += 1;
-    const ref = `@e${index}`;
-    const line = name ? `${ref} ${role} "${name}"` : `${ref} ${role}`;
+    const ref = `${prefix}${index}`;
+    const properties = Array.isArray(node.properties)
+      ? (node.properties as Array<{ name: string; value?: { value?: unknown } }>)
+      : [];
+    const states = properties
+      .filter((p) =>
+        ["checked", "disabled", "expanded", "selected", "required", "focused", "readonly"].includes(
+          p.name,
+        ),
+      )
+      .map((p) => `${p.name}=${String(p.value?.value)}`);
+    const value = axString(node.value);
+    if (value && !properties.some((p) => p.name === "protected" && p.value?.value === true))
+      states.push(`value=${JSON.stringify(value)}`);
+    const parent = parents.get(node.nodeId);
+    const context =
+      parent && axString(parent.name) ? ` parent=${JSON.stringify(axString(parent.name))}` : "";
+    const bounds =
+      Array.isArray(node.bounds) && node.bounds.length === 4
+        ? (node.bounds as number[])
+        : undefined;
+    const line =
+      (name ? `${ref} ${role} "${name}"` : `${ref} ${role}`) +
+      (states.length ? ` [${states.join(" ")}]` : "") +
+      context +
+      (bounds ? ` box=${JSON.stringify(bounds.map((n) => Math.round(n)))}` : "");
     if (used + line.length + (lines.length ? 1 : 0) > SNAPSHOT_MAX) break;
-    refs.set(ref, { backendDOMNodeId });
+    refs.set(ref, {
+      backendDOMNodeId,
+      role,
+      name,
+      states: Object.fromEntries(
+        properties
+          .filter((p) =>
+            [
+              "checked",
+              "disabled",
+              "expanded",
+              "selected",
+              "required",
+              "focused",
+              "readonly",
+            ].includes(p.name),
+          )
+          .map((p) => [p.name, p.value?.value]),
+      ),
+      frameId: typeof node.frameId === "string" ? node.frameId : undefined,
+      parent: parent ? String(parent.nodeId ?? "") : undefined,
+      nodeId: typeof node.nodeId === "string" ? node.nodeId : undefined,
+      bounds,
+    });
     lines.push(line);
     used += line.length + (lines.length > 1 ? 1 : 0);
   }

@@ -271,7 +271,7 @@ export function buildSystemPromptParts(input: SystemPromptInput): SystemPromptPa
     liveChromeNote,
     spawnNote,
     input.plan
-      ? "Plan mode is on. You may use read-only tools (grep, glob, file_read, file_list, repo_map, git_diff, git_log, git_status, mcp_list_tools, mcp_get_tool_info, read_skill, ask_user, task_list, orient, find_entity, get_entity, search_knowledge, host_sessions, canvas_read) to ground the plan in the repo. Do not edit, commit, push, call canvas_write, or call mutating tools. Track the concrete steps with task_list as you ground them — they seed the plan card the operator accepts. Reply with a short numbered checklist of concrete steps, then stop and wait for the operator to accept or run the plan."
+      ? "Plan mode is on. You may use read-only tools (grep, glob, file_read, file_list, repo_map, code_definition, code_references, code_symbols, code_diagnostics, git_diff, git_log, git_status, mcp_list_tools, mcp_get_tool_info, read_skill, ask_user, task_list, orient, find_entity, get_entity, search_knowledge, host_sessions, canvas_read) to ground the plan in the repo. Do not edit, commit, push, call canvas_write, or call mutating tools. Track the concrete steps with task_list as you ground them — they seed the plan card the operator accepts. Reply with a short numbered checklist of concrete steps, then stop and wait for the operator to accept or run the plan."
       : "",
     !input.plan && !host && !guestReady
       ? docker

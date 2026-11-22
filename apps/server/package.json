@@ -1,6 +1,6 @@
 {
   "name": "@locus/server",
-  "version": "0.21.0",
+  "version": "0.24.0",
   "private": true,
   "description": "Locus control plane — loopback Hono API, WebSocket hub, and session services",
   "type": "module",
@@ -21,7 +21,10 @@
     "@locus/shared": "*",
     "@locus/worker": "*",
     "@vscode/ripgrep": "^1.18.0",
-    "hono": "^4.13.13",
+    "hono": "^4.13.19",
+    "pixelmatch": "^7.2.0",
+    "playwright-core": "^1.65.0",
+    "pngjs": "^7.0.0",
     "typescript-ls": "npm:typescript@^5.9.3",
     "vscode-css-languageservice": "^6.3.10",
     "vscode-html-languageservice": "^5.6.2",
@@ -31,6 +34,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "@types/pngjs": "^6.0.5",
     "@types/ws": "^8.18.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

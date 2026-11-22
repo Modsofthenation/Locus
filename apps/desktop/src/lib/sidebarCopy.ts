@@ -14,6 +14,7 @@ export function sidebarBrandSubtitle(opts: {
   settingsTab: SettingsTab;
   dockerKind?: string | null;
   slackTeam?: string | null;
+  grafanaConnected?: boolean;
   agentCount: number;
   needsCount: number;
   designCount: number;
@@ -32,13 +33,15 @@ export function sidebarBrandSubtitle(opts: {
   }
   if (opts.section === "settings") return settingsNavLabel(opts.settingsTab);
   if (opts.section === "docker") {
-    return `Docker · ${opts.dockerKind === "docker" ? "local" : "mock"}`;
+    // The title already says Docker; the footer carries daemon state.
+    return opts.dockerKind === "docker" ? "Local engine" : "Mock engine";
   }
   if (opts.section === "slack") {
     // Never repeat the section title as its own subtitle.
     return opts.slackTeam?.trim() ? opts.slackTeam.trim() : "Not signed in";
   }
-  if (opts.section === "grafana") return "";
+  // Every section header has a second line, so the primary button sits at the same height.
+  if (opts.section === "grafana") return opts.grafanaConnected ? "Connected" : "Not connected";
   const swarm = opts.mode === "swarm";
   if (opts.section === "agents") {
     const noun = swarm

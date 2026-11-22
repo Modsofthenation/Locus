@@ -100,7 +100,7 @@ describe("codex cli adapter", () => {
     expect(joined).toContain("git_pr_get");
     expect(joined).not.toContain("git_push");
     expect(argv.args).toContain(
-      'mcp_servers.locus_git.enabled_tools=["git_pr_list","git_pr_get","git_pr_loadpath","git_pr_comment","git_pr_review","git_pr_checks"]',
+      'mcp_servers.locus_git.enabled_tools=["git_pr_list","git_pr_get","git_pr_loadpath","git_pr_comment","git_pr_review","git_pr_checks","git_ci_logs"]',
     );
   });
   it("builds an initial command with workspace, model, search, and API key", () => {

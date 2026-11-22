@@ -19,6 +19,8 @@ import {
   BRAIN_BRIEF_TOOL,
   BRAIN_READ_TOOLS,
   RUNTIME_TOOLS,
+  CODE_INTEL_READ_TOOLS,
+  CODE_RENAME_TOOL,
   WEBSEARCH_TOOL,
   canonicalToolName,
   htmlDocumentFromText,
@@ -844,6 +846,10 @@ export type ParentExtraToolsInput = {
   offerBrain?: boolean;
   mcpTools: ExtraToolDef[];
   pluginTools?: ExtraToolDef[];
+  /** Language-server lookups (code_definition / references / symbols / diagnostics). Default on. */
+  codeIntel?: boolean;
+  /** code_rename: only where edits are allowed and the host can write the workspace. Default on. */
+  codeRename?: boolean;
 };
 
 /**
@@ -892,6 +898,7 @@ export function parentExtraTools(input: ParentExtraToolsInput): ExtraToolDef[] {
         return tool.name === "repo_map" || tool.name === "task_list";
       }),
     );
+    if (input.codeIntel !== false && !input.isProject) extras.push(...CODE_INTEL_READ_TOOLS);
     if (input.offerBrain !== false) extras.push(...BRAIN_READ_TOOLS);
   } else if (!input.isDesign) {
     extras.push(
@@ -901,6 +908,10 @@ export function parentExtraTools(input: ParentExtraToolsInput): ExtraToolDef[] {
         return true;
       }),
     );
+    if (input.codeIntel !== false && !input.isProject) {
+      extras.push(...CODE_INTEL_READ_TOOLS);
+      if (input.codeRename !== false) extras.push(CODE_RENAME_TOOL);
+    }
     if (input.offerBrain !== false) extras.push(...BRAIN_READ_TOOLS, BRAIN_BRIEF_TOOL);
   }
   if (input.isHost && !input.isProject) extras.push(HOST_SESSIONS_TOOL);

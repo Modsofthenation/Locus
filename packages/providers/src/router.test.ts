@@ -1048,10 +1048,31 @@ describe("message mapping", () => {
         cacheWriteTokens: 39_331,
       }),
     ).toEqual({
-      inputTokens: 7,
+      inputTokens: 187_033,
       outputTokens: 548,
       cachedInputTokens: 147_695,
       cacheWriteTokens: 39_331,
+    });
+  });
+
+  it("counts Anthropic cache reads and writes inside inputTokens, OpenAI cached once", () => {
+    expect(
+      readTokenUsage({
+        input_tokens: 3,
+        output_tokens: 50,
+        cache_read_input_tokens: 9_000,
+        cache_creation_input_tokens: 1_000,
+      }),
+    ).toEqual({
+      inputTokens: 10_003,
+      outputTokens: 50,
+      cachedInputTokens: 9_000,
+      cacheWriteTokens: 1_000,
+    });
+    expect(readTokenUsage({ input_tokens: 12, cached_input_tokens: 4, output_tokens: 7 })).toEqual({
+      inputTokens: 12,
+      outputTokens: 7,
+      cachedInputTokens: 4,
     });
   });
 

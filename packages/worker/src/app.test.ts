@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createConnection } from "node:net";
 import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { MockDockerEngine, MockHypervisor } from "@locus/hypervisor";
 import { defaultNetworking, UBUNTU_DEFAULT_HARDWARE } from "@locus/shared";
 import { createWorkerApp } from "./app.js";
+import { WORKER_CLI_STREAM_END } from "./cliReplay.js";
 import { WorkerClient } from "./client.js";
 import { parseWorkerCliMcpLine } from "./loopbackMcp.js";
 import { loadOrCreateWorkerToken, workerTokenMatches } from "./token.js";
@@ -341,6 +343,41 @@ describe("locus worker HTTP", () => {
     });
     expect(preview.status).toBe(200);
     expect(await preview.text()).toContain("hi");
+  });
+
+  it("keeps an opted-in CLI process alive after the client disconnects and replays the remaining output", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-worker-cli-replay-"));
+    const command = await writeFakeCli(
+      dir,
+      "agent.mjs",
+      `
+console.log("first");
+setTimeout(() => console.log("second"), 300);
+`,
+    );
+    const app = createWorkerApp({ engine: new MockDockerEngine(dir), token: "secret" });
+    const fetchFn: typeof fetch = async (input, init) => app.request(String(input), init);
+    const client = new WorkerClient(
+      { id: "w1", name: "studio", url: "http://127.0.0.1:7421", token: "secret" },
+      fetchFn,
+    );
+    const guest = await client.create({ sessionId: "s1", name: "agent", image: "locus/agent" });
+    const runId = randomUUID();
+    const connected = await client.openCursorCli(guest.id, { runId, command, args: [] });
+    expect(connected.replay).toBe(true);
+    const reader = connected.stream.getReader();
+    const first = await reader.read();
+    expect(Buffer.from(first.value!).toString()).toBe("first\n");
+    await reader.cancel();
+    expect(await client.cliRunStatus(guest.id)).toBe("running");
+    const replayed = await client.replayCursorCli(
+      guest.id,
+      runId,
+      first.value!.byteLength,
+      new AbortController().signal,
+    );
+    expect(await new Response(replayed.stream).text()).toBe(`second\n${WORKER_CLI_STREAM_END}\n`);
+    expect(await client.cliRunStatus(guest.id)).toBe("finished");
   });
 
   it("streams Cursor CLI NDJSON from the worker bind-mount", async () => {

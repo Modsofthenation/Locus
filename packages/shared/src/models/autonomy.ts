@@ -10,6 +10,7 @@ export const SUPERVISED_ALWAYS_ASK = [
   "exec",
   "file_write",
   "apply_patch",
+  "code_rename",
   "git_commit",
   "start_process",
   "powershell",
@@ -119,6 +120,9 @@ export function mergeApprovalPolicy(
 ): ApprovalPolicy {
   if (!overlay) {
     return {
+      ...(base.confirmComputerActions !== undefined
+        ? { confirmComputerActions: base.confirmComputerActions }
+        : {}),
       autoAllow: [...(base.autoAllow ?? [])],
       alwaysAsk: [...(base.alwaysAsk ?? [])],
       deny: [...(base.deny ?? [])],
@@ -126,6 +130,9 @@ export function mergeApprovalPolicy(
     };
   }
   return {
+    ...(overlay.confirmComputerActions !== undefined || base.confirmComputerActions !== undefined
+      ? { confirmComputerActions: overlay.confirmComputerActions ?? base.confirmComputerActions }
+      : {}),
     autoAllow: uniq([...(base.autoAllow ?? []), ...(overlay.autoAllow ?? [])]),
     alwaysAsk: uniq([...(base.alwaysAsk ?? []), ...(overlay.alwaysAsk ?? [])]),
     deny: uniq([...(base.deny ?? []), ...(overlay.deny ?? [])]),

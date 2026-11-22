@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import type { CliSpawnArgv } from "@locus/shared/cliSandbox";
 import {
   cursorCliSpawnFailureMessage,
   resolveWindowsCliSpawn,
@@ -134,20 +135,31 @@ export function allowedWorkerCursorCliCommand(command: string): boolean {
   ].includes(base);
 }
 
+/** Rewrites the final spawn to run inside the CLI sandbox (see `@locus/shared/cliSandbox`). */
+export type WorkerCliSandboxWrap = (req: CliSpawnArgv) => CliSpawnArgv;
+
 export function spawnWorkerCursorCli(
   req: WorkerCursorCliRequest,
   workspace: string,
   signal?: AbortSignal,
+  sandbox?: WorkerCliSandboxWrap,
 ): { stream: ReadableStream<Uint8Array>; kill: () => void } {
   const command = req.command.trim() || "agent";
   const args = workerCliArgs(command, req.args, workspace, req.gitMcpUrl);
   const env = workerCliEnv(command, req.apiKey, workerGitMcpUrl(args) ?? req.gitMcpUrl);
   const resolved = resolveWindowsCliSpawn(command, args, { env });
+  const target: CliSpawnArgv = {
+    command: resolved.command,
+    args: resolved.args,
+    cwd: workspace,
+    env: { ...env, ...resolved.envPatch },
+  };
+  const run = sandbox ? sandbox(target) : target;
   let child: ReturnType<typeof spawn>;
   try {
-    child = spawn(resolved.command, resolved.args, {
-      cwd: workspace,
-      env: { ...env, ...resolved.envPatch },
+    child = spawn(run.command, run.args, {
+      cwd: run.cwd,
+      env: run.env,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       windowsVerbatimArguments: resolved.windowsVerbatimArguments === true,

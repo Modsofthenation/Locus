@@ -1,6 +1,6 @@
 {
   "name": "locus",
-  "version": "0.21.0",
+  "version": "0.24.0",
   "private": true,
   "description": "Local AI coding agents that run in Ubuntu, Debian, Omarchy, and Windows VMs or Linux Docker containers on your machine",
   "repository": {
@@ -36,9 +36,10 @@
     "lint": "eslint .",
     "test": "npm run test --workspaces --if-present && node --test scripts/*.test.mjs",
     "test:visual": "npm run test:visual --workspace=@locus/desktop",
+    "test:computer": "vitest run packages/guest-agent/src/computerUse.eval.test.ts packages/guest-agent/src/nativeComputerUse.eval.test.ts apps/server/src/session/computerControl.test.ts",
     "capture:readme": "npm run capture:readme --workspace=@locus/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "images": "docker build -t locus/agent:0.1 -t locus/agent:0.21.0 images/agent",
+    "images": "docker build -t locus/agent:0.1 -t locus/agent:0.24.0 images/agent",
     "format:check": "prettier --check \"**/*.{ts,tsx,mjs,cjs,json,css}\"",
     "format:fix": "prettier --write \"**/*.{ts,tsx,mjs,cjs,json,css}\""
   },
@@ -49,7 +50,7 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "concurrently": "^10.0.6",
-    "eslint": "10.14.0",
+    "eslint": "10.15.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.14.0",
     "prettier": "3.9.10",

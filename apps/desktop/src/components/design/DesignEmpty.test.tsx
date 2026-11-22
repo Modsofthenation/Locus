@@ -30,7 +30,9 @@ vi.mock("@/lib/api", () => ({
 }));
 
 async function pickComposerRepoBranch(host: HTMLElement, repoName: string, branch: string) {
-  const picker = host.querySelector("[aria-label='Repository']") as HTMLButtonElement;
+  const picker = host.querySelector(
+    "[aria-label='Repository'], [aria-label^='Repository: ']",
+  ) as HTMLButtonElement;
   if (!host.querySelector("[role='listbox']")) {
     act(() => {
       picker.click();
@@ -222,9 +224,15 @@ describe("DesignEmpty", () => {
     expect(host.querySelector(".recipe-tile")).toBeNull();
     expect(host.querySelector("[aria-label='Style']")).toBeTruthy();
     openLook();
-    expect(host.querySelector("[aria-label='Color palette']")).toBeTruthy();
-    expect(host.querySelector("[aria-label='Design system']")).toBeTruthy();
-    expect(host.querySelector("[aria-label='Repository']")).toBeTruthy();
+    const palette = host.querySelector("[aria-label^='Color palette']");
+    expect(palette).toBeTruthy();
+    expect(palette?.querySelector("span")?.getAttribute("title")).toMatch(/ · #[0-9a-f]{6}$/i);
+    expect(
+      host.querySelector("[aria-label='Design system'], [aria-label^='Design system: ']"),
+    ).toBeTruthy();
+    expect(
+      host.querySelector("[aria-label='Repository'], [aria-label^='Repository: ']"),
+    ).toBeTruthy();
     expect(host.querySelector("[aria-label='Assets']")).toBeNull();
     expect(host.querySelector(".composer-repo-placeholder")?.textContent).toBe("No repo context");
     expect(host.querySelector(".palette-presets")).toBeNull();
@@ -275,7 +283,9 @@ describe("DesignEmpty", () => {
     vi.mocked(api.createSession).mockClear();
     vi.mocked(api.createSession).mockResolvedValue(created);
     render(undefined, { repos: [linkedRepo] });
-    const picker = host.querySelector("[aria-label='Repository']") as HTMLButtonElement;
+    const picker = host.querySelector(
+      "[aria-label='Repository'], [aria-label^='Repository: ']",
+    ) as HTMLButtonElement;
     expect(picker.title).toMatch(/design context/i);
     // The only linked repo is preselected as read-only context.
     expect(host.querySelector(".composer-repo-placeholder")).toBeNull();

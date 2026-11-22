@@ -309,3 +309,241 @@ export function validateMcpServer(server: McpServerConfig): string | undefined {
   }
   return undefined;
 }
+
+// ─────────────────────────── Agent tool ───────────────────────────
+
+export const MANAGE_MCP_SERVER_NAME = "manage_mcp_server";
+
+export const MANAGE_MCP_SERVER_TOOL: ExtraToolDef = {
+  name: MANAGE_MCP_SERVER_NAME,
+  description:
+    'Add, update, list, or remove the operator\'s MCP servers (Settings → MCP). Use when the operator asks to add or connect an MCP server. Stdio servers take command + args (e.g. command npx, args ["-y","@modelcontextprotocol/server-github"]); HTTP/SSE servers take url. Never put tokens or secrets in the call: list secret env names in env_keys and tell the operator to paste the values in Settings → MCP. Changes wait for Approve and take effect on the next round.',
+  parameters: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["create", "update", "delete", "list"],
+        description: "create / update / delete / list",
+      },
+      id: { type: "string", description: "Server id (update/delete). The name also works." },
+      name: { type: "string", description: "Display name, e.g. GitHub" },
+      command: {
+        type: "string",
+        description: "Stdio: one executable (npx, uvx, node, docker, or a path). No shell syntax.",
+      },
+      args: {
+        type: "string",
+        description: 'Stdio: JSON array of argument strings, e.g. ["-y","@scope/server"]',
+      },
+      url: { type: "string", description: "HTTP/SSE endpoint (http or https). Replaces command." },
+      env: {
+        type: "string",
+        description:
+          'JSON object of non-secret env values, e.g. {"LOG_LEVEL":"info"}. Secret-looking keys are stored blank.',
+      },
+      env_keys: {
+        type: "string",
+        description:
+          'JSON array of env names the operator fills in Settings → MCP, e.g. ["GITHUB_TOKEN"]',
+      },
+      runtime: {
+        type: "string",
+        enum: ["host", "guest"],
+        description: "host (default) runs on this machine; guest runs inside the Docker container",
+      },
+      enabled: {
+        type: "string",
+        enum: ["true", "false"],
+        description: "Turn the server on or off",
+      },
+      allowed_tools: {
+        type: "string",
+        description: "Optional JSON array of native tool names to expose. Omit for all.",
+      },
+    },
+    required: ["action"],
+  },
+};
+
+export function isManageMcpServerName(name: string): boolean {
+  return name === MANAGE_MCP_SERVER_NAME;
+}
+
+const MAX_MANAGED_MCP_SERVERS = 32;
+
+function mcpArg(args: Record<string, unknown>, key: string): string {
+  const value = args[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function mcpJsonArg(raw: unknown): unknown {
+  if (raw == null) return undefined;
+  if (typeof raw !== "string") return raw;
+  const text = raw.trim();
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function mcpStringList(raw: unknown): string[] | undefined {
+  const parsed = mcpJsonArg(raw);
+  if (!Array.isArray(parsed)) return undefined;
+  return parsed.filter((item): item is string => typeof item === "string").slice(0, 64);
+}
+
+function findManagedMcpServer(
+  servers: McpServerConfig[],
+  args: Record<string, unknown>,
+): McpServerConfig | undefined {
+  const id = mcpArg(args, "id");
+  const name = (mcpArg(args, "name") || id).toLowerCase();
+  return (
+    servers.find((row) => id && row.id === id) ??
+    servers.find((row) => name && row.name.trim().toLowerCase() === name)
+  );
+}
+
+function formatMcpManageList(servers: McpServerConfig[]): string {
+  if (!servers.length) return "No MCP servers.";
+  return servers
+    .map((server) => {
+      const target = server.url?.trim()
+        ? server.url.trim()
+        : [server.command, ...server.args].join(" ");
+      const env = Object.keys(server.env ?? {});
+      const missing = env.filter((key) => !server.env[key]?.trim());
+      const bits = [
+        server.enabled ? "on" : "off",
+        server.runtime ?? "host",
+        server.managed ? "managed" : "",
+        env.length ? `env: ${env.join(", ")}` : "",
+        missing.length ? `needs Settings: ${missing.join(", ")}` : "",
+      ].filter(Boolean);
+      return `${server.name} id=${server.id} (${bits.join(", ")}): ${target}`;
+    })
+    .join("\n");
+}
+
+/**
+ * manage_mcp_server: pure edit of config.mcpServers. The caller persists and reconnects on ok.
+ * Secret values never come from the tool call; existing env values are kept on update.
+ */
+export function applyMcpServerManageAction(
+  servers: McpServerConfig[],
+  args: Record<string, unknown>,
+  newId: () => string,
+): { ok: boolean; servers: McpServerConfig[]; output: string } {
+  const action = mcpArg(args, "action").toLowerCase();
+  if (action === "list") return { ok: true, servers, output: formatMcpManageList(servers) };
+  const current =
+    action === "update" || action === "delete" ? findManagedMcpServer(servers, args) : undefined;
+  if ((action === "update" || action === "delete") && !current) {
+    return { ok: false, servers, output: "Unknown MCP server. Pass id or name." };
+  }
+  if (current?.managed) {
+    return { ok: false, servers, output: `${current.name} is set by managed policy` };
+  }
+  if (action === "delete") {
+    return {
+      ok: true,
+      servers: servers.filter((row) => row.id !== current!.id),
+      output: `Removed MCP server ${current!.name}`,
+    };
+  }
+  if (action !== "create" && action !== "update") {
+    return { ok: false, servers, output: "action must be create, update, delete, or list" };
+  }
+  if (action === "create" && servers.length >= MAX_MANAGED_MCP_SERVERS) {
+    return { ok: false, servers, output: `At most ${MAX_MANAGED_MCP_SERVERS} MCP servers` };
+  }
+
+  const env: Record<string, string> = { ...(current?.env ?? {}) };
+  const blanked: string[] = [];
+  const envRaw = mcpJsonArg(args.env);
+  if (envRaw && typeof envRaw === "object" && !Array.isArray(envRaw)) {
+    for (const [key, value] of Object.entries(envRaw as Record<string, unknown>)) {
+      const name = key.trim();
+      if (!name || typeof value !== "string") continue;
+      if (looksLikeSecretName(name)) {
+        if (!env[name]) env[name] = "";
+        blanked.push(name);
+      } else {
+        env[name] = value;
+      }
+    }
+  }
+  for (const key of mcpStringList(args.env_keys) ?? []) {
+    const name = key.trim();
+    if (name && env[name] === undefined) env[name] = "";
+  }
+
+  const url = args.url !== undefined ? mcpArg(args, "url") : (current?.url ?? "");
+  const command = mcpArg(args, "command") || current?.command || "";
+  const parsedArgs = mcpStringList(args.args);
+  if (args.args !== undefined && parsedArgs === undefined) {
+    return { ok: false, servers, output: "args must be a JSON array of strings" };
+  }
+  const runtimeArg = mcpArg(args, "runtime");
+  const enabledArg = mcpArg(args, "enabled").toLowerCase();
+  const allowed = mcpStringList(args.allowed_tools);
+  const missing = Object.keys(env).filter((key) => !env[key]?.trim());
+  // A new server with blank secrets starts off so it does not fail to connect.
+  const enabled =
+    enabledArg === "false"
+      ? false
+      : enabledArg === "true"
+        ? true
+        : (current?.enabled ?? !missing.length);
+  const next: McpServerConfig = {
+    ...(current ?? {}),
+    id: current?.id ?? newId(),
+    name: mcpArg(args, "name") || current?.name || "",
+    enabled,
+    command: url ? "" : command,
+    args: url ? [] : (parsedArgs ?? current?.args ?? []),
+    env,
+    runtime:
+      runtimeArg === "guest"
+        ? "guest"
+        : runtimeArg === "host"
+          ? "host"
+          : (current?.runtime ?? "host"),
+    ...(allowed ? { allowedTools: allowed } : {}),
+  };
+  if (url) next.url = url;
+  else delete next.url;
+  if (!next.url && !next.command) {
+    return { ok: false, servers, output: "MCP server needs a command or a url" };
+  }
+  if (
+    servers.some(
+      (row) =>
+        row.id !== next.id && row.name.trim().toLowerCase() === next.name.trim().toLowerCase(),
+    )
+  ) {
+    return { ok: false, servers, output: `An MCP server named ${next.name} already exists` };
+  }
+  const error = validateMcpServer(next);
+  if (error) return { ok: false, servers, output: error };
+  const out = current
+    ? servers.map((row) => (row.id === next.id ? next : row))
+    : [...servers, next];
+  const notes = [
+    blanked.length ? `Secret values for ${blanked.join(", ")} were not stored.` : "",
+    missing.length
+      ? `Paste ${missing.join(", ")} in Settings → MCP → ${next.name}, then turn it on.`
+      : "",
+  ].filter(Boolean);
+  return {
+    ok: true,
+    servers: out,
+    output: [
+      `${current ? "Updated" : "Added"} MCP server ${next.name} (id=${next.id}, ${next.enabled ? "on" : "off"}).`,
+      ...notes,
+    ].join(" "),
+  };
+}

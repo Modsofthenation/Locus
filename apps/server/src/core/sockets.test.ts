@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { Hub } from "./hub.js";
 import { attachSockets } from "./sockets.js";
+import { AgentTerminalRegistry } from "../workspace/agentTerminals.js";
 
 const closers: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -116,6 +117,56 @@ describe("display websocket", () => {
       ws.on("close", () => resolve("close"));
     });
     expect(outcome).not.toBe("open");
+  });
+
+  it("requires the operator token on loopback upgrades when one is set", async () => {
+    const http = createHttpServer();
+    attachSockets({
+      server: http,
+      hub: new Hub(),
+      displays: { get: () => undefined },
+      onCommand: () => undefined,
+      operatorToken: "op_" + "a".repeat(40),
+    });
+    await listen(http);
+    closers.push(() => closeServer(http));
+    const port = (http.address() as AddressInfo).port;
+    const outcome = (ws: WebSocket) =>
+      new Promise<string>((resolve) => {
+        ws.on("open", () => {
+          resolve("open");
+          ws.close();
+        });
+        ws.on("unexpected-response", () => resolve("rejected"));
+        ws.on("error", () => resolve("error"));
+      });
+    // A bare loopback client (a sandboxed CLI, a guest forward, curl) is refused.
+    expect(await outcome(new WebSocket(`ws://127.0.0.1:${port}/ws`))).not.toBe("open");
+    expect(
+      await outcome(new WebSocket(`ws://127.0.0.1:${port}/ws`, { origin: "http://127.0.0.1" })),
+    ).not.toBe("open");
+    expect(
+      await outcome(
+        new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+          headers: { "x-locus-operator": "op_" + "b".repeat(40) },
+        }),
+      ),
+    ).not.toBe("open");
+    // The desktop's cookie or the CLI's header gets in.
+    expect(
+      await outcome(
+        new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+          headers: { cookie: `locus_operator=op_${"a".repeat(40)}` },
+        }),
+      ),
+    ).toBe("open");
+    expect(
+      await outcome(
+        new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+          headers: { "x-locus-operator": "op_" + "a".repeat(40) },
+        }),
+      ),
+    ).toBe("open");
   });
 
   it("broadcasts control-plane events to /ws clients", async () => {
@@ -227,6 +278,55 @@ describe("display websocket", () => {
     ws.send(Buffer.from("pwd"));
     const echoed = await waitMessage(ws);
     expect(echoed.toString()).toBe("pwd");
+  });
+
+  it("routes /ws/sessions/:id/terminal to the agent terminal registry", async () => {
+    const http = createHttpServer();
+    const commands: Array<string | null> = [];
+    const agentTerminals = new AgentTerminalRegistry({
+      resolve: async (id) =>
+        id === "s1"
+          ? { target: { runtime: "host", cwd: process.cwd() }, defaultPreset: "claude" }
+          : { reason: "no workspace", defaultPreset: "shell" },
+      cooked: false,
+      spawn: (_target, command) => {
+        commands.push(command);
+        return spawn(process.execPath, [
+          "-e",
+          "process.stdout.write('ready'); process.stdin.on('data', (d) => process.stdout.write(d)); setTimeout(() => {}, 5000)",
+        ]);
+      },
+    });
+    attachSockets({
+      server: http,
+      hub: new Hub(),
+      displays: { get: () => undefined },
+      onCommand: () => undefined,
+      agentTerminals,
+    });
+    await listen(http);
+    closers.push(() => closeServer(http));
+    const port = (http.address() as AddressInfo).port;
+    const ws = new WebSocket(
+      `ws://127.0.0.1:${port}/ws/sessions/s1/terminal?terminal=a&command=codex`,
+    );
+    closers.push(async () => {
+      ws.close();
+    });
+    const first = waitMessage(ws);
+    await waitOpen(ws);
+    expect((await first).toString()).toBe("ready");
+    ws.send(Buffer.from("hi"));
+    expect((await waitMessage(ws)).toString()).toBe("hi");
+    expect(commands).toEqual(["codex"]);
+    expect(agentTerminals.list("s1").map((row) => row.id)).toEqual(["a"]);
+
+    const missing = new WebSocket(`ws://127.0.0.1:${port}/ws/sessions/s2/terminal`);
+    const code = await new Promise<number>((resolve, reject) => {
+      missing.on("close", (c) => resolve(c));
+      missing.on("error", reject);
+    });
+    expect(code).toBe(1011);
   });
 
   it("keeps a workspace shell alive when its terminal reconnects", async () => {

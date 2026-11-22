@@ -408,8 +408,42 @@ export function cursorGithubRepoUrl(url?: string): string | undefined {
   return `https://github.com/${ownerRepo.owner}/${ownerRepo.repo}`;
 }
 
+/** SSH-over-443 hosts that serve the same repos as the forge's main host. */
+const FORGE_HOST_ALIASES: Record<string, string> = {
+  "ssh.github.com": "github.com",
+  "ssh.bitbucket.org": "bitbucket.org",
+  "altssh.bitbucket.org": "bitbucket.org",
+  "altssh.gitlab.com": "gitlab.com",
+};
+
+const HOSTED_FORGE_HOSTS = new Set([
+  "github.com",
+  "bitbucket.org",
+  "gitlab.com",
+  ...Object.keys(FORGE_HOST_ALIASES),
+]);
+
+/**
+ * Rewrite a remote the way `git remote get-url` may print it into a form the forge
+ * patterns accept: `ssh://git@host:22/o/r` → `git@host:o/r`, HTTPS userinfo
+ * (`https://user:token@host/…`) dropped, and SSH alias hosts mapped to the main host.
+ */
+function canonicalRemote(input: string): string {
+  let url = input.trim();
+  const ssh = url.match(/^ssh:\/\/(?:([^@/]+)@)?([^/:]+)(?::\d+)?\/(.+)$/i);
+  // Only for hosted forges: a self-hosted ssh:// URL may need its port.
+  if (ssh?.[2] && ssh[3] && HOSTED_FORGE_HOSTS.has(ssh[2].toLowerCase())) {
+    url = `${ssh[1] ?? "git"}@${ssh[2]}:${ssh[3]}`;
+  }
+  url = url.replace(/^(https?:\/\/)[^@/]+@/i, "$1");
+  const host = url.match(/^(?:https?:\/\/|[^@/]+@)([^/:]+)/i)?.[1];
+  const alias = host ? FORGE_HOST_ALIASES[host.toLowerCase()] : undefined;
+  if (host && alias) url = url.replace(host, alias);
+  return url;
+}
+
 export function parseRepoUrl(input: string): { forge: ForgeKind; url: string } | null {
-  const trimmed = input.trim();
+  const trimmed = canonicalRemote(input);
   if (!trimmed) return null;
 
   const github =

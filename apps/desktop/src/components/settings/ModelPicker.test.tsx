@@ -1,6 +1,6 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BUILTIN_PROVIDERS, builtinProviderKey, type AiProvider } from "@locus/shared";
 import { CodexReasoningPicker, ModelPicker, composerModelLabel } from "./ModelPicker";
 import {
@@ -9,6 +9,7 @@ import {
   selectValue,
   setSelectValue,
 } from "@/lib/selectControl";
+import { Store, initialState } from "@/state/store";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -86,6 +87,57 @@ describe("ModelPicker", () => {
     ).toBe("No provider");
   });
 
+  it("offers Turn on a provider… in the chip menu when the chosen provider is off", () => {
+    const dispatch = vi.fn();
+    render(
+      <Store.Provider value={{ state: initialState, dispatch }}>
+        <ModelPicker
+          compact
+          providers={providers}
+          providerId="openai"
+          model="gpt-4.1"
+          onChange={() => undefined}
+        />
+      </Store.Provider>,
+    );
+    expect(host.querySelector(".model-picker-combined.off")).not.toBeNull();
+    act(() => {
+      host
+        .querySelector("[aria-label='Model'], [aria-label^='Model: ']")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const turnOn = [...host.querySelectorAll("[role='menuitem']")].find(
+      (el) => el.textContent === "Turn on a provider…",
+    ) as HTMLButtonElement;
+    act(() => {
+      turnOn.click();
+    });
+    expect(dispatch).toHaveBeenCalledWith({ type: "settings", open: true });
+    expect(dispatch).toHaveBeenCalledWith({ type: "settingsTab", tab: "providers" });
+  });
+
+  it("leaves the shortcut out once the provider is on", () => {
+    const on = providers.map((p) => (p.id === "openai" ? { ...p, enabled: true } : p));
+    render(
+      <Store.Provider value={{ state: initialState, dispatch: vi.fn() }}>
+        <ModelPicker
+          compact
+          providers={on}
+          providerId="openai"
+          model="gpt-4.1"
+          onChange={() => undefined}
+        />
+      </Store.Provider>,
+    );
+    expect(host.querySelector(".model-picker-combined.off")).toBeNull();
+    act(() => {
+      host
+        .querySelector("[aria-label='Model'], [aria-label^='Model: ']")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(host.textContent).not.toContain("Turn on a provider");
+  });
+
   it("does not add a placeholder when the selected provider is listed", () => {
     render(
       <ModelPicker
@@ -101,7 +153,7 @@ describe("ModelPicker", () => {
     ).toBe("OpenAI (off) · gpt-4.1");
     act(() => {
       host
-        .querySelector("[aria-label='Model']")
+        .querySelector("[aria-label='Model'], [aria-label^='Model: ']")
         ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     const disabled = [...host.querySelectorAll("[role='menuitem']")].some(
@@ -119,8 +171,8 @@ describe("ModelPicker", () => {
         onChange={() => undefined}
       />,
     );
-    expect(host.querySelector('[aria-label="Fast"]')).toBeNull();
-    expect(host.querySelector('[aria-label="Thinking"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Fast"], [aria-label^="Fast: "]')).toBeNull();
+    expect(host.querySelector('[aria-label="Thinking"], [aria-label^="Thinking: "]')).toBeNull();
   });
 
   it("shows only the reasoning levels supported by the selected Codex model", () => {
@@ -152,7 +204,7 @@ describe("ModelPicker", () => {
       "claude-sonnet-4-5",
       "gpt-5",
     ]);
-    expect(host.querySelector('[aria-label="Thinking"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Thinking"], [aria-label^="Thinking: "]')).toBeNull();
     expect(selectValue(host, "Fast")).toBe("off");
     act(() => {
       setSelectValue(host, "Fast", "fast");
@@ -170,7 +222,7 @@ describe("ModelPicker", () => {
         onChange={(next) => changes.push(next)}
       />,
     );
-    expect(host.querySelector('[aria-label="Fast"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Fast"], [aria-label^="Fast: "]')).toBeNull();
     expect(selectOptionLabels(host, "Thinking")).toEqual(["Off", "Thinking", "High"]);
     act(() => {
       setSelectValue(host, "Thinking", "thinking");
@@ -283,7 +335,7 @@ describe("ModelPicker", () => {
     expect(host.querySelector(".model-picker-combined-label")?.textContent).toMatch(/composer-2/);
     act(() => {
       host
-        .querySelector("[aria-label='Model']")
+        .querySelector("[aria-label='Model'], [aria-label^='Model: ']")
         ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     const modelItems = [...host.querySelectorAll(".model-picker-combined [role='menuitem']")].map(
@@ -423,7 +475,7 @@ describe("ModelPicker", () => {
     );
     act(() => {
       host
-        .querySelector("[aria-label='Model']")
+        .querySelector("[aria-label='Model'], [aria-label^='Model: ']")
         ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(

@@ -236,6 +236,15 @@ export interface Automation {
   updatedAt: string;
 }
 
+export interface AutomationTriggerPreview {
+  matches: boolean;
+  explanation: string;
+  workspace: string;
+  model: string;
+  tools: string[];
+  integrationAllowlist: string[];
+}
+
 export interface AutomationRun {
   id: string;
   automationId: string;

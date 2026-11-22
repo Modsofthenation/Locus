@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.acme.ParserTest" tests="3" skipped="0" failures="1" errors="0" timestamp="2026-01-01T00:00:00" hostname="ci" time="1.25">
+  <properties/>
+  <testcase name="parsesEmpty()" classname="org.acme.ParserTest" time="0.4"/>
+  <testcase name="parses nested [1]" classname="org.acme.ParserTest" time="0.5"/>
+  <testcase name="rejectsGarbage()" classname="org.acme.ParserTest" time="0.35">
+    <failure message="java.lang.AssertionError: should reject &quot;??&quot;" type="java.lang.AssertionError">java.lang.AssertionError: should reject "??"
+	at org.acme.ParserTest.rejectsGarbage(ParserTest.kt:42)
+</failure>
+  </testcase>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

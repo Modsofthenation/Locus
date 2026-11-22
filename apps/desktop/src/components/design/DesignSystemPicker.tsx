@@ -17,7 +17,15 @@ export function DesignSystemPicker(props: {
   return (
     <div className={`design-system-picker${props.compact ? " compact" : ""}`}>
       {!props.compact ? <div className="field-label">Design system</div> : null}
-      <div className="design-system-picker-row">
+      <div
+        className="design-system-picker-row"
+        title={props.compact ? `Design system: ${selected?.name ?? "None"}` : undefined}
+      >
+        {props.compact ? (
+          <span className="design-system-picker-prefix" aria-hidden="true">
+            System
+          </span>
+        ) : null}
         <Select
           ariaLabel="Design system"
           value={value}

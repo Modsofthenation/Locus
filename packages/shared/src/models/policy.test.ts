@@ -249,6 +249,8 @@ describe("applyManagedPolicy", () => {
       locked: [],
     };
     expect(policyRejectsCreate({ runtime: "host", status })).toMatch(/Host agents/);
+    // A Fargate chat's Host guest lives in its own cloud task, not on this machine.
+    expect(policyRejectsCreate({ runtime: "host", cloudTask: true, status })).toBeUndefined();
     expect(policyRejectsCreate({ autonomy: "autonomous", status })).toMatch(/Autonomous/);
     expect(policyRejectsCreate({ liveChrome: true, status })).toMatch(/Chrome/);
     expect(policyRejectsCreate({ network: "open", status })).toMatch(/jail/);

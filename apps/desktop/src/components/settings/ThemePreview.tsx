@@ -1,4 +1,5 @@
-import { resolveTheme, themeOption } from "@locus/shared";
+import type { CustomTheme } from "@locus/shared";
+import { themeDisplayName, themeSurfaceAttrs } from "@/lib/theme";
 import { EmptyHero } from "@/components/layout/EmptyHero";
 import { IconReturn } from "@/components/layout/Icons";
 import { NEW_AGENT_COPY } from "@/lib/launchCopy";
@@ -7,26 +8,29 @@ export function ThemePreview({
   theme,
   selected = false,
   hovering = false,
+  customThemes,
+  label,
 }: {
   theme: string;
   selected?: boolean;
   hovering?: boolean;
+  /** Generated themes to resolve `theme` against; defaults to the installed set. */
+  customThemes?: readonly CustomTheme[];
+  /** Overrides the status chip (e.g. "editing"). */
+  label?: string;
 }) {
-  const id = resolveTheme(theme);
-  const opt = themeOption(id);
-  const status = hovering ? "preview" : selected ? "selected" : "applied";
+  const name = themeDisplayName(theme, customThemes);
+  const status = label ?? (hovering ? "preview" : selected ? "selected" : "applied");
   return (
     <section className="theme-preview-panel" aria-label="Theme preview">
       <p className="theme-preview-label">
-        <span>Preview · {opt.name}</span>
+        <span>Preview · {name}</span>
         <span className={`theme-preview-status ${status}`}>{status}</span>
       </p>
       <div
         className="theme-preview"
-        data-theme={id}
         data-testid="theme-preview"
-        {...(opt.gradient ? { "data-theme-gradient": "" } : {})}
-        {...(opt.terminal ? { "data-theme-terminal": "" } : {})}
+        {...themeSurfaceAttrs(theme, customThemes)}
         inert
       >
         <div className="theme-preview-chrome">

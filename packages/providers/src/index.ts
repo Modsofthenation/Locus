@@ -1,4 +1,11 @@
 export { completeChat, hasUsableKey, collectText } from "./router.js";
+export { scrubCliEnv, isSecretEnvName } from "./cliEnv.js";
+export {
+  completeOneShot,
+  oneShotCliPrompt,
+  type OneShotCliStream,
+  type OneShotTraceEvent,
+} from "./oneShot.js";
 export { listProviderModels, testProvider } from "./models.js";
 export { buildSystemPrompt, buildSystemPromptParts } from "./prompt.js";
 export { streamOpenAiCompatible, toOpenAi, DEFAULT_OPENAI_MAX_TOKENS } from "./openai.js";
@@ -88,6 +95,20 @@ export {
   buildKiroCliArgv,
   spawnKiroCli,
 } from "./kiroCli.js";
+export {
+  streamGenericCli,
+  checkGenericCli,
+  listGenericCliModels,
+  buildGenericCliArgv,
+  expandCliArgs,
+  parseGenericJsonlLine,
+  parseAcpSessionUpdate,
+  pickAcpPermission,
+  spawnGenericCli,
+  AcpConnection,
+  AcpRpcError,
+  GENERIC_CLI_CONTINUE,
+} from "./genericCli.js";
 export type { CompleteRequest, FetchFn, ChatEvent } from "./types.js";
 export type { ChatEngine, ChatTurnOptions } from "./loop.js";
 export type {
@@ -120,3 +141,20 @@ export type {
   CodexCliSpawnRequest,
 } from "./codexCli.js";
 export type { KiroCliEvent, KiroCliHealth, KiroCliAuthMode, KiroCliSpawner } from "./kiroCli.js";
+export type {
+  GenericCliEvent,
+  GenericCliHealth,
+  GenericCliSpawner,
+  GenericCliArgv,
+  CliTemplateVars,
+} from "./genericCli.js";
+export {
+  readProviderUsage,
+  isUsageCapableProvider,
+  parseCodexOauthUsage,
+  parseCodexSessionRateLimits,
+  parseClaudeUsage,
+  parseCursorUsageSummary,
+  parseKiroUsage,
+  type ProviderUsageDeps,
+} from "./usage.js";

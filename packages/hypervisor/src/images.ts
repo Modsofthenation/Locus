@@ -7,6 +7,8 @@ import {
   imageBuildStartProgress,
   isLocusAgentImage,
   LOCUS_AGENT_IMAGE,
+  LOCUS_AGENT_IMAGE_REVISION,
+  LOCUS_AGENT_IMAGE_REVISION_LABEL,
   LOCUS_AGENT_IMAGE_VERSION,
   parseDockerBuildProgress,
   type ImageBuildProgress,
@@ -30,7 +32,32 @@ export async function imageExists(
   return inspect.code === 0;
 }
 
-/** Build locus/agent:0.1 when a first-party alias is requested and the tag is missing. */
+/**
+ * Revision label of a local image, or undefined when the image is missing.
+ * Empty string when the image exists but predates the label.
+ */
+export async function imageRevision(
+  runner: CommandRunner,
+  dockerBin: string,
+  image: string,
+): Promise<string | undefined> {
+  const inspect = await runner.exec(dockerBin, [
+    "image",
+    "inspect",
+    "-f",
+    `{{ index .Config.Labels "${LOCUS_AGENT_IMAGE_REVISION_LABEL}" }}`,
+    image,
+  ]);
+  if (inspect.code !== 0) return undefined;
+  const value = inspect.stdout.trim();
+  return value === "<no value>" ? "" : value;
+}
+
+/**
+ * Build locus/agent:0.1 when a first-party alias is requested and the tag is missing, or when
+ * the cached tag was built from an older Dockerfile (e.g. before iptables was added for the
+ * restricted jail). The tag itself is stable, so the revision label is what detects staleness.
+ */
 export async function ensureLocusAgentImage(
   runner: CommandRunner,
   dockerBin: string,
@@ -40,10 +67,24 @@ export async function ensureLocusAgentImage(
   onProgress?: (progress: ImageBuildProgress) => void,
 ): Promise<void> {
   if (!isLocusAgentImage(image)) return;
-  if (await imageExists(runner, dockerBin, LOCUS_AGENT_IMAGE)) return;
+  const revision = await imageRevision(runner, dockerBin, LOCUS_AGENT_IMAGE);
+  if (revision === LOCUS_AGENT_IMAGE_REVISION) return;
+  const hasContext = !!context && existsSync(join(context, "Dockerfile"));
+  if (revision !== undefined && !hasContext) {
+    // No Dockerfile to rebuild from: keep the cached image rather than failing outright.
+    log?.(
+      `${LOCUS_AGENT_IMAGE} is outdated and images/agent is missing; using the cached image.\n`,
+    );
+    return;
+  }
   if (!context || !existsSync(join(context, "Dockerfile"))) {
     throw new Error(
       "Locus agent Dockerfile is missing. Expected images/agent next to the repo, or set LOCUS_IMAGES.",
+    );
+  }
+  if (revision !== undefined) {
+    log?.(
+      `${LOCUS_AGENT_IMAGE} is outdated (revision ${revision || "none"}, need ${LOCUS_AGENT_IMAGE_REVISION}); rebuilding.\n`,
     );
   }
   log?.(`${imageBuildStartNote()}\n`);

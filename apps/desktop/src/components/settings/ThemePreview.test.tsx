@@ -64,4 +64,17 @@ describe("ThemePreview", () => {
     expect(preview?.hasAttribute("data-theme-terminal")).toBe(true);
     expect(host.textContent).toContain("Console");
   });
+
+  it("marks style-group themes on the preview surface", () => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root.render(<ThemePreview theme="bevel" />);
+    });
+    const preview = host.querySelector("[data-testid='theme-preview']");
+    expect(preview?.getAttribute("data-theme")).toBe("bevel");
+    expect(preview?.getAttribute("data-theme-style")).toBe("retro");
+    expect(preview?.hasAttribute("data-theme-terminal")).toBe(false);
+  });
 });

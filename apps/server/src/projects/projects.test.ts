@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MockHypervisor } from "@locus/hypervisor";
 import { applySubscribe } from "@locus/shared";
 import { ProjectService } from "./projects.js";
@@ -53,6 +53,66 @@ describe("ProjectService", () => {
     expect(playbook).toMatch(/one member per slice/i);
     await projects.remove(created.id);
     expect(await projects.list()).toEqual([]);
+  });
+
+  it("checks a local model and cached image then creates an isolated offline session", async () => {
+    const { projects, sessions, store } = await setup();
+    const config = await store.loadConfig();
+    const provider = config.providers.find((row) => row.name === "Ollama")!;
+    sessions.fetchFn = vi.fn(async () =>
+      Response.json({
+        models: [
+          { name: "local:latest" },
+          { name: "remote:latest", remote_host: "https://example.com" },
+        ],
+      }),
+    );
+    vi.spyOn(sessions, "hasCachedDockerImage").mockResolvedValue(true);
+    const project = await projects.create({ title: "Flight mode" });
+    const current = await projects.ensureChat(project.id);
+    const profile = { providerId: provider.id, model: "local", dockerImage: "locus/agent:0.1" };
+    await projects.patch(project.id, { offlineProfile: profile });
+    expect((await projects.offlinePreflight(project.id)).checks.every((check) => check.ready)).toBe(
+      true,
+    );
+    expect(
+      (await projects.offlinePreflight(project.id, { ...profile, model: "remote" })).checks[0]
+        ?.ready,
+    ).toBe(false);
+    expect(sessions.fetchFn).toHaveBeenCalledWith(
+      new URL("/api/tags", provider.baseUrl),
+      expect.objectContaining({ redirect: "error" }),
+    );
+    const offline = await projects.ensureChat(project.id);
+    expect(offline.sessionId).not.toBe(current.sessionId);
+    expect(await sessions.get(offline.sessionId)).toMatchObject({
+      offline: true,
+      providerId: provider.id,
+      model: "local",
+    });
+    const blocked = await sessions.executeTool(
+      offline.sessionId,
+      { name: "slack_history", args: {} },
+      { ignoreAllowlist: true },
+    );
+    expect(blocked.output).toContain("unavailable in an offline project");
+    const member = await sessions.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      runtime: "host",
+      providerId: config.providers[0]!.id,
+      model: "default",
+      startVm: false,
+      projectId: project.id,
+      repo: { forge: "github", url: "https://github.com/example/test" },
+    });
+    expect(member).toMatchObject({
+      offline: true,
+      network: "none",
+      runtime: "docker",
+      providerId: provider.id,
+    });
+    expect(member.repo).toBeUndefined();
   });
 
   it("duplicates a project document and context without members", async () => {

@@ -108,9 +108,53 @@ That isolates tokens, certs, HTTP, and in-memory guest lists. Both still share t
 
 There is no “this worker belongs only to app X” setting. Isolation is a different port, `LOCUS_WORKER_HOME`, and token.
 
+## Git worktrees (Host)
+
+A Host agent created with `worktree: true` (or `worktreeFrom: <sessionId>`) runs `git worktree add -b locus/<slug>-<id> ~/.locus/worktrees/<repo>-<id> <HEAD>` from the chosen checkout and uses that folder as `hostDir`. `session.worktree` records `source`, `path`, `branch`, `baseSha`, and `baseBranch`; everything else (Files, git pane, CLI turns, checkpoints) just sees a normal host folder.
+
+| Call | What it does |
+|------|--------------|
+| `POST /api/sessions` with `worktree: true` | One agent on its own branch. Needs a git folder with a commit; worker placement is rejected. |
+| `POST /api/sessions/fanout` `{ create, agents: [{ providerId, model }], prompt }` | Creates a base agent (no prompt), then one worker per agent row. Host: one worktree each off the base checkout (a linked repo is cloned once into the base agent first). Docker: one container each (2–4). |
+| `POST /api/sessions/:id/workers` `{ agents \| count, prompt }` | Same fan-out from an existing agent. |
+| `GET /api/sessions/:id/workers/board` | Per agent: status, provider, model, branch, diffstat vs `baseSha` (committed + uncommitted + untracked), commits, dirty files. |
+| `POST /api/sessions/:id/workers/merge` `{ workerId }` | Worktree workers: `git add -A && git commit` in the worktree, then `git merge --no-ff` into the base checkout. A dirty base or a conflict is refused / aborted, never left half-merged. |
+| `POST /api/sessions/:id/workers/discard` | Stops the agent, removes the worktree, deletes its branch and the session. |
+
+Removing a worktree agent runs `git worktree remove --force` and `git worktree prune`; the branch is deleted only when it has no commits and no changes. `.locus/worktree.json` in the source checkout can list extra git-ignored files to copy (`copy`) and a `setup` command run in the background in each new worktree. Limits: worktrees are local-Host only (not LAN/cloud workers or VMs); Docker workers still snapshot the container rather than bind-mounting a worktree.
+
+## Custom CLI agents
+
+Provider kind `cli-agent` runs any coding-agent CLI as a fifth Host CLI Turn adapter (`HostCliKind = "generic"`, `packages/providers/src/genericCli.ts`). Settings → Providers → **Add CLI agent** starts from a preset in `packages/shared/src/models/cliAgent.ts` (Gemini CLI, Gemini CLI ACP, OpenCode, Aider, Amp, GitHub Copilot CLI, Custom). Several can coexist; they are keyed by name.
+
+| Field | Meaning |
+| --- | --- |
+| `cli.command` | One executable (PATH or absolute). No shell. |
+| `cli.args` | Argv template. `{prompt}`, `{model}`, `{workspace}`, `{resume}`. An arg with an empty value is dropped with its bare flag (`-m {model}`). No `{prompt}` → prompt on stdin. |
+| `cli.resumeArgs` | Appended when the session has a stored id (`session.genericCli.sessionId`). Without `{resume}` (e.g. `--continue`) Locus stores `continue` after the first turn. |
+| `cli.output` | `text` (stdout lines → text), `jsonl` (best-effort: `message`/`text`/`assistant`, `tool_use`/`tool_result`, `result`, `session_id`), `claude-stream-json` (Claude Code parser), `acp`. |
+| `cli.env`, `cli.apiKeyEnv` | Extra env (secret-looking names go to the vault like MCP env) and the env var that receives the provider API key. |
+
+**ACP** ([Agent Client Protocol](https://agentclientprotocol.com)): Locus is the client. `initialize` (no fs / terminal capabilities) → `session/load` when the agent advertises `loadSession` and a stored id exists (replayed history is not re-rendered) → otherwise `session/new` with `cwd` = workspace and the session MCP URL when the agent accepts HTTP MCP → `session/prompt`. `session/update` maps `agent_message_chunk` → text, `agent_thought_chunk` → reasoning, `tool_call` / `tool_call_update` → tool chips. `session/request_permission` is answered with an allow option; Locus approval gates sit around the Turn and its MCP tools, not inside the CLI.
+
+Placement: Host, Docker, and Linux VM (SSH, stdin piped through `ssh`) work. Worker spawns have no stdin channel yet, so ACP and stdin-prompt configs return a clear error there; argv-prompt configs run. Gemini presets write `.gemini/settings.json` (`mcpServers.locus.httpUrl`) on Host and VM workspaces; other CLI agents get no MCP file. Presets marked UNVERIFIED in code were written from public docs, not run end to end.
+
 ## Native Fargate
 
 `@locus/compute` quotes dated Fargate Linux/x86 US-East-1 list prices (`2026-08`) and POSTs `RunTask` / `DescribeTasks` / `StopTask` to `ecs.{region}.amazonaws.com`, or to the worker **ECS endpoint** when set (PrivateLink or API Gateway; path kept; execute-api hosts sign as `execute-api`). Empty `allowedSizes` cannot provision. Known sizes: `0.25-0.5`, `0.5-1`, `1-2`, `2-4`. The handle is `https://<publicIPv4 or privateIPv4>:7421` after `DescribeTasks` returns an ENI address (no loopback fallback), plus a generated `LOCUS_WORKER_TOKEN` injected as a container env override. Existing `WorkerClient` then creates the Docker guest on that worker. Operator registers a task definition that already runs `locus-worker` and pastes the ARN. Locus does not create VPCs, NAT gateways, or GPU nodes. Destroying a Docker guest does not stop a paste-URL VM; Fargate session stop does `StopTask`. Azure Container Instances (`kind: azure`) and GCP Compute Engine (`kind: gcp`) follow the same quote → provision → WorkerClient path with recorded `fetch` (no SDKs).
+
+
+### Fargate chats (each agent is its own task)
+
+Picking a Fargate worker in New agent → **Where** is the whole user flow: runtime, image, and host-folder choices disappear, and the chat opens immediately. Behind it:
+
+1. Create returns at once; the boot list shows **Start cloud task → Connect agent → (Clone repo) → Ready**.
+2. The control plane mints a TLS key pair and a bearer token, then `RunTask`s the operator's task definition with them as `worker` container env (`LOCUS_WORKER_TLS_CERT_B64` / `LOCUS_WORKER_TLS_KEY_B64`, `LOCUS_WORKER_TOKEN`, `LOCUS_WORKER_ALLOW_HOST=1`). The cert fingerprint is pinned before the task exists — no trust-on-first-use over the internet.
+3. `DescribeTasks` polls for the ENI address (up to 3 minutes; a `STOPPED` task or a `RunTask` failure such as missing capacity is reported with ECS's reason), then `/v1/info` is polled until the cold container answers (up to 4 minutes). A refusal or a pin mismatch fails at once; any failure `StopTask`s the task.
+4. Fargate has no Docker daemon or KVM, so the agent runs as a **Host guest inside the task** (`host-workspaces/<session>`). The task is single-tenant and destroyed on Stop / idle TTL; the worker drops the token and TLS key from its environment so guest commands cannot read them. A later turn after the reaper provisions a fresh task and re-clones the repo.
+5. The image allowlist does not apply (the task definition is the image). Managed policy's "no Host agents" does not block it — that rule is about this machine. PR reviews still need Docker or a VM.
+
+Build the image and register the task definition from [`images/worker`](../images/worker/README.md). Optional **Security group** must allow inbound TCP 7421 from this machine.
 
 ## v1 limits
 

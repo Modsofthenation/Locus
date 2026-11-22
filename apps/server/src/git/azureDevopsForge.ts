@@ -100,6 +100,7 @@ type AzPull = {
   targetRefName?: string;
   lastMergeSourceCommit?: { commitId?: string };
   repository?: { name?: string; webUrl?: string; project?: { name?: string } };
+  labels?: Array<{ name?: string; active?: boolean }>;
 };
 
 function refName(raw?: string): string {
@@ -214,6 +215,9 @@ export function createAzureDevOpsForgeAdapter(fetchFn: ForgeFetcher): ForgeAdapt
       return {
         ...summary,
         body: json.description ?? "",
+        labels: (json.labels ?? []).flatMap((row) =>
+          row.active !== false && row.name?.trim() ? [row.name.trim()] : [],
+        ),
         files: [],
         comments,
         commits: [],

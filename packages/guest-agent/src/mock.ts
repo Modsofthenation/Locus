@@ -255,6 +255,10 @@ export class MockGuestRuntime implements GuestRuntime {
         return { ok: true, output: "tab-1 about:blank" };
       case "browser_navigate":
         return { ok: true, output: `opened ${str(req.args, "url")}` };
+      case "computer_capabilities":
+        return { ok: true, output: JSON.stringify({ backend: "mock", nativeDesktop: false }) };
+      case "browser_wait":
+        return { ok: true, output: "ready mock browser" };
       case "browser_snapshot":
         return { ok: true, output: '@e1 button "Submit"' };
       case "browser_click": {
@@ -271,6 +275,13 @@ export class MockGuestRuntime implements GuestRuntime {
         }
         return { ok: true, output: `typed into ${ref}` };
       }
+      case "browser_action": {
+        if (mockSnapshotRef(str(req.args, "ref")) !== "@e1")
+          return { ok: false, output: "Unknown ref. Call browser_snapshot first." };
+        return { ok: true, output: `mock ${str(req.args, "action")} verified` };
+      }
+      case "desktop_action":
+        return { ok: false, output: "Native desktop actions require a live guest" };
       case "browser_console":
         return { ok: true, output: "[]" };
       case "browser_network":

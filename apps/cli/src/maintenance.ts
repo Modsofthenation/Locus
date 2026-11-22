@@ -1,5 +1,5 @@
 /**
- * `locus backup`, `locus restore`, `locus update` and `locus eval`.
+ * `locus backup`, `locus restore`, `locus update` and `locus bench` (alias `locus eval`).
  * Kept out of commands.ts so that file only carries the route entries.
  */
 import { resolve } from "node:path";
@@ -9,8 +9,11 @@ import {
   benchmarkTargetKey,
   formatUsd,
   parseBenchmarkTarget,
+  type BenchmarkComparison,
+  type BenchmarkHistoryRow,
   type BenchmarkRun,
   type BenchmarkTargetSummary,
+  type BenchmarkCaseSpec,
 } from "@locus/shared";
 import { UsageError, flagBool, flagList, flagNum, flagStr, need } from "./args.js";
 import { formatKv, formatTable as formatColumns, printJson } from "./format.js";
@@ -256,7 +259,13 @@ function summaryTable(run: RunWithSummary): string {
 }
 
 function runDetail(run: RunWithSummary): string {
-  const header = `${run.id} · ${run.status}${run.error ? ` (${run.error})` : ""}`;
+  const header = [
+    `${run.id} · ${run.status}${run.error ? ` (${run.error})` : ""}`,
+    run.harness ? `harness ${run.harness.key}` : "",
+    run.suite ? `suite ${run.suite}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const cases = formatTable(
     ["Case", "Model", "Try", "Result", "Why", "Time"],
     run.results.map((row) => [
@@ -264,20 +273,41 @@ function runDetail(run: RunWithSummary): string {
       benchmarkTargetKey(row.target),
       String(row.attempt),
       row.status,
-      row.reason ?? "",
+      [row.reason ?? "", row.failingTests?.length ? `[${row.failingTests.join(", ")}]` : ""]
+        .filter(Boolean)
+        .join(" "),
       row.durationMs ? `${Math.round(row.durationMs / 1000)}s` : "",
     ]),
   );
   return [header, "", summaryTable(run), "", cases].join("\n");
 }
 
+type CaseRow = { id: string; title: string; kind?: string; language?: string };
+
+/** Server list (toy + spec suite); falls back to the built-in toy cases when Locus is down. */
 export async function cmdEvalCases(ctx: Ctx): Promise<void> {
-  const rows = BENCHMARK_CASES.map(({ id, title }) => ({ id, title }));
-  done(ctx, rows, () =>
-    formatTable(
-      ["Case", "What it tests"],
-      rows.map((r) => [r.id, r.title]),
-    ),
+  const suite = flagStr(ctx.flags, "suite");
+  let rows: CaseRow[];
+  let errors: string[] = [];
+  try {
+    const query = suite ? `?suite=${encodeURIComponent(resolve(suite))}` : "";
+    const res = await ctx.client.get<{ cases: CaseRow[]; errors?: string[] }>(
+      `/api/benchmarks/cases${query}`,
+    );
+    rows = res.cases;
+    errors = res.errors ?? [];
+  } catch (err) {
+    if (suite) throw err;
+    rows = BENCHMARK_CASES.map(({ id, title }) => ({ id, title, kind: "toy" }));
+  }
+  done(ctx, { cases: rows, errors }, () =>
+    [
+      formatTable(
+        ["Case", "Kind", "Language", "What it tests"],
+        rows.map((r) => [r.id, r.kind ?? "", r.language ?? "", r.title]),
+      ),
+      ...errors.map((e) => `! ${e}`),
+    ].join("\n"),
   );
 }
 
@@ -291,8 +321,10 @@ export async function cmdEvalRun(ctx: Ctx): Promise<void> {
     return target;
   });
   const timeoutMin = flagNum(ctx.flags, "timeout");
+  const suite = flagStr(ctx.flags, "suite");
   let run = await ctx.client.post<RunWithSummary>("/api/benchmarks", {
     targets,
+    suite: suite ? resolve(suite) : undefined,
     caseIds: flagList(ctx.flags, "case"),
     repeat: flagNum(ctx.flags, "repeat"),
     timeoutMs: timeoutMin ? timeoutMin * 60_000 : undefined,
@@ -302,7 +334,7 @@ export async function cmdEvalRun(ctx: Ctx): Promise<void> {
       ctx,
       run,
       () =>
-        `Started ${run.id}: ${run.results.length} case runs. Follow it with \`locus eval show ${run.id}\`.`,
+        `Started ${run.id}: ${run.results.length} case runs. Follow it with \`locus bench show ${run.id}\`.`,
     );
     return;
   }
@@ -315,7 +347,7 @@ export async function cmdEvalRun(ctx: Ctx): Promise<void> {
       const finished = run.results.filter((r) => r.status !== "pending" && r.status !== "running");
       for (const row of finished.slice(reported)) {
         ctx.err(
-          `${row.status === "passed" ? "✓" : "✗"} ${row.caseId} · ${benchmarkTargetKey(row.target)} · ${row.reason ?? ""}`,
+          `${row.status === "passed" ? "✓" : row.status === "skipped" ? "-" : "✗"} ${row.caseId} · ${benchmarkTargetKey(row.target)} · ${row.reason ?? ""}`,
         );
       }
       reported = finished.length;
@@ -329,17 +361,18 @@ export async function cmdEvalList(ctx: Ctx): Promise<void> {
   done(ctx, runs, () =>
     runs.length
       ? formatTable(
-          ["Run", "Status", "Created", "Models"],
+          ["Run", "Status", "Created", "Harness", "Models"],
           runs.map((run) => [
             run.id,
             run.status,
             run.createdAt.slice(0, 16).replace("T", " "),
+            run.harness?.key ?? "-",
             run.summary
               .map((s) => `${benchmarkTargetKey(s.target)} ${s.passed}/${s.total}`)
               .join(", "),
           ]),
         )
-      : "No benchmark runs yet. Start one with `locus eval run --model provider/model`.",
+      : "No benchmark runs yet. Start one with `locus bench run --model provider/model`.",
   );
 }
 
@@ -355,4 +388,116 @@ export async function cmdEvalCancel(ctx: Ctx): Promise<void> {
     `/api/benchmarks/${encodeURIComponent(id)}/cancel`,
   );
   done(ctx, run, () => `Cancelling ${run.id}.`);
+}
+
+const pct = (rate: number) => `${Math.round(rate * 100)}%`;
+
+export async function cmdBenchHistory(ctx: Ctx): Promise<void> {
+  const { rows } = await ctx.client.get<{ rows: BenchmarkHistoryRow[] }>("/api/benchmarks/history");
+  done(ctx, rows, () =>
+    rows.length
+      ? formatTable(
+          ["Model", "Harness", "Runs", "Passed", "Rate", "Cost/case", "Median time", "Last run"],
+          rows.map((row) => [
+            `${row.providerId}/${row.model}`,
+            row.harnessVersion,
+            String(row.runs),
+            `${row.passed}/${row.cases}`,
+            pct(row.passRate),
+            row.usdPerCase != null ? formatUsd(row.usdPerCase) : "-",
+            row.medianMs ? `${Math.round(row.medianMs / 1000)}s` : "-",
+            row.lastAt.slice(0, 16).replace("T", " "),
+          ]),
+        )
+      : "No finished benchmark runs yet.",
+  );
+}
+
+export async function cmdBenchCompare(ctx: Ctx): Promise<void> {
+  const a = need(ctx.args, 0, "first (before) run id");
+  const b = need(ctx.args, 1, "second (after) run id");
+  const cmp = await ctx.client.get<BenchmarkComparison>(
+    `/api/benchmarks/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`,
+  );
+  const all = flagBool(ctx.flags, "all");
+  const rows = all ? cmp.rows : cmp.rows.filter((r) => !r.change.startsWith("still-"));
+  const rate = (v?: number) => (v === undefined ? "-" : pct(v));
+  done(ctx, cmp, () =>
+    [
+      `${cmp.a.id} (${cmp.a.harnessVersion}) ${pct(cmp.a.passRate)} → ${cmp.b.id} (${cmp.b.harnessVersion}) ${pct(cmp.b.passRate)}`,
+      `${cmp.fixed} fixed · ${cmp.broke} broke`,
+      "",
+      rows.length
+        ? formatTable(
+            ["Case", "Model", "Before", "After", "Change"],
+            rows.map((r) => [r.caseId, r.target, rate(r.before), rate(r.after), r.change]),
+          )
+        : "No case changed. Pass --all to list every case.",
+    ].join("\n"),
+  );
+}
+
+type MineJobView = {
+  id: string;
+  status: "running" | "done" | "error" | "cancelled";
+  repo: string;
+  progress: string[];
+  error?: string;
+  result?: {
+    scanned: number;
+    outDir?: string;
+    specs: BenchmarkCaseSpec[];
+    candidates: Array<{
+      sha: string;
+      subject: string;
+      kept: boolean;
+      reason: string;
+      file?: string;
+    }>;
+  };
+};
+
+export async function cmdBenchMine(ctx: Ctx): Promise<void> {
+  const repo = resolve(need(ctx.args, 0, "repo path"));
+  const out = flagStr(ctx.flags, "out");
+  let job = await ctx.client.post<MineJobView>("/api/benchmarks/mine", {
+    repo,
+    since: flagStr(ctx.flags, "since"),
+    limit: flagNum(ctx.flags, "limit"),
+    maxCommits: flagNum(ctx.flags, "max-commits"),
+    ref: flagStr(ctx.flags, "ref"),
+    requireIssue: flagBool(ctx.flags, "require-issue") || undefined,
+    testCommand: flagStr(ctx.flags, "test-command"),
+    setup: flagBool(ctx.flags, "no-setup") ? null : flagStr(ctx.flags, "setup"),
+    out: out ? resolve(out) : undefined,
+    dryRun: flagBool(ctx.flags, "dry-run") || undefined,
+  });
+  const pollMs = flagNum(ctx.flags, "poll-ms") ?? 2000;
+  let shown = 0;
+  for (;;) {
+    if (!ctx.json) {
+      for (const line of job.progress.slice(shown)) ctx.err(line);
+      shown = job.progress.length;
+    }
+    if (job.status !== "running") break;
+    await new Promise((r) => setTimeout(r, pollMs));
+    job = await ctx.client.get<MineJobView>(`/api/benchmarks/mine/${encodeURIComponent(job.id)}`);
+  }
+  if (job.status === "error") throw new Error(job.error ?? "Mining failed");
+  const result = job.result;
+  done(ctx, job, () => {
+    if (!result) return `Mining ${job.status}.`;
+    const kept = result.candidates.filter((c) => c.kept);
+    return [
+      `Scanned ${result.scanned} commits; ${result.candidates.length} candidates verified, ${kept.length} kept.`,
+      ...kept.map((c) => `  ${c.sha.slice(0, 7)} ${c.subject}${c.file ? ` → ${c.file}` : ""}`),
+      result.outDir
+        ? `Review the specs in ${result.outDir}, then run them with \`locus bench run --suite ${repo} --model provider/model\`.`
+        : kept.length
+          ? "Dry run: nothing written."
+          : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  });
 }

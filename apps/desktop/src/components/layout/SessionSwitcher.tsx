@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  resolveTheme,
+  resolveThemeRef,
   sessionRuntime,
   canClearChat,
   CLEAR_CHAT_CONFIRM,
@@ -9,6 +9,7 @@ import {
 import { applyTheme } from "@/lib/theme";
 import { api } from "@/lib/api";
 import { showErrorNotice, showNotice } from "@/lib/notice";
+import { openProviderSettings, runSampleTask, sampleTaskReady } from "@/lib/sampleTask";
 import { archiveOne } from "@/lib/sessionUndo";
 import { askConfirm } from "@/lib/dialog";
 import { exportSessionChat } from "@/lib/chatExport";
@@ -28,6 +29,7 @@ import { matchModDigit, matchModKey } from "@/lib/shortcuts";
 import { KeyboardShortcutsSheet } from "./KeyboardShortcutsSheet";
 import { loadPaletteRecents, rememberPaletteRecent } from "@/lib/paletteRecents";
 import { setPendingSettingsQuery } from "@/lib/settingsQuery";
+import { noteRailSignal } from "@/lib/railSuggest";
 import { HighlightQuery } from "@/lib/queryMark";
 import { Modal } from "./Modal";
 import { orderPaletteForBrowse, tryNextContext } from "@/lib/discoverability";
@@ -222,6 +224,10 @@ export function SessionSwitcher({
       dispatch({ type: "section", section: "games" });
       return;
     }
+    if (id === "section:android") {
+      dispatch({ type: "section", section: "android" });
+      return;
+    }
     if (id === "new-game") {
       dispatch({ type: "section", section: "games" });
       dispatch({ type: "select", id: null });
@@ -241,6 +247,7 @@ export function SessionSwitcher({
       return;
     }
     if (id === "new-board") {
+      noteRailSignal("board");
       dispatch({ type: "selectBoard", id: null });
       return;
     }
@@ -253,6 +260,7 @@ export function SessionSwitcher({
       return;
     }
     if (id === "new-project") {
+      noteRailSignal("project");
       dispatch({ type: "selectProject", id: null });
       return;
     }
@@ -261,10 +269,12 @@ export function SessionSwitcher({
       return;
     }
     if (id === "section:ide") {
+      noteRailSignal("ide");
       dispatch({ type: "section", section: "ide" });
       return;
     }
     if (id === "new-workspace") {
+      noteRailSignal("ide");
       dispatch({ type: "section", section: "ide" });
       dispatch({ type: "select", id: null });
       return;
@@ -312,6 +322,24 @@ export function SessionSwitcher({
     }
     if (id === "finish-setup") {
       dispatch({ type: "setupOpen", open: true });
+      return;
+    }
+    if (id === "sample-task") {
+      if (!sampleTaskReady(state.setup, state.config)) {
+        openProviderSettings(dispatch);
+        return;
+      }
+      void runSampleTask({ config: state.config, dispatch }).catch((err) =>
+        showErrorNotice(err, "Could not start the sample task"),
+      );
+      return;
+    }
+    if (id === "plan-usage") {
+      dispatch({
+        type: "planUsage",
+        open: true,
+        providerId: state.sessions.find((row) => row.id === state.selectedId)?.providerId,
+      });
       return;
     }
     if (id === "feature:compare") {
@@ -541,7 +569,7 @@ export function SessionSwitcher({
       return;
     }
     if (id.startsWith("theme:")) {
-      const theme = resolveTheme(id.slice("theme:".length));
+      const theme = resolveThemeRef(id.slice("theme:".length), state.config?.customThemes);
       applyTheme(theme);
       if (!state.config) return;
       const next = { ...state.config, theme };

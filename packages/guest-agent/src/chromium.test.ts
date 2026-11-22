@@ -283,13 +283,15 @@ describe("CdpChromiumDriver", () => {
       {
         endpoint: async () => ({ host: "127.0.0.1", port: 49152 }),
         wsCtor: class {
+          private message?: (data?: unknown) => void;
           on(type: string, fn: (data?: unknown) => void) {
             if (type === "open") queueMicrotask(() => fn());
-            if (type === "message") {
-              queueMicrotask(() => fn(JSON.stringify({ id: 1, result: { data: "dA==" } })));
-            }
+            if (type === "message") this.message = fn;
           }
-          send(_raw: string) {}
+          send(raw: string) {
+            const { id } = JSON.parse(raw) as { id: number };
+            queueMicrotask(() => this.message?.(JSON.stringify({ id, result: { data: "dA==" } })));
+          }
           close() {}
         },
       },
@@ -564,6 +566,10 @@ describe("CdpChromiumDriver", () => {
         if (msg.method === "DOM.getBoxModel") {
           result = { model: { content: [100, 50, 200, 50, 200, 90, 100, 90] } };
         }
+        if (msg.method === "DOM.resolveNode") result = { object: { objectId: "node" } };
+        if (msg.method === "Runtime.callFunctionOn") result = { result: { value: true } };
+        if (msg.method === "Runtime.evaluate")
+          result = { result: { value: { ready: true, found: true, url: "https://example.com" } } };
         queueMicrotask(() => {
           for (const fn of this.listeners.message ?? []) {
             fn(JSON.stringify({ id: msg.id, result }));
@@ -588,13 +594,13 @@ describe("CdpChromiumDriver", () => {
     );
     const tree = await driver.handle({ name: "browser_snapshot", args: {} });
     expect(tree.ok).toBe(true);
-    expect(tree.output).toContain('@e1 button "Submit"');
+    expect(tree.output).toContain('@s1e1 button "Submit"');
     expect(tree.output).not.toContain("Hidden");
     expect(tree.output).not.toContain("Wrapper");
     const missing = await driver.handle({ name: "browser_click", args: { ref: "@e99" } });
     expect(missing.ok).toBe(false);
-    expect(missing.output).toMatch(/Unknown ref @e99/);
-    const click = await driver.handle({ name: "browser_click", args: { ref: "@e1" } });
+    expect(missing.output).toMatch(/Unknown or stale ref @e99/);
+    const click = await driver.handle({ name: "browser_click", args: { ref: "@s1e1" } });
     expect(click.ok).toBe(true);
     expect(click.output).toContain("150,70");
     expect(
@@ -608,7 +614,7 @@ describe("CdpChromiumDriver", () => {
     ).toBe(true);
     const typed = await driver.handle({
       name: "browser_type",
-      args: { ref: "e1", text: "hello" },
+      args: { ref: "s1e1", text: "hello" },
     });
     expect(typed.ok).toBe(true);
     expect(
@@ -619,7 +625,7 @@ describe("CdpChromiumDriver", () => {
       args: { url: "https://example.com" },
     });
     expect(opened.ok).toBe(true);
-    expect(opened.output).toBe("opened https://example.com");
+    expect(opened.output).toBe("ready https://example.com");
     expect(
       calls.some(
         (row) => row.method === "Page.navigate" && row.params.url === "https://example.com",

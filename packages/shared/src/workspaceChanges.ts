@@ -1,6 +1,13 @@
 import type { ChatMessage, ToolCall } from "./models/session.js";
 import { canonicalToolCall } from "./models/toolChip.js";
-import { fileDiffStats, patchFilesFromTool, type DiffStats } from "./patch.js";
+import { codeRenameDiffFromResult } from "./models/codeIntel.js";
+import {
+  fileDiffStats,
+  parseUnifiedDiff,
+  patchFilesFromTool,
+  type DiffStats,
+  type PatchFile,
+} from "./patch.js";
 
 export type WorkspaceFileChange = {
   path: string;
@@ -478,9 +485,13 @@ function toolSucceeded(call: ToolCall): boolean {
 export function workspaceChangesFromMessages(messages: ChatMessage[]): WorkspaceFileChange[] {
   const stats = new Map<string, DiffStats>();
   const lastContent = new Map<string, string>();
+  // A tool-result message repeats its call; count each call id once.
+  const seen = new Set<string>();
 
   for (const message of messages) {
     for (const call of message.toolCalls ?? []) {
+      if (seen.has(call.id)) continue;
+      seen.add(call.id);
       if (!toolSucceeded(call)) continue;
       const canonical = canonicalToolCall(call.name, call.arguments);
       if (canonical.name === "file_write") {
@@ -492,8 +503,13 @@ export function workspaceChangesFromMessages(messages: ChatMessage[]): Workspace
         lastContent.set(path, content);
         continue;
       }
-      if (canonical.name !== "apply_patch") continue;
-      for (const file of patchFilesFromTool("apply_patch", canonical.arguments, call.result)) {
+      let files: PatchFile[];
+      if (canonical.name === "apply_patch") {
+        files = patchFilesFromTool("apply_patch", canonical.arguments, call.result);
+      } else if (canonical.name === "code_rename") {
+        files = parseUnifiedDiff(codeRenameDiffFromResult(call.result));
+      } else continue;
+      for (const file of files) {
         const path = workspaceRelFromToolPath(file.path);
         if (!path) continue;
         const next = fileDiffStats(file);

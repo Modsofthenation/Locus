@@ -24,6 +24,7 @@ export const SECTION_META: Record<Exclude<UiSection, "settings">, SectionMeta> =
   design: { label: "Design", icon: <IconPalette /> },
   games: { label: "Games", icon: <IconGamepad /> },
   assets: { label: "Assets", icon: <IconCube /> },
+  android: { label: "Android", icon: <IconFrame /> },
   ide: { label: "IDE", icon: <IconFolder /> },
   board: { label: "Board", icon: <IconFrame /> },
   project: { label: "Projects", icon: <IconStack /> },

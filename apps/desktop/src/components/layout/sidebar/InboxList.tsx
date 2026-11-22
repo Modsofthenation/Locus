@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { AgentSession, ProductMode } from "@locus/shared";
 import { api } from "@/lib/api";
-import { inboxKindLabel, type InboxRow } from "@/lib/inboxList";
+import { inboxRowLabel, type InboxRow } from "@/lib/inboxList";
 import { isBatchableApproval } from "@/lib/needsYou";
 import { showErrorNotice } from "@/lib/notice";
 import { EmptyListNote } from "../EmptyHero";
@@ -22,6 +22,8 @@ export function InboxList(props: {
   sessions: AgentSession[];
   query: string;
   mode: ProductMode;
+  /** The row Home's decision card is showing, highlighted here. */
+  focusKey?: string | null;
   onOpen: (row: InboxRow) => void;
 }) {
   const { dispatch } = useStore();
@@ -42,7 +44,7 @@ export function InboxList(props: {
 
   if (!props.rows.length) {
     // The subtitle already says "Caught up" and the main pane shows it; only a miss needs words.
-    return props.query ? <EmptyListNote>No matching inbox items</EmptyListNote> : null;
+    return props.query ? <EmptyListNote>No matching items</EmptyListNote> : null;
   }
 
   return (
@@ -51,12 +53,17 @@ export function InboxList(props: {
         const session = props.sessions.find((item) => item.id === row.sessionId);
         const call = pendingCall(session, row.callId);
         const canDecide = Boolean(call && isBatchableApproval(call.name));
-        const kind = inboxKindLabel(row.kind, props.mode);
+        const kind = inboxRowLabel(row, canDecide, props.mode);
+        const focused = props.focusKey === row.key;
         return (
-          <div key={row.key} className="session-item needs-you has-menu inbox-row">
+          <div
+            key={row.key}
+            className={`session-item needs-you has-menu inbox-row ${focused ? "active" : ""}`}
+          >
             <button
               type="button"
               className="session-item-open"
+              aria-current={focused ? "true" : undefined}
               title={`${kind} · ${row.title} · ${row.detail}`}
               onClick={() => props.onOpen(row)}
             >

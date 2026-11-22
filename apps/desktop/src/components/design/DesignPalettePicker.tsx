@@ -190,6 +190,9 @@ export function DesignPalettePicker(props: {
     ? { top: place.top, left: place.left }
     : undefined;
 
+  const presetName = [...stored, ...PALETTE_PRESETS].find((preset) => preset.id === selected)?.name;
+  const paletteLabel = `Color palette: ${presetName ?? "Custom"}`;
+
   return (
     <div className="palette-picker compact" ref={root}>
       <button
@@ -197,15 +200,16 @@ export function DesignPalettePicker(props: {
         type="button"
         className={`palette-swatch-row ${open ? "on" : ""}`}
         aria-expanded={open}
-        aria-label="Color palette"
-        title="Color palette"
+        aria-label={`${paletteLabel}. Edit colors`}
+        title={`${paletteLabel} · click to edit`}
         onClick={() => setOpen((v) => !v)}
       >
         {PALETTE_ROLES.map((role) => (
           <span
             key={role}
+            aria-hidden="true"
             style={{ background: props.palette[role] }}
-            title={PALETTE_ROLE_LABELS[role]}
+            title={`${PALETTE_ROLE_LABELS[role]} · ${props.palette[role]}`}
           />
         ))}
       </button>

@@ -9,6 +9,7 @@ export type SettingsTab =
   | "environments"
   | "git"
   | "integrations"
+  | "reviewers"
   | "mcp"
   | "skills"
   | "benchmark"
@@ -19,7 +20,10 @@ export type SettingsTab =
 
 export const SETTINGS_NAV_GROUPS: { label: string; items: SettingsTab[] }[] = [
   { label: "Models", items: ["providers", "mcp", "skills", "benchmark"] },
-  { label: "Workspace", items: ["machines", "workers", "environments", "git", "integrations"] },
+  {
+    label: "Workspace",
+    items: ["machines", "workers", "environments", "git", "integrations", "reviewers"],
+  },
   {
     label: "System",
     items: ["appearance", "notifications", "phone", "chrome", "advanced", "about"],
@@ -59,6 +63,7 @@ export function settingsNavCount(
   if (tab === "skills") return (config.skills ?? []).length;
   if (tab === "workers") return (config.workers ?? []).length;
   if (tab === "environments") return (config.namedEnvironments ?? []).length;
+  if (tab === "reviewers") return (config.slackReviewers ?? []).length || undefined;
   return undefined;
 }
 
@@ -144,6 +149,11 @@ export function settingsSearchHits(
   for (const row of config.integrations ?? []) {
     if (matchesQuery(row.name, q) || matchesQuery(row.kind, q)) {
       add({ tab: "integrations", id: row.id, label: row.name });
+    }
+  }
+  for (const row of config.slackReviewers ?? []) {
+    if (matchesQuery(row.name, q) || matchesQuery("slack pr review", q)) {
+      add({ tab: "reviewers", id: row.id, label: row.name });
     }
   }
   return hits;

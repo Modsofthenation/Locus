@@ -28,14 +28,18 @@ import {
   pullFlags,
   type ForgeFetcher,
 } from "./forgeHttp.js";
-import type {
-  CreatePullInput,
-  CreatedPull,
-  ForgeAdapter,
-  PostCommentInput,
-  PostIssueCommentInput,
-  PostReviewInput,
+import {
+  READ_FILE_MAX_BYTES,
+  type CommitFileInput,
+  type CreatePullInput,
+  type CreatedPull,
+  type ForgeAdapter,
+  type PostCommentInput,
+  type PostIssueCommentInput,
+  type PostReviewInput,
+  type ReviewThreadInfo,
 } from "./forgeAdapter.js";
+import { fetchGithubCheckLog, githubCheckRunStatus, listGithubCheckRuns } from "./forgeCi.js";
 
 function githubCompatible(account: GitForgeAccount): boolean {
   return account.kind === "gitea" || account.kind === "forgejo";
@@ -317,6 +321,7 @@ export async function getGithubPull(
     head?: { ref?: string; sha?: string };
     base?: { ref?: string };
     requested_reviewers?: Array<{ login?: string }>;
+    labels?: Array<{ name?: string } | string>;
   }>(fetchFn, account, `/repos/${owner}/${repo}/pulls/${number}`);
   if (!pull.ok) throw fail({ status: pull.status } as Response, pull.text);
   const flags = pullFlags({
@@ -346,54 +351,71 @@ export async function getGithubPull(
     reviewers: reviewers.length ? reviewers : summary?.reviewers,
     checkState: summary?.checkState,
   };
-  const [files, reviewComments, issueComments, commits, checks, viewed] = await Promise.all([
-    githubJson<
-      Array<{ filename?: string; status?: string; patch?: string; previous_filename?: string }>
-    >(fetchFn, account, `/repos/${owner}/${repo}/pulls/${number}/files?per_page=100`),
-    githubJson<
-      Array<{
-        id?: number;
-        body?: string;
-        user?: { login?: string };
-        path?: string;
-        line?: number;
-        original_line?: number;
-        side?: string;
-        created_at?: string;
-        html_url?: string;
-      }>
-    >(fetchFn, account, `/repos/${owner}/${repo}/pulls/${number}/comments?per_page=100`),
-    githubJson<
-      Array<{
-        id?: number;
-        body?: string;
-        user?: { login?: string };
-        created_at?: string;
-        html_url?: string;
-      }>
-    >(fetchFn, account, `/repos/${owner}/${repo}/issues/${number}/comments?per_page=100`),
-    githubJson<
-      Array<{
-        sha?: string;
-        commit?: { message?: string; author?: { name?: string; date?: string } };
-      }>
-    >(fetchFn, account, `/repos/${owner}/${repo}/pulls/${number}/commits?per_page=50`),
-    githubJson<{
-      statuses?: Array<{ context?: string; state?: string; target_url?: string }>;
-      state?: string;
-    }>(fetchFn, account, `/repos/${owner}/${repo}/commits/${summary.headSha || "HEAD"}/status`),
-    githubViewedPaths(fetchFn, account, owner, repo, number),
-  ]);
+  const [files, reviewComments, issueComments, commits, checks, viewed, checkRuns] =
+    await Promise.all([
+      githubJson<
+        Array<{ filename?: string; status?: string; patch?: string; previous_filename?: string }>
+      >(fetchFn, account, `/repos/${owner}/${repo}/pulls/${number}/files?per_page=100`),
+      githubJson<
+        Array<{
+          id?: number;
+          body?: string;
+          user?: { login?: string };
+          path?: string;
+          line?: number;
+          original_line?: number;
+          side?: string;
+          created_at?: string;
+          html_url?: string;
+        }>
+      >(fetchFn, account, `/repos/${owner}/${repo}/pulls/${number}/comments?per_page=100`),
+      githubJson<
+        Array<{
+          id?: number;
+          body?: string;
+          user?: { login?: string };
+          created_at?: string;
+          html_url?: string;
+        }>
+      >(fetchFn, account, `/repos/${owner}/${repo}/issues/${number}/comments?per_page=100`),
+      githubJson<
+        Array<{
+          sha?: string;
+          commit?: { message?: string; author?: { name?: string; date?: string } };
+        }>
+      >(fetchFn, account, `/repos/${owner}/${repo}/pulls/${number}/commits?per_page=50`),
+      githubJson<{
+        statuses?: Array<{ context?: string; state?: string; target_url?: string }>;
+        state?: string;
+      }>(fetchFn, account, `/repos/${owner}/${repo}/commits/${summary.headSha || "HEAD"}/status`),
+      githubViewedPaths(fetchFn, account, owner, repo, number),
+      // Actions and other apps report check runs, not commit statuses.
+      githubCompatible(account) || !summary.headSha
+        ? Promise.resolve(undefined)
+        : githubJson<{
+            check_runs?: Array<{
+              name?: string;
+              status?: string;
+              conclusion?: string | null;
+              html_url?: string;
+            }>;
+          }>(
+            fetchFn,
+            account,
+            `/repos/${owner}/${repo}/commits/${summary.headSha}/check-runs?filter=latest&per_page=100`,
+          ).catch(() => undefined),
+    ]);
   return {
     ...summary,
     body: pull.json.body ?? "",
+    labels: githubIssueLabels(pull.json),
     files: githubFiles(files.json, viewed),
     comments: [
       ...githubReviewComments(reviewComments.json),
       ...githubIssueComments(issueComments.json),
     ],
     commits: githubCommits(commits.json),
-    checks: githubChecks(checks.json),
+    checks: githubChecks(checks.json, checkRuns?.ok ? checkRuns.json.check_runs : undefined),
   };
 }
 
@@ -734,12 +756,28 @@ function githubCommits(
 
 function githubChecks(
   body: { statuses?: Array<{ context?: string; state?: string; target_url?: string }> } | undefined,
+  runs?: Array<{ name?: string; status?: string; conclusion?: string | null; html_url?: string }>,
 ): PullCheck[] {
-  return (body?.statuses ?? []).map((row) => ({
-    name: row.context || "status",
-    status: githubStatus(row.state),
-    url: row.target_url,
-  }));
+  const fromRuns: PullCheck[] = (Array.isArray(runs) ? runs : []).flatMap((row) =>
+    row.name
+      ? [
+          {
+            name: row.name,
+            status: githubCheckRunStatus(row.status, row.conclusion),
+            url: row.html_url,
+          },
+        ]
+      : [],
+  );
+  const names = new Set(fromRuns.map((row) => row.name));
+  const fromStatuses = (body?.statuses ?? [])
+    .map((row) => ({
+      name: row.context || "status",
+      status: githubStatus(row.state),
+      url: row.target_url,
+    }))
+    .filter((row) => !names.has(row.name));
+  return [...fromStatuses, ...fromRuns];
 }
 
 function githubStatus(state?: string): PullCheck["status"] {
@@ -1004,6 +1042,184 @@ export async function commentGithubIssue(
   return { ok, output: text.slice(0, 4000) };
 }
 
+/** Changed files from `base` to `head`; undefined unless `head` is strictly ahead of `base`. */
+export async function compareGithubCommits(
+  fetchFn: ForgeFetcher,
+  account: GitForgeAccount,
+  owner: string,
+  repo: string,
+  base: string,
+  head: string,
+): Promise<PullFile[] | undefined> {
+  // Gitea / Forgejo compare responses differ; only GitHub's shape is read here.
+  if (githubCompatible(account)) return undefined;
+  const { ok, json } = await githubJson<{
+    status?: string;
+    files?: Array<{
+      filename?: string;
+      status?: string;
+      patch?: string;
+      previous_filename?: string;
+    }>;
+  }>(
+    fetchFn,
+    account,
+    `/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`,
+  );
+  if (!ok || json.status !== "ahead" || !Array.isArray(json.files)) return undefined;
+  return githubFiles(json.files, new Set());
+}
+
+export async function readGithubFile(
+  fetchFn: ForgeFetcher,
+  account: GitForgeAccount,
+  owner: string,
+  repo: string,
+  path: string,
+  ref: string,
+): Promise<string | undefined> {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const { ok, json } = await githubJson<{
+    type?: string;
+    encoding?: string;
+    content?: string;
+    size?: number;
+  }>(
+    fetchFn,
+    account,
+    `/repos/${owner}/${repo}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`,
+  );
+  if (!ok || json.type !== "file" || typeof json.content !== "string") return undefined;
+  if ((json.size ?? 0) > READ_FILE_MAX_BYTES) return undefined;
+  if (json.encoding && json.encoding !== "base64") return json.content;
+  return Buffer.from(json.content, "base64").toString("utf8");
+}
+
+/** Resolve unresolved review threads whose first comment `pick` selects. GitHub only (GraphQL). */
+export async function resolveGithubReviewThreads(
+  fetchFn: ForgeFetcher,
+  account: GitForgeAccount,
+  owner: string,
+  repo: string,
+  number: number,
+  pick: (thread: ReviewThreadInfo) => boolean,
+): Promise<number> {
+  if (githubCompatible(account) || !hasForgeToken(account)) return 0;
+  const { ok, json } = await githubGraphql<{
+    data?: {
+      repository?: {
+        pullRequest?: {
+          reviewThreads?: {
+            nodes?: Array<{
+              id?: string;
+              isResolved?: boolean;
+              path?: string | null;
+              line?: number | null;
+              originalLine?: number | null;
+              comments?: {
+                nodes?: Array<{ body?: string; author?: { login?: string } | null }>;
+              };
+            }>;
+          };
+        };
+      };
+    };
+  }>(
+    fetchFn,
+    account,
+    `query($owner: String!, $name: String!, $number: Int!) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          reviewThreads(first: 100) {
+            nodes {
+              id isResolved path line originalLine
+              comments(first: 1) { nodes { body author { login } } }
+            }
+          }
+        }
+      }
+    }`,
+    { owner, name: repo, number },
+  );
+  if (!ok) return 0;
+  let resolved = 0;
+  for (const node of json.data?.repository?.pullRequest?.reviewThreads?.nodes ?? []) {
+    if (!node.id || node.isResolved) continue;
+    const first = node.comments?.nodes?.[0];
+    const picked = pick({
+      path: node.path ?? undefined,
+      line: node.line ?? node.originalLine ?? undefined,
+      body: first?.body ?? "",
+      author: first?.author?.login,
+    });
+    if (!picked) continue;
+    const done = await githubGraphql<{
+      data?: { resolveReviewThread?: { thread?: { isResolved?: boolean } } };
+    }>(
+      fetchFn,
+      account,
+      `mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { isResolved } } }`,
+      { id: node.id },
+    );
+    if (done.ok && done.json.data?.resolveReviewThread?.thread?.isResolved) resolved += 1;
+  }
+  return resolved;
+}
+
+/**
+ * Cut `branch` from `base` and create or replace one file on it (git refs + contents API). GitHub
+ * only: Gitea / Forgejo take a different contents payload.
+ */
+export async function commitGithubFileToNewBranch(
+  fetchFn: ForgeFetcher,
+  account: GitForgeAccount,
+  owner: string,
+  repo: string,
+  input: CommitFileInput,
+): Promise<void> {
+  if (githubCompatible(account)) {
+    throw new Error(`Committing files is not supported on ${account.kind} yet`);
+  }
+  const base = await githubJson<{ object?: { sha?: string } }>(
+    fetchFn,
+    account,
+    `/repos/${owner}/${repo}/git/ref/heads/${input.base.split("/").map(encodeURIComponent).join("/")}`,
+  );
+  const sha = base.json.object?.sha;
+  if (!base.ok || !sha) throw fail({ status: base.status } as Response, base.text);
+  const encodedPath = input.path.split("/").map(encodeURIComponent).join("/");
+  // Replacing a file needs its blob sha; a missing file is created.
+  const current = await githubJson<{ sha?: string; type?: string }>(
+    fetchFn,
+    account,
+    `/repos/${owner}/${repo}/contents/${encodedPath}?ref=${sha}`,
+  );
+  const exists = current.ok && current.json.type === "file" && Boolean(current.json.sha);
+  if (exists && input.expectNew) {
+    throw new Error(`${input.path} exists on ${input.base} but couldn't be read; try again`);
+  }
+  const ref = await githubJson(fetchFn, account, `/repos/${owner}/${repo}/git/refs`, {
+    method: "POST",
+    body: JSON.stringify({ ref: `refs/heads/${input.branch}`, sha }),
+  });
+  if (!ref.ok) throw fail({ status: ref.status } as Response, ref.text);
+  const put = await githubJson(
+    fetchFn,
+    account,
+    `/repos/${owner}/${repo}/contents/${encodedPath}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        message: input.message,
+        content: Buffer.from(input.content, "utf8").toString("base64"),
+        branch: input.branch,
+        ...(exists ? { sha: current.json.sha } : {}),
+      }),
+    },
+  );
+  if (!put.ok) throw fail({ status: put.status } as Response, put.text);
+}
+
 export function createGithubForgeAdapter(fetchFn: ForgeFetcher): ForgeAdapter {
   return {
     listRepos: (account) => listGithubRepos(fetchFn, account),
@@ -1031,5 +1247,17 @@ export function createGithubForgeAdapter(fetchFn: ForgeFetcher): ForgeAdapter {
       githubLatestOpenPullCursor(fetchFn, account, owner, repo),
     listBranches: (account, owner, repo) => listGithubBranches(fetchFn, account, owner, repo),
     about: (account, owner, repo) => githubRepoAbout(fetchFn, account, owner, repo),
+    listCheckRuns: (account, owner, repo, input) =>
+      listGithubCheckRuns(fetchFn, account, owner, repo, input.headSha),
+    fetchCheckLog: (account, owner, repo, run) =>
+      fetchGithubCheckLog(fetchFn, account, owner, repo, run),
+    compareCommits: (account, owner, repo, base, head) =>
+      compareGithubCommits(fetchFn, account, owner, repo, base, head),
+    readFile: (account, owner, repo, path, ref) =>
+      readGithubFile(fetchFn, account, owner, repo, path, ref),
+    resolveReviewThreads: (account, owner, repo, number, pick) =>
+      resolveGithubReviewThreads(fetchFn, account, owner, repo, number, pick),
+    commitFileToNewBranch: (account, owner, repo, input) =>
+      commitGithubFileToNewBranch(fetchFn, account, owner, repo, input),
   };
 }

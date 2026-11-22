@@ -143,3 +143,166 @@ describe("locus eval", () => {
     expect(out.stdout).toMatch(/cross-file-feature/);
   });
 });
+
+describe("locus bench", () => {
+  it("lists server cases with kind and language", async () => {
+    const api = await mock({
+      "GET /api/benchmarks/cases": () => ({
+        cases: [
+          { id: "fix-add", title: "Fix a one-line bug", kind: "toy" },
+          { id: "go-wordwrap", title: "Word wrap", kind: "spec", language: "go" },
+        ],
+        errors: ["bad.json: id is required"],
+      }),
+    });
+    const out = await runCli(["--api", api.url, "bench", "cases"]);
+    expect(out.code, out.stderr).toBe(0);
+    expect(out.stdout).toMatch(/go-wordwrap\s+spec\s+go/);
+    expect(out.stdout).toMatch(/! bad\.json: id is required/);
+  });
+
+  it("prints history per model and harness version", async () => {
+    const api = await mock({
+      "GET /api/benchmarks/history": () => ({
+        rows: [
+          {
+            providerId: "openai",
+            model: "gpt-5",
+            harnessVersion: "0.20.0+abc1234.deadbeef",
+            runs: 2,
+            runIds: ["a", "b"],
+            cases: 10,
+            passed: 7,
+            passRate: 0.7,
+            usdPerCase: 0.02,
+            medianMs: 42_000,
+            tokens: 1000,
+            firstAt: "2026-11-01T00:00:00Z",
+            lastAt: "2026-11-08T00:00:00Z",
+          },
+        ],
+      }),
+    });
+    const out = await runCli(["--api", api.url, "bench", "history"]);
+    expect(out.code, out.stderr).toBe(0);
+    expect(out.stdout).toMatch(/openai\/gpt-5/);
+    expect(out.stdout).toMatch(/0\.20\.0\+abc1234\.deadbeef/);
+    expect(out.stdout).toMatch(/7\/10/);
+    expect(out.stdout).toMatch(/70%/);
+  });
+
+  it("compares two runs and hides unchanged cases unless --all", async () => {
+    const api = await mock({
+      "GET /api/benchmarks/compare": (_r, url) => {
+        expect(url.searchParams.get("a")).toBe("r1");
+        expect(url.searchParams.get("b")).toBe("r2");
+        return {
+          a: { id: "r1", harnessVersion: "h1", passRate: 0.5, cases: 2 },
+          b: { id: "r2", harnessVersion: "h2", passRate: 0.5, cases: 2 },
+          rows: [
+            { caseId: "x", target: "p/m", before: 1, after: 0, change: "broke" },
+            { caseId: "z", target: "p/m", before: 1, after: 1, change: "still-passing" },
+          ],
+          fixed: 0,
+          broke: 1,
+        };
+      },
+    });
+    const out = await runCli(["--api", api.url, "bench", "compare", "r1", "r2"]);
+    expect(out.code, out.stderr).toBe(0);
+    expect(out.stdout).toMatch(/0 fixed · 1 broke/);
+    expect(out.stdout).toMatch(/x .*broke/);
+    expect(out.stdout).not.toMatch(/still-passing/);
+    const all = await runCli(["--api", api.url, "bench", "compare", "r1", "r2", "--all"]);
+    expect(all.stdout).toMatch(/still-passing/);
+  });
+
+  it("mines a repo, polls the job and reports kept specs", async () => {
+    let polls = 0;
+    const api = await mock({
+      "POST /api/benchmarks/mine": () => ({
+        id: "mine-1",
+        status: "running",
+        repo: "/r",
+        progress: ["Scanned 40 commits, 3 candidates."],
+      }),
+      "GET /api/benchmarks/mine/mine-1": () => {
+        polls += 1;
+        return {
+          id: "mine-1",
+          status: "done",
+          repo: "/r",
+          progress: [
+            "Scanned 40 commits, 3 candidates.",
+            "✓ abc1234 fix rounding — 1 fail-to-pass",
+          ],
+          result: {
+            scanned: 40,
+            outDir: "/r/.locus/benchmarks",
+            specs: [{ id: "r-abc1234" }],
+            candidates: [
+              {
+                sha: "abc1234ffff",
+                subject: "fix rounding",
+                kept: true,
+                reason: "ok",
+                file: "/r/.locus/benchmarks/r-abc1234.json",
+              },
+              { sha: "def5678ffff", subject: "refactor", kept: false, reason: "already pass" },
+            ],
+          },
+        };
+      },
+    });
+    const out = await runCli([
+      "--api",
+      api.url,
+      "bench",
+      "mine",
+      "/r",
+      "--since",
+      "6 months ago",
+      "--limit",
+      "3",
+      "--no-setup",
+      "--poll-ms",
+      "1",
+    ]);
+    expect(out.code, out.stderr).toBe(0);
+    expect(polls).toBe(1);
+    expect(api.bodies["POST /api/benchmarks/mine"]).toMatchObject({
+      repo: "/r",
+      since: "6 months ago",
+      limit: 3,
+      setup: null,
+    });
+    expect(out.stderr).toMatch(/✓ abc1234 fix rounding/);
+    expect(out.stdout).toMatch(/2 candidates verified, 1 kept/);
+    expect(out.stdout).toMatch(/r-abc1234\.json/);
+  });
+
+  it("passes --suite to run as an absolute path", async () => {
+    const api = await mock({
+      "POST /api/benchmarks": (_r, _u, body) => ({
+        id: "bench-2",
+        status: "running",
+        results: [{}],
+        targets: (body as { targets: unknown[] }).targets,
+        summary: [],
+      }),
+    });
+    const out = await runCli([
+      "--api",
+      api.url,
+      "bench",
+      "run",
+      "--model",
+      "p/m",
+      "--suite",
+      "suite-dir",
+    ]);
+    expect(out.code, out.stderr).toBe(0);
+    expect(out.stdout).toMatch(/locus bench show bench-2/);
+    expect((api.bodies["POST /api/benchmarks"] as { suite: string }).suite).toMatch(/suite-dir$/);
+  });
+});

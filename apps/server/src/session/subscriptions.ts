@@ -1,6 +1,11 @@
 import {
   advanceSubscription,
   checksFixRepoId,
+  findBoundAgent,
+  isFailingCheckStatus,
+  parseReviewSettings,
+  planCiFix,
+  settleCiFixState,
   formatChecksCursor,
   isCanvasSession,
   isSlackChannelMessage,
@@ -10,6 +15,7 @@ import {
   resolveForgeAccount,
   wrapSubscriptionEvent,
   type AgentSession,
+  type PullCheck,
   type SessionSubscription,
   type SlackMessage,
   type SubscriptionSnapshot,
@@ -37,10 +43,13 @@ export class SubscriptionService {
   private timer?: ReturnType<typeof setInterval>;
   private readonly forge: ForgeClient;
   private readonly integrations: IntegrationsClient;
+  /** Head SHA and checks seen by the last checks snapshot, keyed by subscription id. */
+  private readonly lastChecks = new Map<string, { headSha: string; checks: PullCheck[] }>();
 
   constructor(
     private readonly store: JsonStore,
-    private readonly sessions: Pick<SessionService, "sendChat">,
+    private readonly sessions: Pick<SessionService, "sendChat"> &
+      Partial<Pick<SessionService, "flagNeedsHuman">>,
     private readonly opts: {
       slack?: SlackGateway;
       hub?: Hub;
@@ -103,6 +112,7 @@ export class SubscriptionService {
       } else if (sub.kind === "pull_request") {
         snapshot = await this.pullSnapshot(session, sub);
       } else if (sub.kind === "checks") {
+        this.lastChecks.delete(`${session.id}:${sub.id}`);
         snapshot = await this.checksSnapshot(session, sub);
       } else if (
         sub.kind === "linear_issue" ||
@@ -114,21 +124,20 @@ export class SubscriptionService {
         snapshot = await this.integrationSnapshot(session, sub);
       }
       const result = advanceSubscription(sub, now, snapshot);
+      const seen =
+        sub.kind === "checks" ? this.lastChecks.get(`${session.id}:${sub.id}`) : undefined;
+      if (seen && result.next && !result.fire) {
+        const settled = settleCiFixState(sub.ciFix, seen.checks);
+        result.next = { ...result.next, ciFix: settled };
+      }
       if (result.fire) {
         let wake = result.fire;
         if (sub.kind === "checks" && this.opts.repos) {
-          const repoId = checksFixRepoId(session, sub);
-          if (repoId && sub.pullNumber) {
-            try {
-              const { session: fix } = await this.opts.repos.startFixSession(
-                repoId,
-                sub.pullNumber,
-              );
-              if (fix.id === session.id) wake = "";
-            } catch {
-              /* still wake the subscriber */
-            }
+          const fixed = await this.startCiFix(session, sub, seen);
+          if (fixed.ciFix !== undefined && result.next) {
+            result.next = { ...result.next, ciFix: fixed.ciFix ?? undefined };
           }
+          if (fixed.suppressWake) wake = "";
         }
         if (wake) {
           const paused = session.projectId
@@ -155,6 +164,63 @@ export class SubscriptionService {
       } catch {
         /* a wake should not crash the poller */
       }
+    }
+  }
+
+  /**
+   * A checks wake on the session's linked repo: start one CI fix per head SHA + failing
+   * set (with check names, condensed logs, and the head SHA in the prompt), and stop with
+   * Needs you after `review.ciFixMaxAttempts` consecutive fixes on the same check.
+   * `ciFix: null` means clear the stored state.
+   */
+  private async startCiFix(
+    session: AgentSession,
+    sub: SessionSubscription,
+    seen: { headSha: string; checks: PullCheck[] } | undefined,
+  ): Promise<{ suppressWake: boolean; ciFix?: SessionSubscription["ciFix"] | null }> {
+    const repos = this.opts.repos;
+    const repoId = checksFixRepoId(session, sub);
+    if (!repos || !repoId || !sub.pullNumber) return { suppressWake: false };
+    const config = await this.store.loadConfig().catch(() => undefined);
+    const maxAttempts = parseReviewSettings(config?.review).ciFixMaxAttempts;
+    const decision = seen
+      ? planCiFix(sub.ciFix, {
+          headSha: seen.headSha,
+          checks: seen.checks,
+          maxAttempts,
+          now: this.now(),
+        })
+      : undefined;
+    const ciFix = decision
+      ? decision.state.lastKey || decision.state.attempts
+        ? decision.state
+        : null
+      : undefined;
+    if (decision?.action === "duplicate") return { suppressWake: true, ciFix };
+    if (decision?.action === "cap") {
+      const targets = new Set([session.id]);
+      const sessions = await this.store.loadSessions().catch(() => []);
+      const bound = findBoundAgent(sessions, { repoId, pullNumber: sub.pullNumber });
+      if (bound) targets.add(bound.id);
+      for (const id of targets) {
+        await this.sessions.flagNeedsHuman?.(id, decision.summary).catch(() => undefined);
+      }
+      return { suppressWake: true, ciFix };
+    }
+    try {
+      const failing = seen?.checks.filter((row) => isFailingCheckStatus(row.status)) ?? [];
+      const { session: fix } = await repos.startFixSession(repoId, sub.pullNumber, {
+        ci: {
+          headSha: seen?.headSha,
+          checks: failing.map((row) => row.name),
+          attempt: decision?.action === "start" ? decision.attempt : undefined,
+          maxAttempts,
+        },
+      });
+      return { suppressWake: fix.id === session.id, ciFix };
+    } catch {
+      /* still wake the subscriber; do not count an attempt that never started */
+      return { suppressWake: false };
     }
   }
 
@@ -276,6 +342,10 @@ export class SubscriptionService {
       const fresh = await withFreshForgeToken(this.store, account, this.opts.fetch ?? fetch);
       if (!fresh.token) return null;
       const pull = await this.forge.getPull(fresh, parsed.owner, parsed.repo, number);
+      this.lastChecks.set(`${session.id}:${sub.id}`, {
+        headSha: pull.headSha,
+        checks: pull.checks,
+      });
       const cursor = formatChecksCursor(pull.headSha, pull.checks);
       if (!sub.cursor) return { cursor, summary: "" };
       const failures = newCheckFailures(sub.cursor, pull.checks);

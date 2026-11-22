@@ -6,6 +6,7 @@ import type { SessionPlan } from "./plan.js";
 import { SUBAGENT_KINDS } from "./subagentKind.js";
 import { HOST_SESSIONS_TOOL_NAME } from "./hostSessions.js";
 import { DOCKER_SWARM_TOOL_NAME } from "./dockerSwarm.js";
+import { CODE_INTEL_TOOL_NAMES } from "./codeIntel.js";
 
 export const TASK_ITEM_STATUSES = ["pending", "in_progress", "done", "cancelled"] as const;
 export type TaskItemStatus = (typeof TASK_ITEM_STATUSES)[number];
@@ -42,6 +43,7 @@ const RUNTIME_TOOL_NAMES = new Set([
   SUBSCRIBE_TOOL_NAME,
   UNSUBSCRIBE_TOOL_NAME,
   ...BRAIN_TOOL_NAMES,
+  ...CODE_INTEL_TOOL_NAMES,
 ]);
 
 export function isRuntimeToolName(name: string): boolean {
@@ -128,7 +130,7 @@ export const REPO_MAP_TOOL: ExtraToolDef = {
 export const SPAWN_AGENT_TOOL: ExtraToolDef = {
   name: SPAWN_AGENT_TOOL_NAME,
   description:
-    "Spawn an isolated child agent. It returns a summary, not a transcript. Do not nest. Omit kind to use the session default. If the operator asked for a different kind this turn, pass that kind.",
+    "Spawn an isolated child agent. It returns a summary, not a transcript. Do not nest. Omit kind to use the session default. If the operator asked for a different kind this turn, pass that kind. Pass provider and/or model to run the child on another configured model, then use its summary in your next step.",
   parameters: {
     type: "object",
     properties: {
@@ -139,6 +141,16 @@ export const SPAWN_AGENT_TOOL: ExtraToolDef = {
         enum: [...SUBAGENT_KINDS],
         description:
           "Child agent kind. Omit to use the session default. Pass this when the operator asked for a different kind this turn (explore, implement, or review).",
+      },
+      provider: {
+        type: "string",
+        description:
+          "Optional configured provider to run the child on: its id, name, or kind (e.g. anthropic, openai). Omit to use this session's provider. Pass it when the operator or automation prompt asks for a step on another model.",
+      },
+      model: {
+        type: "string",
+        description:
+          "Optional model id for the child. Omit to use the session model, or the chosen provider's default model.",
       },
     },
     required: ["task"],

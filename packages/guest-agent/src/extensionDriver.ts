@@ -1,5 +1,6 @@
 import {
   CHROMIUM_VIEWPORT,
+  computerKey,
   LIVE_CHROME_DISCONNECTED,
   LIVE_CHROME_UNSUPPORTED,
   type BrowserInputMessage,
@@ -31,6 +32,13 @@ export class ExtensionChromiumDriver implements ChromiumDriver {
     ) {
       return { ok: false, output: LIVE_CHROME_UNSUPPORTED };
     }
+    if (req.name === "key") {
+      const key = computerKey(String(req.args.key ?? ""));
+      return this.rpc.call({
+        ...req,
+        args: { ...req.args, ...key, modifiers: req.args.modifiers ?? key.modifiers },
+      });
+    }
     return this.rpc.call(req);
   }
 
@@ -55,6 +63,10 @@ export class ExtensionChromiumDriver implements ChromiumDriver {
   async dispatchInput(event: BrowserInputMessage): Promise<void> {
     if (!this.rpc.connected()) throw new Error(LIVE_CHROME_DISCONNECTED);
     await this.rpc.dispatchInput(event);
+  }
+
+  async invalidateObservation(): Promise<void> {
+    await this.rpc.call({ name: "browser_snapshot", args: {} });
   }
 
   async listDownloads(): Promise<string[]> {

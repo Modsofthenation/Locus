@@ -535,11 +535,13 @@ export function policyRejectsCreate(input: {
   autonomy?: string;
   network?: string;
   liveChrome?: boolean;
+  /** Host runtime inside a dedicated cloud task (Fargate), not this machine. */
+  cloudTask?: boolean;
   status?: ManagedPolicyStatus | null;
 }): string | undefined {
   const status = input.status;
   if (!status?.active) return undefined;
-  if (input.runtime === "host" && !policyAllowsHostAgents(status)) {
+  if (input.runtime === "host" && !input.cloudTask && !policyAllowsHostAgents(status)) {
     return "Managed policy does not allow Host agents";
   }
   if (input.autonomy === "autonomous" && !policyAllowsAutonomous(status)) {

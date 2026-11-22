@@ -1575,6 +1575,50 @@ export function navigateWorkspaceSymbols(input: { root: string; query: string; l
   return { items: items.slice(0, limit) };
 }
 
+export type WorkspaceOutlineItem = {
+  name: string;
+  kind: string;
+  /** 0-based line of the declaration name. */
+  line: number;
+  character: number;
+  container?: string;
+};
+
+/** TS/JS document outline (navigation tree), flattened in source order. Empty for other languages. */
+export function outlineWorkspaceFile(input: {
+  root: string;
+  rel: string;
+  content: string;
+  limit?: number;
+}): WorkspaceOutlineItem[] {
+  const rel = sanitizeWorkspaceRel(input.rel);
+  if (!rel || input.content.length > MAX_CONTENT) return [];
+  if (!TS_EXT.has(extname(rel).toLowerCase())) return [];
+  const project = loadTsForFile(input.root, rel);
+  const fileName = tsFileName(input.root, rel);
+  setOverlay(project, fileName, input.content);
+  const limit = Math.max(1, Math.min(400, input.limit ?? 200));
+  const out: WorkspaceOutlineItem[] = [];
+  const visit = (node: ts.NavigationTree, container: string | undefined, depth: number) => {
+    if (out.length >= limit || depth > 4) return;
+    const span = node.nameSpan ?? node.spans[0];
+    if (depth > 0 && span && node.kind !== ts.ScriptElementKind.alias) {
+      const pos = tsPosition(input.content, span.start);
+      out.push({
+        name: node.text,
+        kind: node.kind,
+        line: pos.line,
+        character: pos.character,
+        ...(container ? { container } : {}),
+      });
+    }
+    const next = depth > 0 ? node.text : undefined;
+    for (const child of node.childItems ?? []) visit(child, next, depth + 1);
+  };
+  visit(project.languageService.getNavigationTree(fileName), undefined, 0);
+  return out.sort((a, b) => a.line - b.line || a.character - b.character);
+}
+
 export function applyWorkspaceEdits(
   files: Map<string, string>,
   edits: WorkspaceTextEdit[],

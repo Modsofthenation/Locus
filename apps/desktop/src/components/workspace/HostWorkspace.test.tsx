@@ -167,6 +167,7 @@ describe("HostWorkspace", () => {
     expect(host.querySelector('[title="Collapse files"]')).toBeNull();
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(host.querySelector(".vm-pane.workspace-fs")).toBeNull();
     expect(fsBtn.getAttribute("aria-label")).toBe("Full screen files");
@@ -276,7 +277,9 @@ describe("HostWorkspace", () => {
       preview!.click();
       await Promise.resolve();
     });
-    const select = host.querySelector('[aria-label="Preview port"]') as HTMLElement;
+    const select = host.querySelector(
+      '[aria-label="Preview port"], [aria-label^="Preview port: "]',
+    ) as HTMLElement;
     expect(select).toBeTruthy();
     expect(select.closest("[data-value]")?.getAttribute("data-value")).toBe("3000");
     await act(async () => {

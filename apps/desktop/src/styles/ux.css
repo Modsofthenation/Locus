@@ -224,6 +224,10 @@
 .model-picker-combined.on .model-picker-combined-label {
   color: var(--text);
 }
+/* The next turn would run on a provider that is off: say so before Send fails. */
+.model-picker-combined.off .model-picker-combined-label {
+  color: var(--warn, var(--accent));
+}
 
 .setup-later .setup-list {
   margin: var(--space-2) 0 0;
@@ -269,12 +273,14 @@
   font-weight: var(--weight-semibold);
 }
 
-.empty-hero p {
+.empty-hero p:not(.eyebrow) {
   margin: var(--space-1) 0 0;
   color: var(--muted);
   font-size: var(--type-sm);
   line-height: 1.45;
   max-width: 62ch;
+  /* No one-word last lines ("guest.", "can write.") under the hero titles. */
+  text-wrap: pretty;
 }
 
 .empty-hero .eyebrow {
@@ -282,7 +288,9 @@
   font-size: var(--type-xs);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--muted);
+  /* No colour here (and .empty-hero p skips the eyebrow): .eyebrow already uses --muted,
+     and a colour at this specificity beats theme styles that paint the eyebrow as a chip
+     (brutalist, comic) or in the accent (pixel, HUD, editorial). */
 }
 
 details.advanced [hidden] {
@@ -427,33 +435,60 @@ details.advanced [hidden] {
 }
 
 .ui-tooltip-bubble {
+  /* Accessible description only; the visible label is .ui-tooltip-float. */
   position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Portalled to <body> with fixed coordinates (Tooltip.tsx places it), so a clipped panel
+   or scrolling list cannot cut it off and it flips below triggers at the window top. */
+.ui-tooltip-float {
+  position: fixed;
+  top: 0;
+  left: 0;
   z-index: var(--z-tooltip);
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 16px));
   padding: 4px 8px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
-  background: var(--bg-1);
+  /* Glass themes make --bg-1 translucent; the opaque page colour underneath keeps the
+     label readable over whatever it floats above. */
+  background: linear-gradient(var(--bg-1), var(--bg-1)), var(--bg);
   color: var(--text);
   box-shadow: var(--elev-2);
+  font-family: var(--font);
   font-size: var(--type-xs);
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
   line-height: 1.3;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
   pointer-events: none;
+  visibility: hidden;
   opacity: 0;
-  transform: translateX(-50%) translateY(2px);
+  transform: translateY(2px);
   transition:
     opacity var(--dur-fast) var(--ease-standard),
     transform var(--dur-fast) var(--ease-standard);
 }
 
-/* `:focus-visible`, not `:focus-within`: menus hand focus back to their trigger after a
-   mouse pick, which would otherwise pin the bubble open. */
-.ui-tooltip:hover .ui-tooltip-bubble,
-.ui-tooltip:has(:focus-visible) .ui-tooltip-bubble {
+.ui-tooltip-float.side-bottom {
+  transform: translateY(-2px);
+}
+
+.ui-tooltip-float.is-placed {
+  visibility: visible;
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
+  transform: none;
 }
 
 .ui-tooltip.is-disabled {
@@ -462,10 +497,6 @@ details.advanced [hidden] {
 
 .ui-tooltip.is-disabled > :disabled {
   pointer-events: none;
-}
-
-.ui-tooltip:has(details[open]) .ui-tooltip-bubble {
-  opacity: 0;
 }
 
 .field-inline {
@@ -480,7 +511,7 @@ details.advanced [hidden] {
     opacity: 0.7;
   }
 
-  .ui-tooltip-bubble {
+  .ui-tooltip-float {
     transition: none;
   }
 }
@@ -498,7 +529,7 @@ details.advanced [hidden] {
 }
 
 @media (forced-colors: active) {
-  .ui-tooltip-bubble,
+  .ui-tooltip-float,
   .modal,
   .app-notice,
   .menu-pop {
@@ -605,10 +636,11 @@ mark {
   }
 }
 
-/* Phone-width chat top bar: give the title room. Compare stays in the ⋯ menu,
+/* Phone-width chat top bar: give the title room. Compare and Chat / Terminal stay in the ⋯ menu,
    and the panel toggle keeps its icon (the label is in its tooltip and aria-label). */
 @media (max-width: 600px) {
-  .topbar .topbar-compare {
+  .topbar .topbar-compare,
+  .topbar .view-mode-toggle {
     display: none;
   }
   .topbar .topbar-panel-toggle-label {

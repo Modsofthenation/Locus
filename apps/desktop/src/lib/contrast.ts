@@ -64,27 +64,60 @@ export function parseThemePalettes(css: string): ThemePalette[] {
   return palettes;
 }
 
+/** Share of `--accent` in the default `--accent-text` mix (rest is `--text`); matches index.css. */
+export const ACCENT_TEXT_ACCENT_SHARE = 0.7;
+
+/** `color-mix(in srgb, a share, b)` for hex inputs, rounded to a hex colour. */
+export function mixSrgbHex(a: string, b: string, shareOfA: number): string | null {
+  const x = parseCssHex(a);
+  const y = parseCssHex(b);
+  if (!x || !y) return null;
+  const hex = [0, 1, 2]
+    .map((i) => Math.round(x[i]! * shareOfA + y[i]! * (1 - shareOfA)))
+    .map((v) => v.toString(16).padStart(2, "0"))
+    .join("");
+  return `#${hex}`;
+}
+
+/**
+ * Fills tokens that index.css derives with color-mix() when a palette does not
+ * set them, so the audit checks what the page actually paints.
+ */
+export function resolveDerivedTokens(vars: Record<string, string>): Record<string, string> {
+  if (vars["accent-text"] || !vars.accent || !vars.text) return vars;
+  const accentText = mixSrgbHex(vars.accent, vars.text, ACCENT_TEXT_ACCENT_SHARE);
+  return accentText ? { ...vars, "accent-text": accentText } : vars;
+}
+
 export interface ContrastCheck {
   pair: string;
   ratio: number;
   minimum: number;
 }
 
-export function themeContrastChecks(vars: Record<string, string>): {
+export function themeContrastChecks(declared: Record<string, string>): {
   ok: ContrastCheck[];
   fail: ContrastCheck[];
 } {
+  const vars = resolveDerivedTokens(declared);
   const pairs: Array<[string, string, string, number]> = [
     ["text", "bg", "text / bg", 4.5],
     ["text", "bg-1", "text / bg-1", 4.5],
     ["muted", "bg", "muted / bg", 4.5],
     ["muted", "bg-1", "muted / bg-1", 4.5],
-    ["faint", "bg", "faint / bg", 3],
+    // Faint is small print (hints, counts, group labels), so it needs body-text AA too.
+    ["faint", "bg", "faint / bg", 4.5],
+    ["faint", "bg-1", "faint / bg-1", 4.5],
     ["accent-ink", "accent", "accent-ink / accent", 4.5],
     ["ok", "bg", "ok / bg", 3],
-    ["danger", "bg", "danger / bg", 3],
+    // Danger labels destructive buttons and error lines, both small text.
+    ["danger", "bg", "danger / bg", 4.5],
+    ["danger", "bg-1", "danger / bg-1", 4.5],
     ["warn", "bg", "warn / bg", 3],
     ["accent", "bg", "accent / bg", 3],
+    // Small accent-coloured labels and links use --accent-text, which must clear AA.
+    ["accent-text", "bg", "accent-text / bg", 4.5],
+    ["accent-text", "bg-1", "accent-text / bg-1", 4.5],
     ["accent-2", "bg", "accent-2 / bg", 3],
     ["term-fg", "term", "term-fg / term", 4.5],
   ];

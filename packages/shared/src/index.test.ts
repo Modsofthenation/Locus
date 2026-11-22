@@ -82,11 +82,14 @@ import {
   wantsFreshPulls,
   redactText,
   resolveVmHardware,
+  THEME_IDS,
   THEME_OPTIONS,
   filterThemeOptions,
   resolveTheme,
   themeFamily,
   themeFamilyLabel,
+  THEME_FAMILY_ORDER,
+  THEME_STYLES,
   themeOption,
   TOOL_SCHEMAS,
   toolsForOs,
@@ -219,6 +222,25 @@ describe("parseRepoUrl", () => {
     expect(parseRepoUrl("https://bitbucket.org/acme/app")).toEqual({
       forge: "bitbucket",
       url: "https://bitbucket.org/acme/app.git",
+    });
+  });
+
+  it("parses remotes as git remote get-url prints them", () => {
+    const bitbucket = { forge: "bitbucket", url: "https://bitbucket.org/acme/app.git" };
+    expect(parseRepoUrl("git@ssh.bitbucket.org:acme/app.git")).toEqual(bitbucket);
+    expect(parseRepoUrl("ssh://git@altssh.bitbucket.org:443/acme/app.git")).toEqual(bitbucket);
+    expect(parseRepoUrl("https://someone@bitbucket.org/acme/app.git")).toEqual(bitbucket);
+    expect(parseRepoUrl("ssh://git@ssh.github.com:443/acme/app.git")).toEqual({
+      forge: "github",
+      url: "https://github.com/acme/app.git",
+    });
+    expect(parseRepoUrl("https://x-access-token:secret@github.com/acme/app")).toEqual({
+      forge: "github",
+      url: "https://github.com/acme/app.git",
+    });
+    expect(parseRepoUrl("ssh://git@altssh.gitlab.com:443/acme/app.git")).toEqual({
+      forge: "gitlab",
+      url: "https://gitlab.com/acme/app.git",
     });
   });
 
@@ -1086,6 +1108,8 @@ describe("toolsForOs", () => {
         tool.name === "browser_snapshot" ||
         tool.name === "browser_click" ||
         tool.name === "browser_type" ||
+        tool.name === "browser_action" ||
+        tool.name === "browser_wait" ||
         tool.name === "browser_console" ||
         tool.name === "browser_network" ||
         tool.name === "browser_pdf" ||
@@ -1186,6 +1210,7 @@ describe("toolsForOs", () => {
       "git_pr_loadpath",
       "git_pr_comment",
       "git_pr_checks",
+      "git_ci_logs",
       "git_pr_merge",
       "git_issue_list",
       "git_issue_get",
@@ -1269,6 +1294,9 @@ describe("toolsForOs", () => {
       "browser_snapshot",
       "browser_click",
       "browser_type",
+      "browser_action",
+      "browser_wait",
+      "computer_capabilities",
       "browser_console",
       "browser_network",
       "browser_pdf",
@@ -1289,6 +1317,8 @@ describe("toolsForOs", () => {
             name !== "browser_snapshot" &&
             name !== "browser_click" &&
             name !== "browser_type" &&
+            name !== "browser_action" &&
+            name !== "browser_wait" &&
             name !== "browser_console" &&
             name !== "browser_network" &&
             name !== "browser_pdf" &&
@@ -2316,7 +2346,7 @@ describe("themes", () => {
     expect(resolveTheme("nord")).toBe("nord");
     expect(resolveTheme()).toBe("ember");
     expect(resolveTheme("not-a-theme")).toBe("ember");
-    expect(THEME_OPTIONS).toHaveLength(106);
+    expect(THEME_OPTIONS).toHaveLength(186);
     expect(THEME_OPTIONS.map((t) => t.id)).toEqual([
       "ember",
       "midnight",
@@ -2424,6 +2454,86 @@ describe("themes", () => {
       "uplink",
       "mainframe",
       "teletype",
+      "concrete",
+      "poster",
+      "highlighter",
+      "bunker",
+      "icepane",
+      "smoke",
+      "rosequartz",
+      "deepsea",
+      "notebook",
+      "legalpad",
+      "newsprint",
+      "graphpaper",
+      "manila",
+      "bevel",
+      "tealtop",
+      "platinum",
+      "onebit",
+      "cyanotype",
+      "drafting",
+      "graphite",
+      "cad",
+      "sunsetdrive",
+      "arcade",
+      "laser",
+      "afterhours",
+      "putty",
+      "marshmallow",
+      "sage",
+      "duskclay",
+      "rice",
+      "stone",
+      "fog",
+      "pocket",
+      "cartridge",
+      "dungeon",
+      "sunday",
+      "pulp",
+      "vigilante",
+      "napkin",
+      "whiteboard",
+      "chalkboard",
+      "visor",
+      "hazard",
+      "redalert",
+      "leather",
+      "felt",
+      "brushed",
+      "dessau",
+      "weimar",
+      "nightschool",
+      "liquidchrome",
+      "glitter",
+      "starlight",
+      "gazette",
+      "quarterly",
+      "evening",
+      "washi",
+      "crane",
+      "lantern",
+      "speakeasy",
+      "ballroom",
+      "champagne",
+      "milano",
+      "squiggle",
+      "boombox",
+      "manuscript",
+      "telegram",
+      "inkwell",
+      "fluoro",
+      "zine",
+      "nightprint",
+      "datamosh",
+      "corrupt",
+      "whiteout",
+      "mochi",
+      "boba",
+      "sleepy",
+      "thermal",
+      "duplicate",
+      "register",
     ]);
     expect(THEME_OPTIONS.filter((t) => t.chatScene).map((t) => t.id)).toEqual([
       "cosmos",
@@ -2469,6 +2579,52 @@ describe("themes", () => {
       "peony",
       "glaze",
       "teletype",
+      "concrete",
+      "poster",
+      "highlighter",
+      "icepane",
+      "rosequartz",
+      "notebook",
+      "legalpad",
+      "newsprint",
+      "graphpaper",
+      "manila",
+      "bevel",
+      "tealtop",
+      "platinum",
+      "onebit",
+      "drafting",
+      "putty",
+      "marshmallow",
+      "sage",
+      "rice",
+      "stone",
+      "pocket",
+      "sunday",
+      "pulp",
+      "napkin",
+      "whiteboard",
+      "brushed",
+      "dessau",
+      "weimar",
+      "liquidchrome",
+      "glitter",
+      "gazette",
+      "quarterly",
+      "washi",
+      "crane",
+      "champagne",
+      "milano",
+      "squiggle",
+      "manuscript",
+      "telegram",
+      "fluoro",
+      "zine",
+      "whiteout",
+      "mochi",
+      "boba",
+      "thermal",
+      "duplicate",
     ]);
     expect(THEME_OPTIONS.filter((t) => t.contrast).map((t) => t.id)).toEqual([
       "contrast",
@@ -2562,6 +2718,45 @@ describe("themes", () => {
     expect(filterThemeOptions("terminal").every((opt) => opt.terminal)).toBe(true);
     expect(themeFamilyLabel("contrast")).toBe("Contrast");
     expect(themeFamilyLabel("gradient")).toBe("Gradient");
+    expect(themeFamily(themeOption("concrete"))).toBe("brutalist");
+    expect(themeFamily(themeOption("icepane"))).toBe("glass");
+    expect(themeFamily(themeOption("notebook"))).toBe("paper");
+    expect(themeFamily(themeOption("bevel"))).toBe("retro");
+    expect(themeFamily(themeOption("cyanotype"))).toBe("blueprint");
+    expect(themeFamily(themeOption("sunsetdrive"))).toBe("neon");
+    expect(themeFamily(themeOption("putty"))).toBe("clay");
+    expect(themeFamily(themeOption("rice"))).toBe("zen");
+    expect(themeFamily(themeOption("pocket"))).toBe("pixel");
+    expect(themeFamily(themeOption("sunday"))).toBe("comic");
+    expect(themeFamily(themeOption("napkin"))).toBe("sketch");
+    expect(themeFamily(themeOption("visor"))).toBe("hud");
+    expect(themeFamily(themeOption("leather"))).toBe("skeuo");
+    expect(themeFamily(themeOption("dessau"))).toBe("bauhaus");
+    expect(themeFamily(themeOption("liquidchrome"))).toBe("y2k");
+    expect(themeFamily(themeOption("gazette"))).toBe("editorial");
+    expect(themeFamily(themeOption("washi"))).toBe("origami");
+    expect(themeFamily(themeOption("speakeasy"))).toBe("deco");
+    expect(themeFamily(themeOption("milano"))).toBe("memphis");
+    expect(themeFamily(themeOption("manuscript"))).toBe("typewriter");
+    expect(themeFamily(themeOption("fluoro"))).toBe("riso");
+    expect(themeFamily(themeOption("datamosh"))).toBe("glitch");
+    expect(themeFamily(themeOption("mochi"))).toBe("kawaii");
+    expect(themeFamily(themeOption("thermal"))).toBe("receipt");
+    expect(themeFamilyLabel("deco")).toBe("Art Deco");
+    expect(themeFamilyLabel("hud")).toBe("HUD");
+    expect(themeFamilyLabel("y2k")).toBe("Y2K");
+    expect(themeFamilyLabel("retro")).toBe("Retro OS");
+    expect(themeFamilyLabel("brutalist")).toBe("Brutalist");
+    for (const style of THEME_STYLES) {
+      const members = filterThemeOptions(style);
+      expect(members.length).toBeGreaterThanOrEqual(3);
+      expect(members.every((opt) => opt.style === style)).toBe(true);
+      expect(THEME_FAMILY_ORDER).toContain(style);
+    }
+    expect(filterThemeOptions("light").some((t) => t.style)).toBe(false);
+    expect(filterThemeOptions("dark").some((t) => t.style)).toBe(false);
+    expect(new Set(THEME_OPTIONS.map((t) => t.id)).size).toBe(THEME_OPTIONS.length);
+    expect(THEME_OPTIONS.map((t) => t.id).sort()).toEqual([...THEME_IDS].sort());
   });
 });
 

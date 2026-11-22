@@ -98,6 +98,10 @@ describe("electron packaging", () => {
           from: "build/server-typescript-ls",
           to: "server/node_modules/typescript-ls",
         }),
+        expect.objectContaining({
+          from: "build/server-playwright-core",
+          to: "server/node_modules/playwright-core",
+        }),
         expect.objectContaining({ from: "../../images", to: "images" }),
         expect.objectContaining({ from: "../../apps/chrome-extension", to: "chrome-extension" }),
       ]),
@@ -350,7 +354,8 @@ describe("electron packaging", () => {
 
   it("inlines vscode language services and ships typescript-ls beside the bundle", async () => {
     const script = readFileSync(join(desktopRoot, "scripts/bundle-server.mjs"), "utf8");
-    expect(script).toMatch(/external:\s*\[["']typescript-ls["']\]/);
+    expect(script).toMatch(/external:\s*\[[^\]]*"typescript-ls"/);
+    expect(script).toMatch(/external:\s*\[[^\]]*"playwright-core"/);
     expect(script).toContain("server-typescript-ls");
     expect(script).toContain('"cssLanguageService.js"');
     expect(script).toContain('"htmlLanguageService.js"');

@@ -46,7 +46,7 @@ export type CursorCloudEvent =
       text?: string;
       durationMs?: number;
       git?: CursorGitSnapshot;
-      usage?: TokenUsageEvent & { window?: number };
+      usage?: TokenUsageEvent & { window?: number; contextTokens?: number };
     }
   | {
       type: "usage";
@@ -55,6 +55,8 @@ export type CursorCloudEvent =
       cachedInputTokens?: number;
       cacheWriteTokens?: number;
       window?: number;
+      /** Prompt size of the last model call, when the totals above span several calls. */
+      contextTokens?: number;
     }
   | { type: "reasoning"; text: string }
   | { type: "error"; message: string }

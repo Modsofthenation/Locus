@@ -2,7 +2,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import WebSocket from "ws";
-import type { ClientEvent } from "@locus/shared";
+import {
+  OPERATOR_HEADER,
+  OPERATOR_QUERY,
+  OPERATOR_TOKEN_FILE,
+  type ClientEvent,
+} from "@locus/shared";
 
 export class HttpError extends Error {
   readonly status: number;
@@ -31,8 +36,44 @@ export function defaultApiUrl(): string {
   }
 }
 
+function locusHomeDir(): string {
+  return process.env.LOCUS_HOME?.trim() || join(homedir(), ".locus");
+}
+
+/**
+ * Operator token for the control plane: `LOCUS_OPERATOR_TOKEN`, else
+ * `<LOCUS_HOME>/operator.token` (written by the control plane at start).
+ * Read on each call so a control plane started after the CLI still works.
+ */
+export function readOperatorToken(): string | undefined {
+  const env = process.env.LOCUS_OPERATOR_TOKEN?.trim();
+  if (env) return env;
+  try {
+    return readFileSync(join(locusHomeDir(), OPERATOR_TOKEN_FILE), "utf8").trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class LocusClient {
-  constructor(readonly baseUrl: string) {}
+  constructor(
+    readonly baseUrl: string,
+    private readonly operatorToken: () => string | undefined = readOperatorToken,
+  ) {}
+
+  /** Headers that identify this CLI as the operator. */
+  authHeaders(): Record<string, string> {
+    const token = this.operatorToken();
+    return token ? { [OPERATOR_HEADER]: token } : {};
+  }
+
+  /** Browser URL that signs a plain browser in to the UI (sets the operator cookie). */
+  signInUrl(path = "/"): string {
+    const url = new URL(this.url(path));
+    const token = this.operatorToken();
+    if (token) url.searchParams.set(OPERATOR_QUERY, token);
+    return url.toString();
+  }
 
   url(path: string): string {
     if (path.startsWith("http://") || path.startsWith("https://")) return path;
@@ -46,6 +87,7 @@ export class LocusClient {
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers: Record<string, string> = {
+      ...this.authHeaders(),
       ...(init.body ? { "content-type": "application/json" } : {}),
       ...(init.headers as Record<string, string> | undefined),
     };
@@ -115,7 +157,7 @@ export class LocusClient {
     onEvent: (event: ClientEvent) => void,
     onClose?: (err?: Error) => void,
   ): () => void {
-    const socket = new WebSocket(this.wsUrl("/ws"));
+    const socket = new WebSocket(this.wsUrl("/ws"), { headers: this.authHeaders() });
     let closed = false;
     let sawMessage = false;
     let fail: Error | undefined;

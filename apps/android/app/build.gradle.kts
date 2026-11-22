@@ -10,8 +10,8 @@ android {
         applicationId = "app.locus.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 35
-        versionName = "0.21.0"
+        versionCode = 38
+        versionName = "0.24.0"
     }
     buildTypes {
         release {

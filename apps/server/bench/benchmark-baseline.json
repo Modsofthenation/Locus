@@ -1,0 +1,6 @@
+{
+  "passRate": 0.5,
+  "maxDrop": 0.15,
+  "note": "Placeholder until the first scheduled run. Replace passRate (and runId / model / harnessVersion) with a real run's numbers from the benchmark-run artifact.",
+  "updatedAt": "2026-11-14"
+}

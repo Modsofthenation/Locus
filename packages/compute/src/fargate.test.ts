@@ -235,6 +235,84 @@ describe("Fargate recorded HTTP", () => {
     expect(compute.get("arn:aws:ecs:us-east-1:123:task/locus/abc")).toBeUndefined();
   });
 
+  it("injects host opt-in, the minted TLS identity, and the security group", async () => {
+    type RunBody = {
+      overrides: { containerOverrides: { name: string; environment: unknown }[] };
+      networkConfiguration: { awsvpcConfiguration: unknown };
+    };
+    let runBody: RunBody | undefined;
+    const compute = new FargateComputeBackend(
+      ((input, init) => {
+        const target = String(
+          (init?.headers as Record<string, string> | undefined)?.["x-amz-target"] ?? "",
+        );
+        if (target.endsWith("RunTask") && typeof init?.body === "string") {
+          runBody = JSON.parse(init.body) as RunBody;
+        }
+        return fixtureFetch()(input, init);
+      }) as typeof fetch,
+      wait,
+    );
+    const tls = { cert: "CERT-PEM", key: "KEY-PEM", fingerprint: `sha256:${"a".repeat(64)}` };
+    const handle = await compute.provision({
+      backend: { ...fargate, subnet: "subnet-1", securityGroup: "sg-1" },
+      sessionId: "s1",
+      size: "0.25-0.5",
+      workerTls: tls,
+    });
+    expect(handle.fingerprint).toBe(tls.fingerprint);
+    const override = runBody?.overrides.containerOverrides[0];
+    expect(override?.name).toBe("worker");
+    const env = Object.fromEntries(
+      (override?.environment as { name: string; value: string }[]).map((row) => [
+        row.name,
+        row.value,
+      ]),
+    );
+    expect(env.LOCUS_WORKER_TOKEN).toBe(handle.token);
+    expect(env.LOCUS_WORKER_ALLOW_HOST).toBe("1");
+    expect(Buffer.from(env.LOCUS_WORKER_TLS_CERT_B64!, "base64").toString()).toBe("CERT-PEM");
+    expect(Buffer.from(env.LOCUS_WORKER_TLS_KEY_B64!, "base64").toString()).toBe("KEY-PEM");
+    expect(runBody?.networkConfiguration.awsvpcConfiguration).toEqual({
+      subnets: ["subnet-1"],
+      securityGroups: ["sg-1"],
+      assignPublicIp: "ENABLED",
+    });
+  });
+
+  it("reports why a task stopped before it got an address", async () => {
+    const stopped = {
+      tasks: [
+        {
+          taskArn: "arn:aws:ecs:us-east-1:123:task/locus/abc",
+          lastStatus: "STOPPED",
+          stoppedReason: "Essential container in task exited",
+          containers: [{ name: "worker", reason: "CannotPullContainerError: not found" }],
+        },
+      ],
+    };
+    const compute = new FargateComputeBackend(fixtureFetch({ describeBodies: [stopped] }), wait);
+    await expect(
+      compute.provision({ backend: fargate, sessionId: "s1", size: "0.25-0.5" }),
+    ).rejects.toThrow(/Essential container in task exited — CannotPullContainerError/);
+  });
+
+  it("surfaces RunTask failures such as missing capacity", async () => {
+    const compute = new FargateComputeBackend(
+      (async () =>
+        new Response(
+          JSON.stringify({
+            tasks: [],
+            failures: [{ reason: "RESOURCE:CPU", detail: "none left" }],
+          }),
+          { status: 200 },
+        )) as typeof fetch,
+    );
+    await expect(
+      compute.provision({ backend: fargate, sessionId: "s1", size: "0.25-0.5" }),
+    ).rejects.toThrow(/RunTask failed: RESOURCE:CPU — none left/);
+  });
+
   it("does not call AWS when the size is not allowed", async () => {
     let called = 0;
     const compute = new FargateComputeBackend((async () => {

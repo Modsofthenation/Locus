@@ -421,4 +421,21 @@ describe("formatFixPrompt", () => {
     expect(text).toContain("## Load path: HIGH");
     expect(text).toContain("#12 Add currency");
   });
+
+  it("leads with the CI section when one is given", () => {
+    const text = formatFixPrompt({
+      pull: {
+        url: "https://github.com/acme/app/pull/12",
+        title: "Add currency",
+        headRef: "feat",
+        baseRef: "main",
+      },
+      number: 12,
+      ci: "CI failed on this pull request: test.",
+    });
+    expect(text.startsWith("CI failed on this pull request: test.")).toBe(true);
+    expect(text).toContain("Pull request context:");
+    expect(text).toContain("No reviewer JSON verdict yet.");
+    expect(text).not.toContain("Implement the reviewer's findings");
+  });
 });

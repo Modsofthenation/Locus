@@ -1,0 +1,33 @@
+name: Computer use
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser-and-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: sudo apt-get update && sudo apt-get install -y python3-pyatspi python3-gi gir1.2-gtk-3.0 at-spi2-core dbus-x11 xvfb
+      - name: Run real browser and GTK tasks in an isolated desktop session
+        run: dbus-run-session -- xvfb-run -a npm run test:computer
+        env:
+          LOCUS_COMPUTER_USE: "1"
+          CHROMIUM_BIN: google-chrome
+          LOCUS_NATIVE_DESKTOP: "1"
+          LOCUS_COMPUTER_REPORT: computer-use-report.json
+          NO_AT_BRIDGE: "0"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: computer-use-report
+          path: computer-use-report.json

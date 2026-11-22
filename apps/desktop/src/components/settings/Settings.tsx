@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   BUILTIN_SLASH_NAMES,
+  CLI_AGENT_PRESETS,
   FORGE_KINDS,
   GUEST_OS_OPTIONS,
   INTEGRATION_KINDS,
@@ -37,9 +38,9 @@ import {
   type IntegrationPlugin,
   type LocusConfig,
   type McpServerConfig,
-  type ThemeId,
   type VmTemplate,
   type WorkerBackend,
+  newSlackReviewer,
 } from "@locus/shared";
 import { api, type HypervisorStatus } from "@/lib/api";
 import { installAppUpdate, installOutcomeMessage, updateVersionLabel } from "@/lib/appUpdate";
@@ -62,6 +63,7 @@ import {
 import { setSettingsDirty, setSettingsPersist } from "@/lib/settingsLeave";
 import { applyProductModeSideEffects, beginProductModeTransition } from "@/lib/productMode";
 import { Select } from "@/components/layout/Select";
+import { MenuItem, OverflowMenu } from "@/components/layout/OverflowMenu";
 import { AUTONOMY_SELECT_OPTIONS } from "@/lib/formOptions";
 import { blankSkill, configForSave } from "@/lib/configPersist";
 import { useStore } from "@/state/store";
@@ -80,6 +82,7 @@ import {
   SettingsEmpty,
   SkillCard,
   WorkerCard,
+  cliAgentProviderFromPreset,
   integrationConnected,
   isBuiltinProvider,
   isBuiltinTemplate,
@@ -88,7 +91,11 @@ import { PolicyBanner, policyControlLocked } from "./PolicyBanner";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { BenchmarkSettings } from "./BenchmarkSettings";
+import { StorageSettings } from "./StorageSettings";
 import { BackupSettings } from "./BackupSettings";
+import { ProviderUsagePanel } from "./ProviderUsagePanel";
+import { ControlsSettings } from "./ControlsSettings";
+import { SlackReviewerSettings } from "./SlackReviewerSettings";
 import { HowItWorks, SettingsToggleRow } from "./SettingsBits";
 import { SearchField } from "@/components/layout/SearchField";
 import { BusyButton } from "@/components/layout/Skeleton";
@@ -150,6 +157,7 @@ export function Settings() {
   const [expandedMcp, setExpandedMcp] = useState<string | null>(null);
   const [expandedEnv, setExpandedEnv] = useState<string | null>(null);
   const [expandedIntegration, setExpandedIntegration] = useState<string | null>(null);
+  const [expandedReviewer, setExpandedReviewer] = useState<string | null>(null);
   const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null);
   const [hostPathsOpen, setHostPathsOpen] = useState(false);
   const [oauth, setOauth] = useState<{
@@ -244,9 +252,9 @@ export function Settings() {
 
   useEffect(() => {
     if (state.section !== "settings") return;
-    applyTheme(draft?.theme);
+    applyTheme(draft?.theme, draft?.customThemes ?? []);
     applyChatDensity(draft?.chatDensity);
-  }, [state.section, draft?.theme, draft?.chatDensity]);
+  }, [state.section, draft?.theme, draft?.customThemes, draft?.chatDensity]);
 
   useEffect(() => {
     if (state.section !== "settings") return;
@@ -784,7 +792,7 @@ export function Settings() {
         dockerKind: snapshot.docker,
         setup: snapshot.setup,
       });
-      applyTheme(snapshot.config.theme);
+      applyTheme(snapshot.config.theme, snapshot.config.customThemes ?? []);
       applyChatDensity(snapshot.config.chatDensity);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Reset failed");
@@ -853,6 +861,16 @@ export function Settings() {
       enabled: false,
       extraHeaders: {},
     };
+    setDraft({ ...current, providers: [...current.providers, next] });
+    setProviderFilter("");
+    setExpandedProvider(next.id);
+  }
+
+  function addCliAgent(presetId: string) {
+    const next = cliAgentProviderFromPreset(
+      presetId,
+      current.providers.map((row) => row.name),
+    );
     setDraft({ ...current, providers: [...current.providers, next] });
     setProviderFilter("");
     setExpandedProvider(next.id);
@@ -1105,6 +1123,7 @@ export function Settings() {
     if (hit.tab === "environments" && hit.id) setExpandedEnv(hit.id);
     if (hit.tab === "git" && hit.id) setExpandedForge(hit.id);
     if (hit.tab === "integrations" && hit.id) setExpandedIntegration(hit.id);
+    if (hit.tab === "reviewers" && hit.id) setExpandedReviewer(hit.id);
   }
 
   const findHits = settingsSearchHits(current, find, productMode);
@@ -1178,15 +1197,38 @@ export function Settings() {
                 {current.providers.filter((row) => row.enabled).length} of{" "}
                 {current.providers.length} providers enabled
               </p>
-              <button
-                type="button"
-                className="btn small add-provider"
-                onClick={addProvider}
-                disabled={policyControlLocked(draft, "providers")}
-              >
-                Add provider
-              </button>
+              <div className="settings-pane-actions">
+                <button
+                  type="button"
+                  className="btn small add-provider"
+                  onClick={addProvider}
+                  disabled={policyControlLocked(draft, "providers")}
+                >
+                  Add provider
+                </button>
+                <OverflowMenu
+                  className="add-cli-agent"
+                  title="Add a Custom CLI agent"
+                  toggleClassName="btn small add-provider"
+                  label="Add CLI agent"
+                  align="right"
+                  disabled={policyControlLocked(draft, "providers")}
+                  testId="add-cli-agent"
+                >
+                  {CLI_AGENT_PRESETS.map((preset) => (
+                    <MenuItem
+                      key={preset.id}
+                      value={preset.id}
+                      title={preset.hint}
+                      onClick={() => addCliAgent(preset.id)}
+                    >
+                      {preset.name}
+                    </MenuItem>
+                  ))}
+                </OverflowMenu>
+              </div>
             </div>
+            <ProviderUsagePanel />
             {draft.providers.length > 6 ? (
               <SearchField
                 className="search"
@@ -1249,7 +1291,14 @@ export function Settings() {
             editorFontSize={draft.editorFontSize ?? 12}
             formatOnSave={draft.formatOnSave !== false}
             showMinimap={draft.showMinimap !== false}
-            onSelect={(id: ThemeId) => setDraft({ ...draft, theme: id })}
+            customThemes={draft.customThemes ?? []}
+            providers={draft.providers}
+            onSelect={(id) => setDraft({ ...draft, theme: id })}
+            onCustomThemes={(customThemes, select) =>
+              setDraft((prev) =>
+                prev ? { ...prev, customThemes, ...(select ? { theme: select } : {}) } : prev,
+              )
+            }
             onEditor={(patch) => setDraft((prev) => (prev ? { ...prev, ...patch } : prev))}
           />
         )}
@@ -1505,10 +1554,12 @@ export function Settings() {
                 hourly USD so the spend cap meters VM time.
               </p>
               <p>
-                Mark <strong>Fargate</strong> to RunTask an allowed size (recorded HTTP, no AWS SDK)
-                using a task definition you already registered that runs locus-worker — Locus does
-                not create VPCs. An optional ECS endpoint sends RunTask through a VPC endpoint or
-                API Gateway.
+                Mark <strong>Fargate</strong> so each chat gets its own ECS task (an allowed size,
+                recorded HTTP, no AWS SDK) from a task definition that runs the{" "}
+                <code>images/worker</code> image — the agent runs inside that task and Stop ends it.
+                Locus does not create VPCs; the security group must allow TCP 7421 from this
+                machine. An optional ECS endpoint sends RunTask through a VPC endpoint or API
+                Gateway.
               </p>
             </HowItWorks>
             <div className="worker-add-paste">
@@ -1866,6 +1917,44 @@ export function Settings() {
               ))
             )}
           </>
+        )}
+        {tab === "reviewers" && (
+          <SlackReviewerSettings
+            reviewers={current.slackReviewers ?? []}
+            polling={current.slackReviewerPolling}
+            onPollingChange={(slackReviewerPolling) =>
+              setDraft({ ...current, slackReviewerPolling })
+            }
+            forges={current.forges ?? []}
+            providers={current.providers}
+            integrations={current.integrations ?? []}
+            skills={current.skills ?? []}
+            expanded={expandedReviewer}
+            onToggleExpand={(id) => setExpandedReviewer((open) => (open === id ? null : id))}
+            onAdd={() => {
+              const rows = current.slackReviewers ?? [];
+              const next = newSlackReviewer(crypto.randomUUID(), rows.length);
+              appendList("slackReviewers", next);
+              setExpandedReviewer(next.id);
+            }}
+            onPatch={(i, patch) => patchList("slackReviewers", i, patch)}
+            onRemove={(i) => {
+              const row = (current.slackReviewers ?? [])[i];
+              removeListUndoable("slackReviewers", i, row?.name || "reviewer");
+              setExpandedReviewer((id) => (id === row?.id ? null : id));
+            }}
+            onPersist={() => persistRef.current()}
+            onOpenIntegrations={() => dispatch({ type: "settingsTab", tab: "integrations" })}
+            onOpenChat={(channelId, threadTs) => {
+              void (async () => {
+                window.clearTimeout(autosaveTimerRef.current);
+                autosaveTimerRef.current = 0;
+                if (!(await persistRef.current())) return;
+                dispatch({ type: "selectSlackChannel", id: channelId });
+                dispatch({ type: "slackThread", ts: threadTs });
+              })();
+            }}
+          />
         )}
         {tab === "mcp" && (
           <>
@@ -2467,6 +2556,18 @@ export function Settings() {
                   </p>
                 </div>
               </div>
+              <SettingsToggleRow
+                label="Post-edit diagnostics"
+                hint="After an agent edits a TS/JS, Python, Go, Rust or Java file, append new language-server errors to the tool result (Host and Docker, ~3s budget)."
+                on={draft.advanced.postEditDiagnostics !== false}
+                testId="advanced-postEditDiagnostics"
+                onChange={(next) =>
+                  setDraft({
+                    ...draft,
+                    advanced: { ...draft.advanced, postEditDiagnostics: next },
+                  })
+                }
+              />
               <div className="field">
                 <label>Notify webhook</label>
                 <input
@@ -2752,6 +2853,8 @@ export function Settings() {
                 </p>
               </div>
             </details>
+            <ControlsSettings draft={draft} setDraft={setDraft} />
+            <StorageSettings />
             <BackupSettings />
             <details className="advanced" open>
               <summary>Danger zone</summary>

@@ -1,5 +1,6 @@
 import { isCanvasSession, isIdeSession, type SessionKind, type VisionMode } from "./session.js";
 import type { ComputerUseToolName } from "./tools.js";
+import { CODE_INTEL_READ_TOOL_NAMES } from "./codeIntel.js";
 import { isWindows, type AgentRuntime, type GuestOs } from "./vm.js";
 
 export interface AgentRecipe {
@@ -79,10 +80,13 @@ export const REVIEW_TOOLS: ComputerUseToolName[] = [
   "git_pr_loadpath",
   "git_pr_comment",
   "git_pr_checks",
+  "git_ci_logs",
   "git_issue_list",
   "git_issue_get",
   "git_issue_comment",
   ...CANVAS_RECIPE_TOOLS,
+  // Read-only language-server lookups (runtime tools, not guest catalog tools).
+  ...(CODE_INTEL_READ_TOOL_NAMES as readonly string[] as ComputerUseToolName[]),
 ];
 
 export const DESIGN_PLAYBOOK =
@@ -172,6 +176,7 @@ const REPO_FIX_TOOLS: ComputerUseToolName[] = [
   "git_pr_loadpath",
   "git_pr_comment",
   "git_pr_checks",
+  "git_ci_logs",
   "git_pr_merge",
   "git_issue_list",
   "git_issue_get",
@@ -385,7 +390,7 @@ export const AGENT_RECIPES: AgentRecipe[] = [
     prompt:
       "Set up this repository in /workspace: install dependencies, start the app, verify a real product action, write .locus/environment.json, and leave the next agent able to boot without rediscovering the workflow.",
     playbook:
-      "You are setting up this repository so later Locus agents can run it without rediscovering the workflow. Work in /workspace (already cloned). Discover the product from README, Locus.md, package manifests, Makefiles, compose files, and any existing .locus/environment.json or .cursor/environment.json. Classify work: install (idempotent, must terminate — npm ci / pip install / similar, never a dev server), start (the long-running command via start_process), and ports for preview. Install dependencies and run the install command a second time to prove it is safe to repeat. Start required services, then prove the product works with a real action (tests, a curl, preview, or playwright click/expect against that origin) — loading a page is not enough. Do not change application code to hide an environment problem. Write .locus/environment.json with install, start, ports, and optional packages (apt/apk names). Never put secrets, tokens, or passwords in that file. If Locus.md or AGENTS.md already exists, add only non-obvious operating notes; do not create AGENTS.md. Commit environment.json on a feature branch when the operator wants it shared; wait for Approve on push. Tell the operator to save a golden workspace image once setup is green so the next agent skips install. Finish with a short table of what you verified.",
+      'You are setting up this repository so later Locus agents can run it without rediscovering the workflow. Work in /workspace (already cloned). Discover the product from README, Locus.md, package manifests, Makefiles, compose files, and any existing .locus/environment.json or .cursor/environment.json. Classify work: install (idempotent, must terminate — npm ci / pip install / similar, never a dev server), start (the long-running command via start_process), and ports for preview. Install dependencies and run the install command a second time to prove it is safe to repeat. Start required services, then prove the product works with a real action (tests, a curl, preview, or playwright click/expect against that origin) — loading a page is not enough. Do not change application code to hide an environment problem. Write .locus/environment.json with install, start, ports, and optional packages (apt/apk names). Add a verify block naming the commands you proved work, e.g. verify: { test: "pytest -q", lint: "ruff check .", typecheck: "mypy ." }, with projects: [{ root: "services/api", test: "go test ./..." }] for sub-projects in another language and junit: "<glob>" when the test runner writes JUnit XML; the harness publish gate runs verify.test before git_push / git_pr, so only list commands that pass on a clean checkout. Never put secrets, tokens, or passwords in that file. If Locus.md or AGENTS.md already exists, add only non-obvious operating notes; do not create AGENTS.md. Commit environment.json on a feature branch when the operator wants it shared; wait for Approve on push. Tell the operator to save a golden workspace image once setup is green so the next agent skips install. Finish with a short table of what you verified.',
     allowedTools: ENV_SETUP_TOOLS,
   },
   {

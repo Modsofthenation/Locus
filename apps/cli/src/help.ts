@@ -10,7 +10,7 @@ Start / status:
   locus status             Health, hypervisor, Docker, setup
   locus setup              First-run / QEMU setup status
   locus setup install-qemu Install QEMU via the host package manager
-  locus ui                 Print the UI URL if the server is serving the desktop build
+  locus ui                 Print a browser sign-in URL if the server serves the desktop build
   locus events             Stream hub WebSocket events
   locus completion bash|zsh|fish
   locus version            Print CLI version
@@ -44,7 +44,7 @@ Agents (coding chats):
   locus agent rename <id> <title>
   locus agent workers spawn <id> [--count] [--prompt]
   locus agent workers diff <id>
-  locus agent workers merge <id> <workerId>
+  locus agent workers merge <id> <workerId> [--approve-risk]
   locus agent role cycle <id>
   locus agent promote <id> [--scaffold vite-react|static|next|astro]
   locus agent canvas <id> [--canvas <canvasId>]
@@ -79,7 +79,7 @@ Codebase:
   locus repo pull <id> <number>
   locus repo comment <id> <number> --body TEXT [--path] [--line] [--side]
   locus repo review <id> <number> --body TEXT [--event COMMENT|APPROVE|REQUEST_CHANGES]
-  locus repo merge <id> <number>
+  locus repo merge <id> <number> [--approve-risk]
   locus repo agent <id> [--reuse|--new] [--prompt]
   locus repo setup <id>
   locus repo fix-session <id> <number>
@@ -117,6 +117,18 @@ Config / Settings:
   locus config policy
   locus config revoke-all --confirm REVOKE
   locus config reset --confirm RESET
+  locus config telemetry [enable --endpoint URL …|disable|test]
+  locus config budget [--daily-usd N] [--daily-tokens N]
+
+Team controls:
+  locus audit verify [--local] [--dir path]          Exit 1 at the first broken record
+  locus audit export [--since 7d|YYYY-MM-DD] [--format jsonl|csv] [--out file]
+  locus budget [status]                              Today's spend vs daily caps
+  locus budget set --daily-usd N [--daily-tokens N] [--automation id|--project id]
+  locus budget override --reason "…" [--scope global|automation|project] [--id]
+  locus ci run [--recipe pr-reviewer|repo-fixer] [--prompt] [--repo path|url] [--pr URL]
+               [--runtime host|docker] [--model] [--max-usd] [--allow rule]… [--out result.json]
+               [--post-comment] [--no-auto-deny] [--timeout s]   Exit 0/1/2/3
 
 Backup / updates:
   locus backup [file.locusbak] [--include-disks]     Encrypted copy of ~/.locus
@@ -124,9 +136,10 @@ Backup / updates:
   locus restore status|cancel
   locus update [download]                            Check GitHub releases
 
-Model benchmark:
-  locus eval run --model provider/model[,…] [--case id,…] [--repeat N] [--wait]
-  locus eval cases|list|show <run>|cancel <run>
+Model benchmark (alias: locus eval):
+  locus bench run --model provider/model[,…] [--case id,…] [--suite dir] [--repeat N] [--wait]
+  locus bench cases|list|show <run>|cancel <run>|history|compare <a> <b>
+  locus bench mine <repo> [--since date] [--limit N] [--out dir] [--dry-run]
 
 Images / debug:
   locus image list|capture|delete|fetch|fetch-virtio
@@ -145,6 +158,45 @@ export function helpFor(path: string[]): string {
 }
 
 const HELP_TOPICS: Record<string, string> = {
+  audit: `Tamper-evident audit log (~/.locus/audit/audit-YYYY-MM-DD.jsonl, sha256 hash chain).
+
+  locus audit verify [--local] [--dir path] [--json]
+      Exit 0 when every record hashes and links; exit 1 and print the first broken record.
+      Uses the running control plane, or reads the files directly with --local / --dir
+      (also when the control plane is not running).
+  locus audit export [--since 7d|24h|YYYY-MM-DD|ISO] [--format jsonl|csv] [--out file]
+
+Records: approvals and denials (including Always allow), blocked actions, git_push / git_pr /
+merge results, policy and budget changes, budget stops and overrides, credential and
+integration changes. Values of secrets are never written.`,
+  budget: `Server-enforced daily caps (local calendar day).
+
+  locus budget [status]
+  locus budget set --daily-usd 25 [--daily-tokens 2000000]
+  locus budget set --automation <id> --daily-usd 5
+  locus budget set --project <id> --daily-tokens 500000
+  locus budget set --daily-usd 0                      Clear the global USD cap
+  locus budget override --reason "release day" [--scope global|automation|project] [--id]
+
+A turn checks the caps before its first model call and between rounds. When a cap is hit the
+agent posts "Budget reached: …", sets Needs you, and stops. Overrides last until local midnight
+and are written to the audit log.`,
+  ci: `Headless CI run. Exit codes: 0 pass · 1 fail · 2 stopped waiting for approval · 3 error.
+
+  locus ci run --recipe pr-reviewer --pr https://github.com/acme/web/pull/42 --out result.json
+  locus ci run --recipe repo-fixer --repo . --runtime host --allow "git_push(branch:locus/*)"
+  locus ci run --prompt "Bump lodash and run tests" --repo https://github.com/acme/web --max-usd 2
+
+  --api URL          Use this control plane (else reuse a running one, else start an ephemeral one)
+  --ephemeral        Always start a fresh control plane (LOCUS_HOME in a temp dir unless --home)
+  --allow RULE       Approve matching tool calls (param syntax: git_push(branch:locus/*)); repeatable
+  --no-auto-deny     Stop with exit 2 at the first approval instead of denying it
+  --post-comment     Post the review verdict on the PR (review recipes)
+  --out FILE         Write { outcome, verdict, reasons, risk, costUsd, tokens, tests, sessionId }
+  --timeout SECONDS  Default 1800
+
+An ephemeral plane reads ANTHROPIC_API_KEY / OPENAI_API_KEY and GITHUB_TOKEN from the
+environment. See docs/ci.md.`,
   serve: `Start the Locus control plane on loopback (default port 7420).
 
   locus serve
@@ -314,6 +366,7 @@ Agents flag bad claims with correct_graph; inbox Accept/Dismiss is the human gat
   locus config policy
   locus config revoke-all --confirm REVOKE
   locus config provider test <id>
+  locus config provider usage [id] [--refresh]
   locus config git oauth start <forgeId>
   locus config phone enable
   locus config chrome enable
@@ -344,18 +397,27 @@ The swap happens at the next start, before anything loads. Current files move to
 
 The desktop app checks at launch and every six hours unless Settings → About →
 Check automatically is off. On a Linux AppImage, Install swaps the file and relaunches.`,
-  eval: `Benchmark models on small coding tasks as real Host agent turns.
+  bench: `Benchmark models on coding tasks as real Host agent turns, and track results over time.
 
-  locus eval cases
-  locus eval run --model openai/gpt-5 --model anthropic/claude-sonnet [--case fix-add,off-by-one]
-                 [--repeat 3] [--timeout 10] [--wait]
-  locus eval list
-  locus eval show <run>
-  locus eval cancel <run>
+  locus bench cases [--suite <dir|repo>]
+  locus bench run --model openai/gpt-5 --model anthropic/claude-sonnet [--case fix-add,go-wordwrap]
+                  [--suite <dir|repo>] [--repeat 3] [--timeout 10] [--wait]
+  locus bench list
+  locus bench show <run>
+  locus bench cancel <run>
+  locus bench history                  Pass rate / cost / time per model and harness version
+  locus bench compare <before> <after> [--all]   Cases that flipped between two runs
+  locus bench mine <repo> [--since "6 months ago"] [--limit 5] [--max-commits 500] [--ref main]
+                  [--require-issue] [--test-command "npm test"] [--setup "npm ci" | --no-setup]
+                  [--out <dir>] [--dry-run]
 
-Each case starts with failing tests. A case passes when \`npm test\` passes afterwards and the
-tests were not edited. Runs record tokens, estimated cost and time. Benchmark sessions are
-archived so you can open a failure. Results: ~/.locus/benchmarks/.`,
+Built-in: small JavaScript toy cases plus TypeScript / Python / Go bug-fix fixtures (skipped
+when the toolchain is missing). Spec cases check out the base commit with no history, run the
+setup, send the issue text, then copy in the fix commit's test files and run testCommand: the
+case passes when every fail-to-pass test passes, pass-to-pass tests stay green, and protected
+paths were not edited. \`mine\` drafts verified specs from git history into
+<repo>/.locus/benchmarks/ for review. Results: ~/.locus/benchmarks/. See docs/benchmarks.md.`,
+  eval: `Alias of \`locus bench\` (run, cases, list, show, cancel). See \`locus bench --help\`.`,
   debug: `JSONL traces under ~/.locus/traces, plus audit exports.
 
   locus debug logs

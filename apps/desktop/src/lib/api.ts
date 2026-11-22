@@ -1,5 +1,12 @@
 import type {
   AgentCanvasRef,
+  CustomTheme,
+  AgentTerminalStatus,
+  BenchmarkComparison,
+  BenchmarkHistoryRow,
+  BudgetScope,
+  DailyBudgetStatus,
+  TelemetrySettings,
   BenchmarkRun,
   BenchmarkTarget,
   BenchmarkTargetSummary,
@@ -20,6 +27,9 @@ import type {
   CreateAutomationInput,
   CreateLinkedRepoInput,
   CreateSessionInput,
+  WorkerBoardRow,
+  WorkerRanking,
+  WorktreeAgentSpec,
   DebugLogDetail,
   DebugLogKind,
   DebugLogSource,
@@ -46,6 +56,12 @@ import type {
   SlackMessage,
   SlackRunInput,
   SlackStatus,
+  SlackReviewRun,
+  SlackReviewRunsResponse,
+  SlackReviewerApiLogResponse,
+  SlackReviewTrace,
+  SlackRepoNote,
+  SlackReviewerStats,
   SlackSearchHit,
   GrafanaAlert,
   GrafanaBriefing,
@@ -87,6 +103,8 @@ import type {
   SwarmNeedAction,
   SwarmTeamHandoff,
   SwarmTeamHandoffAction,
+  ProviderUsage,
+  SampleTaskInput,
 } from "@locus/shared";
 import { CHAT_POST_TIMEOUT_MS, HttpError, WORKSPACE_FILE_TIMEOUT_MS } from "./net";
 import {
@@ -154,6 +172,7 @@ export type {
   WorkspaceCompletionItem,
 } from "./apiTypes";
 export {
+  agentTerminalWsUrl,
   browserWsUrl,
   connectEvents,
   displayWsUrl,
@@ -291,7 +310,166 @@ async function rememberMutatedIssue(
 
 export type BenchmarkRunView = BenchmarkRun & { summary: BenchmarkTargetSummary[] };
 
+export type UnityEditorJob = {
+  id: string;
+  sessionId: string;
+  action: "inspect" | "compile" | "playtest" | "capture" | "build" | "create-scene";
+  status: "running" | "succeeded" | "failed";
+  startedAt: string;
+  finishedAt?: string;
+  message?: string;
+  exitCode?: number;
+  editor?: string;
+  log?: string;
+  data?: unknown;
+  screenshot?: boolean;
+  webglReady?: boolean;
+};
+
+export type BlenderEditorJob = {
+  id: string;
+  sessionId: string;
+  action: "create" | "inspect" | "validate" | "render" | "export" | "script";
+  status: "running" | "succeeded" | "failed";
+  startedAt: string;
+  finishedAt?: string;
+  message?: string;
+  exitCode?: number;
+  log?: string;
+  data?: unknown;
+  image?: boolean;
+};
+
+export type GodotEditorJob = {
+  id: string;
+  sessionId: string;
+  action: "inspect" | "import" | "smoke" | "export" | "create-scene";
+  status: "running" | "succeeded" | "failed";
+  startedAt: string;
+  finishedAt?: string;
+  message?: string;
+  exitCode?: number;
+  log?: string;
+  data?: unknown;
+  webReady?: boolean;
+};
+
+export type UnrealEditorJob = {
+  id: string;
+  sessionId: string;
+  action: "inspect" | "compile" | "test" | "package" | "python";
+  status: "running" | "succeeded" | "failed";
+  startedAt: string;
+  finishedAt?: string;
+  message?: string;
+  exitCode?: number;
+  engine?: string;
+  log?: string;
+  data?: unknown;
+};
+
 export const api = {
+  storageInventory: () => json<import("@locus/shared").StorageInventory>("/api/storage/inventory"),
+  pinStorage: (id: string, pinned: boolean) =>
+    json<{ ok: true }>("/api/storage/pin", { method: "PUT", body: JSON.stringify({ id, pinned }) }),
+  cleanupStorage: (ids: string[]) =>
+    json<{ removed: number; bytes: number }>("/api/storage/cleanup", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
+  visualBaselines: (id: string) =>
+    json<import("@locus/shared").VisualBaseline[]>(`/api/sessions/${id}/visual-review`),
+  captureVisualReview: (
+    id: string,
+    input: { name: string; path?: string } | { baselineId: string },
+  ) =>
+    json<import("@locus/shared").VisualBaseline[]>(`/api/sessions/${id}/visual-review`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  startUnrealJob: (
+    id: string,
+    body: {
+      action: UnrealEditorJob["action"];
+      target?: "windows" | "linux" | "macos";
+      filter?: string;
+      script?: string;
+    },
+  ) =>
+    json<UnrealEditorJob>(`/api/sessions/${encodeURIComponent(id)}/unreal/jobs`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getUnrealJob: (id: string, jobId: string) =>
+    json<UnrealEditorJob>(
+      `/api/sessions/${encodeURIComponent(id)}/unreal/jobs/${encodeURIComponent(jobId)}`,
+    ),
+  latestUnrealJob: (id: string) =>
+    json<{ job: UnrealEditorJob | null }>(`/api/sessions/${encodeURIComponent(id)}/unreal/latest`),
+  startBlenderJob: (
+    id: string,
+    body: {
+      action: BlenderEditorJob["action"];
+      file: string;
+      format?: "glb" | "fbx" | "obj" | "stl";
+      script?: string;
+    },
+  ) =>
+    json<BlenderEditorJob>(`/api/sessions/${encodeURIComponent(id)}/blender/jobs`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getBlenderJob: (id: string, jobId: string) =>
+    json<BlenderEditorJob>(
+      `/api/sessions/${encodeURIComponent(id)}/blender/jobs/${encodeURIComponent(jobId)}`,
+    ),
+  latestBlenderJob: (id: string) =>
+    json<{ job: BlenderEditorJob | null }>(
+      `/api/sessions/${encodeURIComponent(id)}/blender/latest`,
+    ),
+  startGodotJob: (
+    id: string,
+    body: {
+      action: GodotEditorJob["action"];
+      scene?: string;
+      target?: "web" | "linux" | "windows" | "macos";
+    },
+  ) =>
+    json<GodotEditorJob>(`/api/sessions/${encodeURIComponent(id)}/godot/jobs`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getGodotJob: (id: string, jobId: string) =>
+    json<GodotEditorJob>(
+      `/api/sessions/${encodeURIComponent(id)}/godot/jobs/${encodeURIComponent(jobId)}`,
+    ),
+  latestGodotJob: (id: string) =>
+    json<{ job: GodotEditorJob | null; preview: GodotEditorJob | null }>(
+      `/api/sessions/${encodeURIComponent(id)}/godot/latest`,
+    ),
+
+  startUnityJob: (
+    id: string,
+    body: {
+      action: UnityEditorJob["action"];
+      scene?: string;
+      target?: "linux" | "windows" | "macos" | "webgl";
+    },
+  ) =>
+    json<UnityEditorJob>(`/api/sessions/${encodeURIComponent(id)}/unity/jobs`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getUnityJob: (id: string, jobId: string) =>
+    json<UnityEditorJob>(
+      `/api/sessions/${encodeURIComponent(id)}/unity/jobs/${encodeURIComponent(jobId)}`,
+    ),
+  latestUnityJob: (id: string) =>
+    json<{ job: UnityEditorJob | null; preview: UnityEditorJob | null }>(
+      `/api/sessions/${encodeURIComponent(id)}/unity/latest`,
+    ),
+
   health: () =>
     json<{ ok: boolean; hypervisor: string; docker?: string; dockerReady?: boolean }>(
       "/api/health",
@@ -309,6 +487,15 @@ export const api = {
   config: () => json<LocusConfig>("/api/config"),
   saveConfig: (config: LocusConfig) =>
     json<LocusConfig>("/api/config", { method: "PUT", body: JSON.stringify(config) }),
+  /** Ask the configured model for a theme. Returns an unsaved spec to preview. */
+  generateTheme: (
+    prompt: string,
+    opts: { current?: CustomTheme; providerId?: string; model?: string } = {},
+  ) =>
+    json<{ theme: CustomTheme }>("/api/themes/generate", {
+      method: "POST",
+      body: JSON.stringify({ prompt, ...opts }),
+    }),
   revokeAllIntegrations: () =>
     json<{ ok: true; config: LocusConfig }>("/api/integrations/revoke-all", {
       method: "POST",
@@ -318,6 +505,25 @@ export const api = {
   sessionApprovals: (id: string) =>
     json<{ approvals: ApprovalExportRow[] }>(`/api/sessions/${id}/audit/approvals`),
   auditApprovals: () => json<{ approvals: ApprovalExportRow[] }>("/api/audit/approvals"),
+  auditVerify: () =>
+    json<{
+      ok: boolean;
+      records: number;
+      files: number;
+      dir?: string;
+      firstBroken?: { file: string; line: number; seq?: number; reason: string };
+    }>("/api/audit/verify"),
+  budgets: () => json<{ status: DailyBudgetStatus }>("/api/budgets"),
+  budgetOverride: (input: { scope: BudgetScope; id?: string; reason: string }) =>
+    json<{ status: DailyBudgetStatus }>("/api/budgets/override", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  telemetryTest: (telemetry?: TelemetrySettings) =>
+    json<{ ok: boolean; error?: string }>("/api/telemetry/test", {
+      method: "POST",
+      body: JSON.stringify({ telemetry }),
+    }),
   testWorker: (input: { url: string; token?: string; fingerprint?: string }) =>
     json<{
       ok: true;
@@ -408,6 +614,8 @@ export const api = {
     }),
   createSession: (input: CreateSessionInput) =>
     json<AgentSession>("/api/sessions", { method: "POST", body: JSON.stringify(input) }),
+  startSampleTask: (input: SampleTaskInput = {}) =>
+    json<AgentSession>("/api/sample-task", { method: "POST", body: JSON.stringify(input) }),
   patchSession: (id: string, patch: PatchSessionInput) =>
     json<AgentSession>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteSession: (id: string) => json(`/api/sessions/${id}`, { method: "DELETE" }),
@@ -469,7 +677,10 @@ export const api = {
   browserHandback: (id: string) =>
     json<AgentSession>(`/api/sessions/${id}/browser/handback`, { method: "POST" }),
   fork: (id: string) => json<AgentSession>(`/api/sessions/${id}/fork`, { method: "POST" }),
-  spawnWorkers: (id: string, body: { count?: number; prompt?: string; models?: string[] } = {}) =>
+  spawnWorkers: (
+    id: string,
+    body: { count?: number; prompt?: string; models?: string[]; agents?: WorktreeAgentSpec[] } = {},
+  ) =>
     json<AgentSession[]>(`/api/sessions/${id}/workers`, {
       method: "POST",
       body: JSON.stringify(body),
@@ -478,10 +689,28 @@ export const api = {
     json<Array<{ id: string; role: string; branch?: string; diff: string }>>(
       `/api/sessions/${id}/workers/diff`,
     ),
-  mergeWorker: (id: string, workerId: string) =>
+  workerConnection: (id: string) =>
+    json<import("@locus/shared").WorkerConnectionStatus>(`/api/sessions/${id}/worker-connection`),
+  resumeWorkerCheckpoint: (id: string) =>
+    json<AgentSession>(`/api/sessions/${id}/worker-connection/resume`, { method: "POST" }),
+  verifyWorkers: (id: string) =>
+    json<import("@locus/shared").WorkerVerification[]>(`/api/sessions/${id}/workers/verify`, {
+      method: "POST",
+    }),
+  workerBoard: (id: string) => json<WorkerBoardRow[]>(`/api/sessions/${id}/workers/board`),
+  rankWorkers: (id: string) =>
+    json<WorkerRanking>(`/api/sessions/${id}/workers/rank`, { method: "POST" }),
+  discardWorker: (id: string) =>
+    json<{ ok: true }>(`/api/sessions/${id}/workers/discard`, { method: "POST" }),
+  fanout: (body: { create: CreateSessionInput; agents: WorktreeAgentSpec[]; prompt: string }) =>
+    json<{ parent: AgentSession; workers: AgentSession[] }>(`/api/sessions/fanout`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  mergeWorker: (id: string, workerId: string, opts: { approveRisk?: boolean } = {}) =>
     json<AgentSession>(`/api/sessions/${id}/workers/merge`, {
       method: "POST",
-      body: JSON.stringify({ workerId }),
+      body: JSON.stringify({ workerId, ...opts }),
     }),
   undoFile: (id: string) => json<AgentSession>(`/api/sessions/${id}/undo-file`, { method: "POST" }),
   cycleRole: (id: string) => json<AgentSession>(`/api/sessions/${id}/roles`, { method: "POST" }),
@@ -763,6 +992,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(patch),
     }),
+  providerUsage: (opts: { refresh?: boolean; id?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (opts.refresh) qs.set("refresh", "1");
+    if (opts.id) qs.set("id", opts.id);
+    const query = qs.toString();
+    return json<{ usage: ProviderUsage[] }>(`/api/providers/usage${query ? `?${query}` : ""}`);
+  },
   refreshCursorCli: () =>
     json<{ changed: boolean; models: string[]; config: LocusConfig }>(
       "/api/providers/cursor-cli/refresh",
@@ -818,7 +1054,21 @@ export const api = {
     ),
   cancelRestore: () => json<{ ok: true }>("/api/restore", { method: "DELETE" }),
   benchmarkCases: () =>
-    json<{ cases: Array<{ id: string; title: string; prompt: string }> }>("/api/benchmarks/cases"),
+    json<{
+      cases: Array<{
+        id: string;
+        title: string;
+        prompt: string;
+        kind?: "toy" | "spec";
+        language?: string;
+      }>;
+      errors?: string[];
+    }>("/api/benchmarks/cases"),
+  benchmarkHistory: () => json<{ rows: BenchmarkHistoryRow[] }>("/api/benchmarks/history"),
+  compareBenchmarks: (a: string, b: string) =>
+    json<BenchmarkComparison>(
+      `/api/benchmarks/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`,
+    ),
   benchmarkRuns: () => json<{ runs: BenchmarkRunView[] }>("/api/benchmarks"),
   benchmarkRun: (id: string) => json<BenchmarkRunView>(`/api/benchmarks/${encodeURIComponent(id)}`),
   startBenchmark: (body: { targets: BenchmarkTarget[]; caseIds?: string[]; repeat?: number }) =>
@@ -860,6 +1110,13 @@ export const api = {
   agentCanvas: (id: string, canvasId: string) =>
     json<AgentCanvasRef & { html: string }>(
       `/api/sessions/${encodeURIComponent(id)}/agent-canvases/${encodeURIComponent(canvasId)}`,
+    ),
+  agentTerminals: (id: string) =>
+    json<AgentTerminalStatus>(`/api/sessions/${encodeURIComponent(id)}/terminals`),
+  closeAgentTerminal: (id: string, terminalId: string) =>
+    json<{ ok: boolean; closed: boolean }>(
+      `/api/sessions/${encodeURIComponent(id)}/terminals/${encodeURIComponent(terminalId)}`,
+      { method: "DELETE" },
     ),
   sessionPreview: (id: string) =>
     json<{ ports: number[]; active?: { port: number; path: string; url: string } }>(
@@ -1275,6 +1532,11 @@ export const api = {
   deleteBoard: (id: string) => json(`/api/boards/${id}`, { method: "DELETE" }),
   projects: () => json<ProjectSummary[]>("/api/projects"),
   project: (id: string) => json<ProjectDocument>(`/api/projects/${id}`),
+  projectOfflinePreflight: (id: string, profile: import("@locus/shared").ProjectOfflineProfile) =>
+    json<import("@locus/shared").ProjectOfflinePreflight>(`/api/projects/${id}/offline-preflight`, {
+      method: "POST",
+      body: JSON.stringify({ profile }),
+    }),
   createProject: (input: CreateProjectInput = {}) =>
     json<ProjectDocument>("/api/projects", { method: "POST", body: JSON.stringify(input) }),
   patchProject: (id: string, input: PatchProjectInput) =>
@@ -1457,6 +1719,17 @@ export const api = {
     if (!res.ok) throw new HttpError(await errorMessageFromResponse(res), res.status);
     return (await res.json()) as { assetId: string; mime: string };
   },
+  previewAutomationTrigger: (input: {
+    job: CreateAutomationInput;
+    jobId?: string;
+    runId?: string;
+    raw?: string;
+    headerEvent?: string;
+  }) =>
+    json<import("@locus/shared").AutomationTriggerPreview>("/api/automations/preview-trigger", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   automationRuns: (id?: string, opts?: { limit?: number; offset?: number }) => {
     const base = id ? `/api/automations/${id}/runs` : "/api/automation-runs";
     const params = new URLSearchParams();
@@ -1544,11 +1817,14 @@ export const api = {
         body: JSON.stringify(input),
       }),
     ),
-  mergePull: async (id: string, number: number) =>
+  mergePull: async (id: string, number: number, opts: { approveRisk?: boolean } = {}) =>
     rememberMutatedPull(
       id,
       number,
-      await json<PullRequestDetail>(`/api/repos/${id}/pulls/${number}/merge`, { method: "POST" }),
+      await json<PullRequestDetail>(`/api/repos/${id}/pulls/${number}/merge`, {
+        method: "POST",
+        body: JSON.stringify(opts),
+      }),
     ),
   setPullFileViewed: async (id: string, number: number, path: string, viewed: boolean) =>
     rememberMutatedPull(
@@ -1694,6 +1970,57 @@ export const api = {
   slackSearch: (query: string) =>
     json<SlackSearchHit[]>(`/api/slack/search?q=${encodeURIComponent(query.trim())}`),
   slackActivity: () => json<SlackActivityItem[]>("/api/slack/activity"),
+  /**
+   * Recent runs with 👍 / 👎 on their final Slack message, vote totals per reviewer, reviews
+   * queued or running now, and the review chats still watched.
+   */
+  slackReviewerRuns: () => json<SlackReviewRunsResponse>("/api/slack/reviewers/runs"),
+  /**
+   * Review one PR now with a saved reviewer. `threadTs` posts progress into that Slack thread.
+   * `dryRun` posts nothing anywhere and returns the findings.
+   */
+  slackReviewerReview: (
+    id: string,
+    url: string,
+    threadTs?: string,
+    opts: { dryRun?: boolean } = {},
+  ) =>
+    json<SlackReviewRun>(`/api/slack/reviewers/${encodeURIComponent(id)}/review`, {
+      method: "POST",
+      body: JSON.stringify({
+        url,
+        ...(threadTs ? { threadTs } : {}),
+        ...(opts.dryRun ? { dryRun: true } : {}),
+      }),
+    }),
+  /** Live logs: the reviewers' Slack and forge calls with `seq` above `after`, oldest first. */
+  slackReviewerLogs: (after = 0) =>
+    json<SlackReviewerApiLogResponse>(
+      `/api/slack/reviewers/logs${after ? `?after=${encodeURIComponent(String(after))}` : ""}`,
+    ),
+  /** One run's trace: prompt, reasoning, tool calls with output, and reply. `live` while running. */
+  slackReviewerTrace: (traceId: string) =>
+    json<SlackReviewTrace>(`/api/slack/reviewers/traces/${encodeURIComponent(traceId)}`),
+  /** A reviewer's accuracy over the last `days` days (1–90). */
+  slackReviewerStats: (id: string, days = 30) =>
+    json<SlackReviewerStats>(
+      `/api/slack/reviewers/${encodeURIComponent(id)}/stats?days=${encodeURIComponent(String(days))}`,
+    ),
+  /** Findings a reviewer remembers as dismissed, by repo (`host/owner/repo`). */
+  slackReviewerNotes: (id: string) =>
+    json<Record<string, SlackRepoNote[]>>(`/api/slack/reviewers/${encodeURIComponent(id)}/notes`),
+  /** Forget one remembered dismissal (`repo` + `index`), a repo's, or all of a reviewer's. */
+  slackReviewerForgetNotes: (id: string, input: { repo?: string; index?: number } = {}) =>
+    json<{ removed: number }>(`/api/slack/reviewers/${encodeURIComponent(id)}/notes/forget`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  /** Open a PR adding a repo's remembered dismissals to its REVIEW.md. GitHub and GitLab only. */
+  slackReviewerProposeNotes: (id: string, repo: string) =>
+    json<{ url: string; number: number; branch: string; notes: number }>(
+      `/api/slack/reviewers/${encodeURIComponent(id)}/notes/propose`,
+      { method: "POST", body: JSON.stringify({ repo }) },
+    ),
   startSlackOauth: (
     input: {
       accountId?: string;

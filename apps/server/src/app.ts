@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { LocusConfig } from "@locus/shared";
-import { listProviderModels } from "@locus/providers";
+import { listProviderModels, readProviderUsage } from "@locus/providers";
 import { type ListProviderModelsFn } from "./integrations/cursorCliCatalog.js";
 import type { AutomationService } from "./automations/automations.js";
 import type { BoardService } from "./boards/boards.js";
@@ -18,9 +18,12 @@ import { BrainService } from "./brain/brain.js";
 import { registerRepoRoutes } from "./http/repoRoutes.js";
 import { registerDesignRoutes } from "./http/designRoutes.js";
 import { registerSlackRoutes } from "./http/slackRoutes.js";
+import type { SlackReviewerService } from "./slack/slackReviewer.js";
 import { registerGrafanaRoutes } from "./http/grafanaRoutes.js";
 import { GrafanaExplorer } from "./integrations/grafanaExplorer.js";
 import { registerWorkspaceRoutes } from "./http/workspaceRoutes.js";
+import { registerAgentTerminalRoutes } from "./http/agentTerminalRoutes.js";
+import type { AgentTerminalRegistry } from "./workspace/agentTerminals.js";
 import { registerSessionRoutes } from "./http/sessionRoutes.js";
 import { registerConfigRoutes } from "./http/configRoutes.js";
 import { registerWorkerRoutes } from "./http/workerRoutes.js";
@@ -37,8 +40,12 @@ import { registerShareRoutes } from "./http/shareRoutes.js";
 import { registerDebugRoutes } from "./http/debugRoutes.js";
 import { registerMachineRoutes } from "./http/machineRoutes.js";
 import { registerTailscaleRoutes } from "./http/tailscaleRoutes.js";
+import { registerStorageRoutes } from "./http/storageRoutes.js";
 import { registerBackupRoutes } from "./http/backupRoutes.js";
 import { registerBenchmarkRoutes } from "./http/benchmarkRoutes.js";
+import { registerSampleTaskRoutes } from "./http/sampleTaskRoutes.js";
+import { registerControlsRoutes } from "./http/controlsRoutes.js";
+import type { TelemetryExporter } from "./core/telemetry.js";
 import { BenchmarkService } from "./evals/benchmark.js";
 import {
   attachPhoneGate,
@@ -85,13 +92,19 @@ export function createApp(opts: {
   host?: { platform?: string; osRelease?: string };
   fetchFn?: typeof fetch;
   listProviderModels?: ListProviderModelsFn;
+  readProviderUsage?: typeof readProviderUsage;
   hub?: Hub;
   slack?: SlackGateway;
+  slackReviewers?: SlackReviewerService;
   brain?: BrainService;
   workflows?: WorkflowService;
   benchmarks?: BenchmarkService;
+  telemetry?: TelemetryExporter;
   peerAddress?: (c: import("hono").Context) => string | undefined;
   phoneTls?: { fingerprint: string };
+  agentTerminals?: AgentTerminalRegistry;
+  /** Required on loopback `/api` and `/ws` requests. Unset leaves loopback trusted (tests). */
+  operatorToken?: string;
 }): Hono {
   const app = new Hono();
   let hypervisor = opts.hypervisor;
@@ -145,6 +158,7 @@ export function createApp(opts: {
       remote: async () => (await opts.store.loadConfig()).phoneRemote,
       chromeExtension: async () => (await opts.store.loadConfig()).chromeExtension,
       peer: opts.peerAddress,
+      operatorToken: opts.operatorToken,
     }),
   );
 
@@ -163,6 +177,7 @@ export function createApp(opts: {
     sessions: opts.sessions,
     brain,
     fetchFn: opts.fetchFn,
+    peerAddress: opts.peerAddress,
   });
   registerPhoneRoutes(app, {
     store: opts.store,
@@ -222,7 +237,11 @@ export function createApp(opts: {
     peerAddress: opts.peerAddress,
   });
   registerForgeAuthRoutes(app, { store: opts.store, oauth, slackOauth, googleOauth });
-  registerProviderRoutes(app, { store: opts.store, listModels });
+  registerProviderRoutes(app, {
+    store: opts.store,
+    listModels,
+    readUsage: opts.readProviderUsage ?? readProviderUsage,
+  });
 
   registerSessionRoutes(app, {
     sessions: opts.sessions,
@@ -247,15 +266,29 @@ export function createApp(opts: {
   registerMachineRoutes(app, { store: opts.store, sessions: opts.sessions });
   registerDockerRoutes(app, opts.sessions.dockerInventory);
   registerTailscaleRoutes(app, { store: opts.store, runner });
+  registerStorageRoutes(app, opts.store, opts.peerAddress);
   registerBackupRoutes(app, { store: opts.store, peerAddress: opts.peerAddress });
+  registerControlsRoutes(app, {
+    store: opts.store,
+    sessions: opts.sessions,
+    telemetry: opts.telemetry,
+    peerAddress: opts.peerAddress,
+  });
   registerBenchmarkRoutes(app, opts.benchmarks ?? new BenchmarkService(opts.store, opts.sessions));
+  registerSampleTaskRoutes(app, {
+    dataDir: opts.store.dataDir,
+    loadConfig: () => opts.store.loadConfig(),
+    create: (input, worktreeSource) =>
+      opts.sessions.create(input, { waitUntilStarted: false, worktreeSource }),
+  });
 
   const grafana = new GrafanaExplorer(opts.store, opts.sessions, opts.fetchFn ?? fetch, brain);
-  registerSlackRoutes(app, slack, slackOauth, opts.store);
+  registerSlackRoutes(app, slack, slackOauth, opts.store, opts.slackReviewers);
   registerGrafanaRoutes(app, grafana);
   registerGoogleOauthRoutes(app, googleOauth, opts.store);
   registerDesignRoutes(app, opts.sessions.design, opts.store);
   registerWorkspaceRoutes(app, opts.sessions.workspace);
+  registerAgentTerminalRoutes(app, opts.agentTerminals);
   registerRepoRoutes(app, opts.repos);
 
   registerAutomationRoutes(app, opts.automations);

@@ -56,12 +56,11 @@ describe("worker loopback MCP", () => {
       }),
     });
     cleanup.push(mcp.close);
-    expect(mcp.url).toBe(`http://127.0.0.1:${mcp.port}/mcp`);
     expect(mcp.sessionUrl).toBe(`http://127.0.0.1:${mcp.port}/mcp/sessions/sess-1`);
     expect(workerLoopbackMcpUrls(mcp.port, "sess-1")).toEqual({
-      url: mcp.url,
       sessionUrl: mcp.sessionUrl,
     });
+    expect(mcp).not.toHaveProperty("url");
 
     const initialized = await fetch(mcp.sessionUrl, {
       method: "POST",
@@ -81,6 +80,35 @@ describe("worker loopback MCP", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "initialize" }),
     });
     expect(other.status).toBe(404);
+  });
+
+  it("refuses the unscoped /mcp and never relays it to the control plane", async () => {
+    const relayed: string[] = [];
+    const mcp = await startWorkerLoopbackMcp({
+      sessionId: "sess-1",
+      onRequest: async (req) => {
+        relayed.push(req.path);
+        return { status: 200, body: { ok: true } };
+      },
+    });
+    cleanup.push(mcp.close);
+    const base = `http://127.0.0.1:${mcp.port}`;
+    const toolsList = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    for (const path of ["/mcp", "/mcp/", "/mcp/sessions", "/mcp/sessions/", "/mcp/other"]) {
+      const res = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: toolsList,
+      });
+      expect(res.status, path).toBe(404);
+    }
+    const scoped = await fetch(`${mcp.sessionUrl}/`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: toolsList,
+    });
+    expect(scoped.status).toBe(200);
+    expect(relayed).toEqual(["/mcp/sessions/sess-1"]);
   });
 
   it("writes session MCP json without secrets and keeps other servers", async () => {

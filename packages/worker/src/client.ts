@@ -3,12 +3,18 @@ import { WORKER_PLANE_HEADER } from "@locus/shared";
 import type { CreateContainerRequest } from "@locus/hypervisor";
 import type { ChromiumDriver, GuestRuntime, ToolRequest, ToolResult } from "@locus/guest-agent";
 import { isWorkerHealth, parseWorkerFingerprint } from "@locus/shared";
+import { WORKER_CLI_REPLAY_HEADER } from "./cliReplay.js";
 import { WorkerBrowserDriver } from "./browserDriver.js";
 import { packDirectory } from "./archive.js";
 import { pinnedHttpsFetch, pinnedHttpsWebSocket } from "./tls.js";
 import type { WebSocket } from "ws";
 
 const HEALTH_TIMEOUT_MS = 8_000;
+
+export class WorkerCliStartError extends Error {}
+
+/** The worker answered, but refused (bad token, wrong service). Retrying will not help. */
+export class WorkerHealthError extends Error {}
 
 export class WorkerClient {
   readonly kind = "docker" as const;
@@ -48,7 +54,12 @@ export class WorkerClient {
     return this.resolvedFingerprint ?? parseWorkerFingerprint(this.backend.fingerprint);
   }
 
-  private async request(url: string, init: RequestInit, tofu = false): Promise<Response> {
+  private async request(
+    url: string,
+    init: RequestInit,
+    tofu = false,
+    stream = false,
+  ): Promise<Response> {
     if (
       !url.startsWith("https:") &&
       !/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])[:/]/i.test(url)
@@ -61,7 +72,7 @@ export class WorkerClient {
     }
     if (this.fetchFn) return this.fetchFn(url, init);
     try {
-      const result = await pinnedHttpsFetch(url, init, pin);
+      const result = await pinnedHttpsFetch(url, init, pin, stream);
       if (tofu) this.observedFingerprint = result.fingerprint;
       else this.resolvedFingerprint = result.fingerprint;
       return result.response;
@@ -96,11 +107,41 @@ export class WorkerClient {
       }
       throw err;
     }
-    const body = (await res.json()) as unknown;
+    const body = (await res.json().catch(() => undefined)) as unknown;
     if (!res.ok || !isWorkerHealth(body)) {
-      throw new Error(errorMessage(body, "Worker health check failed"));
+      throw new WorkerHealthError(errorMessage(body, "Worker health check failed"));
     }
     return { ...body, fingerprint: this.pin() ?? this.observedFingerprint };
+  }
+
+  /**
+   * Poll `/v1/info` until a freshly provisioned worker (cold Fargate task: image pull plus
+   * Node start) answers. Connection errors and timeouts retry; a refusal or a TLS pin
+   * mismatch fails at once.
+   */
+  async waitReady(opts: {
+    timeoutMs: number;
+    intervalMs?: number;
+    wait?: (ms: number) => Promise<void>;
+    signal?: AbortSignal;
+  }): Promise<Awaited<ReturnType<WorkerClient["health"]>>> {
+    const wait = opts.wait ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+    const deadline = Date.now() + opts.timeoutMs;
+    let last: unknown;
+    for (;;) {
+      if (opts.signal?.aborted) throw new Error("Worker start was cancelled");
+      try {
+        return await this.health();
+      } catch (err) {
+        if (err instanceof WorkerHealthError) throw err;
+        if (err instanceof Error && /fingerprint mismatch/i.test(err.message)) throw err;
+        last = err;
+      }
+      if (Date.now() >= deadline) break;
+      await wait(opts.intervalMs ?? 2_000);
+    }
+    const reason = last instanceof Error ? `: ${last.message}` : "";
+    throw new Error(`Worker did not come up within ${Math.round(opts.timeoutMs / 1000)}s${reason}`);
   }
 
   async create(req: CreateContainerRequest): Promise<VmInstance> {
@@ -321,18 +362,78 @@ export class WorkerClient {
     input: { command: string; args: string[]; apiKey?: string },
     signal?: AbortSignal,
   ): Promise<ReadableStream<Uint8Array>> {
-    const res = await this.request(this.url(this.guestPath(id, "/cursor-cli")), {
-      method: "POST",
-      headers: this.headers(),
-      signal,
-      body: JSON.stringify(input),
-    });
+    return (await this.openCursorCli(id, input, signal)).stream;
+  }
+
+  async openCursorCli(
+    id: string,
+    input: { command: string; args: string[]; apiKey?: string; runId?: string },
+    signal?: AbortSignal,
+  ): Promise<{ stream: ReadableStream<Uint8Array>; replay: boolean }> {
+    const res = await this.request(
+      this.url(this.guestPath(id, "/cursor-cli")),
+      {
+        method: "POST",
+        headers: this.headers(),
+        signal,
+        body: JSON.stringify(input),
+      },
+      false,
+      true,
+    );
     if (!res.ok) {
       const data = (await res.json().catch(() => ({}))) as { error?: string };
-      throw new Error(data.error || `Worker cursor-cli failed (${res.status})`);
+      throw new WorkerCliStartError(data.error || `Worker cursor-cli failed (${res.status})`);
     }
     if (!res.body) throw new Error("Worker cursor-cli produced no stream");
-    return res.body;
+    return { stream: res.body, replay: res.headers.get(WORKER_CLI_REPLAY_HEADER) === "1" };
+  }
+
+  async replayCursorCli(id: string, runId: string, offset: number, signal: AbortSignal) {
+    const path = this.guestPath(id, `/cursor-cli/${encodeURIComponent(runId)}?offset=${offset}`);
+    const res = await this.request(
+      this.url(path),
+      { headers: this.headers(), signal },
+      false,
+      true,
+    );
+    if (res.status === 404 || res.status === 410) return { unavailable: true as const };
+    if (!res.ok || !res.body)
+      throw new Error(`Could not reattach to the worker turn (${res.status})`);
+    return { stream: res.body };
+  }
+
+  async stopCursorCli(id: string, runId: string): Promise<void> {
+    await this.json(
+      "DELETE",
+      this.guestPath(id, `/cursor-cli/${encodeURIComponent(runId)}`),
+      undefined,
+      200,
+      AbortSignal.timeout(4000),
+    );
+  }
+
+  async guestConnection(id: string): Promise<VmInstance | undefined> {
+    const res = await this.request(this.url(this.guestPath(id)), {
+      headers: this.headers(),
+      signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+    });
+    if (res.status === 404) return undefined;
+    if (!res.ok) throw new Error(`Worker guest check failed (${res.status})`);
+    const vm = (await res.json()) as VmInstance;
+    this.remember(vm);
+    return this.cache.get(id);
+  }
+
+  async cliRunStatus(id: string): Promise<"running" | "finished" | "unknown"> {
+    const { state } = await this.json<{ state: "running" | "finished" | "unknown" }>(
+      "GET",
+      this.guestPath(id, "/cursor-cli/status"),
+      undefined,
+      200,
+      AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+    );
+    return state;
   }
 
   async replyCursorCliMcp(

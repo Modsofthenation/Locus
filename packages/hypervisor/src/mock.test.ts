@@ -50,6 +50,18 @@ describe("MockHypervisor", () => {
     expect(hv.logs(vm.id)).toMatch(/running/);
   });
 
+  it("reports disk, boot, and connect boot steps", async () => {
+    const hv = new MockHypervisor("/tmp/locus-test");
+    const steps: string[] = [];
+    hv.onBootStep((_id, step) => steps.push(step));
+    const vm = await hv.create({ sessionId: "s1", name: "a", template: template("ubuntu") });
+    await hv.start(vm.id);
+    expect(steps).toEqual(["disk", "boot"]);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(steps).toEqual(["disk", "boot", "connect"]);
+    await hv.destroy(vm.id);
+  });
+
   it("exposes RDP for Windows guests", async () => {
     const hv = new MockHypervisor("/tmp/locus-test");
     const vm = await hv.create({

@@ -83,7 +83,7 @@ describe("GameEmpty", () => {
     expect(host.querySelector("[aria-label='Color palette']")).toBeNull();
     // Unset kit / style / asset / repo live in the "+" menu until picked.
     expect(host.querySelector("[aria-label='Style']")).toBeNull();
-    expect(host.querySelector("[aria-label='Game kit']")).toBeNull();
+    expect(host.querySelector("[aria-label='Game kit'], [aria-label^='Game kit: ']")).toBeNull();
     expect(host.querySelector("[aria-label='Assets']")).toBeNull();
     expect(host.textContent).not.toContain("No repo context");
     expect(host.querySelector("[data-testid='composer-add-kit']")).toBeTruthy();
@@ -92,7 +92,9 @@ describe("GameEmpty", () => {
     reveal("style");
     reveal("kit");
     expect(host.querySelector("[aria-label='Style']")).toBeTruthy();
-    expect(host.querySelector("[aria-label='Game style']")).toBeTruthy();
+    expect(
+      host.querySelector("[aria-label='Game style'], [aria-label^='Game style: ']"),
+    ).toBeTruthy();
     // Six starters, then "More…" for the rest and the remix sentences.
     const starters = host.querySelector("[aria-label='Game starters']")!;
     expect(starters.querySelectorAll("button[aria-pressed]")).toHaveLength(6);
@@ -118,12 +120,12 @@ describe("GameEmpty", () => {
     expect(host.textContent).toContain("2D");
     expect(host.textContent).toContain("3D");
     expect(host.textContent).toContain("Hotseat");
-    expect(host.querySelector("[aria-label='Game kit']")).toBeTruthy();
+    expect(host.querySelector("[aria-label='Game kit'], [aria-label^='Game kit: ']")).toBeTruthy();
     expect(host.textContent).toContain("Pixel pack");
     expect(
       host.querySelector('[aria-label="Agent runtime"] [aria-selected="true"]')?.textContent,
     ).toBe("Docker");
-    expect(host.querySelector("[aria-label='Game kit']")).toBeTruthy();
+    expect(host.querySelector("[aria-label='Game kit'], [aria-label^='Game kit: ']")).toBeTruthy();
     act(() => {
       setSelectValue(host, "Game kit", "pixel-pack");
     });

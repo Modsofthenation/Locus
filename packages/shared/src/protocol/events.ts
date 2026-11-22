@@ -1,6 +1,7 @@
 import type { AgentSession, ChatMessage, ToolCall } from "../models/session.js";
 import type { ToolOverlay } from "../models/tools.js";
 import type { VmInstance, VmLifecycle } from "../models/vm.js";
+import type { BootProgress } from "../models/bootSteps.js";
 import type { Automation, AutomationRun } from "../models/automation.js";
 import type { BoardDocument } from "../models/board.js";
 import type { ProjectDocument } from "../models/project.js";
@@ -12,8 +13,11 @@ import type {
   PullRequestRef,
 } from "../models/repo.js";
 import type { SlackConversation, SlackMessage } from "../models/slack.js";
+import type { CustomTheme, ThemeRef } from "../models/customTheme.js";
 
 export type ClientEvent =
+  /** The agent changed the app theme or the generated themes (manage_theme). */
+  | { type: "theme.updated"; theme: ThemeRef; customThemes: CustomTheme[] }
   | { type: "session.updated"; session: AgentSession }
   | { type: "session.deleted"; id: string }
   | { type: "vm.updated"; vm: VmInstance }
@@ -46,6 +50,8 @@ export type ClientEvent =
       cached?: boolean;
       detail?: string;
     }
+  /** Guest boot step list; `progress: null` clears it. */
+  | { type: "boot.progress"; sessionId: string; progress: BootProgress | null }
   | {
       type: "qemu.install.progress";
       phase: string;

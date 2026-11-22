@@ -48,6 +48,16 @@ describe("MockDockerEngine", () => {
     engine.shutdown();
   });
 
+  it("reports pull and start boot steps", async () => {
+    const engine = new MockDockerEngine(join(tmpdir(), "locus-docker-steps"));
+    const steps: string[] = [];
+    engine.onBootStep((_id, step) => steps.push(step));
+    const vm = await engine.create({ sessionId: "s1", name: "a", image: "node:22-bookworm" });
+    await engine.start(vm.id);
+    expect(steps).toEqual(["pull", "start"]);
+    engine.shutdown();
+  });
+
   it("rejects session ids that escape the workspace directory", () => {
     expect(() => dockerWorkspaceDir("/data", "../etc")).toThrow(/Invalid session id/);
     expect(() => hostWorkspaceDir("/data", "ok")).not.toThrow();

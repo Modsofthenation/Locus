@@ -158,3 +158,22 @@ describe("automationRunUsd", () => {
     expect(automationRunUsd({})).toBeUndefined();
   });
 });
+
+describe("estimateUsd cache pricing", () => {
+  it("bills cache reads at a tenth and cache writes at 1.25x of the input rate", async () => {
+    const { estimateUsd } = await import("./session.js");
+    const rates = { inputUsdPerMillion: 10, outputUsdPerMillion: 0 };
+    expect(estimateUsd({ inputTokens: 1_000_000, outputTokens: 0 }, rates)).toBeCloseTo(10);
+    expect(
+      estimateUsd(
+        {
+          inputTokens: 1_000_000,
+          outputTokens: 0,
+          cachedInputTokens: 800_000,
+          cacheWriteTokens: 100_000,
+        },
+        rates,
+      ),
+    ).toBeCloseTo(1 + 0.8 + 1.25);
+  });
+});

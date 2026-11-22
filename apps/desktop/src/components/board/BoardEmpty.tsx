@@ -54,7 +54,7 @@ export function BoardEmpty() {
               <textarea
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
-                placeholder="Ask Locus to map it, or start from a pill"
+                placeholder="Describe what to map, or start from a template below…"
                 rows={3}
               />
               <div className="empty-composer-bar">

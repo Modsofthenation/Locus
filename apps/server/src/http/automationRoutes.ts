@@ -3,7 +3,7 @@ import type { CreateAutomationInput, PatchAutomationInput } from "@locus/shared"
 import { MAX_WEBHOOK_BYTES, unwrapAwsApiGatewayWebhook } from "@locus/shared";
 import { redactAutomation } from "../core/redact.js";
 import type { AutomationService } from "../automations/automations.js";
-import { peerFromContext } from "../core/localguard.js";
+import { isLocalOperator, peerFromContext } from "../core/localguard.js";
 import { errorJson } from "./sessionJson.js";
 
 export function registerAutomationRoutes(
@@ -30,6 +30,18 @@ export function registerAutomationRoutes(
     try {
       const input = (await c.req.json()) as CreateAutomationInput;
       return c.json(await automations.create(input), 201);
+    } catch (err) {
+      return errorJson(c, err);
+    }
+  });
+
+  app.post("/api/automations/preview-trigger", async (c) => {
+    if (!automations) return c.json({ error: "Automations unavailable" }, 503);
+    if (!isLocalOperator(c)) return c.json({ error: "Trigger preview is desktop-only" }, 403);
+    const raw = await readCappedText(c.req.raw, MAX_WEBHOOK_BYTES * 2);
+    if (raw === undefined) return c.json({ error: "Preview payload is too large" }, 413);
+    try {
+      return c.json(await automations.previewTrigger(JSON.parse(raw)));
     } catch (err) {
       return errorJson(c, err);
     }

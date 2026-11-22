@@ -13,7 +13,16 @@ type Pending =
   | { kind: "prompt"; opts: PromptOptions; resolve: (value: string | null) => void }
   | { kind: "alert"; opts: AlertOptions; resolve: () => void };
 
+/** Confirms, prompts and alerts render above any open modal (they are asked from inside one). */
 export function DialogHost() {
+  return (
+    <div className="dialog-host">
+      <DialogHostInner />
+    </div>
+  );
+}
+
+function DialogHostInner() {
   const [pending, setPending] = useState<Pending | null>(null);
 
   useEffect(() => {

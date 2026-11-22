@@ -1,6 +1,6 @@
 import { KIRO_CLI_BASE_URL, KIRO_CLI_MODELS, isKiroCliBase, type AiProvider } from "@locus/shared";
 import { cursorCliSpawnFailureMessage } from "@locus/shared/windowsCliSpawn";
-import { ProviderError, type TokenUsageEvent } from "./types.js";
+import { ProviderError, readTokenUsage, type TokenUsageEvent } from "./types.js";
 import type { CursorCliEvent, CursorCliSpawner } from "./cursorCli.js";
 import { spawnCursorCli } from "./cursorCli.js";
 
@@ -640,6 +640,8 @@ export async function* streamKiroCli(input: {
   webSearch?: boolean;
   review?: boolean;
   gitMcpUrl?: string;
+  /** The child's environment before the provider key is added; defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   spawnFn?: KiroCliSpawner;
 }): AsyncGenerator<KiroCliEvent> {
@@ -1054,8 +1056,10 @@ function kiroEmptyReplyMessage(stderr: string, code: number): string {
 function readUsage(row: Record<string, unknown>): TokenUsageEvent | undefined {
   const usage = asRecord(row.usage);
   if (!usage) return undefined;
-  const input = num(usage.input_tokens) ?? num(usage.inputTokens) ?? num(row.input_tokens);
-  const output = num(usage.output_tokens) ?? num(usage.outputTokens) ?? num(row.output_tokens);
+  const read = readTokenUsage(usage);
+  if (read) return read;
+  const input = num(row.input_tokens);
+  const output = num(row.output_tokens);
   if (input == null && output == null) return undefined;
   return { inputTokens: input ?? 0, outputTokens: output ?? 0 };
 }

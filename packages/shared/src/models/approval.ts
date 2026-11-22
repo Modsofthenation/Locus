@@ -1,4 +1,6 @@
 export interface ApprovalPolicy {
+  /** Require approval for every computer mutation, including opaque pixel input. */
+  confirmComputerActions?: boolean;
   /** Tool names that skip chat approval (still cannot skip git_push to a protected branch). */
   autoAllow?: string[];
   /** Tool names that always wait, including exec. */
@@ -26,6 +28,9 @@ export function parseApprovalPolicy(raw: unknown): ApprovalPolicy {
           .map((item) => item.trim())
       : [];
   return {
+    ...(typeof value.confirmComputerActions === "boolean"
+      ? { confirmComputerActions: value.confirmComputerActions }
+      : {}),
     autoAllow: names(value.autoAllow),
     alwaysAsk: names(value.alwaysAsk),
     deny: names(value.deny),
@@ -69,6 +74,11 @@ export function policyEntryMatches(
 
 /** Session-sticky allow from Needs you. Prefer a branch glob when we have one. */
 export function stickyAllowEntry(name: string, args?: Record<string, unknown>): string {
+  if (
+    computerMutation(name, args) &&
+    ["submit", "upload", "destructive"].includes(String(args?.effect))
+  )
+    return `${name}(effect:${String(args?.effect)})`;
   const branch = typeof args?.branch === "string" ? args.branch.trim() : "";
   if (
     branch &&
@@ -124,6 +134,31 @@ export function toolDeniedByPolicy(
   return policyListMatches(policy?.deny, name, args);
 }
 
+const COMPUTER_MUTATIONS = new Set([
+  "browser_navigate",
+  "window_focus",
+  "clipboard_set",
+  "browser_click",
+  "browser_type",
+  "browser_action",
+  "mouse_click",
+  "mouse_drag",
+  "key",
+  "type_text",
+  "desktop_action",
+]);
+
+function computerMutation(name: string, args?: Record<string, unknown>): boolean {
+  if (name === "browser_tabs") return args?.action !== "list";
+  if (
+    (name === "exec" || name === "start_process") &&
+    typeof args?.command === "string" &&
+    /^https?:\/\/\S+$/i.test(args.command.trim())
+  )
+    return true;
+  return COMPUTER_MUTATIONS.has(name);
+}
+
 export function policyToolNeedsApproval(
   name: string,
   policy?: ApprovalPolicy,
@@ -131,6 +166,19 @@ export function policyToolNeedsApproval(
 ): boolean {
   if (policyListMatches(policy?.deny, name, args)) return false;
   if (policyListMatches(policy?.alwaysAsk, name, args)) return true;
+  if (
+    computerMutation(name, args) &&
+    ["submit", "upload", "destructive"].includes(String(args?.effect))
+  ) {
+    // Broad tool grants do not authorize all external effects. Grant an effect explicitly.
+    return !policyListMatches(
+      policy?.autoAllow?.filter((entry) => entry.startsWith(`${name}(effect:`)),
+      name,
+      args,
+    );
+  }
+  if (computerMutation(name, args) && policy?.confirmComputerActions)
+    return !policyListMatches(policy.autoAllow, name, args);
   if (name === "mcp_list_tools" || name === "mcp_get_tool_info" || name === "read_skill") {
     return false;
   }
@@ -139,6 +187,11 @@ export function policyToolNeedsApproval(
     if (policyListMatches(policy?.autoAllow, name, args) || policy?.autoAllow?.includes("mcp"))
       return false;
     return true;
+  }
+  if (name === "manage_skill" || name === "manage_mcp_server") {
+    // Listing is a read. Saving changes future prompts or launches a host process.
+    if (args?.action === "list") return false;
+    return !policyListMatches(policy?.autoAllow, name, args);
   }
   if (name.startsWith("plugin_") || name === "manage_integration_plugin") {
     if (policyListMatches(policy?.autoAllow, name, args) || policy?.autoAllow?.includes("plugin"))

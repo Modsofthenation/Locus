@@ -38,6 +38,12 @@ const { locusHome, wrapMasterKey } = require("./vault-key.cjs");
 const { planUpdateInstall, swapAppImage } = require("./update-install.cjs");
 const { dropWindowsApplicationMenu, installWindowsInputGuard } = require("./windows-input.cjs");
 const { applyZoomLevel, zoomAction } = require("./zoom.cjs");
+const {
+  isControlPlaneApiUrl,
+  operatorCookies,
+  operatorHeaders,
+  readOperatorToken,
+} = require("./operator-auth.cjs");
 
 const CANVAS_PREVIEW_HOST = "locus-canvas.localhost";
 const CONTROL_PLANE_CSP =
@@ -97,6 +103,39 @@ let healthFails = 0;
 const desktopOwner = randomUUID();
 const HEALTH_URL = "http://127.0.0.1:7420/api/health";
 const KEEP_ALIVE_URL = "http://127.0.0.1:7420/api/projects/keep-alive";
+const CONTROL_PLANE_ORIGIN = "http://127.0.0.1:7420";
+
+/**
+ * Loopback is not the operator: /api and /ws need the control plane's operator
+ * token. The control plane writes it to <LOCUS_HOME>/operator.token before it
+ * listens; put it in the window session as an HttpOnly cookie so fetch, img,
+ * and WebSocket requests from the UI carry it. Waits briefly for a control
+ * plane that is still starting.
+ */
+async function syncOperatorCookie(timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  let token = readOperatorToken(locusHome());
+  while (!token && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    token = readOperatorToken(locusHome());
+  }
+  if (!token) {
+    console.error("Locus: no operator token; the UI cannot reach the control plane API.");
+    return;
+  }
+  for (const cookie of operatorCookies(token, [uiUrl, CONTROL_PLANE_ORIGIN])) {
+    await session.defaultSession.cookies.set(cookie).catch((err) => {
+      console.error("Locus: could not set the operator cookie:", err);
+    });
+  }
+}
+
+function operatorFetch(url, init = {}) {
+  return fetch(url, {
+    ...init,
+    headers: { ...(init.headers || {}), ...operatorHeaders(readOperatorToken(locusHome())) },
+  });
+}
 const closeGuard = installCloseGuard({
   app,
   ipcMain,
@@ -224,6 +263,8 @@ async function reviveServer() {
   dropDeadHandles();
   await startServer();
   if (child) ownsServer = true;
+  // Reset all data or a fresh LOCUS_HOME can mint a new token.
+  void syncOperatorCookie();
 }
 
 function dropDeadHandles() {
@@ -312,7 +353,9 @@ async function startServer() {
 
 async function releaseServer() {
   const recordPath = desktopServerRecordPath();
-  const keepAlive = forceStopServer ? false : await controlPlaneKeepAlive(fetch, KEEP_ALIVE_URL);
+  const keepAlive = forceStopServer
+    ? false
+    : await controlPlaneKeepAlive(operatorFetch, KEEP_ALIVE_URL);
   const action = serverQuitAction({ ownsChild: ownsServer, keepAlive, adoptedPid });
   if (action === "detach") {
     if (child && child.pid) {
@@ -374,6 +417,7 @@ app
     await ensureServer();
     if (!dev) startHealthWatch();
     await waitForUrl(uiUrl);
+    await syncOperatorCookie();
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
       if (isCanvasPreviewUrl(details.url)) {
         callback({ responseHeaders: details.responseHeaders });
@@ -411,6 +455,11 @@ app
       closeGuard.onCloseAttempt(event);
     });
     win.webContents.setWindowOpenHandler(({ url }) => {
+      // The system browser has no operator cookie: download control-plane files here.
+      if (isControlPlaneApiUrl(url, [new URL(uiUrl).origin, CONTROL_PLANE_ORIGIN])) {
+        win.webContents.downloadURL(url);
+        return { action: "deny" };
+      }
       if (url.startsWith("https:") || url.startsWith("http:")) {
         void shell.openExternal(url);
       }

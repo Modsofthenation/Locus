@@ -93,11 +93,22 @@ import { Select } from "@/components/layout/Select";
 import { EmptyHero } from "@/components/layout/EmptyHero";
 import { ProviderSetupBanner, SetupBanner } from "@/components/layout/SetupBanner";
 import {
+  NATIVE_ENGINES,
+  isNativeTarget,
+  nativeProjectPrompt,
+  nativeReadiness,
+  type LaunchTarget,
+  type ProjectAction,
+} from "./launchTargets";
+import { LaunchTargetPicker, NativeProjectSetup, NativeStarters } from "./LaunchTargetPicker";
+import {
   LaunchWorkspace,
   type LaunchWorkspaceSelection,
 } from "@/components/layout/LaunchWorkspace";
 
 const DESIGN_RUNTIMES: AgentRuntime[] = ["docker", "vm", "host"];
+/** Unity, Godot, Unreal and Blender drive locally installed tools, so only Host applies. */
+const NATIVE_RUNTIMES: AgentRuntime[] = ["host"];
 
 function rememberedDesignRuntime(): AgentRuntime {
   try {
@@ -198,6 +209,10 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
   const [styleTouched, setStyleTouched] = useState(false);
   const [gameDim, setGameDim] = useState<GameDimension | null>(null);
   const [hotseat, setHotseat] = useState(false);
+  /** Games / Assets: build in the web canvas or a native tool (Unity, Godot, Unreal, Blender) on the Host. */
+  const [target, setTarget] = useState<LaunchTarget>("web");
+  const [projectAction, setProjectAction] = useState<ProjectAction>("create");
+  const [nativeStarterId, setNativeStarterId] = useState<string | null>(null);
   const [remixId, setRemixId] = useState<string | null>(null);
   const [assetBuild, setAssetBuild] = useState<AssetBuild>(ASSET_BUILD_DEFAULTS);
   const [viewSlots, setViewSlots] = useState<AssetViewFiles>({});
@@ -224,11 +239,27 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
   const [revealed, setRevealed] = useState<ReadonlySet<string>>(() => new Set());
   const dockerDown =
     runtime === "docker" && state.dockerKind === "docker" && !state.dockerReady && !backendId;
-  const canCreate = Boolean(state.config) && !dockerDown;
+  const hostAllowed = policyAllowsHostAgents(state.config?.managedPolicy);
+  const engine = surface !== "design" && isNativeTarget(target) ? target : null;
+  const engineInfo = engine ? NATIVE_ENGINES[engine] : null;
+  const engineAction = engineInfo ? engineInfo.actions[projectAction] : null;
+  const nativeProject = Boolean(engine);
+  const readiness = engine
+    ? nativeReadiness({
+        engine,
+        action: projectAction,
+        runtime,
+        remote: Boolean(backendId),
+        hostAllowed,
+        hostDir: workspace.kind === "host" ? workspace.path : undefined,
+      })
+    : null;
+  const canCreate = Boolean(state.config) && !dockerDown && !readiness?.blocker;
   const workers = state.config?.workers ?? [];
   const selectedWorker = workers.find((row) => row.id === backendId);
   const launch = CANVAS_LAUNCH[surface];
-  const compactAssets = surface === "assets" && !showOptions;
+  // Blender needs the Host folder picker up front; the web asset flow keeps it under More options.
+  const compactAssets = surface === "assets" && !showOptions && !nativeProject;
   const meshBuild = assetShowsStage3d(inferAssetSubject({ recipeId: recipeId ?? undefined }));
   const selectedSystem = resolveDesignSystem(designSystemId, state.designSystems);
   const kitStarts = surface === "design" ? (selectedSystem?.startingPoints ?? []) : [];
@@ -252,19 +283,25 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
       : state.gameStyles.find((row) => row.id === gameStyleId)?.name;
   const buildSet = JSON.stringify(assetBuild) !== JSON.stringify(ASSET_BUILD_DEFAULTS);
   const showRepo = !foldContext || repoIds.length > 0 || revealed.has("repo");
-  const showAsset = surface === "game" && (assetIds.length > 0 || revealed.has("asset"));
-  const showKit = !foldContext || Boolean(designSystemId) || revealed.has("kit");
-  const showStyle = !foldContext || Boolean(styleId) || revealed.has("style");
-  const showBuild = surface === "assets" && (buildSet || revealed.has("build"));
+  const showAsset =
+    surface === "game" && !nativeProject && (assetIds.length > 0 || revealed.has("asset"));
+  const showKit =
+    !nativeProject && (!foldContext || Boolean(designSystemId) || revealed.has("kit"));
+  const showStyle = !nativeProject && (!foldContext || Boolean(styleId) || revealed.has("style"));
+  const showBuild = surface === "assets" && !nativeProject && (buildSet || revealed.has("build"));
   const addExtras = foldContext
     ? [
         showRepo ? null : { id: "repo", label: "Repo context", onSelect: () => reveal("repo") },
-        surface === "game" && !showAsset
+        surface === "game" && !nativeProject && !showAsset
           ? { id: "asset", label: "Asset", onSelect: () => reveal("asset") }
           : null,
-        showKit ? null : { id: "kit", label: "Kit", onSelect: () => reveal("kit") },
-        showStyle ? null : { id: "style", label: "Style", onSelect: () => reveal("style") },
-        surface === "assets" && !showBuild
+        showKit || nativeProject
+          ? null
+          : { id: "kit", label: "Kit", onSelect: () => reveal("kit") },
+        showStyle || nativeProject
+          ? null
+          : { id: "style", label: "Style", onSelect: () => reveal("style") },
+        surface === "assets" && !nativeProject && !showBuild
           ? { id: "build", label: "Build", onSelect: () => reveal("build") }
           : null,
       ].filter((row): row is NonNullable<typeof row> => Boolean(row))
@@ -364,6 +401,51 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
     setError(null);
   }
 
+  /** Where the web flow was placed, so leaving a native engine puts it back. */
+  const webPlacement = useRef<{
+    runtime: AgentRuntime;
+    backendId: string;
+    workspace: LaunchWorkspaceSelection;
+  } | null>(null);
+
+  function pickTarget(next: LaunchTarget) {
+    if (next === target) return;
+    setNativeStarterId(null);
+    setError(null);
+    if (isNativeTarget(next)) {
+      if (!isNativeTarget(target)) webPlacement.current = { runtime, backendId, workspace };
+      // Native engines are a Host coding agent on this machine against a real folder.
+      setRuntime("host");
+      setBackendId("");
+      if (workspace.kind !== "host") {
+        const remembered = rememberedDesignWorkspace();
+        setWorkspace(remembered.kind === "host" ? remembered : { kind: "private" });
+        if (remembered.kind === "host") setHostDir(remembered.path);
+      }
+      // A web recipe prompt doesn't fit a native project.
+      if (recipeId || remixId) {
+        setRecipeId(null);
+        setRemixId(null);
+        setPrompt("");
+      }
+    } else if (webPlacement.current) {
+      const prev = webPlacement.current;
+      setRuntime(prev.runtime);
+      setBackendId(prev.backendId);
+      setWorkspace(prev.workspace);
+      webPlacement.current = null;
+    }
+    setTarget(next);
+  }
+
+  function pickProjectAction(next: ProjectAction) {
+    setProjectAction(next);
+    if (nativeStarterId) {
+      setNativeStarterId(null);
+      setPrompt("");
+    }
+  }
+
   function changeRuntime(next: AgentRuntime) {
     if (next !== "docker" && next !== "host") return;
     setRuntime(next);
@@ -439,7 +521,7 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
   }
 
   function refreshAssetMentions(text: string, caret: number) {
-    if (surface !== "game") {
+    if (surface !== "game" || nativeProject) {
       if (assetHits.length) setAssetHits([]);
       return;
     }
@@ -485,6 +567,7 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
       ) {
         return;
       }
+      if (nativeProject) return;
       const recipe = launch.recipes.find((row) => recipeShortcut(row) === event.key.toUpperCase());
       if (!recipe) return;
       event.preventDefault();
@@ -493,6 +576,20 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+
+  function launchPlaybook(): string | undefined {
+    return engineInfo ? engineInfo.playbook : playbook.trim() || undefined;
+  }
+
+  /** The prompt as typed, wrapped with the native engine's workflow instructions when one is picked. */
+  function launchPrompt(): string | undefined {
+    if (!engine) return prompt.trim() || undefined;
+    return nativeProjectPrompt(engine, {
+      action: projectAction,
+      request: prompt.trim(),
+      projectPath: launchHostDir,
+    });
+  }
 
   async function createQuick() {
     if (!state.config || busy || !canCreate) return;
@@ -521,27 +618,37 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
         .map((id) => checkoutFor(id))
         .filter((row): row is NonNullable<typeof row> => Boolean(row));
       const session = await api.createSession({
-        title: recipe?.title ?? start?.title,
+        title: engine
+          ? (engineAction?.starters.find((row) => row.id === nativeStarterId)?.title ??
+            `${engineInfo?.name} project`)
+          : (recipe?.title ?? start?.title),
         os: "ubuntu",
         templateId:
           defaults.templateId || state.config.templates.find((t) => t.os === "ubuntu")?.id || "",
-        kind: launch.kind,
+        kind: nativeProject ? "agent" : launch.kind,
         runtime,
         dockerImage: hostChat ? undefined : launchDockerImage,
         providerId: chosenProvider,
         model: chosenModel,
         startVm: !hostChat || Boolean(sessionBackendId),
-        playbook: playbook.trim() || undefined,
-        allowedTools: allowedTools.length ? allowedTools : undefined,
+        playbook: launchPlaybook(),
+        allowedTools: nativeProject ? undefined : allowedTools.length ? allowedTools : undefined,
         ...(launch.showLook ? { palette } : {}),
-        designSystemId:
-          (surface === "game" ? kitForGameDimension(gameDim, designSystemId) : designSystemId) ||
-          undefined,
-        ...(surface === "assets" && assetStyleId ? { assetStyleId } : {}),
-        ...(surface === "game" && gameStyleId ? { gameStyleId } : {}),
-        ...(surface === "assets" ? { assetBuild: resolveAssetBuild(assetBuild) } : {}),
-        prompt:
-          surface === "game"
+        // Kits, styles and build settings shape the web canvas only.
+        ...(nativeProject
+          ? {}
+          : {
+              designSystemId:
+                (surface === "game"
+                  ? kitForGameDimension(gameDim, designSystemId)
+                  : designSystemId) || undefined,
+              ...(surface === "assets" && assetStyleId ? { assetStyleId } : {}),
+              ...(surface === "game" && gameStyleId ? { gameStyleId } : {}),
+              ...(surface === "assets" ? { assetBuild: resolveAssetBuild(assetBuild) } : {}),
+            }),
+        prompt: engine
+          ? launchPrompt()
+          : surface === "game"
             ? composeGameLaunchPrompt({
                 prompt: prompt.trim(),
                 hotseat,
@@ -558,7 +665,7 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
         ...(primaryCheckout ? { repo: primaryCheckout } : {}),
         ...(extraCheckouts.length ? { extraRepos: extraCheckouts } : {}),
         ...(repoIds[0] && branchLock ? { branchLock: true } : {}),
-        ...(surface === "game" && assetIds.length ? { assetIds } : {}),
+        ...(surface === "game" && !nativeProject && assetIds.length ? { assetIds } : {}),
         ...(sessionBackendId ? { placement: "worker" as const, backendId: sessionBackendId } : {}),
       });
       setFiles([]);
@@ -585,9 +692,22 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
   return (
     <div className="empty design-start">
       <div className="empty-card">
-        <EmptyHero title={launch.heading} lead={launch.lead} />
+        <EmptyHero
+          title={engineInfo?.heading ?? launch.heading}
+          lead={engineInfo?.lead ?? launch.lead}
+        />
 
         <section className="launch" aria-label={launch.aria}>
+          {surface === "game" || surface === "assets" ? (
+            <LaunchTargetPicker
+              surface={surface}
+              value={engine ?? "web"}
+              onChange={pickTarget}
+              nativeDisabledReason={
+                hostAllowed ? undefined : "Your organization's policy blocks Host agents."
+              }
+            />
+          ) : null}
           {compactAssets ? null : (
             <>
               {state.setup && !state.setup.hasProvider ? (
@@ -612,7 +732,7 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                 </SetupBanner>
               ) : null}
 
-              {workers.length ? (
+              {workers.length && !nativeProject ? (
                 <div className="launch-env-bar">
                   <PlacementToggle workers={workers} value={backendId} onChange={setBackendId} />
                   <p className="hint launch-runtime-hint">{workerHint || "\u00a0"}</p>
@@ -635,16 +755,24 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                 }
                 onSelect={selectWorkspace}
                 onHostDir={setHostDir}
-                runtimes={DESIGN_RUNTIMES}
+                runtimes={nativeProject ? NATIVE_RUNTIMES : DESIGN_RUNTIMES}
                 unavailableRuntimes={{ vm: launch.vmReason }}
-                disabledRuntimes={
-                  policyAllowsHostAgents(state.config?.managedPolicy) ? [] : ["host"]
-                }
+                disabledRuntimes={hostAllowed ? [] : ["host"]}
+                kickerBadge={engineInfo ? `${engineInfo.name} project folder` : undefined}
                 onRuntimeChange={changeRuntime}
               />
             )}
 
-            {surface === "assets" ? (
+            {engine && readiness ? (
+              <NativeProjectSetup
+                engine={engine}
+                action={projectAction}
+                onAction={pickProjectAction}
+                readiness={readiness}
+              />
+            ) : null}
+
+            {surface === "assets" && !nativeProject ? (
               <AssetDropWell
                 files={viewSlots}
                 onChange={setViewSlots}
@@ -719,7 +847,7 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                   onPick={pickAssetMention}
                 />
               ) : null}
-              {surface === "game" ? (
+              {surface === "game" && !nativeProject ? (
                 <div className="game-shape-chips" role="group" aria-label="Game shape">
                   <button
                     type="button"
@@ -753,9 +881,11 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                 value={prompt}
                 files={files}
                 placeholder={
-                  surface === "game"
-                    ? `${launch.placeholder.replace(/[.…]+$/, "")}. Type @ to reference an asset…`
-                    : launch.placeholder
+                  engineAction
+                    ? engineAction.placeholder
+                    : surface === "game"
+                      ? `${launch.placeholder.replace(/[.…]+$/, "")}. Type @ to reference an asset…`
+                      : launch.placeholder
                 }
                 onChange={(value) => {
                   setPrompt(value);
@@ -981,8 +1111,10 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                   <button
                     className="btn primary small composer-send"
                     disabled={busy || !canCreate}
-                    title={launch.createLabel}
-                    aria-label={busy ? "Creating…" : launch.createLabel}
+                    title={readiness?.blocker ?? engineAction?.createLabel ?? launch.createLabel}
+                    aria-label={
+                      busy ? "Creating…" : (engineAction?.createLabel ?? launch.createLabel)
+                    }
                     onClick={() => void createQuick()}
                   >
                     {busy ? "Creating…" : <span className="composer-send-label">Send</span>}
@@ -1039,13 +1171,17 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
                     type: "new",
                     open: true,
                     os: "ubuntu",
-                    prompt: prompt.trim() || undefined,
+                    prompt: launchPrompt(),
                     runtime,
                     dockerImage: hostChat ? undefined : (launchDockerImage ?? dockerImage),
                     hostDir: hostChat ? launchHostDir : undefined,
-                    playbook: playbook.trim() || undefined,
-                    allowedTools: allowedTools.length ? allowedTools : undefined,
-                    kind: launch.kind,
+                    playbook: launchPlaybook(),
+                    allowedTools: nativeProject
+                      ? undefined
+                      : allowedTools.length
+                        ? allowedTools
+                        : undefined,
+                    kind: nativeProject ? "agent" : launch.kind,
                     repoId: repoIds[0] || undefined,
                     extraRepoIds: repoIds.slice(1).length ? repoIds.slice(1) : undefined,
                     repoUrl: state.repos.find((row) => row.id === repoIds[0])?.checkout.url,
@@ -1064,16 +1200,29 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
             <div className="launch-starters-slot">
               <div className="design-start-from">
                 <p className="design-start-from-label">Or start from</p>
+                {engine ? (
+                  <NativeStarters
+                    engine={engine}
+                    action={projectAction}
+                    selectedId={nativeStarterId}
+                    onPick={(starter) => {
+                      setNativeStarterId(starter.id);
+                      setPrompt(starter.prompt);
+                      setError(null);
+                      box.current?.focus();
+                    }}
+                  />
+                ) : null}
                 <RecipeCards
                   pills
                   shortcuts
-                  recipes={launch.recipes}
+                  recipes={nativeProject ? [] : launch.recipes}
                   selectedId={recipeId}
                   onSelect={applyRecipe}
                   label={launch.starters}
                   limit={launch.starterLimit}
                   more={
-                    surface === "game" ? (
+                    surface === "game" && !nativeProject ? (
                       <>
                         <p className="design-start-from-label">Remix a sentence</p>
                         <div

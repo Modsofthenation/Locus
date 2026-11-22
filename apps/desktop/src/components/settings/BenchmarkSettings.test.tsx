@@ -8,6 +8,8 @@ const apiMock = vi.hoisted(() => ({
   benchmarkRuns: vi.fn(),
   startBenchmark: vi.fn(),
   cancelBenchmark: vi.fn(),
+  benchmarkHistory: vi.fn(async () => ({ rows: [] as unknown[] })),
+  compareBenchmarks: vi.fn(),
   backup: vi.fn(),
   inspectBackup: vi.fn(),
   restoreStatus: vi.fn(),
@@ -116,6 +118,86 @@ describe("BenchmarkSettings", () => {
     expect(run.textContent).toContain("openai/gpt-a");
     expect(run.textContent).toContain("1/1 · 100%");
     expect(run.textContent).toContain("$0.02");
+  });
+
+  it("shows run history per harness and compares two runs", async () => {
+    const target = { providerId: "openai", model: "gpt-a" };
+    const run = (id: string, createdAt: string) => ({
+      id,
+      createdAt,
+      status: "done",
+      targets: [target],
+      caseIds: ["fix-add"],
+      repeat: 1,
+      results: [],
+      summary: [],
+      harness: { locusVersion: "0.20.0", configHash: "abc", key: `0.20.0.${id}` },
+    });
+    apiMock.benchmarkCases.mockResolvedValue({ cases: [] });
+    apiMock.benchmarkRuns.mockResolvedValue({
+      runs: [run("r2", "2026-11-13T00:00:00Z"), run("r1", "2026-11-12T00:00:00Z")],
+    });
+    apiMock.benchmarkHistory.mockResolvedValue({
+      rows: [
+        {
+          providerId: "openai",
+          model: "gpt-a",
+          harnessVersion: "0.20.0+abc1234.deadbeef",
+          runs: 2,
+          runIds: ["r1", "r2"],
+          cases: 4,
+          passed: 3,
+          passRate: 0.75,
+          usdPerCase: 0.01,
+          medianMs: 3000,
+          tokens: 0,
+          firstAt: "2026-11-12T00:00:00Z",
+          lastAt: "2026-11-13T00:00:00Z",
+        },
+      ],
+    });
+    apiMock.compareBenchmarks.mockResolvedValue({
+      a: { id: "r1", harnessVersion: "h1", passRate: 1, cases: 2 },
+      b: { id: "r2", harnessVersion: "h2", passRate: 0.5, cases: 2 },
+      rows: [
+        { caseId: "fix-add", target: "openai/gpt-a", before: 1, after: 0, change: "broke" },
+        {
+          caseId: "off-by-one",
+          target: "openai/gpt-a",
+          before: 1,
+          after: 1,
+          change: "still-passing",
+        },
+      ],
+      fixed: 0,
+      broke: 1,
+    });
+    act(() => root.render(<BenchmarkSettings providers={[provider]} />));
+    await flush();
+    const history = host.querySelector("[data-testid='benchmark-history']")!;
+    expect(history.textContent).toContain("0.20.0+abc1234.deadbeef");
+    expect(history.textContent).toContain("3/4 · 75%");
+
+    const panel = host.querySelector("[data-testid='benchmark-compare']")!;
+    const go = panel.querySelector<HTMLButtonElement>("[data-testid='benchmark-compare-go']")!;
+    expect(go.disabled).toBe(true);
+    const [before, after] = panel.querySelectorAll("select");
+    const pick = (el: HTMLSelectElement, value: string) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
+      setter.call(el, value);
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    act(() => {
+      pick(before!, "r1");
+      pick(after!, "r2");
+    });
+    expect(go.disabled).toBe(false);
+    await act(async () => go.click());
+    await flush();
+    expect(apiMock.compareBenchmarks).toHaveBeenCalledWith("r1", "r2");
+    expect(panel.textContent).toContain("0 fixed · 1 broke");
+    expect(panel.querySelector("tr[data-change='broke']")?.textContent).toContain("fix-add");
+    expect(panel.textContent).not.toContain("off-by-one");
   });
 });
 

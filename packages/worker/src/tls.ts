@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile, chmod } from "node:fs/promises";
 import https from "node:https";
 import { isIP } from "node:net";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import type { TLSSocket } from "node:tls";
 import type { WebSocket } from "ws";
 import { parseWorkerFingerprint } from "@locus/shared";
@@ -20,6 +21,10 @@ export function certFingerprint(derOrPem: Buffer | string): string {
 }
 
 export async function loadOrCreateWorkerTls(dataDir: string): Promise<WorkerTlsMaterial> {
+  // Provisioned workers (Fargate): the control plane mints the identity and pins its
+  // fingerprint before the task starts, so the first request is already verified.
+  const inline = workerTlsFromEnv(process.env);
+  if (inline) return { ...inline, created: false };
   const envCert = process.env.LOCUS_WORKER_TLS_CERT?.trim();
   const envKey = process.env.LOCUS_WORKER_TLS_KEY?.trim();
   if (envCert && envKey) {
@@ -46,6 +51,21 @@ export async function loadOrCreateWorkerTls(dataDir: string): Promise<WorkerTlsM
   await chmod(keyPath, 0o600).catch(() => undefined);
   await chmod(certPath, 0o600).catch(() => undefined);
   return { ...pair, created: true };
+}
+
+/** `LOCUS_WORKER_TLS_CERT_B64` / `LOCUS_WORKER_TLS_KEY_B64`: base64 PEM injected at task start. */
+export function workerTlsFromEnv(
+  env: Record<string, string | undefined>,
+): Omit<WorkerTlsMaterial, "created"> | undefined {
+  const certB64 = env.LOCUS_WORKER_TLS_CERT_B64?.trim();
+  const keyB64 = env.LOCUS_WORKER_TLS_KEY_B64?.trim();
+  if (!certB64 || !keyB64) return undefined;
+  const cert = Buffer.from(certB64, "base64").toString("utf8");
+  const key = Buffer.from(keyB64, "base64").toString("utf8");
+  if (!cert.includes("BEGIN CERTIFICATE") || !key.includes("BEGIN")) {
+    throw new Error("LOCUS_WORKER_TLS_CERT_B64 / LOCUS_WORKER_TLS_KEY_B64 are not PEM");
+  }
+  return { key, cert, fingerprint: certFingerprint(cert) };
 }
 
 export function createSelfSignedWorkerTls(): Omit<WorkerTlsMaterial, "created"> {
@@ -145,6 +165,7 @@ export async function pinnedHttpsFetch(
   url: string,
   init: RequestInit | undefined,
   fingerprint?: string,
+  stream = false,
 ): Promise<{ response: Response; fingerprint: string }> {
   const parsed = new URL(url);
   const method = (init?.method ?? "GET").toUpperCase();
@@ -168,22 +189,30 @@ export async function pinnedHttpsFetch(
         agent: false,
       },
       (res) => {
-        const chunks: Buffer[] = [];
-        res.on("data", (chunk) => chunks.push(chunk));
-        res.on("end", () => {
-          const hdrs = new Headers();
-          for (const [key, value] of Object.entries(res.headers)) {
-            if (value === undefined) continue;
-            hdrs.set(key, Array.isArray(value) ? value.join(", ") : value);
-          }
-          resolve({
-            response: new Response(Buffer.concat(chunks), {
-              status: res.statusCode ?? 0,
-              headers: hdrs,
+        const hdrs = new Headers();
+        for (const [key, value] of Object.entries(res.headers)) {
+          if (value !== undefined) hdrs.set(key, Array.isArray(value) ? value.join(", ") : value);
+        }
+        const status = res.statusCode ?? 500;
+        if ([204, 205, 304].includes(status) || method === "HEAD") {
+          res.resume();
+          resolve({ response: new Response(null, { status, headers: hdrs }), fingerprint: seen });
+        } else if (stream) {
+          const body = Readable.toWeb(res, {
+            strategy: { highWaterMark: 64 * 1024, size: (chunk: Uint8Array) => chunk.byteLength },
+          }) as ReadableStream<Uint8Array>;
+          resolve({ response: new Response(body, { status, headers: hdrs }), fingerprint: seen });
+        } else {
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("error", reject);
+          res.on("end", () =>
+            resolve({
+              response: new Response(Buffer.concat(chunks), { status, headers: hdrs }),
+              fingerprint: seen,
             }),
-            fingerprint: seen,
-          });
-        });
+          );
+        }
       },
     );
     req.on("socket", (socket) => {

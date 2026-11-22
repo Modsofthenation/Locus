@@ -65,6 +65,30 @@ describe("skills", () => {
     ).toEqual(["review"]);
   });
 
+  it("parses Agent Skills front matter with a folded description", () => {
+    const parsed = parseSkillMarkdown(
+      "review-pr.md",
+      "---\nname: review-pr\ndescription: >\n  Adversarial review of a PR.\n  Default lean.\nallowed-tools: exec fetch\n---\n\n# Review PR\nSee [HOST.md](HOST.md).\n",
+      { folder: ".agents/skills/review-pr" },
+    );
+    expect(parsed?.name).toBe("review-pr");
+    expect(parsed?.hint).toBe("Adversarial review of a PR. Default lean.");
+    expect(parsed?.allowedTools).toEqual(["exec", "fetch"]);
+    expect(parsed?.body).toMatch(/^Skill folder: \.agents\/skills\/review-pr\//);
+    expect(parsed?.body).toContain("# Review PR");
+    const literal = parseSkillMarkdown("x.md", "---\nhint: |\n  line one\n  line two\n---\nGo.");
+    expect(literal?.hint).toBe("line one\nline two");
+    expect(literal?.body).toBe("Go.");
+  });
+
+  it("lets a repo skill replace a built-in but not an operator skill", () => {
+    const merged = mergeSkills(
+      [skill("review-pr", { id: "builtin:review-pr" }), skill("mine", { id: "custom" })],
+      [skill("review-pr", { id: "file:review-pr" }), skill("mine", { id: "file:mine" })],
+    );
+    expect(merged.map((row) => row.id)).toEqual(["file:review-pr", "custom"]);
+  });
+
   it("lists name and hint only until read_skill", () => {
     const catalog = formatSkillCatalog([
       skill("review", { title: "Review", hint: "PR checklist" }),

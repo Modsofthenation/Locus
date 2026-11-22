@@ -6,6 +6,7 @@ import {
 } from "@locus/shared";
 import type { ChromiumDriver, ScreencastFrame, ToolRequest, ToolResult } from "@locus/guest-agent";
 import type { WebSocket } from "ws";
+import { randomUUID } from "node:crypto";
 
 export interface WorkerBrowserLink {
   execute(id: string, req: ToolRequest, signal?: AbortSignal): Promise<ToolResult>;
@@ -22,6 +23,7 @@ export class WorkerBrowserDriver implements ChromiumDriver {
   private files: string[] = [];
   private ready?: { resolve: () => void; reject: (err: Error) => void };
   private opened: { ready: boolean; error?: Error } = { ready: false };
+  private pending = new Map<string, { resolve: () => void; reject: (error: Error) => void }>();
 
   constructor(
     private readonly link: WorkerBrowserLink,
@@ -29,24 +31,11 @@ export class WorkerBrowserDriver implements ChromiumDriver {
   ) {}
 
   async handle(req: ToolRequest): Promise<ToolResult> {
-    if (req.name === "browser_tabs") {
-      const action = typeof req.args.action === "string" ? req.args.action : "new";
-      if (action === "new" || action === "close" || action === "select") {
-        this.send({
-          type: "tab",
-          action,
-          targetId: typeof req.args.targetId === "string" ? req.args.targetId : undefined,
-          url: typeof req.args.url === "string" ? req.args.url : undefined,
-        });
-        return { ok: true, output: "" };
-      }
-    }
     return this.link.execute(this.vmId, req);
   }
 
   async navigate(url: string): Promise<ToolResult> {
-    this.send({ type: "navigate", url });
-    return { ok: true, output: url };
+    return this.link.execute(this.vmId, { name: "browser_navigate", args: { url } });
   }
 
   async startScreencast(onFrame: (frame: ScreencastFrame) => void): Promise<void> {
@@ -56,6 +45,9 @@ export class WorkerBrowserDriver implements ChromiumDriver {
     const socket = await this.link.openBrowserSocket(this.vmId, (raw) => this.onMessage(raw));
     this.socket = socket;
     socket.on("close", () => {
+      for (const pending of this.pending.values())
+        pending.reject(new Error("Worker browser WS closed"));
+      this.pending.clear();
       if (this.socket === socket) this.socket = undefined;
       this.ready?.reject(new Error("Worker browser WS closed"));
       this.ready = undefined;
@@ -70,6 +62,9 @@ export class WorkerBrowserDriver implements ChromiumDriver {
   }
 
   async stopScreencast(): Promise<void> {
+    for (const pending of this.pending.values())
+      pending.reject(new Error("Worker browser stopped"));
+    this.pending.clear();
     this.onFrame = undefined;
     const socket = this.socket;
     this.socket = undefined;
@@ -93,7 +88,37 @@ export class WorkerBrowserDriver implements ChromiumDriver {
   }
 
   async dispatchInput(event: BrowserInputMessage): Promise<void> {
-    this.send(event);
+    await this.request(event);
+  }
+
+  async releaseInput(): Promise<void> {
+    if (this.socket?.readyState === 1) await this.request({ type: "release-input" });
+  }
+  async invalidateObservation(): Promise<void> {
+    if (this.socket?.readyState === 1) await this.request({ type: "invalidate-observation" });
+    else await this.link.execute(this.vmId, { name: "browser_snapshot", args: {} });
+  }
+  private request(message: BrowserClientMessage): Promise<void> {
+    if (this.socket?.readyState !== 1)
+      return Promise.reject(new Error("Worker browser is disconnected"));
+    const requestId = randomUUID();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(requestId);
+        reject(new Error("Worker browser action timed out"));
+      }, READY_MS);
+      this.pending.set(requestId, {
+        resolve: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+      this.send({ ...message, requestId });
+    });
   }
 
   private send(message: BrowserClientMessage): void {
@@ -104,6 +129,13 @@ export class WorkerBrowserDriver implements ChromiumDriver {
   private onMessage(raw: string): void {
     const message = parseBrowserServerMessage(raw);
     if (!message) return;
+    if (message.type === "action-result") {
+      const pending = this.pending.get(message.requestId);
+      this.pending.delete(message.requestId);
+      if (message.ok) pending?.resolve();
+      else pending?.reject(new Error(message.output ?? "Worker browser action failed"));
+      return;
+    }
     if (message.type === "frame") {
       this.onFrame?.({
         data: message.data,

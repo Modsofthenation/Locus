@@ -1,13 +1,21 @@
+import { riskGateRefusal } from "@locus/shared";
+import { registerAndroidRoutes } from "./androidRoutes.js";
+import { workerMergeGate } from "../session/riskGate.js";
 import { readFile, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { Readable } from "node:stream";
+import { stream } from "hono/streaming";
 import type { Hono } from "hono";
 import type { CreateSessionInput, LocusConfig, PatchSessionInput } from "@locus/shared";
 import {
+  isLoopbackOrigin,
   sessionOffersAgentCanvas,
   slugAgentCanvasId,
   sessionListViews,
   clipNamedEnvName,
   namedEnvironmentById,
   sessionRuntime,
+  sanitizePreviewPath,
   snapshotNamedEnvironment,
   upsertNamedEnvironment,
   exportApprovals,
@@ -20,13 +28,49 @@ import type { RepoService } from "../git/repos.js";
 import { parseIncomingAttachments } from "../media/attachments.js";
 import { artifactContentType, artifactDest } from "../media/artifacts.js";
 import { recordingDest } from "../media/recordings.js";
+import { VisualReview } from "../media/visualReview.js";
 import { screenshotDest } from "../media/screenshots.js";
 import { attachmentFilename } from "../media/share.js";
 import type { ProjectService } from "../projects/projects.js";
-import { servePreview } from "../runtime/preview.js";
+import { servePreview, serveStaticPreview } from "../runtime/preview.js";
 import type { SessionService } from "../session/sessions.js";
 import { errorJson } from "./sessionJson.js";
 import { SessionTraceLog } from "../session/traces.js";
+import {
+  isUnityAction,
+  startUnityJob,
+  unityJob,
+  latestUnityJob,
+  latestUnityWebglJob,
+  unityScreenshot,
+  unityWebglAsset,
+  restoreUnityJobs,
+} from "../unity/runner.js";
+import {
+  godotJob,
+  godotWebAsset,
+  isGodotAction,
+  latestGodotJob,
+  latestGodotWebJob,
+  restoreGodotJobs,
+  startGodotJob,
+} from "../godot/runner.js";
+import {
+  isUnrealAction,
+  latestUnrealJob,
+  restoreUnrealJobs,
+  startUnrealJob,
+  unrealJob,
+} from "../unreal/runner.js";
+import {
+  blenderExport,
+  blenderImage,
+  blenderJob,
+  isBlenderAction,
+  latestBlenderJob,
+  restoreBlenderJobs,
+  startBlenderJob,
+} from "../blender/runner.js";
 
 export function registerSessionRoutes(
   app: Hono,
@@ -39,13 +83,414 @@ export function registerSessionRoutes(
     peerAddress?: (c: import("hono").Context) => string | undefined;
   },
 ): void {
+  registerAndroidRoutes(app, opts);
   app.get("/api/sessions", async (c) => c.json(sessionListViews(await opts.sessions.list())));
+
+  // A loopback TCP connection can still originate from a malicious web page.
+  // Accept the local app's browser origin, but reject arbitrary remote origins.
+  const unityOriginAllowed = (c: import("hono").Context, allowOpaque = false): boolean => {
+    const origin = c.req.header("origin");
+    return !origin || isLoopbackOrigin(origin) || (allowOpaque && origin === "null");
+  };
+
+  // Unity Editor automation is restricted to the selected host workspace of a
+  // Unity session. The client cannot supply arbitrary filesystem project roots.
+  app.post("/api/sessions/:id/unity/jobs", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress))
+      return c.json({ error: "Unity Editor operations and assets are local-only" }, 403);
+    if (!unityOriginAllowed(c)) return c.json({ error: "Origin not allowed" }, 403);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      action?: unknown;
+      scene?: string;
+      target?: "linux" | "windows" | "macos" | "webgl";
+    };
+    if (!isUnityAction(body.action)) return c.json({ error: "Invalid Unity action" }, 400);
+    try {
+      const sessionId = c.req.param("id");
+      const root = await opts.sessions.unityProjectRoot(sessionId);
+      await restoreUnityJobs(root, sessionId);
+      const job = await startUnityJob({
+        sessionId,
+        root,
+        action: body.action,
+        scene: body.scene,
+        target: body.target,
+      });
+      return c.json(job, 202);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  app.get("/api/sessions/:id/unity/latest", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress))
+      return c.json({ error: "Unity Editor operations and assets are local-only" }, 403);
+    if (!unityOriginAllowed(c)) return c.json({ error: "Origin not allowed" }, 403);
+    try {
+      const root = await opts.sessions.unityProjectRoot(c.req.param("id"));
+      await restoreUnityJobs(root, c.req.param("id"));
+      return c.json({
+        job: latestUnityJob(c.req.param("id")) ?? null,
+        preview: latestUnityWebglJob(c.req.param("id")) ?? null,
+      });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  app.get("/api/sessions/:id/unity/jobs/:jobId", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress))
+      return c.json({ error: "Unity Editor operations and assets are local-only" }, 403);
+    if (!unityOriginAllowed(c)) return c.json({ error: "Origin not allowed" }, 403);
+    try {
+      const root = await opts.sessions.unityProjectRoot(c.req.param("id"));
+      await restoreUnityJobs(root, c.req.param("id"));
+      const job = unityJob(c.req.param("jobId"), c.req.param("id"));
+      return job ? c.json(job) : c.json({ error: "Unity job not found" }, 404);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  app.get("/api/sessions/:id/unity/jobs/:jobId/screenshot", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress))
+      return c.json({ error: "Unity Editor operations and assets are local-only" }, 403);
+    if (!unityOriginAllowed(c)) return c.json({ error: "Origin not allowed" }, 403);
+    try {
+      const root = await opts.sessions.unityProjectRoot(c.req.param("id"));
+      await restoreUnityJobs(root, c.req.param("id"));
+      const png = await unityScreenshot(c.req.param("jobId"), c.req.param("id"));
+      return png
+        ? c.body(Uint8Array.from(png), 200, {
+            "content-type": "image/png",
+            "cache-control": "no-store",
+          })
+        : c.json({ error: "Screenshot unavailable" }, 404);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  // Unity's generated WebGL player runs in a sandboxed iframe, with an opaque
+  // origin and cross-origin-readable static assets. Do not enable same-origin.
+  app.get("/api/sessions/:id/unity/jobs/:jobId/webgl/*", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress))
+      return c.json({ error: "Unity Editor operations and assets are local-only" }, 403);
+    if (!unityOriginAllowed(c, true)) return c.json({ error: "Origin not allowed" }, 403);
+    try {
+      const sessionId = c.req.param("id");
+      const root = await opts.sessions.unityProjectRoot(sessionId);
+      await restoreUnityJobs(root, sessionId);
+      const suffix = c.req.path.split("/webgl/").slice(1).join("/webgl/");
+      const asset = await unityWebglAsset(
+        c.req.param("jobId"),
+        sessionId,
+        decodeURIComponent(suffix),
+      );
+      if (!asset) return c.json({ error: "WebGL player asset unavailable" }, 404);
+      const localOrigin = new URL(c.req.url).origin;
+      const webglBase = `${localOrigin}/api/sessions/${encodeURIComponent(sessionId)}/unity/jobs/${encodeURIComponent(c.req.param("jobId"))}/webgl/`;
+      // Sandboxed frames have an opaque origin. Permit their generated Unity
+      // loader to fetch only this server's static WebGL build assets.
+      // Stream large Unity .data/.wasm files with backpressure to avoid
+      // buffering hundreds of megabytes per concurrent preview request.
+      const headers: Record<string, string> = {
+        "content-type": asset.mime,
+        "cache-control": "no-store",
+        "access-control-allow-origin": c.req.header("origin") ?? new URL(c.req.url).origin,
+        vary: "Origin",
+        "cross-origin-resource-policy": "cross-origin",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": `default-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; script-src ${webglBase} 'unsafe-inline' 'unsafe-eval' blob:; connect-src ${webglBase} data: blob:; worker-src ${webglBase} blob:; style-src ${webglBase} 'unsafe-inline'; img-src ${webglBase} data: blob:; font-src ${webglBase} data:; frame-ancestors ${localOrigin} http://localhost:* http://127.0.0.1:*`,
+        "referrer-policy": "no-referrer",
+      };
+      for (const [key, value] of Object.entries(headers)) c.header(key, value);
+      c.header("content-length", String(asset.size));
+      return stream(c, async (writer) => {
+        await writer.pipe(
+          Readable.toWeb(createReadStream(asset.path)) as ReadableStream<Uint8Array>,
+        );
+      });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  // Blender jobs execute native local code. No user-provided absolute paths or remote callers.
+  app.post("/api/sessions/:id/blender/jobs", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress) || !unityOriginAllowed(c))
+      return c.json({ error: "Blender jobs are local-operator only" }, 403);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      action?: unknown;
+      file?: string;
+      script?: string;
+      format?: "glb" | "fbx" | "obj" | "stl";
+    };
+    if (!isBlenderAction(body.action)) return c.json({ error: "Invalid Blender action" }, 400);
+    try {
+      const sessionId = c.req.param("id");
+      const root = await opts.sessions.blenderProjectRoot(sessionId);
+      await restoreBlenderJobs(root, sessionId);
+      return c.json(
+        await startBlenderJob({
+          root,
+          sessionId,
+          action: body.action,
+          file: body.file,
+          script: body.script,
+          format: body.format,
+        }),
+        202,
+      );
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  app.get("/api/sessions/:id/blender/latest", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress) || !unityOriginAllowed(c))
+      return c.json({ error: "Blender jobs are local-operator only" }, 403);
+    try {
+      const id = c.req.param("id");
+      await restoreBlenderJobs(await opts.sessions.blenderProjectRoot(id), id);
+      return c.json({ job: latestBlenderJob(id) ?? null });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  app.get("/api/sessions/:id/blender/jobs/:jobId", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress) || !unityOriginAllowed(c))
+      return c.json({ error: "Blender jobs are local-operator only" }, 403);
+    try {
+      const id = c.req.param("id");
+      await restoreBlenderJobs(await opts.sessions.blenderProjectRoot(id), id);
+      const job = blenderJob(c.req.param("jobId"), id);
+      return job ? c.json(job) : c.json({ error: "Blender job not found" }, 404);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  app.get("/api/sessions/:id/blender/jobs/:jobId/image", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress) || !unityOriginAllowed(c))
+      return c.json({ error: "Blender image is local-operator only" }, 403);
+    try {
+      const id = c.req.param("id");
+      await restoreBlenderJobs(await opts.sessions.blenderProjectRoot(id), id);
+      const image = await blenderImage(c.req.param("jobId"), id);
+      return image
+        ? c.body(Uint8Array.from(image), 200, {
+            "content-type": "image/png",
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+          })
+        : c.json({ error: "Blender image not found" }, 404);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  app.get("/api/sessions/:id/blender/jobs/:jobId/export", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress) || !unityOriginAllowed(c))
+      return c.json({ error: "Blender export is local-operator only" }, 403);
+    try {
+      const id = c.req.param("id");
+      await restoreBlenderJobs(await opts.sessions.blenderProjectRoot(id), id);
+      const asset = await blenderExport(c.req.param("jobId"), id);
+      if (!asset) return c.json({ error: "Blender export not found" }, 404);
+      c.header("content-type", asset.mime);
+      c.header("content-disposition", 'attachment; filename="' + asset.name + '"');
+      c.header("cache-control", "no-store");
+      c.header("x-content-type-options", "nosniff");
+      c.header("content-length", String(asset.size));
+      return stream(c, async (writer) => {
+        await writer.pipe(
+          Readable.toWeb(createReadStream(asset.file)) as ReadableStream<Uint8Array>,
+        );
+      });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  // Unreal builds, commandlets and project Python run native code on the Host.
+  // Only the local operator may start them, and only against the session folder.
+  app.post("/api/sessions/:id/unreal/jobs", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress) || !unityOriginAllowed(c))
+      return c.json({ error: "Unreal Engine operations are local-operator only" }, 403);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      action?: unknown;
+      target?: "windows" | "linux" | "macos";
+      filter?: string;
+      script?: string;
+    };
+    if (!isUnrealAction(body.action)) return c.json({ error: "Invalid Unreal action" }, 400);
+    try {
+      const sessionId = c.req.param("id");
+      const root = await opts.sessions.unrealProjectRoot(sessionId);
+      await restoreUnrealJobs(root, sessionId);
+      const job = await startUnrealJob({
+        sessionId,
+        root,
+        action: body.action,
+        ...(body.target ? { target: body.target } : {}),
+        ...(typeof body.filter === "string" && body.filter.trim()
+          ? { filter: body.filter.trim() }
+          : {}),
+        ...(typeof body.script === "string" ? { script: body.script } : {}),
+      });
+      return c.json(job, 202);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  app.get("/api/sessions/:id/unreal/latest", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress) || !unityOriginAllowed(c))
+      return c.json({ error: "Unreal Engine operations are local-operator only" }, 403);
+    try {
+      const sessionId = c.req.param("id");
+      await restoreUnrealJobs(await opts.sessions.unrealProjectRoot(sessionId), sessionId);
+      return c.json({ job: latestUnrealJob(sessionId) ?? null });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  app.get("/api/sessions/:id/unreal/jobs/:jobId", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress) || !unityOriginAllowed(c))
+      return c.json({ error: "Unreal Engine operations are local-operator only" }, 403);
+    try {
+      const sessionId = c.req.param("id");
+      await restoreUnrealJobs(await opts.sessions.unrealProjectRoot(sessionId), sessionId);
+      const job = unrealJob(c.req.param("jobId"), sessionId);
+      return job ? c.json(job) : c.json({ error: "Unreal job not found" }, 404);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  // Godot operations run native code and project plugins on the Host. Never
+  // accept arbitrary project paths, remote callers or foreign browser origins.
+  app.post("/api/sessions/:id/godot/jobs", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress) || !unityOriginAllowed(c))
+      return c.json({ error: "Godot Editor is local-operator only" }, 403);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      action?: unknown;
+      scene?: string;
+      target?: "web" | "linux" | "windows" | "macos";
+    };
+    if (!isGodotAction(body.action)) return c.json({ error: "Invalid Godot action" }, 400);
+    try {
+      const sessionId = c.req.param("id");
+      const root = await opts.sessions.godotProjectRoot(sessionId);
+      await restoreGodotJobs(root, sessionId);
+      const job = await startGodotJob({
+        sessionId,
+        root,
+        action: body.action,
+        scene: body.scene,
+        target: body.target,
+      });
+      return c.json(job, 202);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  app.get("/api/sessions/:id/godot/latest", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress) || !unityOriginAllowed(c))
+      return c.json({ error: "Godot Editor is local-operator only" }, 403);
+    try {
+      const sessionId = c.req.param("id");
+      await restoreGodotJobs(await opts.sessions.godotProjectRoot(sessionId), sessionId);
+      return c.json({
+        job: latestGodotJob(sessionId) ?? null,
+        preview: latestGodotWebJob(sessionId) ?? null,
+      });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  app.get("/api/sessions/:id/godot/jobs/:jobId", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress) || !unityOriginAllowed(c))
+      return c.json({ error: "Godot Editor is local-operator only" }, 403);
+    try {
+      const sessionId = c.req.param("id");
+      await restoreGodotJobs(await opts.sessions.godotProjectRoot(sessionId), sessionId);
+      const job = godotJob(c.req.param("jobId"), sessionId);
+      return job ? c.json(job) : c.json({ error: "Godot job not found" }, 404);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+
+  app.get("/api/sessions/:id/godot/jobs/:jobId/web/*", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress) || !unityOriginAllowed(c, true))
+      return c.json({ error: "Godot preview is local-only" }, 403);
+    try {
+      const sessionId = c.req.param("id");
+      await restoreGodotJobs(await opts.sessions.godotProjectRoot(sessionId), sessionId);
+      const relative = c.req.path.split("/web/").slice(1).join("/web/");
+      const asset = await godotWebAsset(
+        c.req.param("jobId"),
+        sessionId,
+        decodeURIComponent(relative),
+      );
+      if (!asset) return c.json({ error: "Godot Web export not found" }, 404);
+      const origin = new URL(c.req.url).origin;
+      const base = `${origin}/api/sessions/${encodeURIComponent(sessionId)}/godot/jobs/${encodeURIComponent(c.req.param("jobId"))}/web/`;
+      const headers: Record<string, string> = {
+        "content-type": asset.mime,
+        "cache-control": "no-store",
+        "access-control-allow-origin": c.req.header("origin") ?? origin,
+        vary: "Origin",
+        "cross-origin-resource-policy": "cross-origin",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "content-security-policy": `default-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; script-src ${base} 'unsafe-inline' 'unsafe-eval' blob:; connect-src ${base} data: blob:; worker-src ${base} blob:; style-src ${base} 'unsafe-inline'; img-src ${base} data: blob:; font-src ${base} data:; frame-ancestors ${origin} http://localhost:* http://127.0.0.1:*`,
+      };
+      for (const [key, value] of Object.entries(headers)) c.header(key, value);
+      c.header("content-length", String(asset.size));
+      return stream(c, async (writer) => {
+        await writer.pipe(
+          Readable.toWeb(createReadStream(asset.file)) as ReadableStream<Uint8Array>,
+        );
+      });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
 
   app.post("/api/sessions", async (c) => {
     const input = (await c.req.json()) as CreateSessionInput;
     try {
       const session = await opts.sessions.create(input, { waitUntilStarted: false });
       return c.json(session, 201);
+    } catch (err) {
+      return errorJson(c, err);
+    }
+  });
+
+  /** One prompt → N agents (mixed providers / CLIs), each in its own worktree or container. */
+  app.post("/api/sessions/fanout", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      create?: CreateSessionInput;
+      agents?: unknown;
+      prompt?: string;
+    };
+    if (!body.create || typeof body.create !== "object") {
+      return c.json({ error: "create is required" }, 400);
+    }
+    try {
+      const out = await opts.sessions.fanout({
+        create: body.create,
+        agents: body.agents,
+        prompt: body.prompt ?? "",
+      });
+      return c.json(out, 201);
     } catch (err) {
       return errorJson(c, err);
     }
@@ -78,6 +523,76 @@ export function registerSessionRoutes(
     const session = await opts.sessions.get(c.req.param("id"));
     if (!session) return c.json({ error: "Not found" }, 404);
     return c.json(session);
+  });
+
+  const visualReview = new VisualReview(opts.store.dataDir);
+  const visualPath = "/api/sessions/:id/visual-review";
+  app.get(visualPath, async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress))
+      return c.json({ error: "Visual review is desktop-only" }, 403);
+    if (!(await opts.sessions.get(c.req.param("id"))))
+      return c.json({ error: "Session not found" }, 404);
+    return c.json(await visualReview.list(c.req.param("id")));
+  });
+  app.get(`${visualPath}/:baseline/:image`, async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress))
+      return c.json({ error: "Visual review is desktop-only" }, 403);
+    try {
+      const image = await visualReview.image(
+        c.req.param("id"),
+        c.req.param("baseline"),
+        c.req.param("image"),
+      );
+      return new Response(new Uint8Array(image), {
+        headers: { "content-type": "image/png", "cache-control": "no-store" },
+      });
+    } catch {
+      return c.json({ error: "Visual review image not found" }, 404);
+    }
+  });
+  app.post(visualPath, async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress))
+      return c.json({ error: "Visual review is desktop-only" }, 403);
+    const sessionId = c.req.param("id");
+    try {
+      const body = await c.req.json<{ name?: string; baselineId?: string; path?: string }>();
+      const { active } = await opts.sessions.previewStatus(sessionId);
+      if (!active) throw new Error("Start the session's web preview first");
+      const target = await opts.sessions.previewTarget(sessionId, active.port);
+      const bindPort = Number(
+        process.env.PORT ?? (await opts.store.loadConfig()).advanced.bindPort ?? 7420,
+      );
+      if (target.kind === "http" && target.port === bindPort && target.host === "127.0.0.1") {
+        throw new Error("Choose the web application's preview port");
+      }
+      const prefix = `/api/sessions/${encodeURIComponent(sessionId)}/preview-http/${active.port}`;
+      const path = sanitizePreviewPath(body.path || active.path);
+      return c.json(
+        await visualReview.run(sessionId, { ...body, path }, (url, signal) => {
+          const pathname = url.pathname.startsWith(prefix + "/")
+            ? url.pathname.slice(prefix.length)
+            : url.pathname;
+          if (target.kind === "static")
+            return serveStaticPreview(target.root, sanitizePreviewPath(pathname));
+          if (target.kind === "http") {
+            const upstream = new URL(`http://${target.host}:${target.port}`);
+            upstream.pathname = pathname;
+            upstream.search = url.search;
+            return fetch(upstream, { redirect: "manual", signal });
+          }
+          const proxied = new URL(prefix + pathname + url.search, url.origin);
+          return opts.sessions.proxyWorkerPreview(sessionId, String(active.port), {
+            path: proxied.pathname,
+            url: proxied.href,
+            method: "GET",
+            headers: new Headers(),
+            arrayBuffer: async () => new ArrayBuffer(0),
+          });
+        }),
+      );
+    } catch (err) {
+      return errorJson(c, err);
+    }
   });
 
   app.get("/api/sessions/:id/preview", async (c) => {
@@ -341,6 +856,7 @@ export function registerSessionRoutes(
       count?: unknown;
       prompt?: string;
       models?: unknown;
+      agents?: unknown;
     };
     try {
       return c.json(await opts.sessions.spawnWorkers(c.req.param("id"), body), 201);
@@ -358,10 +874,99 @@ export function registerSessionRoutes(
   });
 
   app.post("/api/sessions/:id/workers/merge", async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { workerId?: string };
+    const body = (await c.req.json().catch(() => ({}))) as {
+      workerId?: string;
+      approveRisk?: boolean;
+      requestApproval?: boolean;
+    };
     try {
       if (!body.workerId?.trim()) return c.json({ error: "workerId is required" }, 400);
-      return c.json(await opts.sessions.mergeWorker(c.req.param("id"), body.workerId.trim()));
+      const parentId = c.req.param("id");
+      const workerId = body.workerId.trim();
+      if (body.approveRisk !== true) {
+        const worker = await opts.sessions.get(workerId);
+        const [sessions, config] = await Promise.all([
+          opts.store.loadSessions(),
+          opts.store.loadConfig(),
+        ]);
+        const gate = worker ? workerMergeGate(worker, sessions, config) : undefined;
+        if (gate?.gated) {
+          if (body.requestApproval !== true) return c.json(riskGateRefusal(gate), 409);
+          const { toolCallId } = await opts.sessions.requestOperatorApproval(
+            workerId,
+            {
+              name: "worker_merge",
+              arguments: { parentId, workerId, riskGate: gate.reason ?? "" },
+            },
+            async () => {
+              const parent = await opts.sessions.mergeWorker(parentId, workerId);
+              return { ok: true, output: `Merged into ${parent.title}` };
+            },
+          );
+          return c.json(
+            { pending: true, sessionId: workerId, toolCallId, ...riskGateRefusal(gate) },
+            202,
+          );
+        }
+      }
+      return c.json(await opts.sessions.mergeWorker(parentId, workerId));
+    } catch (err) {
+      return errorJson(c, err);
+    }
+  });
+
+  app.get("/api/sessions/:id/worker-connection", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress))
+      return c.json({ error: "Worker recovery is desktop-only" }, 403);
+    try {
+      return c.json(await opts.sessions.workerConnection(c.req.param("id")));
+    } catch (err) {
+      return errorJson(c, err);
+    }
+  });
+
+  app.post("/api/sessions/:id/worker-connection/resume", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress))
+      return c.json({ error: "Worker recovery is desktop-only" }, 403);
+    try {
+      return c.json(await opts.sessions.resumeWorkerCheckpoint(c.req.param("id")));
+    } catch (err) {
+      return errorJson(c, err);
+    }
+  });
+
+  app.get("/api/sessions/:id/workers/board", async (c) => {
+    try {
+      return c.json(await opts.sessions.workerBoard(c.req.param("id")));
+    } catch (err) {
+      return errorJson(c, err);
+    }
+  });
+
+  app.post("/api/sessions/:id/workers/verify", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress))
+      return c.json({ error: "Verification is desktop-only" }, 403);
+    try {
+      return c.json(await opts.sessions.verifyWorkers(c.req.param("id")));
+    } catch (err) {
+      return errorJson(c, err);
+    }
+  });
+
+  /** Order the group's attempts best-first (model judge, or a heuristic when none is set up). */
+  app.post("/api/sessions/:id/workers/rank", async (c) => {
+    try {
+      return c.json(await opts.sessions.rankWorkers(c.req.param("id")));
+    } catch (err) {
+      return errorJson(c, err);
+    }
+  });
+
+  /** Stop one parallel agent and delete its worktree + branch. */
+  app.post("/api/sessions/:id/workers/discard", async (c) => {
+    try {
+      await opts.sessions.discardWorker(c.req.param("id"));
+      return c.json({ ok: true });
     } catch (err) {
       return errorJson(c, err);
     }

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { AgentSession, ChatMessage, ToolCall } from "@locus/shared";
 import {
+  formatTurnDuration,
   isTestCommand,
   latestTurnOutcome,
   turnOutcomeHeadline,
   turnTestsLabel,
+  worktreeMergeParent,
 } from "./turnOutcome";
 
 const at = "2026-11-12T10:00:00.000Z";
@@ -104,6 +106,55 @@ describe("latestTurnOutcome", () => {
     expect(turnTestsLabel(outcome!.tests)).toEqual({ text: "Tests passed", ok: true });
   });
 
+  it("sums token usage over the turn and measures wall time", () => {
+    const user = { ...msg("u1", "user", "fix add"), createdAt: "2026-11-12T10:00:00.000Z" };
+    const a1 = {
+      ...msg("a1", "assistant", "", [
+        call("c1", "apply_patch", { patch: PATCH }, { finishedAt: "2026-11-12T10:01:10.000Z" }),
+      ]),
+      createdAt: "2026-11-12T10:00:05.000Z",
+      usage: { inputTokens: 1000, outputTokens: 50, cachedInputTokens: 400 },
+    };
+    const a2 = {
+      ...msg("a2", "assistant", "Done."),
+      createdAt: "2026-11-12T10:01:05.000Z",
+      usage: { inputTokens: 1200, outputTokens: 30 },
+    };
+    const outcome = latestTurnOutcome(session([user, a1, a2]));
+    expect(outcome!.usage).toEqual({
+      inputTokens: 2200,
+      outputTokens: 80,
+      cachedInputTokens: 400,
+    });
+    expect(outcome!.durationMs).toBe(70_000);
+    expect(formatTurnDuration(outcome!.durationMs)).toBe("1m 10s");
+  });
+
+  it("counts each call once when tool-result messages repeat it", () => {
+    const patch = call("p1", "apply_patch", { patch: PATCH });
+    const test = call("t1", "exec", { command: "npm test" }, { result: "ok (exit 0)" });
+    const outcome = latestTurnOutcome(
+      session([
+        msg("u1", "user", "fix"),
+        msg("a1", "assistant", "", [patch]),
+        { ...msg("r1", "tool", "updated", [patch]), toolCallId: "p1" },
+        msg("a2", "assistant", "", [test]),
+        { ...msg("r2", "tool", "ok", [test]), toolCallId: "t1" },
+        msg("a3", "assistant", "Done."),
+      ]),
+    );
+    expect(outcome!.commands).toBe(1);
+    expect(outcome!.tests).toHaveLength(1);
+    expect(outcome!.patches).toHaveLength(1);
+    expect(turnOutcomeHeadline(outcome!)).toBe("1 file changed · +1 −1");
+  });
+
+  it("leaves usage and time out when the turn has none", () => {
+    const outcome = latestTurnOutcome(session(turn));
+    expect(outcome!.usage).toBeUndefined();
+    expect(outcome!.durationMs).toBeUndefined();
+  });
+
   it("only offers undo for the checkpoint taken right before this turn", () => {
     const outcome = latestTurnOutcome(
       session(turn, { checkpoints: [{ id: "old", messageCount: 5, createdAt: at }] }),
@@ -150,5 +201,57 @@ describe("turnTestsLabel", () => {
       ]),
     ).toEqual({ text: "1 of 2 test runs failed", ok: false });
     expect(turnTestsLabel([])).toBeUndefined();
+  });
+});
+
+describe("formatTurnDuration", () => {
+  it("formats seconds, minutes and hours", () => {
+    expect(formatTurnDuration(undefined)).toBeUndefined();
+    expect(formatTurnDuration(400)).toBeUndefined();
+    expect(formatTurnDuration(42_000)).toBe("42s");
+    expect(formatTurnDuration(185_000)).toBe("3m 05s");
+    expect(formatTurnDuration(3_720_000)).toBe("1h 02m");
+  });
+});
+
+describe("worktreeMergeParent", () => {
+  const worktree = { path: "/w", branch: "locus/a", source: "/s", baseSha: "abc" } as never;
+  it("returns the parent of a worktree worker", () => {
+    expect(
+      worktreeMergeParent({
+        worktree,
+        compare: { groupId: "g", kind: "workers", role: "2", parentId: "p1" },
+      }),
+    ).toBe("p1");
+  });
+  it("is undefined for the parent, model compares, and agents without a worktree", () => {
+    expect(
+      worktreeMergeParent({ worktree, compare: { groupId: "g", kind: "workers", role: "parent" } }),
+    ).toBeUndefined();
+    expect(
+      worktreeMergeParent({ worktree, compare: { groupId: "g", role: "b", parentId: "p1" } }),
+    ).toBeUndefined();
+    expect(
+      worktreeMergeParent({
+        compare: { groupId: "g", kind: "workers", role: "1", parentId: "p1" },
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe("turn verdict", () => {
+  it("carries a review verdict with its risk into the turn summary", () => {
+    const outcome = latestTurnOutcome(
+      session([
+        msg("u1", "user", "review #12"),
+        msg(
+          "a1",
+          "assistant",
+          'Looks risky. {"verdict":"PASS","reasons":["auth change"],"risk":"high"}',
+        ),
+      ]),
+    );
+    expect(outcome?.verdict).toEqual({ verdict: "PASS", reasons: ["auth change"], risk: "high" });
+    expect(turnOutcomeHeadline(outcome!)).toBe("Review");
   });
 });

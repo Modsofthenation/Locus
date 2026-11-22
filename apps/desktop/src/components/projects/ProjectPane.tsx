@@ -32,6 +32,7 @@ import { ErrorBanner, Skeleton } from "@/components/layout/Skeleton";
 import { WorkspaceBody } from "@/components/workspace/WorkspaceBody";
 import { formatWhen } from "@/components/automations/Automations";
 import { ProjectEmpty } from "./ProjectEmpty";
+import { OfflineProjectSettings } from "./OfflineProjectSettings";
 import { TeamEditor } from "./TeamEditor";
 
 export function ProjectPane() {
@@ -958,6 +959,9 @@ export function ProjectFleet(props: { project: ProjectDocument }) {
           </div>
         ) : null}
       </section>
+      {!props.project.groupChat ? (
+        <OfflineProjectSettings key={props.project.id} project={props.project} />
+      ) : null}
       {subscriptionsBlock}
       {needsSection}
       {boardBlock}

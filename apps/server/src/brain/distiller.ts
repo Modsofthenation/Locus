@@ -4,6 +4,7 @@ import {
   isBrainMemoryKind,
   isClaudeCodeProvider,
   isKiroCliProvider,
+  isGenericCliProvider,
   isCursorCliProvider,
   isCursorProvider,
   pickPolicyDistiller,
@@ -49,7 +50,8 @@ export function brainDistillerProvider(
       isCursorProvider(provider) ||
       isCursorCliProvider(provider) ||
       isClaudeCodeProvider(provider) ||
-      isKiroCliProvider(provider)
+      isKiroCliProvider(provider) ||
+      isGenericCliProvider(provider)
     ) {
       return false;
     }

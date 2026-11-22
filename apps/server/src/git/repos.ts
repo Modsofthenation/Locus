@@ -16,6 +16,9 @@ import {
   findBoundAgent,
   forgesWithTokens,
   formatFixPrompt,
+  formatCiFixPrompt,
+  isFailingCheckStatus,
+  type CiFailureReport,
   formatReviewPrompt,
   formatSetupPrompt,
   parseAnyReviewVerdict,
@@ -51,6 +54,7 @@ import {
   type PullRequestRef,
   type RepoAbout,
   type RepoBranchList,
+  type RiskGate,
 } from "@locus/shared";
 import { ForgeClient, requireOwnerRepo, type ForgeFetcher } from "./forge.js";
 import { withFreshForgeToken } from "./forgeOauth.js";
@@ -59,8 +63,20 @@ import type { SessionService } from "../session/sessions.js";
 import type { JsonStore } from "../core/store.js";
 import { summarizeChangeStack, type ChangeStackSummarizer } from "./changeStackSummaries.js";
 import { readArchitectureSources, resolveArchitectureRoot } from "./architectureCheckout.js";
+import { pullMergeGate, RiskGateError } from "../session/riskGate.js";
 
 const DEFAULT_BRANCH_TIMEOUT_MS = 5_000;
+/** Condensed CI log budget across failing checks in a fix prompt. */
+const CI_FIX_LOG_CHARS = 9_000;
+
+/** A fix started for failing CI (checks subscription or a red pull). */
+export interface CiFixRequest {
+  headSha?: string;
+  /** Failing check names to focus on. */
+  checks?: string[];
+  attempt?: number;
+  maxAttempts?: number;
+}
 
 function stamp(): string {
   return new Date().toISOString();
@@ -507,14 +523,63 @@ export class RepoService {
     return stack;
   }
 
-  async merge(id: string, number: number): Promise<PullRequestDetail> {
+  /**
+   * Merge a pull on the forge. When the latest review verdict is at or above
+   * `review.requireApprovalAtRisk`, throws `RiskGateError` unless `approveRisk` (an explicit
+   * human confirm) is set; `requestApproval` instead queues a Needs-you approval.
+   */
+  async merge(
+    id: string,
+    number: number,
+    opts: { approveRisk?: boolean } = {},
+  ): Promise<PullRequestDetail> {
     const repo = await this.require(id);
+    if (!opts.approveRisk) {
+      const gate = await this.mergeGate(repo, number);
+      if (gate.gated) throw new RiskGateError(gate);
+    }
     const account = await this.accountFor(repo);
     const parsed = requireOwnerRepo(repo.checkout.url);
     const result = await this.forge.merge(account, parsed.owner, parsed.repo, number);
     if (!result.ok) throw new Error(result.output || "Merge failed");
     await this.store.clearPullListCache(id);
     return this.getPull(id, number, { fresh: true });
+  }
+
+  async mergeGate(repo: LinkedRepo, number: number): Promise<RiskGate> {
+    const [sessions, config] = await Promise.all([
+      this.store.loadSessions(),
+      this.store.loadConfig(),
+    ]);
+    return pullMergeGate(sessions, config, { repoId: repo.id, repoUrl: repo.checkout.url, number });
+  }
+
+  /**
+   * Queue a risk-gated merge as a Needs-you approval on the PR's bound agent (else the
+   * review session that gave the verdict). Approve merges; Deny records the refusal.
+   */
+  async requestMergeApproval(
+    id: string,
+    number: number,
+  ): Promise<{ sessionId: string; toolCallId: string; gate: RiskGate }> {
+    const repo = await this.require(id);
+    const gate = await this.mergeGate(repo, number);
+    const sessions = await this.store.loadSessions();
+    const host =
+      findBoundAgent(sessions, { repoId: repo.id, pullNumber: number })?.id ?? gate.sourceId;
+    if (!host) throw new Error("No agent or review session for this pull request");
+    const { toolCallId } = await this.sessions.requestOperatorApproval(
+      host,
+      {
+        name: "git_pr_merge",
+        arguments: { pull_number: number, repo: repo.name, riskGate: gate.reason ?? "" },
+      },
+      async () => {
+        const merged = await this.merge(id, number, { approveRisk: true });
+        return { ok: true, output: `Merged #${merged.number} ${merged.title}` };
+      },
+    );
+    return { sessionId: host, toolCallId, gate };
   }
 
   async setFileViewed(
@@ -741,6 +806,7 @@ export class RepoService {
   async startReviewSession(
     id: string,
     number: number,
+    opts: { providerId?: string; model?: string; maxUsd?: number } = {},
   ): Promise<{ session: Awaited<ReturnType<SessionService["create"]>> }> {
     const repo = await this.require(id);
     const pull = await this.getPull(id, number);
@@ -757,11 +823,15 @@ export class RepoService {
       changestack = undefined;
     }
     const config = await this.store.loadConfig();
-    const provider = config.providers.find((row) => row.enabled) ?? config.providers[0];
+    const provider =
+      (opts.providerId && config.providers.find((row) => row.id === opts.providerId)) ||
+      config.providers.find((row) => row.enabled) ||
+      config.providers[0];
     if (!provider) throw new Error("Add a provider in Settings");
     const template = config.templates.find((row) => row.os === "ubuntu") ?? config.templates[0];
     if (!template) throw new Error("Unknown template");
     const session = await this.sessions.create({
+      maxUsd: typeof opts.maxUsd === "number" && opts.maxUsd > 0 ? opts.maxUsd : undefined,
       title: `Review #${number} · ${repo.name}`,
       os: "ubuntu",
       templateId: template.id,
@@ -769,7 +839,7 @@ export class RepoService {
       runtime: "docker",
       dockerImage: recipe?.dockerImage ?? DEFAULT_DOCKER_IMAGE,
       providerId: provider.id,
-      model: provider.defaultModel,
+      model: opts.model?.trim() || provider.defaultModel,
       repo: { ...repo.checkout, ref: pull.headRef || repo.checkout.ref },
       repoId: repo.id,
       pull: {
@@ -801,9 +871,11 @@ export class RepoService {
   async startFixSession(
     id: string,
     number: number,
+    opts: { ci?: CiFixRequest } = {},
   ): Promise<{ session: Awaited<ReturnType<SessionService["create"]>> }> {
     const repo = await this.require(id);
-    const pull = await this.getPull(id, number);
+    const pull = await this.getPull(id, number, opts.ci ? { fresh: true } : {});
+    const ci = await this.ciFixSection(repo, pull, opts.ci);
     const stored = await this.store.loadLoadPathNotes(repo.id, number);
     const loadpath = buildLoadPath(pull.files, {
       notes: stored?.notes,
@@ -830,6 +902,7 @@ export class RepoService {
       number,
       verdict,
       loadpath,
+      ci,
     });
     const bound = findBoundAgent(sessions, { repoId: repo.id, pullNumber: number });
     if (bound) {
@@ -854,6 +927,59 @@ export class RepoService {
       prompt,
     });
     return created;
+  }
+
+  /**
+   * CI section for a fix prompt: failing check names, condensed logs, and the head SHA.
+   * Runs when the caller names failing checks (checks subscription) or the pull is red.
+   * A forge or log failure degrades to check names only; it never blocks the fix.
+   */
+  private async ciFixSection(
+    repo: LinkedRepo,
+    pull: PullRequestDetail,
+    request?: CiFixRequest,
+  ): Promise<string | undefined> {
+    const red = pull.checks.filter((row) => isFailingCheckStatus(row.status));
+    if (!request && !red.length) return undefined;
+    const headSha = request?.headSha || pull.headSha;
+    const wanted = request?.checks?.length ? new Set(request.checks) : undefined;
+    let report: CiFailureReport;
+    try {
+      const account = await this.readAccountFor(repo);
+      const parsed = requireOwnerRepo(repo.checkout.url);
+      report = await this.forge.ciReport(account, parsed.owner, parsed.repo, {
+        number: pull.number,
+        headSha,
+        checks: pull.checks,
+        maxChars: CI_FIX_LOG_CHARS,
+        maxLogs: 3,
+      });
+    } catch {
+      report = {
+        headSha,
+        pending: [],
+        failures: red.map((row) => ({
+          name: row.name,
+          status: row.status,
+          url: row.url,
+          source: "other" as const,
+          logAvailable: false,
+          note: "Could not read CI logs; call git_ci_logs.",
+        })),
+      };
+    }
+    if (wanted) {
+      const picked = report.failures.filter((row) => wanted.has(row.name));
+      if (picked.length) report = { ...report, failures: picked };
+    }
+    if (!report.failures.length) return undefined;
+    return formatCiFixPrompt({
+      pull: { url: pull.url, title: pull.title, headRef: pull.headRef, baseRef: pull.baseRef },
+      number: pull.number,
+      report,
+      attempt: request?.attempt,
+      maxAttempts: request?.maxAttempts,
+    });
   }
 
   async accountFor(repo: LinkedRepo): Promise<GitForgeAccount> {

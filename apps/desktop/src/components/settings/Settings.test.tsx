@@ -24,6 +24,7 @@ vi.mock("@/lib/api", () => ({
   api: {
     hypervisor: vi.fn(async () => ({ kind: "mock", capabilities: {} })),
     images: vi.fn(async () => []),
+    providerUsage: vi.fn(async () => ({ usage: [] })),
     browseDiskImages: vi.fn(async () => ({
       path: "/media",
       parent: "/",
@@ -75,7 +76,7 @@ vi.mock("@/lib/api", () => ({
     rotateChromeExtension: vi.fn(),
     checkUpdates: vi.fn(async () => ({
       status: "unavailable",
-      current: "0.21.0",
+      current: "0.24.0",
       message: "No GitHub release found yet. Check for updates works after a v* tag is published.",
     })),
     refreshCursorCli: vi.fn(async () => ({ changed: false, models: [] })),
@@ -361,6 +362,7 @@ describe("Settings", () => {
       "Environments",
       "Git",
       "Integrations",
+      "Reviewers",
       "Appearance",
       "Notifications",
       "Phone",
@@ -381,7 +383,7 @@ describe("Settings", () => {
       });
     }
     expect(host!.querySelector(".settings-page")).toBe(page);
-    expect(host!.textContent).toContain("Hover a theme to preview it live");
+    expect(host!.textContent).toContain("Hover or focus a theme to preview it");
     expect(host!.textContent).toContain("New agent");
     expect(host!.querySelector("[data-testid='theme-preview']")?.getAttribute("data-theme")).toBe(
       "ember",
@@ -418,7 +420,16 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("Void");
     expect(host!.textContent).toContain("Hubble");
     expect(host!.textContent).toContain("Andromeda");
-    expect(host!.textContent).toContain("space photo behind the chat thread");
+    // Photo themes explain the chat-pane photo when previewed, not as a page-wide note.
+    const cosmos = [...host!.querySelectorAll(".theme-card")].find(
+      (el) => el.querySelector("h3")?.textContent === "Cosmos",
+    );
+    await act(async () => {
+      cosmos!.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    expect(host!.querySelector("[data-testid='theme-details']")?.textContent).toContain(
+      "space photo behind the chat thread",
+    );
     expect(host!.textContent).not.toContain("Base URL");
 
     await act(async () => {
@@ -533,7 +544,6 @@ describe("Settings", () => {
     );
     expect(host!.querySelector(".theme-preview-label")?.textContent).toMatch(/Nord/);
     expect(host!.textContent).toContain("Click to apply");
-    expect(host!.textContent).toContain("Applied theme: Ember");
     expect(host!.querySelector("[data-testid='settings-save-status']")?.textContent).toBe(
       "Saving…",
     );
@@ -682,7 +692,7 @@ describe("Settings", () => {
     );
     await flushAutosave();
     expect(api.saveConfig).toHaveBeenCalledWith(expect.objectContaining({ theme: "nord" }));
-    expect(host!.textContent).toContain("Applied theme: Nord");
+    expect(host!.querySelector(".theme-card[aria-pressed='true'] h3")?.textContent).toBe("Nord");
     expect(host!.querySelector("[data-testid='settings-save-status']")?.textContent).toBe("Saved");
 
     const paper = [...host!.querySelectorAll(".theme-card")].find(
@@ -693,7 +703,7 @@ describe("Settings", () => {
     });
     await flushAutosave();
     expect(api.saveConfig).toHaveBeenLastCalledWith(expect.objectContaining({ theme: "paper" }));
-    expect(host!.textContent).toContain("Applied theme: Paper");
+    expect(host!.querySelector(".theme-card[aria-pressed='true'] h3")?.textContent).toBe("Paper");
   });
 
   it("applies editor font size and format-on-save from Appearance", async () => {
@@ -714,8 +724,9 @@ describe("Settings", () => {
     expect(minimap.getAttribute("aria-checked")).toBe("true");
     expect(prefs).toBeTruthy();
     expect(filters).toBeTruthy();
+    // Theme picking comes first; chat and editor preferences follow it.
     expect(
-      prefs!.compareDocumentPosition(filters!) & Node.DOCUMENT_POSITION_FOLLOWING,
+      filters!.compareDocumentPosition(prefs!) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -2032,10 +2043,10 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("worker host");
     expect(host!.textContent).toContain("Steer interrupts");
     expect(host!.textContent).not.toContain("Add a key to enable this provider");
-    expect(host!.querySelector('[aria-label="Fast"]')).toBeTruthy();
+    expect(host!.querySelector('[aria-label="Fast"], [aria-label^="Fast: "]')).toBeTruthy();
     expect(
       host!
-        .querySelector('[aria-label="Fast"]')
+        .querySelector('[aria-label="Fast"], [aria-label^="Fast: "]')
         ?.closest("[data-value]")
         ?.getAttribute("data-value"),
     ).toBe("off");

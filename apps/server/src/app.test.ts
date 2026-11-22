@@ -6682,6 +6682,49 @@ describe("golden images, media, and abort", () => {
     ctx.hypervisor.shutdown();
   });
 
+  it("reports plan usage for enabled agent CLIs and caches it", async () => {
+    const ctx = await setup();
+    cleanup.push(ctx.dir);
+    const config = await ctx.store.loadConfig();
+    const providers = config.providers.map((p) => ({
+      ...p,
+      enabled: p.kind === "codex-cli" || p.kind === "openai",
+    }));
+    await ctx.store.saveConfig({ ...config, providers });
+    const codex = providers.find((p) => p.kind === "codex-cli");
+    expect(codex).toBeDefined();
+    let calls = 0;
+    const app = createApp({
+      store: ctx.store,
+      sessions: ctx.sessions,
+      hypervisor: ctx.hypervisor,
+      readProviderUsage: async (provider) => {
+        calls += 1;
+        return {
+          providerId: provider.id,
+          providerName: provider.name,
+          kind: provider.kind,
+          ok: true,
+          source: "oauth",
+          windows: [{ id: "five_hour", label: "5-hour", usedPercent: calls * 10 }],
+          fetchedAt: new Date().toISOString(),
+        };
+      },
+    });
+    const first = (await (await app.request("/api/providers/usage")).json()) as {
+      usage: Array<{ providerId: string; windows: Array<{ usedPercent: number }> }>;
+    };
+    expect(first.usage.map((row) => row.providerId)).toEqual([codex!.id]);
+    const cached = (await (await app.request("/api/providers/usage")).json()) as typeof first;
+    expect(cached.usage[0]?.windows[0]?.usedPercent).toBe(10);
+    const refreshed = (await (
+      await app.request("/api/providers/usage?refresh=1")
+    ).json()) as typeof first;
+    expect(refreshed.usage[0]?.windows[0]?.usedPercent).toBe(20);
+    expect(calls).toBe(2);
+    ctx.hypervisor.shutdown();
+  });
+
   it("checks GitHub releases for an app update", async () => {
     const ctx = await setup();
     cleanup.push(ctx.dir);
@@ -6694,7 +6737,7 @@ describe("golden images, media, and abort", () => {
         return new Response("Not Found", { status: 404 });
       }) as typeof fetch,
     });
-    const res = await app.request("/api/updates?current=0.21.0");
+    const res = await app.request("/api/updates?current=0.24.0");
     expect(res.status).toBe(200);
     const body = (await res.json()) as { status: string; message?: string };
     expect(body.status).toBe("unavailable");

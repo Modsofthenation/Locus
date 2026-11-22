@@ -11,6 +11,7 @@ import { AGENT_CANVAS_TOOLS, isAgentCanvasToolName } from "./agentCanvas.js";
 import { BOARD_TOOL_NAMES } from "./board.js";
 import { PROJECT_TOOL_NAMES } from "./project.js";
 import { isRuntimeToolName } from "./workingState.js";
+import { CODE_INTEL_READ_TOOL_NAMES, isCodeIntelToolName } from "./codeIntel.js";
 import {
   installCommandsNeedApproval,
   packageJsonLifecycleRisk,
@@ -44,6 +45,14 @@ export type ComputerUseToolName =
   | "file_list"
   | "canvas_write"
   | "canvas_read"
+  | "unity_editor"
+  | "unity_result"
+  | "godot_editor"
+  | "godot_result"
+  | "unreal_editor"
+  | "unreal_result"
+  | "blender_editor"
+  | "blender_result"
   | "grep"
   | "glob"
   | "apply_patch"
@@ -62,6 +71,7 @@ export type ComputerUseToolName =
   | "git_pr_loadpath"
   | "git_pr_comment"
   | "git_pr_checks"
+  | "git_ci_logs"
   | "git_pr_merge"
   | "git_issue_list"
   | "git_issue_get"
@@ -148,6 +158,10 @@ export type ComputerUseToolName =
   | "browser_snapshot"
   | "browser_click"
   | "browser_type"
+  | "browser_action"
+  | "browser_wait"
+  | "computer_capabilities"
+  | "desktop_action"
   | "browser_console"
   | "browser_network"
   | "browser_pdf"
@@ -306,6 +320,52 @@ export const COMPUTER_USE_TOOLS: ToolSpec[] = [
     os: [...ALL_TOOL_OS],
   },
   {
+    name: "unity_editor",
+    description:
+      "Run Unity Editor operations on the local project for Unity Games sessions (inspect, create-scene, compile, playtest, capture, build). Returns a job ID; use unity_result for outcome.",
+    os: [...ALL_TOOL_OS],
+  },
+  {
+    name: "unity_result",
+    description:
+      "Poll a Unity Editor job and inspect logs, scene data, screenshot and build/test results.",
+    os: [...ALL_TOOL_OS],
+  },
+  {
+    name: "godot_editor",
+    description:
+      "Run Godot 4 Host editor operations: inspect scenes, import, smoke test, create scene or export.",
+    os: [...ALL_TOOL_OS],
+  },
+  {
+    name: "godot_result",
+    description: "Poll and inspect Godot 4 Editor operation outcomes, scene reports and logs.",
+    os: [...ALL_TOOL_OS],
+  },
+  {
+    name: "unreal_editor",
+    description:
+      "Run Unreal Engine Host operations: inspect project, compile C++ and Blueprints, automation tests, editor Python script or package a player.",
+    os: [...ALL_TOOL_OS],
+  },
+  {
+    name: "unreal_result",
+    description:
+      "Poll and inspect Unreal Engine operation outcomes: logs, test summaries, inspection data and package output.",
+    os: [...ALL_TOOL_OS],
+  },
+  {
+    name: "blender_editor",
+    description:
+      "Use installed Blender on a local Host workspace to create, inspect, validate, render or export. Prepare .py editing scripts for local operator confirmation. Poll blender_result for results.",
+    os: [...ALL_TOOL_OS],
+  },
+  {
+    name: "blender_result",
+    description: "Poll Blender background jobs, inspect reports and receive rendered previews.",
+    os: [...ALL_TOOL_OS],
+  },
+  {
     name: "canvas_read",
     description:
       "Read a canvas this chat already wrote. Optional id (defaults to the latest). Returns the html so you can canvas_write a full replacement. Host-side.",
@@ -418,6 +478,12 @@ export const COMPUTER_USE_TOOLS: ToolSpec[] = [
     name: "git_pr_checks",
     description:
       "List check runs / pipeline status for the open pull request. Skip if git_pr_get already returned Checks or checks are in the user message. Optional pull_number. Host-side (not a third-party pipeline MCP).",
+    os: [...ALL_TOOL_OS],
+  },
+  {
+    name: "git_ci_logs",
+    description:
+      "Failing CI checks for this session's pull request head, with a condensed job log per check (error regions, head/tail, failing test ids). Optional pr (number), check (name filter), maxChars (log budget). GitHub Actions and GitLab jobs return logs; other forges list names and status only. Read-only, host-side. Reproduce the failure locally before fixing it.",
     os: [...ALL_TOOL_OS],
   },
   {
@@ -919,6 +985,30 @@ export const COMPUTER_USE_TOOLS: ToolSpec[] = [
     os: [...LINUX_TOOL_OS],
   },
   {
+    name: "browser_action",
+    description:
+      "Perform and verify fill, select, check, or invoke on a fresh browser_snapshot ref. fill replaces the field value. Use screenshot/pixels for canvases.",
+    os: [...LINUX_TOOL_OS],
+  },
+  {
+    name: "browser_wait",
+    description:
+      "Wait up to timeout_ms for the active document to be ready and optional visible text to appear.",
+    os: [...LINUX_TOOL_OS],
+  },
+  {
+    name: "computer_capabilities",
+    description:
+      "Probe available desktop observation, input, accessibility and clipboard backends. Call before native desktop work; do not assume X11 tools work on Wayland.",
+    os: [...ALL_TOOL_OS],
+  },
+  {
+    name: "desktop_action",
+    description:
+      "Invoke, fill, select or check a native accessibility element from a11y_tree/uia_tree. Pass its ref and expected name to reject stale targets. Actions verify the resulting control state where supported.",
+    os: [...ALL_TOOL_OS],
+  },
+  {
     name: "browser_console",
     description: "Return recent Chromium console errors and warnings.",
     os: [...LINUX_TOOL_OS],
@@ -1095,6 +1185,8 @@ export function toolsForOs(os: ToolOs): ToolSpec[] {
 }
 
 const DOCKER_ONLY_TOOLS = new Set<ComputerUseToolName>([
+  "browser_action",
+  "browser_wait",
   "browser_tabs",
   "browser_navigate",
   "browser_snapshot",
@@ -1122,6 +1214,7 @@ function uniqueCatalog(...groups: ComputerUseToolName[][]): ComputerUseToolName[
 
 /** File, git, forge, and integration tools Host and Docker catalogs share. */
 export const SHARED_RUNTIME_TOOLS: ComputerUseToolName[] = [
+  "computer_capabilities",
   "exec",
   "file_read",
   "file_write",
@@ -1146,6 +1239,7 @@ export const SHARED_RUNTIME_TOOLS: ComputerUseToolName[] = [
   "git_pr_loadpath",
   "git_pr_comment",
   "git_pr_checks",
+  "git_ci_logs",
   "git_pr_merge",
   "git_issue_list",
   "git_issue_get",
@@ -1231,6 +1325,8 @@ export const SHARED_RUNTIME_TOOLS: ComputerUseToolName[] = [
 
 /** Headed Chromium on the operator machine (isolated `host-chrome/<session>` profile). */
 export const HOST_BROWSER_TOOLS: ComputerUseToolName[] = [
+  "browser_action",
+  "browser_wait",
   "screenshot",
   "mouse_move",
   "mouse_click",
@@ -1287,6 +1383,16 @@ export const DOCKER_TOOLS: ComputerUseToolName[] = uniqueCatalog(
 /** File, git, and shell tools that run on this machine, plus opt-in headed Chrome. */
 export const HOST_TOOLS: ComputerUseToolName[] = uniqueCatalog(
   SHARED_RUNTIME_TOOLS,
+  [
+    "unity_editor",
+    "unity_result",
+    "godot_editor",
+    "godot_result",
+    "unreal_editor",
+    "unreal_result",
+    "blender_editor",
+    "blender_result",
+  ],
   HOST_PLANNING_TOOLS,
   HOST_BROWSER_TOOLS,
 );
@@ -1369,6 +1475,7 @@ export const PROJECT_CHAT_TOOLS: ComputerUseToolName[] = [
   "git_pr_list",
   "git_pr_get",
   "git_pr_checks",
+  "git_ci_logs",
   "git_issue_list",
   "git_issue_get",
   "jira_search",
@@ -1472,6 +1579,8 @@ export const APPROVAL_TOOLS: ComputerUseToolName[] = [
 ];
 
 const PARALLEL_SAFE_TOOLS = new Set<string>([
+  "computer_capabilities",
+  "browser_wait",
   "file_read",
   "file_list",
   "grep",
@@ -1483,6 +1592,7 @@ const PARALLEL_SAFE_TOOLS = new Set<string>([
   "git_pr_get",
   "git_pr_loadpath",
   "git_pr_checks",
+  "git_ci_logs",
   "git_issue_list",
   "git_issue_get",
   "jira_search",
@@ -1533,11 +1643,11 @@ const PARALLEL_SAFE_TOOLS = new Set<string>([
   "clipboard_get",
   "a11y_tree",
   "uia_tree",
-  "browser_tabs",
   "browser_snapshot",
   "browser_console",
   "browser_network",
   "repo_map",
+  ...CODE_INTEL_READ_TOOL_NAMES,
   "mcp_list_tools",
   "mcp_get_tool_info",
   "read_skill",
@@ -1552,6 +1662,7 @@ const PARALLEL_SAFE_TOOLS = new Set<string>([
 ]);
 
 const PARALLEL_SAFE_READ_ACTIONS: Record<string, Set<string>> = {
+  browser_tabs: new Set(["list"]),
   scratchpad: new Set(["read"]),
   task_list: new Set(["list"]),
   remember: new Set(["list"]),
@@ -1635,6 +1746,7 @@ export const FORGE_TOOLS = [
   "git_pr_loadpath",
   "git_pr_comment",
   "git_pr_checks",
+  "git_ci_logs",
   "git_pr_merge",
   "git_issue_list",
   "git_issue_get",
@@ -1669,6 +1781,14 @@ const CONTROL_PLANE_TOOLS = new Set<string>([
   ...FORGE_TOOLS,
   ...INTEGRATION_TOOL_NAMES,
   ...AGENT_CANVAS_TOOLS,
+  "unity_editor",
+  "unity_result",
+  "godot_editor",
+  "godot_result",
+  "unreal_editor",
+  "unreal_result",
+  "blender_editor",
+  "blender_result",
   ...BOARD_TOOL_NAMES,
   ...SWARM_TEAM_TOOLS,
   ...PROJECT_TOOL_NAMES.filter((name) => !GUEST_PROJECT_TOOLS.has(name)),
@@ -1692,7 +1812,7 @@ export function parseToolAllowlist(
   for (const raw of names) {
     const name = raw.trim();
     if (!name) continue;
-    if (!allowed.has(name as ComputerUseToolName)) {
+    if (!allowed.has(name as ComputerUseToolName) && !isCodeIntelToolName(name)) {
       throw new Error(`Unknown tool for this guest: ${name}`);
     }
     if (!out.includes(name as ComputerUseToolName)) out.push(name as ComputerUseToolName);
@@ -1713,6 +1833,7 @@ export const FORGE_MCP_TOOLS: ComputerUseToolName[] = [
   "git_pr_comment",
   "git_pr_review",
   "git_pr_checks",
+  "git_ci_logs",
   "git_issue_list",
   "git_issue_get",
   "git_issue_comment",

@@ -99,7 +99,12 @@ export type CliTurnContinuePorts = {
     html: string | null | undefined;
     sessionId: string;
   }) => boolean;
-  prefixPrompt: (sessionId: string, prompt: string, planTurn: boolean) => Promise<string>;
+  prefixPrompt: (
+    sessionId: string,
+    prompt: string,
+    planTurn: boolean,
+    turnId: string,
+  ) => Promise<string>;
   appendMessage: (sessionId: string, message: ChatMessage) => Promise<unknown>;
   gameCanvasBaseline: (sessionId: string) => string | undefined;
   traces: Pick<SessionTraceLog, "write">;
@@ -121,7 +126,7 @@ export async function continueAfterCliRound(
 ): Promise<CliTurnContinueResult> {
   if (input.abort.signal.aborted) return { stop: true };
   const continuePrompt = (prompt: string) =>
-    ports.prefixPrompt(input.sessionId, prompt, input.planTurn);
+    ports.prefixPrompt(input.sessionId, prompt, input.planTurn, input.turnId);
   const counters: CliRoundCounters = {
     canvasNudges: input.canvasNudges,
     canvasIncompleteNudges: input.canvasIncompleteNudges,

@@ -1,0 +1,18 @@
+{
+  "id": "ts-retry-backoff",
+  "title": "Retry backoff ignores the cap",
+  "repo": "fixture:.",
+  "baseCommit": "locus-base",
+  "fixCommit": "locus-fix",
+  "language": "typescript",
+  "prompt": "Retry delays are wrong. With `{ baseMs: 200, maxMs: 1000 }` we see waits of 400, 800, 1200, 1600 ms. They should start at baseMs, grow by `factor` (default 2) each retry, and never go above maxMs. The code is in src/retry.ts.",
+  "testCommand": "npm test",
+  "failToPass": [
+    "delays grow geometrically from baseMs",
+    "delays never exceed maxMs",
+    "waits the backoff delays between tries"
+  ],
+  "passToPass": ["returns the first success", "rethrows after the last retry"],
+  "protectedPaths": ["test/retry.test.ts"],
+  "timeoutSec": 600
+}

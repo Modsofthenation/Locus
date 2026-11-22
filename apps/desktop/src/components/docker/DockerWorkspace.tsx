@@ -20,6 +20,7 @@ import { dockerRuntimeLabel } from "@/lib/workspaceTree";
 import { IconChevron, IconFolder, IconPanelRight } from "@/components/layout/Icons";
 import { MenuItem, OverflowMenu } from "@/components/layout/OverflowMenu";
 import { Select } from "@/components/layout/Select";
+import { PrepareVisualReviewButton } from "@/components/chat/VisualReview";
 import { ExpandableLog } from "@/components/chat/ExpandableLog";
 import { GuestTimeline, TimelinePreviewLayer } from "@/components/chat/GuestTimeline";
 import {
@@ -28,6 +29,10 @@ import {
   useAgentCanvasOpen,
 } from "@/components/workspace/AgentCanvasPane";
 import { WorkspaceEditor } from "@/components/workspace/WorkspaceEditor";
+import {
+  AgentTerminalPane,
+  useAgentTerminalViewMode,
+} from "@/components/workspace/AgentTerminalPane";
 import { WorkspaceFullscreenButton } from "@/components/workspace/WorkspaceFullscreenButton";
 import { BrowserPane } from "@/components/guest/BrowserPane";
 import { DockerStatsPanel, useDockerStats } from "./DockerStatsPanel";
@@ -85,7 +90,8 @@ export function DockerWorkspace() {
   const [savingImage, setSavingImage] = useState(false);
   const [preview, setPreview] = useState<PreviewStatus>({ ports: [] });
   const [viewport, setViewport] = useState<DesignViewport>("desktop");
-  const [view, setView] = useState<"files" | "browser" | "canvas">("files");
+  const [view, setView] = useState<"files" | "browser" | "canvas" | "terminal">("files");
+  const [agentTermStarted, setAgentTermStarted] = useState(false);
   const canvasFocus = useAgentCanvasFocus(session?.id, session?.agentCanvases);
   const [commenting, setCommenting] = useState(false);
   const operatorPickedView = useRef(false);
@@ -102,7 +108,19 @@ export function DockerWorkspace() {
     operatorPickedView.current = false;
     setFileCount(0);
     setLog([]);
+    setAgentTermStarted(false);
   }, [sessionId]);
+
+  useAgentTerminalViewMode(sessionId, session?.viewMode, {
+    terminal: () => {
+      operatorPickedView.current = true;
+      setCommenting(false);
+      setView("terminal");
+      setAgentTermStarted(true);
+      if (state.vmCollapsed) dispatch({ type: "showVmPane" });
+    },
+    chat: () => setView((current) => (current === "terminal" ? "files" : current)),
+  });
 
   useAgentCanvasOpen(canvasFocus, () => {
     operatorPickedView.current = true;
@@ -270,8 +288,10 @@ export function DockerWorkspace() {
   const width = VIEWPORTS.find((item) => item.id === viewport)?.width ?? 1280;
   const showingCanvas = view === "canvas" && Boolean(session.agentCanvases?.length);
   const showingBrowser = guestReady && view === "browser";
-  const showingFiles = guestReady && !showingBrowser && !showingCanvas;
-  const showingPreview = guestReady && live && !showingBrowser && !showingCanvas;
+  const showingTerminal = view === "terminal";
+  const showingFiles = guestReady && !showingBrowser && !showingCanvas && !showingTerminal;
+  const showingPreview =
+    guestReady && live && !showingBrowser && !showingCanvas && !showingTerminal;
   const showTerm = guestReady || starting;
 
   if (showRail) {
@@ -339,6 +359,22 @@ export function DockerWorkspace() {
       Canvas
     </button>
   ) : null;
+  const terminalTab = (
+    <button
+      type="button"
+      className={`btn small ghost ${showingTerminal ? "on" : ""}`}
+      aria-pressed={showingTerminal}
+      title="Run claude, codex, gemini, or any command in the container's /workspace"
+      onClick={() => {
+        operatorPickedView.current = true;
+        setCommenting(false);
+        setView("terminal");
+        setAgentTermStarted(true);
+      }}
+    >
+      Terminal
+    </button>
+  );
   const browserTab = guestReady ? (
     <button
       type="button"
@@ -423,6 +459,7 @@ export function DockerWorkspace() {
         </span>
         <div className="docker-ide-tabs">
           {canvasTab}
+          {terminalTab}
           {guestReady ? (
             <>
               {filesTab}
@@ -435,6 +472,9 @@ export function DockerWorkspace() {
         <div className="vm-toolbar-actions">
           {showingPreview ? (
             <>
+              {active && sessionId && !session?.preview ? (
+                <PrepareVisualReviewButton sessionId={sessionId} target={active} />
+              ) : null}
               {preview.ports.length > 1 ? (
                 <Select
                   className="preview-port"
@@ -527,12 +567,6 @@ export function DockerWorkspace() {
               </div>
             </OverflowMenu>
           ) : null}
-          {showingFiles ? (
-            <WorkspaceFullscreenButton
-              isFullscreen={filesFs.isFullscreen}
-              onToggle={filesFs.toggle}
-            />
-          ) : null}
           {filesFs.isFullscreen ? null : (
             <button
               type="button"
@@ -543,6 +577,13 @@ export function DockerWorkspace() {
               <IconPanelRight />
             </button>
           )}
+          {/* Last, so it stays under the pointer when Collapse hides on entering full screen. */}
+          {showingFiles ? (
+            <WorkspaceFullscreenButton
+              isFullscreen={filesFs.isFullscreen}
+              onToggle={filesFs.toggle}
+            />
+          ) : null}
         </div>
       </div>
       <div
@@ -555,7 +596,7 @@ export function DockerWorkspace() {
         <div className="docker-term-main">
           <GuestTimeline session={session}>
             <div
-              className={`desktop docker-desktop ${showingPreview ? "has-preview" : ""} ${showingFiles ? "has-editor" : ""} ${showingBrowser ? "has-browser" : ""} ${showingCanvas ? "has-canvas" : ""}`}
+              className={`desktop docker-desktop ${showingPreview ? "has-preview" : ""} ${showingFiles ? "has-editor" : ""} ${showingBrowser ? "has-browser" : ""} ${showingCanvas ? "has-canvas" : ""} ${showingTerminal ? "has-agent-term" : ""}`}
             >
               {sessionId ? (
                 <div className="workspace-editor-slot" hidden={!showingFiles}>
@@ -576,6 +617,11 @@ export function DockerWorkspace() {
                       dispatch({ type: "selectPull", number: info.number });
                     }}
                   />
+                </div>
+              ) : null}
+              {agentTermStarted && sessionId ? (
+                <div className="agent-term-host" hidden={!showingTerminal}>
+                  <AgentTerminalPane sessionId={sessionId} visible={showingTerminal} />
                 </div>
               ) : null}
               {showingCanvas && sessionId && session.agentCanvases ? (
@@ -613,7 +659,11 @@ export function DockerWorkspace() {
                   </div>
                 </div>
               ) : null}
-              {!showingBrowser && !showingFiles && !showingPreview && !showingCanvas ? (
+              {!showingBrowser &&
+              !showingFiles &&
+              !showingPreview &&
+              !showingCanvas &&
+              !showingTerminal ? (
                 <>
                   <div className="wallpaper" />
                   <div className="chrome">

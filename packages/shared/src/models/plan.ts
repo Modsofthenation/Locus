@@ -1,4 +1,5 @@
 import type { TaskItem } from "./workingState.js";
+import { CODE_INTEL_READ_TOOL_NAMES } from "./codeIntel.js";
 
 export const PLAN_STEP_STATUSES = ["pending", "running", "done", "skipped"] as const;
 export type PlanStepStatus = (typeof PLAN_STEP_STATUSES)[number];
@@ -24,9 +25,11 @@ export const PLAN_READ_TOOLS = new Set([
   "file_read",
   "file_list",
   "repo_map",
+  ...CODE_INTEL_READ_TOOL_NAMES,
   "git_diff",
   "git_log",
   "git_status",
+  "git_ci_logs",
   "mcp_list_tools",
   "mcp_get_tool_info",
   "read_skill",

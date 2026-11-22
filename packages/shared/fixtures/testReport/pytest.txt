@@ -1,0 +1,23 @@
+.FsF                                                                     [100%]
+=================================== FAILURES ===================================
+___________________________________ test_bad ___________________________________
+
+>   def test_bad(): assert 1 == 2, "one is not two"
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: one is not two
+E   assert 1 == 2
+
+tests/test_a.py:3: AssertionError
+_______________________________ TestK.test_inner _______________________________
+
+self = <test_a.TestK object at 0x7fc10a83ec10>
+
+>   def test_inner(self): raise ValueError("boom <&>")
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ValueError: boom <&>
+
+tests/test_a.py:7: ValueError
+=========================== short test summary info ============================
+FAILED tests/test_a.py::test_bad - AssertionError: one is not two
+FAILED tests/test_a.py::TestK::test_inner - ValueError: boom <&>
+2 failed, 1 passed, 1 skipped in 0.03s

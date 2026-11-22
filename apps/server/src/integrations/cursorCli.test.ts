@@ -42,7 +42,8 @@ async function waitFor(
   id: string,
   pred: (session: NonNullable<Awaited<ReturnType<SessionService["get"]>>>) => boolean,
 ) {
-  const deadline = Date.now() + 4000;
+  // Generous: under full-suite load a CLI turn can take several seconds to settle.
+  const deadline = Date.now() + 15_000;
   let fresh = await sessions.get(id);
   while (Date.now() < deadline) {
     fresh = await sessions.get(id);

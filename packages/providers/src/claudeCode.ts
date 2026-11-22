@@ -1,6 +1,6 @@
 import { CLAUDE_CODE_BASE_URL, isClaudeCodeBase, type AiProvider } from "@locus/shared";
 import { cursorCliSpawnFailureMessage } from "@locus/shared/windowsCliSpawn";
-import { ProviderError, type TokenUsageEvent } from "./types.js";
+import { ProviderError, readTokenUsage, type TokenUsageEvent } from "./types.js";
 import type { CursorCliEvent, CursorCliSpawner } from "./cursorCli.js";
 import { spawnCursorCli } from "./cursorCli.js";
 
@@ -38,7 +38,7 @@ export type ClaudeCodeHealth = {
   message?: string;
 };
 
-type ParsedClaudeCodeEvent = ClaudeCodeEvent & { partial?: boolean };
+export type ParsedClaudeCodeEvent = ClaudeCodeEvent & { partial?: boolean };
 
 export interface ClaudeCodeArgv {
   command: string;
@@ -132,7 +132,8 @@ export function parseClaudeCodeEvents(line: string): ClaudeCodeEvent[] {
   return parseClaudeCodeEventsRaw(line).map(publicClaudeCodeEvent);
 }
 
-function parseClaudeCodeEventsRaw(line: string): ParsedClaudeCodeEvent[] {
+/** Like parseClaudeCodeEvents, but keeps `partial` so callers can drop the final full echo. */
+export function parseClaudeCodeEventsRaw(line: string): ParsedClaudeCodeEvent[] {
   const trimmed = line.trim();
   if (!trimmed || trimmed.startsWith(":")) return [];
   let data: unknown;
@@ -272,6 +273,8 @@ export async function* streamClaudeCode(input: {
   mode?: "agent" | "plan";
   webSearch?: boolean;
   review?: boolean;
+  /** The child's environment before the provider key is added; defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   spawnFn?: ClaudeCodeSpawner;
 }): AsyncGenerator<ClaudeCodeEvent> {
@@ -293,9 +296,11 @@ export async function* streamClaudeCode(input: {
   let streamedReasoning = false;
   let sawTerminal = false;
   const toolNames = new Map<string, string>();
+  let contextTokens: number | undefined;
   try {
     for await (const line of handle.lines) {
       if (input.signal?.aborted) break;
+      contextTokens = claudeCodeCallPromptTokens(line) ?? contextTokens;
       const events = parseClaudeCodeEventsRaw(line);
       for (const event of events) {
         if (event.type === "tool_call" && event.id) {
@@ -310,6 +315,9 @@ export async function* streamClaudeCode(input: {
         if (event.type === "text") streamedText = true;
         if (event.type === "reasoning") streamedReasoning = true;
         const published = publicClaudeCodeEvent(event);
+        if (published.type === "result" && published.usage && contextTokens) {
+          published.usage = { ...published.usage, contextTokens };
+        }
         if (published.type === "result" && published.text && streamedText) {
           yield { ...published, text: undefined };
         } else {
@@ -530,11 +538,38 @@ function stringifyResult(value: unknown): string | undefined {
   }
 }
 
+/**
+ * Prompt size (input + cache reads + cache writes) of one model call, from its `message_start`
+ * stream event or its `assistant` message. The final `result.usage` sums every call in the
+ * run, so it overstates how full the context window is.
+ */
+export function claudeCodeCallPromptTokens(line: string): number | undefined {
+  if (!line.includes('"usage"')) return undefined;
+  let row: Record<string, unknown> | undefined;
+  try {
+    row = asRecord(JSON.parse(line.trim()) as unknown);
+  } catch {
+    return undefined;
+  }
+  if (!row) return undefined;
+  const event = asRecord(row.event);
+  const message =
+    row.type === "assistant"
+      ? asRecord(row.message)
+      : row.type === "stream_event" && event?.type === "message_start"
+        ? asRecord(event.message)
+        : undefined;
+  const usage = readTokenUsage(message?.usage);
+  return usage && usage.inputTokens > 0 ? usage.inputTokens : undefined;
+}
+
 function readUsage(row: Record<string, unknown>): TokenUsageEvent | undefined {
   const usage = asRecord(row.usage);
   if (!usage) return undefined;
-  const input = num(usage.input_tokens) ?? num(usage.inputTokens) ?? num(row.input_tokens);
-  const output = num(usage.output_tokens) ?? num(usage.outputTokens) ?? num(row.output_tokens);
+  const read = readTokenUsage(usage);
+  if (read) return read;
+  const input = num(row.input_tokens);
+  const output = num(row.output_tokens);
   if (input == null && output == null) return undefined;
   return { inputTokens: input ?? 0, outputTokens: output ?? 0 };
 }

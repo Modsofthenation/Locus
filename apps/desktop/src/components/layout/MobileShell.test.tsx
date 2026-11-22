@@ -2129,7 +2129,7 @@ describe("MobileShell", () => {
       merge!.click();
       await Promise.resolve();
     });
-    expect(api.mergePull).toHaveBeenCalledWith("r1", 12);
+    expect(api.mergePull).toHaveBeenCalledWith("r1", 12, { approveRisk: false });
     await act(async () => {
       host.querySelector<HTMLButtonElement>(".mobile-back")!.click();
       await Promise.resolve();

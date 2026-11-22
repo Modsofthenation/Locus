@@ -1,0 +1,167 @@
+name: Locus CI
+description: Run a headless Locus agent (PR review or repo fix) and fail the job on its verdict.
+author: Locus
+
+inputs:
+  recipe:
+    description: "pr-reviewer or repo-fixer. Defaults to pr-reviewer when `pr` is set."
+    required: false
+    default: ""
+  prompt:
+    description: Free-form task instead of (or on top of) a recipe.
+    required: false
+    default: ""
+  pr:
+    description: Pull request URL to review. Defaults to the triggering pull request.
+    required: false
+    default: ${{ github.event.pull_request.html_url }}
+  repo:
+    description: Local path or clone URL. Defaults to the checked-out workspace.
+    required: false
+    default: ${{ github.workspace }}
+  runtime:
+    description: host or docker.
+    required: false
+    default: ""
+  provider:
+    description: Provider id from the Locus config (default the first provider with a key).
+    required: false
+    default: ""
+  model:
+    description: Exact model id.
+    required: false
+    default: ""
+  max-usd:
+    description: Per-run USD cap for the agent.
+    required: false
+    default: "2"
+  allow:
+    description: "Newline-separated approval rules, e.g. git_push(branch:locus/*). Everything else is denied."
+    required: false
+    default: ""
+  post-comment:
+    description: Post the review verdict as a PR comment (review recipes).
+    required: false
+    default: "false"
+  timeout:
+    description: Seconds before the run is aborted (exit 3).
+    required: false
+    default: "1800"
+  out:
+    description: Where to write the JSON result.
+    required: false
+    default: locus-result.json
+  version:
+    description: >-
+      Git ref of Locus to run (tag such as v0.20.0, or a commit). Empty runs the copy of Locus
+      that contains this action.
+    required: false
+    default: ""
+  locus-repository:
+    description: Repository to fetch when `version` is set.
+    required: false
+    default: Modsofthenation/Locus
+  node-version:
+    description: Node.js version for the control plane.
+    required: false
+    default: "22.22"
+
+outputs:
+  outcome:
+    description: pass, fail, approval, or error.
+    value: ${{ steps.run.outputs.outcome }}
+  verdict:
+    description: PASS, FAIL, or NONE.
+    value: ${{ steps.run.outputs.verdict }}
+  exit-code:
+    description: 0 pass, 1 fail, 2 waiting for approval, 3 error.
+    value: ${{ steps.run.outputs.exit-code }}
+  result:
+    description: Path of the JSON result file.
+    value: ${{ steps.run.outputs.result }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Fetch Locus
+      id: src
+      shell: bash
+      env:
+        LOCUS_VERSION: ${{ inputs.version }}
+        LOCUS_REPOSITORY: ${{ inputs.locus-repository }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        if [ -n "$LOCUS_VERSION" ]; then
+          dir="$RUNNER_TEMP/locus-src"
+          rm -rf "$dir"
+          git init -q "$dir"
+          git -C "$dir" remote add origin "https://github.com/${LOCUS_REPOSITORY}.git"
+          git -C "$dir" fetch -q --depth 1 origin "$LOCUS_VERSION"
+          git -C "$dir" checkout -q FETCH_HEAD
+        else
+          dir="$(cd "$ACTION_PATH/../../.." && pwd)"
+        fi
+        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+    - name: Install Locus
+      shell: bash
+      working-directory: ${{ steps.src.outputs.dir }}
+      env:
+        ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      run: npm ci --no-audit --no-fund
+
+    - name: Run agent
+      id: run
+      shell: bash
+      working-directory: ${{ steps.src.outputs.dir }}
+      env:
+        IN_RECIPE: ${{ inputs.recipe }}
+        IN_PROMPT: ${{ inputs.prompt }}
+        IN_PR: ${{ inputs.pr }}
+        IN_REPO: ${{ inputs.repo }}
+        IN_RUNTIME: ${{ inputs.runtime }}
+        IN_PROVIDER: ${{ inputs.provider }}
+        IN_MODEL: ${{ inputs.model }}
+        IN_MAX_USD: ${{ inputs.max-usd }}
+        IN_ALLOW: ${{ inputs.allow }}
+        IN_POST_COMMENT: ${{ inputs.post-comment }}
+        IN_TIMEOUT: ${{ inputs.timeout }}
+        IN_OUT: ${{ inputs.out }}
+      run: |
+        set -uo pipefail
+        out="$IN_OUT"
+        case "$out" in /*) ;; *) out="$GITHUB_WORKSPACE/$out" ;; esac
+        args=(ci run --out "$out" --timeout "$IN_TIMEOUT")
+        [ -n "$IN_RECIPE" ] && args+=(--recipe "$IN_RECIPE")
+        [ -n "$IN_PROMPT" ] && args+=(--prompt "$IN_PROMPT")
+        [ -n "$IN_PR" ] && args+=(--pr "$IN_PR")
+        if [ -n "$IN_REPO" ] && [ -z "$IN_PR" -o -n "$IN_PROMPT" -o "$IN_RECIPE" = "repo-fixer" ]; then
+          args+=(--repo "$IN_REPO")
+        fi
+        [ -n "$IN_RUNTIME" ] && args+=(--runtime "$IN_RUNTIME")
+        [ -n "$IN_PROVIDER" ] && args+=(--provider "$IN_PROVIDER")
+        [ -n "$IN_MODEL" ] && args+=(--model "$IN_MODEL")
+        [ -n "$IN_MAX_USD" ] && args+=(--max-usd "$IN_MAX_USD")
+        [ "$IN_POST_COMMENT" = "true" ] && args+=(--post-comment)
+        while IFS= read -r rule; do
+          rule="$(echo "$rule" | xargs)"
+          [ -n "$rule" ] && args+=(--allow "$rule")
+        done <<< "$IN_ALLOW"
+        npx --no-install locus "${args[@]}"
+        code=$?
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        echo "result=$out" >> "$GITHUB_OUTPUT"
+        if [ -f "$out" ]; then
+          node -e 'const r=require(process.argv[1]);console.log(`outcome=${r.outcome}\nverdict=${r.verdict}`)' "$out" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Locus CI"
+            node -e 'const r=require(process.argv[1]);console.log(`**${r.outcome.toUpperCase()}** · verdict ${r.verdict}${r.risk?` · risk ${r.risk}`:""}${typeof r.costUsd==="number"?` · $${r.costUsd.toFixed(2)}`:""}\n`);for(const x of r.reasons||[])console.log(`- ${String(x).split("\n")[0]}`)' "$out"
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+        exit $code

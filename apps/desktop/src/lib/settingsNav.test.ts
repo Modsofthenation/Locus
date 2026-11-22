@@ -26,6 +26,7 @@ describe("settingsNav", () => {
       "Environments",
       "Git",
       "Integrations",
+      "Reviewers",
       "Appearance",
       "Notifications",
       "Phone",
@@ -88,6 +89,7 @@ describe("settingsNav", () => {
       "environments",
       "git",
       "integrations",
+      "reviewers",
       "appearance",
       "notifications",
       "phone",
@@ -183,5 +185,22 @@ describe("settingsNav", () => {
     ]);
     expect(settingsSearchHits(config, "PR review")[0]).toMatchObject({ tab: "skills", id: "s1" });
     expect(settingsSearchHits(config, "")).toEqual([]);
+  });
+
+  it("counts and finds Slack PR reviewers", () => {
+    const config = {
+      providers: [],
+      templates: [],
+      forges: [],
+      slackReviewers: [{ id: "r1", name: "API reviews" }],
+    } as unknown as Parameters<typeof settingsSearchHits>[0];
+    expect(settingsNavCount("reviewers", config)).toBe(1);
+    expect(settingsNavCount("reviewers", { ...config!, slackReviewers: [] })).toBeUndefined();
+    expect(settingsSearchHits(config, "api rev")).toContainEqual({
+      tab: "reviewers",
+      id: "r1",
+      label: "API reviews",
+    });
+    expect(settingsSearchHits(config, "reviewers")[0]).toMatchObject({ tab: "reviewers" });
   });
 });

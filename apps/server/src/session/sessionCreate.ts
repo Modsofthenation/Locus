@@ -11,6 +11,7 @@ import type {
   SessionPersona,
 } from "@locus/shared";
 import {
+  workerRunsInTask,
   attachLinkedCheckouts,
   assignSessionCloneDests,
   BOARD_CHAT_TOOLS,
@@ -73,6 +74,8 @@ export type PreparedCreate = {
   claudeCode: boolean;
   codexCli: boolean;
   kiroCli: boolean;
+  /** Fargate: the agent gets its own ECS task and runs as Host inside it. */
+  cloudTask: boolean;
 };
 
 /** Kind, repo, placement, and provider invariants for a new Agent. */
@@ -195,6 +198,29 @@ export function prepareCreateInput(
       webSearch: input.webSearch !== false,
     };
   }
+  const taskWorker =
+    parseAgentPlacement(input.placement) === "worker" && typeof input.backendId === "string"
+      ? (ctx.config.workers ?? []).find((row) => row.id === input.backendId?.trim())
+      : undefined;
+  const cloudTask = Boolean(taskWorker && workerRunsInTask(taskWorker));
+  if (cloudTask) {
+    if (kind === "review") {
+      throw new Error("PR reviews need Docker or a VM. Pick this machine or a LAN worker.");
+    }
+    // Fargate cannot run Docker or KVM: the task itself is the per-agent sandbox, so
+    // the chat runs as a Host guest inside it. Laptop folders, images, and worktrees
+    // do not apply there.
+    input = {
+      ...input,
+      runtime: "host",
+      dockerImage: undefined,
+      imageId: undefined,
+      hostDir: undefined,
+      worktree: undefined,
+      worktreeFrom: undefined,
+      startVm: true,
+    };
+  }
   const attached = attachLinkedCheckouts(ctx.repos, {
     repo: input.repo,
     repoId: input.repoId,
@@ -249,6 +275,7 @@ export function prepareCreateInput(
     claudeCode,
     codexCli,
     kiroCli,
+    cloudTask,
   };
 }
 

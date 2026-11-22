@@ -14,6 +14,13 @@ export interface JsonSchema {
   additionalProperties?: boolean;
 }
 
+const COMPUTER_EFFECT = {
+  type: "string",
+  enum: ["local", "submit", "upload", "destructive"],
+  description:
+    "Declare external submissions, uploads or destructive effects for operator approval. local is only for navigation and reversible local interaction.",
+};
+
 export const RECORD_SCREEN_MODES = [
   "START_RECORDING",
   "SAVE_RECORDING",
@@ -69,6 +76,7 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
   mouse_click: {
     type: "object",
     properties: {
+      effect: COMPUTER_EFFECT,
       button: { type: "number", description: "1 left, 2 middle, 3 right" },
       x: { type: "number" },
       y: { type: "number" },
@@ -78,6 +86,7 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
   mouse_drag: {
     type: "object",
     properties: {
+      effect: COMPUTER_EFFECT,
       x1: { type: "number", description: "Start X. Omit to drag from the current pointer." },
       y1: { type: "number", description: "Start Y" },
       x2: { type: "number" },
@@ -104,12 +113,15 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
   },
   key: {
     type: "object",
-    properties: { key: { type: "string", description: "Key or combo such as ctrl+c or win+r" } },
+    properties: {
+      effect: COMPUTER_EFFECT,
+      key: { type: "string", description: "Key or combo such as ctrl+c or win+r" },
+    },
     required: ["key"],
   },
   type_text: {
     type: "object",
-    properties: { text: { type: "string" } },
+    properties: { effect: COMPUTER_EFFECT, text: { type: "string" } },
     required: ["text"],
   },
   clipboard_get: { type: "object", properties: {} },
@@ -157,6 +169,97 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
       id: { type: "string", description: "Existing canvas id to replace. Omit to create." },
     },
     required: ["title", "html"],
+  },
+  unity_editor: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        description: "inspect, create-scene, compile, playtest, capture, build",
+        enum: ["inspect", "create-scene", "compile", "playtest", "capture", "build"],
+      },
+      scene: {
+        type: "string",
+        description: "For capture/create-scene, Unity asset path Assets/Scenes/Main.unity",
+      },
+      target: {
+        type: "string",
+        description: "For builds: linux, windows, macos",
+        enum: ["linux", "windows", "macos"],
+      },
+    },
+    required: ["action"],
+  },
+  unity_result: {
+    type: "object",
+    properties: {
+      jobId: {
+        type: "string",
+        description: "Job ID from unity_editor; omit to check latest Unity job.",
+      },
+      waitMs: { type: "number", description: "Wait 0-10000ms before checking job outcome." },
+    },
+  },
+  godot_editor: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["inspect", "import", "smoke", "export", "create-scene"] },
+      scene: { type: "string", description: "res://Scenes/Main.tscn for create-scene" },
+      target: { type: "string", enum: ["web", "linux", "windows", "macos"] },
+    },
+    required: ["action"],
+  },
+  godot_result: {
+    type: "object",
+    properties: {
+      jobId: { type: "string" },
+      waitMs: { type: "number", description: "Wait 0-10000 milliseconds before checking result" },
+    },
+  },
+  unreal_editor: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["inspect", "compile", "test", "python", "package"] },
+      target: {
+        type: "string",
+        description: "For package: windows, linux, macos",
+        enum: ["windows", "linux", "macos"],
+      },
+      filter: { type: "string", description: "For test: automation test name filter" },
+      script: {
+        type: "string",
+        description: "For python: project-relative .py, e.g. Content/Python/build_level.py",
+      },
+    },
+    required: ["action"],
+  },
+  unreal_result: {
+    type: "object",
+    properties: {
+      jobId: { type: "string", description: "Job ID from unreal_editor; omit for the latest." },
+      waitMs: { type: "number", description: "Wait 0-10000ms before checking job outcome." },
+    },
+  },
+  blender_editor: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["create", "inspect", "validate", "render", "export"] },
+      file: {
+        type: "string",
+        description: "Relative .blend file under the selected Host workspace",
+      },
+      format: { type: "string", enum: ["glb", "fbx", "obj", "stl"] },
+    },
+    required: ["action", "file"],
+    additionalProperties: false,
+  },
+  blender_result: {
+    type: "object",
+    properties: {
+      jobId: { type: "string" },
+      waitMs: { type: "number", description: "Bounded 0-10000 ms wait before result polling" },
+    },
+    additionalProperties: false,
   },
   canvas_read: {
     type: "object",
@@ -378,6 +481,17 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
     type: "object",
     properties: {
       pull_number: { type: "number" },
+    },
+  },
+  git_ci_logs: {
+    type: "object",
+    properties: {
+      pr: { type: "number", description: "Pull request number (default: this session's PR)" },
+      check: { type: "string", description: "Only checks whose name contains this text" },
+      maxChars: {
+        type: "number",
+        description: "Condensed log budget across checks (800-16000, default 8000)",
+      },
     },
   },
   git_pr_merge: {
@@ -1350,6 +1464,7 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
   browser_tabs: {
     type: "object",
     properties: {
+      effect: COMPUTER_EFFECT,
       action: {
         type: "string",
         description: "list, new, close, or select",
@@ -1363,14 +1478,47 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
   browser_navigate: {
     type: "object",
     properties: {
+      effect: COMPUTER_EFFECT,
       url: { type: "string", description: "http(s) URL to open" },
     },
     required: ["url"],
   },
   browser_snapshot: { type: "object", properties: {} },
+  browser_wait: {
+    type: "object",
+    properties: {
+      text: { type: "string" },
+      timeout_ms: { type: "number", description: "Bounded to 100–30000 ms" },
+    },
+  },
+  browser_action: {
+    type: "object",
+    properties: {
+      effect: COMPUTER_EFFECT,
+      ref: { type: "string" },
+      action: { type: "string", enum: ["fill", "select", "check", "invoke"] },
+      value: { type: "string" },
+      checked: { type: "boolean" },
+    },
+    required: ["ref", "action"],
+  },
+  computer_capabilities: { type: "object", properties: {} },
+  desktop_action: {
+    type: "object",
+    properties: {
+      effect: COMPUTER_EFFECT,
+      ref: { type: "string" },
+      name: { type: "string" },
+      action: { type: "string", enum: ["fill", "select", "check", "invoke"] },
+      value: { type: "string" },
+      checked: { type: "boolean" },
+    },
+    required: ["ref", "name", "action"],
+  },
   browser_click: {
     type: "object",
     properties: {
+      effect: COMPUTER_EFFECT,
       ref: { type: "string", description: "Ref from the last browser_snapshot, like @e12" },
     },
     required: ["ref"],
@@ -1378,6 +1526,7 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
   browser_type: {
     type: "object",
     properties: {
+      effect: COMPUTER_EFFECT,
       ref: { type: "string", description: "Ref from the last browser_snapshot, like @e12" },
       text: { type: "string" },
     },

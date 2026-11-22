@@ -7,8 +7,10 @@ import { IconChevron, IconFolder, IconPanelRight, IconPlus } from "@/components/
 import { MenuItem, OverflowMenu } from "@/components/layout/OverflowMenu";
 import { Select } from "@/components/layout/Select";
 import { AgentCanvasPane, useAgentCanvasFocus, useAgentCanvasOpen } from "./AgentCanvasPane";
+import { AgentTerminalPane, useAgentTerminalViewMode } from "./AgentTerminalPane";
 import { WorkspaceEditor } from "./WorkspaceEditor";
 import { WorkspaceFullscreenButton } from "./WorkspaceFullscreenButton";
+import { PrepareVisualReviewButton } from "@/components/chat/VisualReview";
 import { BrowserPane } from "@/components/guest/BrowserPane";
 import {
   WorkspaceTerminal,
@@ -63,7 +65,8 @@ export function HostWorkspace(props: { embedded?: boolean } = {}) {
   const nextTerm = useRef(2);
   const [previewOn, setPreviewOn] = useState(false);
   const [preview, setPreview] = useState<PreviewStatus>({ ports: [] });
-  const [view, setView] = useState<"files" | "browser" | "canvas">("files");
+  const [view, setView] = useState<"files" | "browser" | "canvas" | "terminal">("files");
+  const [agentTermStarted, setAgentTermStarted] = useState(false);
   const canvasFocus = useAgentCanvasFocus(sessionId, session?.agentCanvases);
   const termWasExpanded = useRef(!termCollapsed);
 
@@ -88,7 +91,18 @@ export function HostWorkspace(props: { embedded?: boolean } = {}) {
     setPreviewOn(false);
     setPreview({ ports: [] });
     setView("files");
+    setAgentTermStarted(false);
   }, [sessionId]);
+
+  useAgentTerminalViewMode(sessionId, ide ? undefined : session?.viewMode, {
+    terminal: () => {
+      setPreviewOn(false);
+      setView("terminal");
+      setAgentTermStarted(true);
+      if (state.vmCollapsed) dispatch({ type: "showVmPane" });
+    },
+    chat: () => setView((current) => (current === "terminal" ? "files" : current)),
+  });
 
   useAgentCanvasOpen(canvasFocus, () => {
     setPreviewOn(false);
@@ -190,6 +204,21 @@ export function HostWorkspace(props: { embedded?: boolean } = {}) {
           >
             Files
           </button>
+          {ide ? null : (
+            <button
+              type="button"
+              className={`btn small ghost ${view === "terminal" ? "on" : ""}`}
+              aria-pressed={view === "terminal"}
+              title="Run claude, codex, gemini, or any command in this workspace"
+              onClick={() => {
+                setPreviewOn(false);
+                setView("terminal");
+                setAgentTermStarted(true);
+              }}
+            >
+              Terminal
+            </button>
+          )}
           {session?.agentCanvases?.length ? (
             <button
               type="button"
@@ -241,6 +270,9 @@ export function HostWorkspace(props: { embedded?: boolean } = {}) {
           </OverflowMenu>
         </div>
         <div className="vm-toolbar-actions">
+          {showingPreview && active && sessionId && !session?.preview ? (
+            <PrepareVisualReviewButton sessionId={sessionId} target={active} />
+          ) : null}
           {showingPreview && preview.ports.length > 1 ? (
             <Select
               className="preview-port"
@@ -262,10 +294,6 @@ export function HostWorkspace(props: { embedded?: boolean } = {}) {
               }}
             />
           ) : null}
-          <WorkspaceFullscreenButton
-            isFullscreen={filesFs.isFullscreen}
-            onToggle={filesFs.toggle}
-          />
           {ide || filesFs.isFullscreen ? null : (
             <button
               type="button"
@@ -276,11 +304,16 @@ export function HostWorkspace(props: { embedded?: boolean } = {}) {
               <IconPanelRight />
             </button>
           )}
+          {/* Last, so it stays under the pointer when Collapse hides on entering full screen. */}
+          <WorkspaceFullscreenButton
+            isFullscreen={filesFs.isFullscreen}
+            onToggle={filesFs.toggle}
+          />
         </div>
       </div>
       <div
         ref={termSplit.root}
-        className={`desktop docker-desktop has-editor has-term${termCollapsed ? " term-collapsed" : ""}${showingPreview || showingBrowser || view === "canvas" ? " has-preview" : ""}${view === "canvas" ? " has-canvas" : ""}${termSplit.dragging ? " term-resizing" : ""}`}
+        className={`desktop docker-desktop has-editor has-term${termCollapsed ? " term-collapsed" : ""}${showingPreview || showingBrowser || view === "canvas" ? " has-preview" : ""}${view === "canvas" ? " has-canvas" : ""}${view === "terminal" ? " has-agent-term" : ""}${termSplit.dragging ? " term-resizing" : ""}`}
         style={{ gridTemplateRows: termSplit.gridTemplateRows }}
       >
         <div className="host-workspace-main">
@@ -304,6 +337,11 @@ export function HostWorkspace(props: { embedded?: boolean } = {}) {
               }}
             />
           </div>
+          {agentTermStarted && !ide ? (
+            <div className="agent-term-host" hidden={view !== "terminal"}>
+              <AgentTerminalPane sessionId={sessionId} visible={view === "terminal"} />
+            </div>
+          ) : null}
           {view === "canvas" && sessionId && session?.agentCanvases?.length ? (
             <div className="design-stage docker-preview-stage host-preview agent-canvas-host">
               <AgentCanvasPane

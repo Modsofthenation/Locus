@@ -5,7 +5,11 @@ import {
   isProjectSession,
   isDesignSession,
   isGameSession,
+  isUnityProjectSession,
+  isGodotProjectSession,
+  isUnrealProjectSession,
   isAssetSession,
+  isBlenderProjectSession,
   isTestWebhookSkip,
   newSlackActivityItems,
   parseProductMode,
@@ -29,13 +33,18 @@ import { ProductModeTransition } from "@/components/layout/ProductModeTransition
 import { CloseGuard } from "@/components/layout/CloseGuard";
 import { DesignEmpty } from "@/components/design/DesignEmpty";
 import { GameEmpty } from "@/components/game/GameEmpty";
+import { UnityProjectPanel } from "@/components/game/UnityProjectPanel";
+import { GodotProjectPanel } from "@/components/game/GodotProjectPanel";
+import { UnrealProjectPanel } from "@/components/game/UnrealProjectPanel";
 import { AssetEmpty } from "@/components/assets/AssetEmpty";
+import { BlenderProjectPanel } from "@/components/assets/BlenderProjectPanel";
 import { IdeEmpty } from "@/components/workspace/IdeEmpty";
 import { EmptyState } from "@/components/layout/EmptyState";
 import { SessionSwitcher } from "@/components/layout/SessionSwitcher";
 import { FeatureChecklist } from "@/components/layout/FeatureChecklist";
 import { NoticeBanner } from "@/components/layout/NoticeBanner";
 import { DialogHost } from "@/components/layout/DialogHost";
+import { PlanUsageModal } from "@/components/settings/PlanUsageModal";
 import { InboxPane } from "@/components/layout/InboxPane";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
@@ -70,6 +79,9 @@ const AutomationsPane = lazy(async () => ({
 }));
 const BoardPane = lazy(async () => ({
   default: (await import("@/components/board/BoardPane")).BoardPane,
+}));
+const AndroidPane = lazy(async () => ({
+  default: (await import("@/components/android/AndroidPane")).AndroidPane,
 }));
 const ProjectPane = lazy(async () => ({
   default: (await import("@/components/projects/ProjectPane")).ProjectPane,
@@ -262,7 +274,7 @@ export function App() {
         api.setup().catch(() => null),
       ]);
       if (cancelled) return;
-      applyTheme(config.theme);
+      applyTheme(config.theme, config.customThemes ?? []);
       applyChatDensity(config.chatDensity);
       dispatch({
         type: "hydrate",
@@ -448,6 +460,13 @@ export function App() {
                   },
             });
             break;
+          case "boot.progress":
+            dispatch({
+              type: "bootProgress",
+              sessionId: event.sessionId,
+              progress: event.progress,
+            });
+            break;
           case "qemu.install.progress":
             dispatch({
               type: "qemuInstall",
@@ -527,6 +546,13 @@ export function App() {
             break;
           case "automation.deleted":
             dispatch({ type: "automationDeleted", id: event.id });
+            break;
+          case "theme.updated":
+            dispatch({
+              type: "themeUpdated",
+              theme: event.theme,
+              customThemes: event.customThemes,
+            });
             break;
           case "board.updated":
             dispatch({ type: "board", board: event.board });
@@ -778,7 +804,7 @@ export function App() {
       );
       return;
     }
-    applyTheme(state.config?.theme);
+    applyTheme(state.config?.theme, state.config?.customThemes ?? []);
     applyChatDensity(state.config?.chatDensity);
     applyEditorPrefs(
       state.config?.editorFontSize,
@@ -833,14 +859,28 @@ export function App() {
 
   const selected = state.sessions.find((s) => s.id === state.selectedId);
   const designSelected = selected && isDesignSession(selected) ? selected : undefined;
-  const gameSelected = selected && isGameSession(selected) ? selected : undefined;
-  const assetSelected = selected && isAssetSession(selected) ? selected : undefined;
+  const gameSelected =
+    selected &&
+    (isGameSession(selected) ||
+      isUnityProjectSession(selected) ||
+      isGodotProjectSession(selected) ||
+      isUnrealProjectSession(selected))
+      ? selected
+      : undefined;
+  const assetSelected =
+    selected && (isAssetSession(selected) || isBlenderProjectSession(selected))
+      ? selected
+      : undefined;
   const ideSelected = selected && isIdeSession(selected) ? selected : undefined;
   const agentSelected =
     selected &&
     !isDesignSession(selected) &&
     !isGameSession(selected) &&
+    !isUnityProjectSession(selected) &&
+    !isGodotProjectSession(selected) &&
+    !isUnrealProjectSession(selected) &&
     !isAssetSession(selected) &&
+    !isBlenderProjectSession(selected) &&
     !isIdeSession(selected) &&
     !isBoardSession(selected) &&
     !isProjectSession(selected)
@@ -858,6 +898,7 @@ export function App() {
     <Store.Provider value={{ state, dispatch }}>
       <CloseGuard />
       <DialogHost />
+      <PlanUsageModal />
       <NoticeBanner />
       {booting ? <BootScreen onRetry={() => retryBootRef.current()} /> : null}
       {state.productModeTransition ? (
@@ -925,6 +966,8 @@ export function App() {
                       <GrafanaPane />
                     ) : state.section === "docker" ? (
                       <DockerPane />
+                    ) : state.section === "android" ? (
+                      <AndroidPane key={state.selectedId ?? "new"} />
                     ) : state.section === "board" ? (
                       <BoardPane />
                     ) : state.section === "project" ? (
@@ -952,9 +995,23 @@ export function App() {
                             collapsed={state.vmCollapsed}
                             topbarToggle
                             chat={<ChatPane />}
-                            preview={<DesignCanvas />}
+                            preview={
+                              isGodotProjectSession(gameSelected) ? (
+                                <GodotProjectPanel sessionId={gameSelected.id} />
+                              ) : isUnrealProjectSession(gameSelected) ? (
+                                <UnrealProjectPanel sessionId={gameSelected.id} />
+                              ) : isUnityProjectSession(gameSelected) ? (
+                                <UnityProjectPanel sessionId={gameSelected.id} />
+                              ) : (
+                                <DesignCanvas />
+                              )
+                            }
                           />
-                          <ArtifactDrawer session={gameSelected} />
+                          {isUnityProjectSession(gameSelected) ||
+                          isGodotProjectSession(gameSelected) ||
+                          isUnrealProjectSession(gameSelected) ? null : (
+                            <ArtifactDrawer session={gameSelected} />
+                          )}
                         </>
                       ) : (
                         <GameEmpty />
@@ -967,9 +1024,17 @@ export function App() {
                             collapsed={state.vmCollapsed}
                             topbarToggle
                             chat={<ChatPane />}
-                            preview={<DesignCanvas />}
+                            preview={
+                              isBlenderProjectSession(assetSelected) ? (
+                                <BlenderProjectPanel sessionId={assetSelected.id} />
+                              ) : (
+                                <DesignCanvas />
+                              )
+                            }
                           />
-                          <ArtifactDrawer session={assetSelected} />
+                          {isBlenderProjectSession(assetSelected) ? null : (
+                            <ArtifactDrawer session={assetSelected} />
+                          )}
                         </>
                       ) : (
                         <AssetEmpty />

@@ -15,6 +15,7 @@ import {
   LLM_COMPACT_SYSTEM,
   SEARCH_WANDER_NUDGE,
   VERIFY_NUDGE,
+  supportsOneShotCompletion,
   type ChatMessage,
 } from "@locus/shared";
 
@@ -560,6 +561,54 @@ describe("agent runtime loop", () => {
     const fresh = await sessions.get(created.id);
     expect(fresh?.defaultSubagent).toBe("review");
     expect(fresh?.subagents?.[0]?.kind).toBe("review");
+    hypervisor.shutdown();
+  });
+
+  it("runs a spawn_agent child on another configured provider and model", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-"));
+    cleanup.push(dir);
+    const store = new JsonStore(dir);
+    await store.init();
+    const config = await store.loadConfig();
+    const parent = config.providers[0]!;
+    parent.apiKey = "sk-parent";
+    const other = config.providers.find(
+      (row) => row.id !== parent.id && row.kind !== parent.kind && supportsOneShotCompletion(row),
+    )!;
+    other.apiKey = "sk-other";
+    other.enabled = true;
+    await store.saveConfig(config);
+    const seen: { provider: string; model: string }[] = [];
+    async function* engine(req: CompleteRequest) {
+      seen.push({ provider: req.provider.id, model: req.model });
+      yield { type: "text" as const, text: "child summary" };
+    }
+    const hypervisor = new MockHypervisor(dir);
+    const sessions = new SessionService(store, hypervisor, new Hub(), engine);
+    const created = await sessions.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      runtime: "host",
+      providerId: parent.id,
+      model: parent.defaultModel,
+      startVm: false,
+    });
+    const result = await sessions.executeTool(created.id, {
+      name: "spawn_agent",
+      args: { task: "summarise the repo", provider: other.kind, model: "routed-model" },
+    } as unknown as ToolRequest);
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("child summary");
+    expect(seen).toEqual([{ provider: other.id, model: "routed-model" }]);
+    const fresh = await sessions.get(created.id);
+    expect(fresh?.subagents?.[0]?.model).toBe(`${other.name} · routed-model`);
+
+    const refused = await sessions.executeTool(created.id, {
+      name: "spawn_agent",
+      args: { task: "again", provider: "no-such-provider" },
+    } as unknown as ToolRequest);
+    expect(refused.ok).toBe(false);
+    expect(refused.output).toContain('No provider "no-such-provider"');
     hypervisor.shutdown();
   });
 

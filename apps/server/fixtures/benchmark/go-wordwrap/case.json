@@ -1,0 +1,14 @@
+{
+  "id": "go-wordwrap",
+  "title": "Word wrap drops the last line",
+  "repo": "fixture:.",
+  "baseCommit": "locus-base",
+  "fixCommit": "locus-fix",
+  "language": "go",
+  "prompt": "`locus --help` output loses its last line, and lines that would fit exactly at the width get wrapped one word early. wordwrap.Wrap(\"the quick brown fox\", 10) returns only [\"the quick\"]. Fix Wrap in wrap.go: lines may be exactly `width` long, and the final line must be kept.",
+  "testCommand": "go test -v ./...",
+  "failToPass": ["TestKeepsLastLine", "TestExactWidth", "TestLongWord"],
+  "passToPass": ["TestEmpty", "TestIndent"],
+  "protectedPaths": ["wrap_test.go"],
+  "timeoutSec": 600
+}

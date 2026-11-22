@@ -277,7 +277,9 @@ describe("NewAutomationModal runtimes", () => {
     expect(host.textContent).toContain(
       "Named environment, placement, runtime, OS, hardware, jail, spend, autonomy, notify, MCP",
     );
-    const envPicker = host.querySelector('[aria-label="Named environment"]') as HTMLElement;
+    const envPicker = host.querySelector(
+      '[aria-label="Named environment"], [aria-label^="Named environment: "]',
+    ) as HTMLElement;
     expect(envPicker).toBeTruthy();
     expect(selectOptionLabels(host, "Named environment").join(" ")).toContain(
       "None — pick runtime below",

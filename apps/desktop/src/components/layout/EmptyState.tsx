@@ -19,8 +19,8 @@ import {
   showFirstTaskPills,
   t,
   visibleRecipes,
-  workerIsMetered,
-  workerWhereLabel,
+  workerPlacementHint,
+  workerRunsInTask,
   type AgentRecipe,
   type FirstTask,
   type AgentRuntime,
@@ -62,6 +62,7 @@ import { ModelPicker } from "@/components/settings/ModelPicker";
 import { OsPicker } from "@/components/settings/OsPicker";
 import { ComposerRepoPicker } from "@/components/codebase/RepoField";
 import { FirstTaskPills, RecipeCards } from "@/components/settings/RecipeCards";
+import { SampleTaskButton } from "@/components/settings/SampleTaskButton";
 import {
   recentHostFolders,
   suggestFirstTasks,
@@ -136,7 +137,10 @@ export function EmptyState() {
     ? state.projects.find((row) => row.id === state.selectedProjectId && row.surface === "swarm")
         ?.id
     : undefined;
-  const effectiveRuntime = hubMode && !showAdvanced ? "host" : runtime;
+  const pickedWorker = workers.find((row) => row.id === backendId);
+  /** Fargate: the agent gets its own task and runs as Host inside it; no runtime choice. */
+  const cloudTask = Boolean(pickedWorker && workerRunsInTask(pickedWorker));
+  const effectiveRuntime = cloudTask || (hubMode && !showAdvanced) ? "host" : runtime;
   const os =
     effectiveRuntime === "vm"
       ? pickConfiguredOs(templates, osChoice)
@@ -150,7 +154,6 @@ export function EmptyState() {
       : "Add a guest ISO in Settings → Machines."
     : undefined;
   const hostChat = effectiveRuntime === "host";
-  const selectedWorker = workers.find((row) => row.id === backendId);
   const namedEnvironments = state.config?.namedEnvironments ?? [];
   const appliedEnv =
     workspace.kind === "environment" && workspace.env.runtime === effectiveRuntime
@@ -160,7 +163,8 @@ export function EmptyState() {
     effectiveRuntime === "docker"
       ? parseDockerImage(appliedEnv.dockerImage ?? dockerImage)
       : undefined;
-  const launchHostDir = hostChat && workspace.kind === "host" ? workspace.path : undefined;
+  const launchHostDir =
+    hostChat && !cloudTask && workspace.kind === "host" ? workspace.path : undefined;
   const mockDocker = effectiveRuntime === "docker" && state.dockerKind === "mock" && !backendId;
   const dockerDown =
     effectiveRuntime === "docker" &&
@@ -175,15 +179,7 @@ export function EmptyState() {
     (hostChat ||
       (effectiveRuntime === "docker" ? Boolean(launchDockerImage) : available.length > 0));
   const showRuntimeChrome = !hubMode || showAdvanced;
-  const workerHint = backendId
-    ? `${effectiveRuntime === "host" ? "The host workspace" : effectiveRuntime === "vm" ? "The VM" : "The container"} runs on ${
-        selectedWorker ? workerWhereLabel(selectedWorker) : "the worker"
-      }. Chat and keys stay on this machine.${
-        selectedWorker && workerIsMetered(selectedWorker)
-          ? " Stop destroys the guest. Idle TTL applies on the metered VM."
-          : ""
-      }`
-    : "";
+  const workerHint = backendId ? workerPlacementHint(pickedWorker, effectiveRuntime) : "";
   const hasProvider =
     setup?.hasProvider ?? Boolean(state.config?.providers.some((row) => row.enabled));
   const showSample = showFirstTaskPills({ sessions: state.sessions, hasProvider });
@@ -199,6 +195,9 @@ export function EmptyState() {
   );
   const firstTaskTarget = firstTasks[0]?.target;
   const firstTaskPending = state.config?.setupFirstTask === "pending" && hasProvider;
+  // Nothing linked yet: the card offers the bundled sample repo instead of a private-folder task.
+  const offerSampleTask =
+    !hostAgentsLocked && !(firstTaskTarget && firstTaskTarget.kind !== "private");
   const primaryRepo = state.repos.find((row) => row.id === repoIds[0]);
 
   useEffect(() => {
@@ -595,6 +594,11 @@ export function EmptyState() {
                       : `Real work in ${firstTaskTarget.path} on this machine. Nothing is pushed.`}
                   </p>
                 </>
+              ) : offerSampleTask ? (
+                <>
+                  <h3>{t("sample.title")}</h3>
+                  <p>{t("sample.body")}</p>
+                </>
               ) : (
                 <>
                   <h3>{t("empty.firstTask.title")}</h3>
@@ -616,13 +620,16 @@ export function EmptyState() {
                     </button>
                   ))
                 ) : (
-                  <button
-                    type="button"
-                    className="btn small primary"
-                    onClick={() => applyFirstTask(firstTasks[0] ?? FIRST_TASKS[0]!)}
-                  >
-                    {t("empty.firstTask.cta")}
-                  </button>
+                  <>
+                    {offerSampleTask ? <SampleTaskButton className="btn small primary" /> : null}
+                    <button
+                      type="button"
+                      className={offerSampleTask ? "btn small" : "btn small primary"}
+                      onClick={() => applyFirstTask(firstTasks[0] ?? FIRST_TASKS[0]!)}
+                    >
+                      {t("empty.firstTask.cta")}
+                    </button>
+                  </>
                 )}
                 <button
                   type="button"
@@ -740,7 +747,7 @@ export function EmptyState() {
           ) : null}
 
           <div className="launch-card">
-            {showRuntimeChrome ? (
+            {showRuntimeChrome && !cloudTask ? (
               <LaunchWorkspace
                 runtime={effectiveRuntime}
                 remote={Boolean(backendId)}

@@ -2,7 +2,11 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { networkInterfaces } from "node:os";
 import type { IncomingMessage } from "node:http";
 import {
+  OPERATOR_COOKIE,
+  OPERATOR_HEADER,
+  OPERATOR_QUERY,
   PHONE_COOKIE,
+  operatorTokenExempt,
   isLanOrigin,
   isLanPeerHost,
   isLoopbackHost,
@@ -23,12 +27,30 @@ export function allowPhoneAccess(input: {
   remote?: PhoneRemote;
   method?: string;
   path?: string;
+  /** Expected operator token. Unset turns the operator check off (tests, `LOCUS_OPERATOR_AUTH=off`). */
+  operatorToken?: string;
+  /** Operator credential the request carried (see `operatorCredentialFromHeaders`). */
+  operatorCredential?: string;
+  /** Host header is the isolated canvas preview origin. */
+  canvasPreviewHost?: boolean;
 }): boolean {
   const peer = normalizePeer(input.peer);
   const loopbackPeer = !peer || isLoopbackHost(peer);
   const origin = input.origin;
   if (origin && !isLoopbackOrigin(origin) && !isLanOrigin(origin)) return false;
-  if (loopbackPeer && isLoopbackOrigin(origin)) return true;
+  if (loopbackPeer && isLoopbackOrigin(origin)) {
+    // Loopback alone is not the operator: sandboxed CLIs, guest forwards and
+    // any local process share it. /api and /ws need the operator token.
+    if (!input.operatorToken) return true;
+    if (tokensMatch(input.operatorCredential, input.operatorToken)) return true;
+    if (
+      input.path !== undefined &&
+      operatorTokenExempt(input.path, { canvasPreviewHost: input.canvasPreviewHost })
+    ) {
+      return true;
+    }
+    // Fall through: a paired phone token still works from loopback.
+  }
   if (!input.remote?.enabled || !input.remote.token) return false;
   if (peer && !isLoopbackHost(peer) && !isLanPeerHost(peer)) return false;
   if (tokensMatch(input.token, input.remote.token)) return true;
@@ -65,6 +87,52 @@ export function tokenFromHeaders(
       if (token) return token;
     } catch {
       /* ignore */
+    }
+  }
+  return undefined;
+}
+
+/** Operator token from the cookie, `x-locus-operator`, a bearer header, or `?operator=`. */
+export function operatorCredentialFromHeaders(
+  headers: Headers | IncomingMessage["headers"],
+  url?: string,
+): string | undefined {
+  const cookie = cookieValue(headerValue(headers, "cookie"), OPERATOR_COOKIE);
+  if (cookie) return cookie;
+  const header = headerValue(headers, OPERATOR_HEADER)?.trim();
+  if (header) return header;
+  const auth = headerValue(headers, "authorization");
+  if (auth?.toLowerCase().startsWith("bearer ")) {
+    const bearer = auth.slice(7).trim();
+    if (bearer) return bearer;
+  }
+  if (url) {
+    try {
+      const value = new URL(url, "http://127.0.0.1").searchParams.get(OPERATOR_QUERY)?.trim();
+      if (value) return value;
+    } catch {
+      /* ignore */
+    }
+  }
+  return undefined;
+}
+
+/** Set-Cookie for the operator token: HttpOnly, SameSite=Strict, whole site. */
+export function operatorCookie(token: string): string {
+  return `${OPERATOR_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict`;
+}
+
+function cookieValue(cookieHeader: string | undefined, name: string): string | undefined {
+  if (!cookieHeader) return undefined;
+  for (const part of cookieHeader.split(";")) {
+    const [key, ...rest] = part.split("=");
+    if (key?.trim() !== name) continue;
+    const value = rest.join("=").trim();
+    if (!value) return undefined;
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
     }
   }
   return undefined;

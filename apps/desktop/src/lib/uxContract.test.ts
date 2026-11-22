@@ -22,7 +22,7 @@ describe("quiet shell contract", () => {
 
   it("pins a short featured theme set and keeps the rest as extras", () => {
     expect([...FEATURED_THEME_IDS]).toEqual(["ember", "midnight", "paper", "contrast"]);
-    expect(THEME_OPTIONS).toHaveLength(106);
+    expect(THEME_OPTIONS).toHaveLength(186);
   });
 
   it("ships the quiet-shell screenshot contract in ux.css", () => {
@@ -48,14 +48,8 @@ describe("quiet shell contract", () => {
     expect(ux).toMatch(/prefers-contrast: more/);
   });
 
-  it("keeps five primary rails and hides the rest behind More", () => {
-    expect([...PRIMARY_RAIL_SECTIONS]).toEqual([
-      "agents",
-      "design",
-      "ide",
-      "codebase",
-      "automations",
-    ]);
+  it("keeps a slim primary rail and hides the rest behind More", () => {
+    expect([...PRIMARY_RAIL_SECTIONS]).toEqual(["agents", "codebase"]);
     expect([...MORE_RAIL_SECTIONS]).toContain("games");
     expect([...MORE_RAIL_SECTIONS]).toContain("slack");
     expect([...MORE_RAIL_SECTIONS]).not.toContain("codebase");

@@ -273,6 +273,19 @@ describe("workspaceChangesFromMessages", () => {
     expect(changes).toEqual([{ path: "src/app.ts", additions: 2, deletions: 1 }]);
   });
 
+  it("counts a call once when its tool-result message repeats it", () => {
+    const patch = call({
+      id: "p1",
+      name: "apply_patch",
+      arguments: {
+        patch: "--- a/sum.js\n+++ b/sum.js\n@@\n-  for (i < n - 1)\n+  for (i < n)\n",
+      },
+      result: "updated /workspace/sum.js",
+    });
+    const changes = workspaceChangesFromMessages([message([patch]), message([patch])]);
+    expect(changes).toEqual([{ path: "sum.js", additions: 1, deletions: 1 }]);
+  });
+
   it("counts Cursor write_file calls using target_file", () => {
     const changes = workspaceChangesFromMessages([
       message([
