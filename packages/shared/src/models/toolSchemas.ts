@@ -343,9 +343,14 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
       path: { type: "string" },
       url: {
         type: "string",
-        description: "Remote URL. SSH remotes are rewritten to HTTPS when a token is set.",
+        description:
+          "Remote URL. Defaults to the attached repo or the checkout's origin. With a token, git uses its HTTPS form for this call only; origin is not rewritten.",
       },
-      ref: { type: "string", description: "Branch, tag, SHA, or pull/N to fetch." },
+      ref: {
+        type: "string",
+        description:
+          "Branch, tag, SHA, or pull/N to fetch. A branch updates origin/<branch> and fast-forwards the local branch (this is git pull --ff-only); a diverged local branch is reported, not merged.",
+      },
       pull: { type: "number", description: "Pull/merge request number." },
     },
   },
@@ -386,6 +391,11 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
     properties: {
       path: { type: "string" },
       name: { type: "string", description: "Branch name" },
+      from: {
+        type: "string",
+        description:
+          "Start point when the branch is created (e.g. origin/develop). Ignored if the branch already exists; an existing branch is switched to, never reset.",
+      },
     },
     required: ["name"],
   },
@@ -396,6 +406,15 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
         type: "string",
         description:
           "Checkout directory. In a multi-repo workspace pass that repo's dest from the attached-repos prompt.",
+      },
+      skipTests: {
+        type: "boolean",
+        description:
+          "Ask the operator to skip the harness test gate for this publish (for example the user said to push without running tests). The operator decides; if nobody answers in time the tests run.",
+      },
+      skipTestsReason: {
+        type: "string",
+        description: "Why to skip, ideally the user's own words. Shown to the operator.",
       },
     },
   },
@@ -411,6 +430,15 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
       },
       draft: { type: "boolean", description: "Open as a draft pull request" },
       base: { type: "string", description: "Base branch. Defaults to the default branch." },
+      skipTests: {
+        type: "boolean",
+        description:
+          "Ask the operator to skip the harness test gate for this publish (for example the user said to push without running tests). The operator decides; if nobody answers in time the tests run.",
+      },
+      skipTestsReason: {
+        type: "string",
+        description: "Why to skip, ideally the user's own words. Shown to the operator.",
+      },
     },
     required: ["title"],
   },
@@ -738,8 +766,16 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
   slack_upload: {
     type: "object",
     properties: {
-      channel: { type: "string", description: "Channel ID or name" },
-      filename: { type: "string", description: "File name shown in Slack" },
+      channel: { type: "string", description: "Slack conversation ID from slack_channels" },
+      path: {
+        type: "string",
+        description:
+          "Workspace file to upload (for example playwright-report/index.html or report.zip). Read host-side, so large reports never pass through chat. Use this instead of content for anything bigger than a short text file.",
+      },
+      filename: {
+        type: "string",
+        description: "File name shown in Slack (defaults to the path's name)",
+      },
       content: { type: "string", description: "UTF-8 file contents when the file is text" },
       bytes_base64: { type: "string", description: "Base64 file bytes for binary uploads" },
       mime: { type: "string", description: "Optional MIME type" },
@@ -750,7 +786,7 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
         description: 'Identity: "user" (default, signed-in operator) or "bot" (Locus app)',
       },
     },
-    required: ["channel", "filename"],
+    required: ["channel"],
   },
   slack_channels: {
     type: "object",

@@ -105,6 +105,8 @@ export interface QueuedJob {
   requestTs?: string;
   rereview?: boolean;
   retry?: boolean;
+  fullRereview?: boolean;
+  force?: boolean;
   at: string;
 }
 
@@ -130,6 +132,8 @@ export interface ReviewJob {
   requestTs?: string;
   /** Asked for in the review thread: review again even with `rereviewOnNewCommits` off. */
   rereview?: boolean;
+  /** Review the full PR diff, even if this head commit has already been reviewed. */
+  fullRereview?: boolean;
   /** Settings "Try it" dry run: review, but post nothing and record nothing. */
   dryRun?: boolean;
   /** "retry" in the thread: review even a commit already reviewed. */

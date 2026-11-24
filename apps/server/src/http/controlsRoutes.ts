@@ -49,6 +49,12 @@ export function registerControlsRoutes(
     });
   });
 
+  app.get("/api/usage/models", async (c) => {
+    if (!local(c)) return c.json({ error: "Model usage is desktop-only" }, 403);
+    c.header("Cache-Control", "no-store");
+    return c.json(await opts.sessions.budgets.modelUsage());
+  });
+
   app.post("/api/budgets/override", async (c) => {
     if (!local(c)) return denied(c);
     const body = (await c.req.json().catch(() => ({}))) as {

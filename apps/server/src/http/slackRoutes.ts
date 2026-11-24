@@ -49,7 +49,8 @@ export function registerSlackRoutes(
 
   /**
    * Run one reviewer on a PR now. `threadTs` posts progress into that Slack thread. `dryRun`
-   * posts nothing anywhere and returns the findings.
+   * posts nothing anywhere and returns the findings. `fullRereview` reviews the full PR diff
+   * in a live run, even if the head was already reviewed.
    */
   app.post("/api/slack/reviewers/:id/review", async (c) => {
     if (!reviewers) return c.json({ error: "Slack reviewers are not running" }, 503);
@@ -57,6 +58,7 @@ export function registerSlackRoutes(
       url?: string;
       threadTs?: string;
       dryRun?: boolean;
+      fullRereview?: boolean;
     };
     const url = body.url?.trim();
     if (!url) return c.json({ error: "url is required" }, 400);
@@ -64,6 +66,7 @@ export function registerSlackRoutes(
       return c.json(
         await reviewers.reviewNow(c.req.param("id"), url, body.threadTs?.trim() || undefined, {
           dryRun: body.dryRun === true,
+          fullRereview: body.fullRereview === true,
         }),
       );
     } catch (err) {
@@ -180,6 +183,14 @@ export function registerSlackRoutes(
     const body = (await c.req.json().catch(() => ({}))) as { starred?: boolean };
     try {
       return c.json(await slack.setStarred(c.req.param("id"), body.starred !== false));
+    } catch (err) {
+      return c.json({ error: errorMessage(err) }, 400);
+    }
+  });
+
+  app.get("/api/slack/users", async (c) => {
+    try {
+      return c.json(await slack.listUsers(c.req.query("refresh") === "1"));
     } catch (err) {
       return c.json({ error: errorMessage(err) }, 400);
     }

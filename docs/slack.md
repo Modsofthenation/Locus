@@ -83,7 +83,7 @@ Slack apps still have a bot user because Slack apps do. The Slack **section** si
 | **App (`xapp-`)** | Socket Mode (`apps.connections.open`) so `/locus` and shortcuts arrive without Funnel. Never sent to the model. Never used to post. |
 | **Bot (`xoxb-`)** | Optional posting identity. OAuth stores the bot token when bot `chat:write` is granted. Composer toggle **as Locus** and `slack_post` `as="bot"` use it. A pasted bot token in Settings still powers webhook-era `slack_post` until Sign in with Slack succeeds. Reads always prefer the user token. |
 
-Request bot `commands`, `chat:write`, `chat:write.public`, and `files:write` so the app can post and upload to public channels without joining. **Do not** request `channels:join`. **Do not** call `conversations.join` as the bot. **Do not** `chat.postMessage` with the bot token unless the operator chose bot identity (`as="bot"` / composer toggle).
+Request bot `commands`, `chat:write`, `chat:write.public`, and `files:write`. `chat:write.public` allows the bot to post messages to public channels without joining. To share a file as the bot, add the app to the destination conversation. **Do not** request `channels:join`. **Do not** call `conversations.join` as the bot. **Do not** `chat.postMessage` with the bot token unless the operator chose bot identity (`as="bot"` / composer toggle).
 
 ### Live updates without a bot in the room
 
@@ -232,6 +232,17 @@ Keep `slack_post` / `slack_upload` / `slack_channels`. Reads use the **user** to
 
 `slack_post` description: post as the signed-in operator by default; pass `as="bot"` for the Locus app. Interactive sessions wait for Approve / Deny. Automations keep today’s allowlist opt-in. Offer Slack tools when a Slack account has a **user** token (`integrationReady`); a bot-only leftover token does not unlock the client. After OAuth, user-identity `slack_post` must still prefer the user token.
 
+Use `slack_upload` with a conversation ID from `slack_channels`, a `filename`, and either `content` for UTF-8 text or `bytes_base64` for binary files. Add `comment` for a caption or `thread_ts` to share the file in a thread. The file limit is 20 MiB. The selected identity needs `files:write` and access to the destination conversation.
+
+```json
+{
+  "channel": "C0123AB4CDE",
+  "filename": "notes.txt",
+  "content": "Meeting notes\n",
+  "comment": "Notes from today"
+}
+```
+
 Mark `slack_history` / `slack_replies` hostile in `packages/shared/src/untrusted.ts` next to `slack_channels`. Add `UntrustedKind` `"slack-message"` (same fence family as `pr-text`).
 
 ## Slack app the operator creates
@@ -311,7 +322,7 @@ Composer: Enter sends, Shift+Enter newline, no slash-menu of guest commands (tho
 
 Own messages: `user === status.userId` render as “You”. If `session.slack.lastPostTs` matches an agent-approved post, show an agent chip **in Locus only**.
 
-Markdown: Slack mrkdwn (`*bold*`, `<@U123>`, `<#C123>`) converted before `formatMarkdown`. Unknown tokens stay as text. Images/files: `files.upload` (or the current files API) plus Slack permalinks; `slack_upload` waits for Approve / Deny (Slack buttons allowed for that tool).
+Markdown: Slack mrkdwn (`*bold*`, `<@U123>`, `<#C123>`) converted before `formatMarkdown`. Unknown tokens stay as text. File uploads use `files.getUploadURLExternal`, transfer the bytes to the returned URL, then call `files.completeUploadExternal` to share the file. `slack_upload` waits for Approve / Deny and supports Slack approval buttons.
 
 ## PR sequence
 

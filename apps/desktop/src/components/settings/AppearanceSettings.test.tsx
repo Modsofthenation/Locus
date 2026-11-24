@@ -279,6 +279,29 @@ describe("AppearanceSettings", () => {
     expect(host.querySelector("[data-testid='theme-new']")).not.toBeNull();
   });
 
+  it("shuffles to a random theme within the current filter, never the current one", async () => {
+    const onSelect = vi.fn();
+    await mount({ customThemes: [neon], onSelect });
+    const shuffle = host.querySelector<HTMLButtonElement>("[data-testid='theme-shuffle']")!;
+    expect(shuffle.disabled).toBe(false);
+    const random = vi.spyOn(Math, "random");
+    for (const value of [0, 0.5, 0.999]) {
+      random.mockReturnValueOnce(value);
+      await act(async () => shuffle.click());
+    }
+    random.mockRestore();
+    expect(onSelect).toHaveBeenCalledTimes(3);
+    for (const [id] of onSelect.mock.calls) expect(id).not.toBe("ember");
+
+    // Under the Generated filter the pool is just the generated themes.
+    onSelect.mockClear();
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>("[data-testid='theme-filter-generated']")!.click(),
+    );
+    await act(async () => shuffle.click());
+    expect(onSelect).toHaveBeenCalledWith(neon.id);
+  });
+
   it("searches every theme by name or description", async () => {
     await mount({ customThemes: [neon] });
     const search = host.querySelector<HTMLInputElement>("[data-testid='theme-search']")!;

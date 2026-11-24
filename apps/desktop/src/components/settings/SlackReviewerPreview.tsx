@@ -81,6 +81,7 @@ export function slackPreviewVars(
     ),
     ahead: "1 review",
     dismissed: "#2 (`src/http/retry.ts:18`)",
+    part: "2 of 4",
     usage: formatSlackReviewUsage({
       model: model.model,
       inputTokens: 10_240,

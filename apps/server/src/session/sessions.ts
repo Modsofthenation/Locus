@@ -2,6 +2,8 @@ import { mkdir, rm, readFile, cp, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
 import { executeUnityMcp } from "../unity/unityMcp.js";
+import { annotateGitToolResult } from "./gitToolFeedback.js";
+import { fillGitForgeArgs } from "./gitForgeArgs.js";
 import { executeGodotMcp } from "../godot/godotMcp.js";
 import { executeUnrealMcp } from "../unreal/unrealMcp.js";
 import { executeBlenderMcp } from "../blender/blenderMcp.js";
@@ -68,6 +70,7 @@ import {
   parseDockerImage,
   parseOwnerRepo,
   parseRepoUrl,
+  normalizeRepoUrl,
   parseToolAllowlist,
   parseSessionCompare,
   parseSessionPreview,
@@ -110,8 +113,9 @@ import {
   workerComputeUsd,
   sessionComputeMs,
   workerProvisionsCompute,
+  sandboxWorkerKind,
+  type WorkerBackend,
   runtimeNeedsGuest,
-  toolsForRuntime,
   configuredToolsForRuntime,
   validateHardwareOverride,
   addUsage,
@@ -208,7 +212,6 @@ import {
   PROJECT_MEMBER_TOOLS,
   DEFAULT_DESIGN_PALETTE,
   DOCKER_WORKSPACE,
-  guessListenPorts,
   pickPreviewPort,
   sanitizePreviewPath,
   DEFAULT_DOCKER_IMAGE,
@@ -427,7 +430,7 @@ import {
   executeLateControlPlaneTool,
   type ControlPlaneToolPorts,
 } from "./controlPlaneTools.js";
-import { executeSessionForgeTool } from "./sessionForgeTools.js";
+import { executeGuestCatalogTool, type GuestCatalogExecutePorts } from "./guestCatalogExecute.js";
 import { GuestBoot } from "./guestBoot.js";
 import { MachineLifecycle } from "./machineLifecycle.js";
 import { BootTracker } from "./bootSteps.js";
@@ -551,7 +554,12 @@ import {
   workspaceGitState,
   type WorkspaceScriptResult,
 } from "../core/hooks.js";
-import { runWorkspaceVerify, workspaceVerifyCommands } from "../core/verify.js";
+import {
+  loadWorkspaceVerifyPlan,
+  runWorkspaceVerify,
+  workspaceVerifyCommands,
+} from "../core/verify.js";
+import { TestGateHistory, testGateHistoryKey } from "../core/testGateHistory.js";
 import {
   assemblePrompt,
   checkBudget,
@@ -587,6 +595,22 @@ import {
   sessionAutonomy,
   resolveSpendCapUsd,
   isAutonomyTier,
+  harnessGateBypassed,
+  isPublishTool,
+  isTestGatePromptMessage,
+  parseTestGateAnswer,
+  shouldPromptTestGate,
+  testGatePromptMs,
+  testGateSkipRequest,
+  testGateSlowMs,
+  formatTestGateDuration,
+  TEST_GATE_CHOICE_LABELS,
+  TEST_GATE_PROMPT_TOOL,
+  type TestGateChoice,
+  type RepoCheckout,
+  parseHarnessGates,
+  effectiveBypassGates,
+  policyRejectsGateBypass,
   looksLikeFixableFailure,
   selfCorrectNudge,
   EMPTY_CANVAS_NUDGE,
@@ -634,6 +658,9 @@ import {
   offlineProjectTool,
   offlineProviderFetch,
 } from "../projects/offlineProject.js";
+
+/** Approval answer recorded when the test-gate prompt times out (tests run). */
+const TEST_GATE_TIMEOUT_ANSWER = "test-gate:timeout";
 
 export type ChatEngine = (
   req: CompleteRequest,
@@ -775,6 +802,7 @@ export class SessionService {
   private studioTurnStart = new Map<string, string>();
   private llmStreamAborts = new Map<string, AbortController>();
   private workerReaper?: ReturnType<typeof setInterval>;
+  private workerReapInProgress = false;
   private readonly forge = new ForgeClient((input, init) => this.fetchFn(input, init));
   private readonly compute: ComputeBackend;
   private readonly browsers: BrowserStreams;
@@ -839,7 +867,7 @@ export class SessionService {
       store: this.store,
       forge: this.forge,
       requireForge: (session, args) => this.requireForge(session, args),
-      chatEngine: (req) => this.chatEngine(req),
+      chatEngine: this.budgets.trackCompletion((req) => this.chatEngine(req)),
       invalidateRepoMap: (sessionId) => {
         this.repoMapCache.delete(sessionId);
       },
@@ -903,6 +931,10 @@ export class SessionService {
       docker: () => this.docker,
       fetchFn: () => this.fetchFn,
       compute: this.compute,
+      assertComputeBudget: async (session) => {
+        const verdict = await this.budgets.check(session, await this.store.loadConfig());
+        if (!verdict.ok) throw new Error(verdict.message);
+      },
       workers: this.workers,
       boots: this.boots,
       computeReadyTimeoutMs: () => this.computeReadyTimeoutMs,
@@ -963,7 +995,7 @@ export class SessionService {
           this.docker.restoreWorkspace?.(id, srcPath) ?? Promise.resolve(),
       },
       store: this.store,
-      chatEngine: (req) => this.chatEngine(req),
+      chatEngine: this.budgets.trackCompletion((req) => this.chatEngine(req)),
     });
     this.browsers = new BrowserStreams(
       this.guests,
@@ -1101,6 +1133,17 @@ export class SessionService {
     const sessions = await this.list();
     await Promise.all(sessions.map((session) => this.abortChat(session.id).catch(() => undefined)));
     for (const session of sessions) {
+      if (session.remoteGuestId || this.machineLifecycle.isStartingCompute(session.id)) {
+        await this.stopVm(session.id);
+      }
+    }
+    await this.reapOrphanCompute();
+    if ((await this.compute.listOrphans(new Set())).length) {
+      throw new Error(
+        "Cloud compute cleanup is pending. Finish cleanup before resetting local data.",
+      );
+    }
+    for (const session of sessions) {
       await this.remove(session.id).catch(() => undefined);
     }
     for (const vm of this.listMachines()) {
@@ -1204,7 +1247,7 @@ export class SessionService {
         ...backend,
         url: handle.url,
         token: handle.token,
-        fingerprint: handle.fingerprint,
+        fingerprint: handle.gateway ? undefined : handle.fingerprint,
       };
       const cacheKey = `${backend.id}:${handle.id}`;
       const existing = this.workers.get(cacheKey);
@@ -1219,6 +1262,8 @@ export class SessionService {
       const client = new WorkerClient(
         row,
         this.fetchFn === fetch ? undefined : (input, init) => this.fetchFn(input, init),
+        undefined,
+        handle.gateway,
       );
       this.workers.set(cacheKey, client);
       return this.withPlane(client, config.workerPlaneId);
@@ -1289,7 +1334,22 @@ export class SessionService {
   startWorkerReaper(intervalMs = 30_000): void {
     if (this.workerReaper) return;
     this.workerReaper = setInterval(() => {
-      void this.reapIdleWorkerGuests();
+      if (this.workerReapInProgress) return;
+      this.workerReapInProgress = true;
+      void (async () => {
+        try {
+          await this.reapOrphanCompute();
+        } catch {
+          console.warn("Compute reconciliation failed and will retry");
+        }
+        try {
+          await this.reapIdleWorkerGuests();
+        } catch {
+          console.warn("Idle worker cleanup failed and will retry");
+        } finally {
+          this.workerReapInProgress = false;
+        }
+      })();
     }, intervalMs);
     this.workerReaper.unref?.();
   }
@@ -1317,48 +1377,126 @@ export class SessionService {
     return reaped;
   }
 
-  async reapOrphanCompute(): Promise<number> {
+  async assertSandboxWorkersRetained(
+    current: WorkerBackend[],
+    next: WorkerBackend[],
+  ): Promise<void> {
+    const retiring = new Set(
+      current
+        .filter(
+          (worker) =>
+            sandboxWorkerKind(worker.kind) &&
+            !next.some(
+              (candidate) =>
+                candidate.id === worker.id &&
+                candidate.kind === worker.kind &&
+                candidate.token?.trim(),
+            ),
+        )
+        .map((worker) => worker.id),
+    );
+    if (!retiring.size) return;
+    const [sessions, tracked] = await Promise.all([
+      this.list(),
+      this.compute.listOrphans(new Set()),
+    ]);
+    if (
+      tracked.some((row) => retiring.has(row.backendId)) ||
+      sessions.some(
+        (session) =>
+          session.backendId &&
+          retiring.has(session.backendId) &&
+          this.machineLifecycle.isStartingCompute(session.id),
+      )
+    ) {
+      throw new Error("Finish sandbox cleanup before removing or changing the worker provider");
+    }
+  }
+
+  async verifySandboxWorker(backend: WorkerBackend): Promise<void> {
+    if (!this.compute.verify) throw new Error("Sandbox workers are unavailable on this server");
+    await this.compute.verify(backend);
+  }
+
+  async pendingComputeCleanup(): Promise<import("@locus/compute").ComputeOrphan[]> {
     const live = new Set(
       (await this.list())
         .map((session) => session.remoteGuestId)
         .filter((id): id is string => !!id),
     );
-    const orphans = await this.compute.listOrphans(live);
+    return (await this.compute.listOrphans(live)).filter(
+      ({ sessionId }) => !sessionId || !this.machineLifecycle.isStartingCompute(sessionId),
+    );
+  }
+
+  async reapOrphanCompute(): Promise<number> {
+    const orphans = await this.pendingComputeCleanup();
     if (!orphans.length) return 0;
     const config = await this.store.loadConfig();
+    let destroyed = 0;
     for (const orphan of orphans) {
-      const backend = (config.workers ?? []).find((row) => row.id === orphan.backendId);
-      await this.compute.destroy(orphan.id, backend).catch(() => undefined);
+      const session = orphan.sessionId ? await this.get(orphan.sessionId) : undefined;
+      // Recheck after reading the session: a boot could have started while the store was read.
+      if (orphan.sessionId && this.machineLifecycle.isStartingCompute(orphan.sessionId)) {
+        continue;
+      }
+      try {
+        if (session?.remoteGuestId === orphan.id) {
+          if (!orphan.cleanupPending) continue;
+          await this.destroyWorkerGuest(session);
+        } else {
+          const backend = (config.workers ?? []).find((row) => row.id === orphan.backendId);
+          await this.compute.destroy(orphan.id, backend);
+        }
+        destroyed += 1;
+      } catch {
+        console.warn(
+          `Compute cleanup pending for worker ${orphan.backendId}, resource ${orphan.id}`,
+        );
+      }
     }
-    return orphans.length;
+    return destroyed;
   }
 
   private async destroyWorkerGuest(session: AgentSession): Promise<void> {
     this.closeProxy(session.id);
     this.closeIdeTunnel(session.id);
     const remoteId = session.remoteGuestId;
+    if (remoteId) {
+      if (sandboxWorkerKind(remoteId.split(":", 1)[0])) this.haltTurn(session.id);
+      // Terminate the billable resource through the provider even if the guest is unreachable.
+      const config = await this.store.loadConfig();
+      const backend = (config.workers ?? []).find((row) => row.id === session.backendId);
+      try {
+        await this.compute.destroy(remoteId, backend);
+      } catch {
+        const message =
+          "Cloud compute cleanup pending. The provider has not confirmed termination.";
+        await this.patch(session.id, { status: "error", error: message });
+        throw new Error(message);
+      }
+      this.workers.delete(`${session.backendId}:${remoteId}`);
+    }
     if (session.vmId) {
       const vmId = session.vmId;
       this.guests.drop(vmId);
-      const client = await this.requireWorker(session).catch(() => undefined);
-      try {
-        await client?.destroy(vmId);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (!/not found/i.test(msg) && !/404/.test(msg)) throw err;
+      if (!remoteId) {
+        const client = await this.requireWorker(session).catch(() => undefined);
+        try {
+          await client?.destroy(vmId);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!/not found/i.test(msg) && !/404/.test(msg)) throw err;
+        }
       }
       await this.store.deleteVm(vmId).catch(() => undefined);
-    }
-    if (remoteId) {
-      const config = await this.store.loadConfig();
-      const backend = (config.workers ?? []).find((row) => row.id === session.backendId);
-      await this.compute.destroy(remoteId, backend).catch(() => undefined);
     }
     // The workspace went with the guest (or the whole task): clone again on the next start.
     if (remoteId || sessionRuntime(session) !== "host") this.cloned.delete(session.id);
     await this.patch(session.id, {
       vmId: undefined,
       status: "stopped",
+      error: undefined,
       computeMs: sessionComputeMs(session),
       computeStartedAt: undefined,
       remoteGuestId: undefined,
@@ -1423,6 +1561,10 @@ export class SessionService {
       repoId: session.repoId,
       extraRepos: session.extraRepos,
       extraRepoIds: session.extraRepoIds,
+      bypassGates: effectiveBypassGates(
+        session.bypassGates,
+        (await this.store.loadConfig()).managedPolicy,
+      ),
       startVm: true,
     });
     const src = this.hostRoot(session);
@@ -1547,6 +1689,7 @@ export class SessionService {
       autonomy: input.autonomy,
       network: input.network,
       liveChrome: input.liveChrome,
+      bypassGates: parseHarnessGates(input.bypassGates),
       status: config.managedPolicy,
     });
     if (policyErr) throw new Error(policyErr);
@@ -2092,7 +2235,11 @@ export class SessionService {
 
   async remove(sessionId: string, opts?: { discardBranch?: boolean }): Promise<void> {
     this.assertAttemptNotVerifying(sessionId);
-    const session = await this.require(sessionId);
+    let session = await this.require(sessionId);
+    if (session.remoteGuestId || this.machineLifecycle.isStartingCompute(sessionId)) {
+      await this.stopVm(sessionId);
+      session = await this.require(sessionId);
+    }
     await this.killBackgroundProcesses(session).catch(() => undefined);
     this.guestBoot.dropExpected(sessionId);
     this.closeProxy(sessionId);
@@ -2799,7 +2946,9 @@ export class SessionService {
         const compacted = compactMessages(
           await this.hydrateScreenshots(
             sessionId,
-            (await this.require(sessionId)).messages.filter((m) => m.id !== replyId && !m.compact),
+            (await this.require(sessionId)).messages.filter(
+              (m) => m.id !== replyId && !m.compact && !isTestGatePromptMessage(m),
+            ),
             sessionVision(session),
           ),
           {
@@ -3637,6 +3786,7 @@ export class SessionService {
               if (kind === "planRefuse") {
                 return { ok: false, output: planToolRefusal(name, true, call.arguments)! };
               }
+              let testGate: TestGateChoice | undefined;
               if (kind === "approval") {
                 if (stop()) return undefined;
                 if (name === "brain_brief") {
@@ -3682,6 +3832,7 @@ export class SessionService {
                 });
                 call.approval = outcome.approval;
                 if (outcome.kind !== "run") return outcome.result;
+                if (isPublishTool(name)) testGate = parseTestGateAnswer(answer) ?? "run";
                 const slackArgs = applySlackPostApprovalText(name, call.arguments, answer);
                 const nextArgs = applyBrainBriefApprovalBody(name, slackArgs, answer);
                 if (nextArgs) call.arguments = nextArgs;
@@ -3692,7 +3843,7 @@ export class SessionService {
                   name: name as ComputerUseToolName,
                   args: call.arguments,
                 },
-                { fence: false, toolCallId: call.id },
+                { fence: false, toolCallId: call.id, ...(testGate ? { testGate } : {}) },
               );
             } catch (err) {
               return { ok: false, output: err instanceof Error ? err.message : "tool failed" };
@@ -4362,7 +4513,11 @@ export class SessionService {
               await this.applyCodingVerify(sessionId, (await this.get(sessionId)) ?? session);
             }
             await this.runStopHooks(session);
-            await this.patch(sessionId, { status: parkedStatus(session) });
+            const parked = await this.store.mutateSession(sessionId, (current) => {
+              if (current.status === "stopped" || current.status === "error") return;
+              current.status = parkedStatus(current);
+            });
+            if (parked) this.hub.broadcast({ type: "session.updated", session: parked });
             if (abort.signal.aborted && !stale()) {
               await this.appendMessage(sessionId, {
                 id: randomUUID(),
@@ -5252,7 +5407,7 @@ export class SessionService {
     let text = "";
     try {
       const stream = runChatTurn(
-        (req) => this.chatEngine(req),
+        this.budgets.trackCompletion((req) => this.chatEngine(req)),
         {
           provider: input.provider,
           model: input.session.model,
@@ -5507,6 +5662,12 @@ export class SessionService {
     sessionId: string,
     toolCallId: string,
     abort: AbortSignal,
+    opts: {
+      /** Overrides `advanced.approvalTimeoutMs`. */
+      timeoutMs?: number;
+      /** On timeout, approve with this answer instead of denying. */
+      timeoutAnswer?: string;
+    } = {},
   ): Promise<{ decision: "approved" | "denied" | "cancelled"; answer?: string }> {
     const key = `${sessionId}:${toolCallId}`;
     return new Promise((resolve) => {
@@ -5540,8 +5701,14 @@ export class SessionService {
         .catch(() => undefined);
       void this.store.loadConfig().then((config) => {
         if (!this.approvals.has(key)) return;
-        const ms = approvalTimeoutMs(config.advanced.approvalTimeoutMs);
-        timer = setTimeout(() => done("denied"), ms);
+        const ms = opts.timeoutMs ?? approvalTimeoutMs(config.advanced.approvalTimeoutMs);
+        timer = setTimeout(
+          () =>
+            opts.timeoutAnswer !== undefined
+              ? done("approved", opts.timeoutAnswer)
+              : done("denied"),
+          ms,
+        );
       });
     });
   }
@@ -5750,6 +5917,10 @@ export class SessionService {
       extraRepos: session.extraRepos,
       extraRepoIds: session.extraRepoIds,
       branchLock: session.branchLock,
+      bypassGates: effectiveBypassGates(
+        session.bypassGates,
+        (await this.store.loadConfig()).managedPolicy,
+      ),
       hardware,
       imageId,
       instructions: session.instructions,
@@ -6227,18 +6398,84 @@ export class SessionService {
     await this.guests.forVm(vm).prepareHostWorkspace();
   }
 
+  private testGateHistoryStore: TestGateHistory | undefined;
+
+  private get testGateHistory(): TestGateHistory {
+    return (this.testGateHistoryStore ??= new TestGateHistory(
+      join(this.store.dataDir, "test-gate-history.json"),
+    ));
+  }
+
+  /** Root checkouts with a deferred (post-publish) test run in flight. */
+  private deferredTestGates = new Set<string>();
+
+  private testGateHistoryKeyFor(
+    session: AgentSession,
+    root: string,
+    checkout?: RepoCheckout,
+  ): string {
+    return testGateHistoryKey(checkout?.url ?? session.repo?.url, checkout?.dest, root);
+  }
+
+  private async publishTestCacheKey(root: string | undefined): Promise<string | undefined> {
+    const state = await workspaceGitState(root);
+    return state?.clean && root
+      ? `${root}\u0000${state.head}\u0000${state.dependencyStamp}`
+      : undefined;
+  }
+
+  private async traceTestGate(
+    sessionId: string,
+    ok: boolean,
+    detail: string,
+    kind: "blocked" | "testGate" = "blocked",
+    args?: Record<string, unknown>,
+  ): Promise<void> {
+    await this.traces
+      .write({
+        t: now(),
+        kind,
+        level: kind === "blocked" ? "warn" : "info",
+        sessionId,
+        name: "test-gate",
+        ok,
+        detail,
+        ...(args ? { args } : {}),
+      })
+      .catch(() => undefined);
+  }
+
   private async runPublishTestGate(
     session: AgentSession,
-    checkout?: import("@locus/shared").RepoCheckout,
+    checkout?: RepoCheckout,
+    opts: { toolName?: string; onOutput?: (chunk: string) => void; deferred?: boolean } = {},
   ): Promise<WorkspaceScriptResult> {
     const root = this.sessionCheckoutHostRoot(session, checkout);
-    const state = await workspaceGitState(root);
-    const key =
-      state?.clean && root ? `${root}\u0000${state.head}\u0000${state.dependencyStamp}` : undefined;
+    const key = await this.publishTestCacheKey(root);
     if (key) {
       const cached = this.publishTestCache.get(key);
       if (cached) return { ...cached, cached: true };
     }
+    const historyKey = root ? this.testGateHistoryKeyFor(session, root, checkout) : undefined;
+    const expected = formatTestGateDuration(
+      historyKey ? await this.testGateHistory.lastDurationMs(historyKey) : undefined,
+    );
+    const label = opts.toolName ?? "publish";
+    await this.traceTestGate(
+      session.id,
+      true,
+      `Test gate started for ${label}${opts.deferred ? " (deferred)" : ""}${expected ? `; last run took ${expected}` : ""}.`,
+      "testGate",
+      {
+        phase: "start",
+        tool: label,
+        deferred: opts.deferred === true,
+        ...(root ? { cwd: root } : {}),
+      },
+    );
+    opts.onOutput?.(
+      `Running the workspace tests before ${label}${expected ? ` (last run took ${expected})` : ""}…\n`,
+    );
     const result = await runWorkspaceVerify(root, "test");
     const retryable =
       result.failureKind === "missing-dependencies" ||
@@ -6249,7 +6486,202 @@ export class SessionService {
     if (key && cacheable) {
       this.publishTestCache.set(key, enriched);
     }
+    // Only runs that exercised the suite say how long it takes: a quick
+    // "playwright: not found" must not make a slow suite look fast.
+    const measured =
+      result.ok || result.failureKind === "test-failure" || result.failureKind === "timeout";
+    if (historyKey && result.ran && result.durationMs && measured) {
+      await this.testGateHistory.record(historyKey, result.durationMs);
+    }
+    await this.traceTestGate(
+      session.id,
+      result.ok || !result.ran,
+      `Test gate finished for ${label}: ${
+        !result.ran ? "nothing to run" : result.ok ? "passed" : (result.failureKind ?? "failed")
+      }${result.durationMs ? ` in ${formatTestGateDuration(result.durationMs)}` : ""}.`,
+      "testGate",
+      {
+        phase: "finish",
+        tool: label,
+        deferred: opts.deferred === true,
+        ran: result.ran,
+        ok: result.ok,
+        ...(result.command ? { command: result.command } : {}),
+        ...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
+        ...(result.failureKind ? { failureKind: result.failureKind } : {}),
+      },
+    );
     return enriched;
+  }
+
+  /**
+   * Before a slow test gate (or when the agent asked to skip tests), ask the operator
+   * whether to run, skip, or defer the tests. No answer before the countdown ends
+   * runs the tests, so an unattended publish still gets verified.
+   */
+  private async promptTestGateChoice(
+    session: AgentSession,
+    toolName: "git_push" | "git_pr",
+    args: Record<string, unknown>,
+    checkout: RepoCheckout | undefined,
+    config: LocusConfig,
+  ): Promise<TestGateChoice | "cancelled" | "denied"> {
+    const root = this.sessionCheckoutHostRoot(session, checkout);
+    if (!root) return "run";
+    const skip = testGateSkipRequest(args);
+    const cacheKey = await this.publishTestCacheKey(root);
+    // A cached verdict for this exact commit returns instantly: nothing to skip.
+    if (cacheKey && this.publishTestCache.has(cacheKey)) return "run";
+    const lastDurationMs = await this.testGateHistory.lastDurationMs(
+      this.testGateHistoryKeyFor(session, root, checkout),
+    );
+    let configuredTimeoutMs: number | undefined;
+    let command: string | undefined;
+    try {
+      const plan = await loadWorkspaceVerifyPlan(root);
+      const tests = plan.targets.filter((target) => target.steps.test);
+      if (!tests.length) return "run";
+      command = tests[0]?.steps.test?.command;
+      const secs = Math.max(0, ...tests.map((target) => target.timeoutSec ?? 0));
+      if (secs) configuredTimeoutMs = secs * 1000;
+    } catch {
+      /* fall back to history alone */
+    }
+    const slowMs = testGateSlowMs(config.advanced.testGateSlowMs);
+    if (
+      !shouldPromptTestGate({
+        lastDurationMs,
+        configuredTimeoutMs,
+        slowMs,
+        skipRequested: skip.requested,
+      })
+    ) {
+      return "run";
+    }
+    const timeoutMs = testGatePromptMs(config.advanced.testGatePromptMs);
+    const call: ToolCall = {
+      id: randomUUID(),
+      name: TEST_GATE_PROMPT_TOOL,
+      arguments: {
+        tool: toolName,
+        ...(command ? { command } : {}),
+        ...(lastDurationMs ? { lastDurationMs } : {}),
+        ...(skip.requested ? { skipRequested: true } : {}),
+        ...(skip.reason ? { reason: skip.reason } : {}),
+        timeoutMs,
+        deadline: new Date(Date.now() + timeoutMs).toISOString(),
+      },
+      approval: "needed",
+      startedAt: now(),
+    };
+    const pending = this.awaitApproval(session.id, call.id, new AbortController().signal, {
+      timeoutMs,
+      timeoutAnswer: TEST_GATE_TIMEOUT_ANSWER,
+    });
+    await this.appendMessage(session.id, {
+      id: randomUUID(),
+      role: "assistant",
+      content: "",
+      toolCalls: [call],
+      createdAt: now(),
+    });
+    const { decision, answer } = await pending;
+    const timedOut = answer === TEST_GATE_TIMEOUT_ANSWER;
+    const choice: TestGateChoice | "cancelled" | "denied" =
+      decision === "cancelled"
+        ? "cancelled"
+        : decision === "denied"
+          ? "denied"
+          : (parseTestGateAnswer(answer) ?? "run");
+    const summary = timedOut
+      ? `No answer in ${formatTestGateDuration(timeoutMs)}: running the tests.`
+      : choice === "cancelled"
+        ? "Cancelled."
+        : choice === "denied"
+          ? `Operator declined ${toolName}.`
+          : `Operator chose: ${TEST_GATE_CHOICE_LABELS[choice]}.`;
+    const updated = await this.store.mutateSession(session.id, (current) => {
+      const row = current.messages.flatMap((m) => m.toolCalls ?? []).find((t) => t.id === call.id);
+      if (!row) return;
+      row.finishedAt = now();
+      row.result = summary;
+      row.approval = choice === "denied" || choice === "cancelled" ? "denied" : "approved";
+    });
+    if (updated) this.hub.broadcast({ type: "session.updated", session: updated });
+    if (timedOut) {
+      await this.traceTestGate(
+        session.id,
+        true,
+        `Test gate prompt for ${toolName}: ${summary}`,
+        "testGate",
+        {
+          phase: "prompt",
+          tool: toolName,
+          choice,
+          timedOut: true,
+        },
+      );
+    }
+    return choice;
+  }
+
+  /** Run the test gate after a deferred publish and post the verdict to the chat. */
+  private startDeferredTestGate(
+    session: AgentSession,
+    toolName: "git_push" | "git_pr",
+    checkout?: RepoCheckout,
+  ): boolean {
+    const root = this.sessionCheckoutHostRoot(session, checkout) ?? session.id;
+    if (this.deferredTestGates.has(root)) return false;
+    this.deferredTestGates.add(root);
+    void (async () => {
+      let content: string;
+      let failed = false;
+      try {
+        const tests = await this.runPublishTestGate(session, checkout, {
+          toolName,
+          deferred: true,
+        });
+        const took = formatTestGateDuration(tests.durationMs);
+        const cmd = tests.command ? ` (\`${tests.command}\`)` : "";
+        if (!tests.ran) {
+          content = `Deferred tests after ${toolName}: there was nothing to run.`;
+        } else if (tests.ok) {
+          content = `Deferred tests after ${toolName} passed${took ? ` in ${took}` : ""}${cmd}.`;
+        } else if (tests.failureKind === "missing-toolchain") {
+          content = `Deferred tests after ${toolName} could not run: \`${tests.command ?? "verify"}\` is not available on the host.`;
+        } else {
+          failed = true;
+          const detail = formatVerifyGateFailure(toolName, tests)
+            .replace(/^Harness blocked [^\n]*\n/, "")
+            .slice(0, 6000);
+          content = `Deferred tests after ${toolName} failed${took ? ` after ${took}` : ""}${cmd}. The branch was already published.\n\n${detail}`;
+        }
+      } catch (err) {
+        failed = true;
+        content = `Deferred tests after ${toolName} could not run: ${err instanceof Error ? err.message : String(err)}`;
+      } finally {
+        this.deferredTestGates.delete(root);
+      }
+      try {
+        await this.appendMessage(session.id, {
+          id: randomUUID(),
+          role: "system",
+          content,
+          createdAt: now(),
+        });
+        this.hub.broadcast({ type: "session.updated", session: await this.require(session.id) });
+        if (failed) {
+          await this.flagNeedsHuman(
+            session.id,
+            `Deferred tests failed after ${toolName}; the branch is already published.`,
+          );
+        }
+      } catch {
+        /* session may be gone */
+      }
+    })();
+    return true;
   }
 
   /** Repo verify commands (config or detected presets) that count as a verification run. */
@@ -6503,6 +6935,9 @@ export class SessionService {
       detail: verdict.message,
       args: { budget: verdict.scope, budgetId: verdict.id, reason: verdict.reason },
     });
+    if (session.remoteGuestId) {
+      await this.destroyWorkerGuest(session).catch(() => undefined);
+    }
     return true;
   }
 
@@ -7207,11 +7642,17 @@ export class SessionService {
       url: typeof req.args.url === "string" ? req.args.url : undefined,
       dest: typeof req.args.dest === "string" ? req.args.dest : undefined,
     });
+    // A host folder that already holds a clone has no attached repo. Resolve the forge from
+    // that clone's origin (as git_pr does), so fetch/push get the right account and username
+    // instead of the first saved token.
+    const origin =
+      !checkout && !session.repo && (req.name === "git_push" || req.name === "git_fetch")
+        ? await this.originCheckout(session)
+        : undefined;
+    const target = checkout ?? origin;
     const config = await this.store.loadConfig();
-    const forge = await this.sessionForgeFresh(config, session, checkout);
-    const next = { ...req.args };
-    if (forge?.token && !next.token) next.token = forge.token;
-    if (forge?.kind && !next.forge) next.forge = forge.kind;
+    const forge = await this.sessionForgeFresh(config, session, target);
+    const next = fillGitForgeArgs(req.name, req.args, target, forge);
     if (isGitPathToolName(req.name) && !next.path && checkout?.dest) next.path = checkout.dest;
     if (
       checkout?.dest &&
@@ -7220,8 +7661,6 @@ export class SessionService {
     ) {
       next.path = checkout.dest;
     }
-    if (req.name === "git_push" && checkout?.url && !next.url) next.url = checkout.url;
-    if (req.name === "git_fetch" && checkout?.url && !next.url) next.url = checkout.url;
     if (
       (req.name === "git_clone" || req.name === "git_fetch") &&
       session.pull?.number &&
@@ -7233,11 +7672,7 @@ export class SessionService {
     }
     if (req.name === "git_clone" && checkout?.dest && !next.dest) {
       const url = typeof next.url === "string" ? next.url : "";
-      if (
-        url &&
-        url.replace(/\.git$/i, "").toLowerCase() ===
-          checkout.url.replace(/\.git$/i, "").toLowerCase()
-      ) {
+      if (url && normalizeRepoUrl(url) === normalizeRepoUrl(checkout.url)) {
         next.dest = checkout.dest;
       }
     }
@@ -7279,6 +7714,7 @@ export class SessionService {
     result: ToolResult,
     opts?: { ignoreAllowlist?: boolean },
   ): Promise<ToolResult> {
+    result = annotateGitToolResult(req.name, result);
     const linted = await this.appendLintFeedback(session, req, result, opts);
     const hooked = opts?.ignoreAllowlist
       ? linted
@@ -7460,10 +7896,12 @@ export class SessionService {
       branchLock: session.branchLock === true,
       repoRef: session.repo?.ref,
       gitBranch: session.gitBranch,
+      bypassGates: effectiveBypassGates(session.bypassGates, config.managedPolicy),
     });
     const blocked = await this.applyToolGate(sessionId, name, gate);
     if (blocked) return blocked;
     let approvalCallId: string | undefined;
+    let testGate: TestGateChoice | undefined;
     const finish = async (result: ToolResult): Promise<ToolResult> => {
       result = { ...result, output: redactText(result.output, configSecretValues(config)) };
       if (approvalCallId) {
@@ -7503,9 +7941,10 @@ export class SessionService {
         toolCalls: [call],
         createdAt: now(),
       });
-      const { decision } = await pending;
+      const { decision, answer } = await pending;
       if (decision !== "approved")
         return finish({ ok: false, output: `Git operation ${decision}.` });
+      if (isPublishTool(name)) testGate = parseTestGateAnswer(answer) ?? "run";
     }
     if (requestSignal?.aborted) {
       return finish({ ok: false, output: "The Git tool caller disconnected." });
@@ -7514,7 +7953,11 @@ export class SessionService {
       return finish({ ok: false, output: "CLI turn has ended." });
     }
     try {
-      return await finish(await this.executeTool(sessionId, { name, args }));
+      return await finish(
+        testGate
+          ? await this.executeTool(sessionId, { name, args }, { testGate })
+          : await this.executeTool(sessionId, { name, args }),
+      );
     } catch (err) {
       return finish({ ok: false, output: err instanceof Error ? err.message : "Git tool failed" });
     }
@@ -7676,7 +8119,8 @@ export class SessionService {
     const tools = input.tools.filter((name) => !isWorkflowToolName(name));
     let text = "";
     const toolCalls: WorkflowCompletion["toolCalls"] = [];
-    for await (const event of runChatTurn((req) => this.chatEngine(req), {
+    const complete = this.budgets.trackCompletion((req) => this.chatEngine(req));
+    for await (const event of runChatTurn(complete, {
       provider,
       model,
       system: input.system,
@@ -7731,6 +8175,8 @@ export class SessionService {
       mcp: this.mcp,
       integrations: {
         call: (name, args, rows) => this.integrations.call(name, args, rows),
+        readWorkspaceUpload: (id, path, maxBytes) =>
+          this.workspace.readWorkspaceUpload(id, path, maxBytes),
         noteSlackPost: async (id, ts) => {
           await this.store.mutateSession(id, (current) => {
             if (!current.slack) return;
@@ -7738,6 +8184,43 @@ export class SessionService {
           });
         },
       },
+    };
+  }
+
+  private guestCatalogPorts(): GuestCatalogExecutePorts {
+    return {
+      tryIndexedGrep: (session, req, config, fenceHostile) =>
+        this.tryIndexedGrep(session, req, config, fenceHostile),
+      forge: {
+        forge: this.forge,
+        attachPull: (id, pull) => this.attachPull(id, pull),
+        requireForge: (row, args) => this.requireForge(row, args),
+        resolveGitHeadBranch: (row, args) => this.resolveGitHeadBranch(row, args),
+        loadLoadPathNotes: (repoId, number) => this.store.loadLoadPathNotes(repoId, number),
+      },
+      isWorkerSession: (session) => this.isWorkerSession(session),
+      executeHostTool: (session, req, opts) => this.executeHostTool(session, req, opts),
+      getMachine: (vmId) => this.getMachine(vmId),
+      guests: this.guests,
+      aborts: this.aborts,
+      injectForgeGitArgs: (session, req) => this.injectForgeGitArgs(session, req),
+      broadcastToolOverlay: (sessionId, req) => this.broadcastToolOverlay(sessionId, req),
+      snapshotFileUndo: (session, guest, req, opts) =>
+        this.snapshotFileUndo(session, guest, req, opts),
+      settleExecutedTool: (session, req, result, opts) =>
+        this.settleExecutedTool(session, req, result, opts),
+      persistRecording: (sessionId, vm, result) => this.persistRecording(sessionId, vm, result),
+      persistArtifact: (sessionId, result) => this.persistArtifact(sessionId, result),
+      noteListeningPorts: (vmId, ports) => this.docker.noteListeningPorts?.(vmId, ports),
+      mutatePreview: async (sessionId, port) => {
+        await this.store.mutateSession(sessionId, (current) => {
+          current.preview = { port };
+        });
+        const updated = await this.get(sessionId);
+        if (updated) this.hub.broadcast({ type: "session.updated", session: updated });
+      },
+      openPreview: (session, vm, args) => this.openPreview(session, vm, args),
+      publishToolResult: (sessionId, req, result) => this.publishToolResult(sessionId, req, result),
     };
   }
 
@@ -7749,6 +8232,12 @@ export class SessionService {
       fence?: boolean;
       onOutput?: (chunk: string) => void;
       toolCallId?: string;
+      /**
+       * git_push / git_pr: the operator's test-gate choice from the approval card.
+       * Set (to `run` for a plain Approve) whenever an operator just approved the
+       * publish, so the gate does not ask again; unset when no card was shown.
+       */
+      testGate?: TestGateChoice;
     },
   ): Promise<ToolResult> {
     const canonical = canonicalToolCall(req.name, req.args ?? {});
@@ -7852,6 +8341,7 @@ export class SessionService {
       fence?: boolean;
       onOutput?: (chunk: string) => void;
       toolCallId?: string;
+      testGate?: TestGateChoice;
     },
   ): Promise<ToolResult> {
     const mapped = canonicalToolCall(req.name, req.args ?? {});
@@ -7876,6 +8366,7 @@ export class SessionService {
     const runtime = sessionRuntime(session);
     const config = await this.store.loadConfig();
     const policy = this.policyFor(session, config);
+    const bypassGates = effectiveBypassGates(session.bypassGates, config.managedPolicy);
     if (req.name === "git_push" && typeof req.args.branch !== "string") {
       const head = await this.resolveGitHeadBranch(session, req.args);
       if (head) req = { ...req, args: { ...req.args, branch: head } };
@@ -7889,6 +8380,7 @@ export class SessionService {
       branchLock: session.branchLock === true,
       repoRef: session.repo?.ref,
       gitBranch: session.gitBranch,
+      bypassGates,
     };
     const policyGate = await this.applyToolGate(
       sessionId,
@@ -7899,7 +8391,11 @@ export class SessionService {
     if (req.name === "git_push" || req.name === "git_pr") {
       await this.prepareHostWorkspace(session);
     }
-    if (!session.offline && !opts?.ignoreAllowlist) {
+    if (
+      !session.offline &&
+      !opts?.ignoreAllowlist &&
+      !harnessGateBypassed(bypassGates, "pre-tool-use-hooks")
+    ) {
       const blocked = await this.runPreToolUseHooks(session, req.name);
       if (blocked) return blocked;
     }
@@ -7955,45 +8451,78 @@ export class SessionService {
     if (req.name === "playwright") {
       return this.runPlaywrightTool(session, req.args);
     }
-    if (req.name === "git_push" || req.name === "git_pr") {
+    let deferTests: { checkout?: RepoCheckout } | undefined;
+    let skippedTests = false;
+    if (isPublishTool(req.name) && harnessGateBypassed(bypassGates, "test-gate")) {
+      await this.traceTestGate(
+        session.id,
+        true,
+        `Test gate bypassed for ${req.name}: this session opted out (bypassGates).`,
+      );
+    } else if (isPublishTool(req.name)) {
       const checkout = matchWorkspaceCheckout(session, {
         path: typeof req.args.path === "string" ? req.args.path : undefined,
         url: typeof req.args.url === "string" ? req.args.url : undefined,
       });
-      const tests = await this.runPublishTestGate(session, checkout);
-      if (isBlockingVerifyFailure(tests)) {
+      const choice =
+        opts?.testGate ??
+        (await this.promptTestGateChoice(session, req.name, req.args, checkout, config));
+      if (choice === "cancelled" || choice === "denied") {
         return {
           ok: false,
-          status: "blocked",
-          category: "test-gate",
-          retryable: tests.retryable,
-          details: {
-            script: "test",
-            failureKind: tests.failureKind ?? "script-failure",
-            failedTests: tests.failedTests ?? [],
-            ...(tests.cwd ? { cwd: tests.cwd } : {}),
-            ...(tests.command ? { command: tests.command } : {}),
-            ...(tests.exitCode !== undefined ? { exitCode: tests.exitCode } : {}),
-            ...(tests.durationMs !== undefined ? { durationMs: tests.durationMs } : {}),
-            ...(tests.cached ? { cached: true } : {}),
-            ...(tests.report ? { report: tests.report } : {}),
-          },
-          output: formatVerifyGateFailure(req.name, tests),
+          output:
+            choice === "denied"
+              ? `Operator declined ${req.name} at the test-gate prompt.`
+              : `${req.name} cancelled while waiting for the test-gate choice.`,
         };
       }
-      if (tests.failureKind === "missing-toolchain") {
-        // The host lacks the repo's toolchain: report it, but do not block the push.
-        await this.traces
-          .write({
-            t: now(),
-            kind: "blocked",
-            level: "warn",
-            sessionId: session.id,
-            name: "test-gate",
-            ok: true,
-            detail: `Test gate skipped: \`${tests.command ?? "verify"}\` is not available on the host.`,
-          })
-          .catch(() => undefined);
+      if (choice === "skip") {
+        skippedTests = true;
+        await this.traceTestGate(
+          session.id,
+          true,
+          `Test gate skipped for ${req.name}: operator chose to skip tests.`,
+        );
+      } else if (choice === "defer") {
+        deferTests = { checkout };
+        await this.traceTestGate(
+          session.id,
+          true,
+          `Test gate deferred for ${req.name}: operator chose to publish now and test after.`,
+        );
+      } else {
+        const tests = await this.runPublishTestGate(session, checkout, {
+          toolName: req.name,
+          onOutput: opts?.onOutput,
+        });
+        if (isBlockingVerifyFailure(tests)) {
+          return {
+            ok: false,
+            status: "blocked",
+            category: "test-gate",
+            retryable: tests.retryable,
+            details: {
+              script: "test",
+              failureKind: tests.failureKind ?? "script-failure",
+              failedTests: tests.failedTests ?? [],
+              ...(tests.cwd ? { cwd: tests.cwd } : {}),
+              ...(tests.command ? { command: tests.command } : {}),
+              ...(tests.exitCode !== undefined ? { exitCode: tests.exitCode } : {}),
+              ...(tests.durationMs !== undefined ? { durationMs: tests.durationMs } : {}),
+              ...(tests.cached ? { cached: true } : {}),
+              ...(tests.report ? { report: tests.report } : {}),
+            },
+            output: formatVerifyGateFailure(req.name, tests),
+          };
+        }
+        if (tests.failureKind === "missing-toolchain") {
+          // The host lacks the repo's toolchain: report it, but do not block the push.
+          await this.traceTestGate(
+            session.id,
+            true,
+            `Test gate skipped: \`${tests.command ?? "verify"}\` is not available on the host.`,
+          );
+        }
       }
     }
     if (
@@ -8012,97 +8541,34 @@ export class SessionService {
       fenceHostile,
       config,
     );
-    if (late) return late;
-    const catalog = new Set(toolsForRuntime(session.os, runtime).map((t) => t.name));
-    if (!catalog.has(req.name)) {
-      throw new Error(`Tool ${req.name} is not available for this agent`);
+    const result =
+      late ??
+      (await executeGuestCatalogTool(
+        this.guestCatalogPorts(),
+        session,
+        req,
+        opts,
+        fenceHostile,
+        config,
+      ));
+    if (skippedTests && result.ok) {
+      return {
+        ...result,
+        output: `${result.output}\n\nTest gate skipped: the operator chose to publish without running tests.`,
+      };
     }
-    if (req.name === "grep") {
-      const indexed = await this.tryIndexedGrep(session, req, config, fenceHostile);
-      if (indexed) return indexed;
+    if (deferTests && result.ok && isPublishTool(req.name)) {
+      const started = this.startDeferredTestGate(session, req.name, deferTests.checkout);
+      return {
+        ...result,
+        output: `${result.output}\n\n${
+          started
+            ? "Tests deferred: the workspace tests are running in the background; the result will be posted to this chat."
+            : "Tests deferred: a deferred test run for this checkout is already in progress; its result will be posted to this chat."
+        }`,
+      };
     }
-    const forge = await executeSessionForgeTool(
-      {
-        forge: this.forge,
-        attachPull: (id, pull) => this.attachPull(id, pull),
-        requireForge: (row, args) => this.requireForge(row, args),
-        resolveGitHeadBranch: (row, args) => this.resolveGitHeadBranch(row, args),
-        loadLoadPathNotes: (repoId, number) => this.store.loadLoadPathNotes(repoId, number),
-      },
-      session,
-      req,
-      fenceHostile,
-    );
-    if (forge) return forge;
-    if (runtime === "host" && !this.isWorkerSession(session)) {
-      return this.executeHostTool(session, req, opts);
-    }
-    const vm = session.vmId ? this.getMachine(session.vmId) : undefined;
-    if (!vm) {
-      throw new Error(
-        runtime === "docker"
-          ? "Start the container before using guest tools"
-          : "Start the VM before using guest tools",
-      );
-    }
-    if (toolNeedsGuest(req.name) && !isGuestReady(vm.status)) {
-      throw new Error(
-        `The guest isn't ready yet (${vm.status}). Wait until it finishes starting, then try again.`,
-      );
-    }
-    if (req.name === "preview") {
-      return this.openPreview(session, vm, req.args);
-    }
-    req = await this.injectForgeGitArgs(session, req);
-    this.broadcastToolOverlay(sessionId, req);
-    const guest = this.guests.forVm(vm);
-    await this.snapshotFileUndo(session, guest, req, opts);
-    let result = await guest.execute(req, this.aborts.get(sessionId)?.signal, opts?.onOutput);
-    result = await this.settleExecutedTool(session, req, result, opts);
-    if (req.name === "record_screen") {
-      result = await this.persistRecording(sessionId, vm, result);
-    }
-    if (
-      req.name === "browser_pdf" ||
-      req.name === "browser_trace" ||
-      req.name === "browser_download"
-    ) {
-      result = await this.persistArtifact(sessionId, result);
-    }
-    if (result.ok && (req.name === "exec" || req.name === "start_process")) {
-      const command = execArgCommands(req.args).join("\n");
-      const guessed = guessListenPorts(command);
-      if (guessed.length) {
-        this.docker.noteListeningPorts?.(vm.id, guessed);
-        if (!session.preview) {
-          const port = pickPreviewPort(guessed) ?? guessed[0]!;
-          await this.store.mutateSession(sessionId, (current) => {
-            current.preview = { port };
-          });
-          const updated = await this.get(sessionId);
-          if (updated) this.hub.broadcast({ type: "session.updated", session: updated });
-        }
-      }
-    }
-    const gui = new Set([
-      "screenshot",
-      "mouse_move",
-      "mouse_click",
-      "mouse_drag",
-      "mouse_scroll",
-      "key",
-      "type_text",
-      "window_focus",
-    ]);
-    if (gui.has(req.name) && req.name !== "screenshot" && sessionVision(session) !== "off") {
-      try {
-        const shot = await guest.execute({ name: "screenshot", args: {} });
-        if (shot.screenshotBase64) result.screenshotBase64 = shot.screenshotBase64;
-      } catch {
-        /* screenshot is optional */
-      }
-    }
-    return await this.publishToolResult(sessionId, req, result);
+    return result;
   }
 
   private async persistRecording(
@@ -8305,6 +8771,7 @@ export class SessionService {
       outputTokens: number;
       cachedInputTokens?: number;
       cacheWriteTokens?: number;
+      estimated?: boolean;
       window?: number;
       contextTokens?: number;
     },
@@ -8315,6 +8782,7 @@ export class SessionService {
       outputTokens: ev.outputTokens,
       ...(ev.cachedInputTokens ? { cachedInputTokens: ev.cachedInputTokens } : {}),
       ...(ev.cacheWriteTokens ? { cacheWriteTokens: ev.cacheWriteTokens } : {}),
+      ...(ev.estimated ? { estimated: true } : {}),
     };
     const stats = this.promptStats.get(sessionId);
     const session = await this.store.mutateSession(sessionId, (current) => {
@@ -8417,15 +8885,12 @@ export class SessionService {
   private async applyUsage(
     sessionId: string,
     messageId: string | undefined,
-    ev: { inputTokens: number; outputTokens: number; cachedInputTokens?: number },
+    ev: TokenUsage,
     /** Price the spend at this provider/model instead of the session's (a routed child). */
     pricedAs?: { providerId: string; model: string },
   ): Promise<void> {
-    const delta = {
-      inputTokens: ev.inputTokens,
-      outputTokens: ev.outputTokens,
-      ...(ev.cachedInputTokens ? { cachedInputTokens: ev.cachedInputTokens } : {}),
-    };
+    const { inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens, estimated } = ev;
+    const delta = { inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens, estimated };
     const stats = messageId ? this.promptStats.get(sessionId) : undefined;
     const session = await this.store.mutateSession(sessionId, (current) => {
       if (messageId) {
@@ -8960,8 +9425,8 @@ export class SessionService {
 
   /**
    * The workspace clone's `origin` as a checkout, for sessions with no attached repo.
-   * Read-only: it is not saved on the session, because an attached repo makes git_push
-   * rewrite origin to a token HTTPS URL, and an SSH origin the operator chose must stay.
+   * Read-only: it is not saved on the session. git_fetch / git_push use its HTTPS form for
+   * the call only, so an SSH origin the operator chose stays as it is.
    */
   private async originCheckout(
     session: AgentSession,
@@ -9154,6 +9619,7 @@ export class SessionService {
         | "maxMs"
         | "autonomy"
         | "defaultSubagent"
+        | "bypassGates"
         | "subscriptions"
         | "needsHuman"
         | "viewMode"
@@ -9377,6 +9843,12 @@ export class SessionService {
         }
       }
       next.autonomy = patch.autonomy;
+    }
+    if (patch.bypassGates !== undefined) {
+      const gates = parseHarnessGates(patch.bypassGates);
+      const denied = policyRejectsGateBypass(gates, (await loadConfig()).managedPolicy);
+      if (denied) throw new Error(denied);
+      next.bypassGates = gates;
     }
     if (patch.defaultSubagent !== undefined) {
       if (!isSubagentKind(patch.defaultSubagent)) throw new Error("Unknown sub-agent kind");

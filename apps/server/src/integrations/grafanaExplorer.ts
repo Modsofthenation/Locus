@@ -111,7 +111,7 @@ export class GrafanaExplorer {
     private readonly sessions: SessionService,
     private readonly fetchFn: typeof fetch = fetch,
     private readonly brain?: BrainService,
-    private readonly complete: GrafanaComplete = completeChat,
+    private readonly complete: GrafanaComplete = sessions.budgets.trackCompletion(completeChat),
   ) {}
 
   async status(): Promise<GrafanaExplorerStatus> {

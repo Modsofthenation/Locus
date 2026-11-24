@@ -126,6 +126,7 @@ const VALUE_FLAGS = new Set([
   "bind-port",
   "log-level",
   "max-usd",
+  "bypass-gate",
   "max-ms",
   "docker-image",
   "template",
@@ -179,7 +180,15 @@ const VALUE_FLAGS = new Set([
   "home",
 ]);
 
-const MULTI_VALUE_FLAGS = new Set(["arg", "repo", "model", "case", "allow", "header"]);
+const MULTI_VALUE_FLAGS = new Set([
+  "arg",
+  "repo",
+  "bypass-gate",
+  "model",
+  "case",
+  "allow",
+  "header",
+]);
 
 function appendFlag(prev: FlagValue | undefined, name: string, next: string): string {
   if (MULTI_VALUE_FLAGS.has(name) && typeof prev === "string" && prev.length) {

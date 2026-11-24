@@ -5,6 +5,25 @@ import { gateToolRequest } from "./toolGates.js";
 const ctx = { policy: DEFAULT_APPROVAL_POLICY };
 
 describe("gateToolRequest", () => {
+  it("lets a session bypass force-push and rm -rf refusals but keeps protected branches and secrets", () => {
+    const bypass = { ...ctx, bypassGates: ["force-push", "recursive-delete"] };
+    expect(gateToolRequest("git_push", { path: "/workspace", force: true }, ctx).kind).toBe(
+      "block",
+    );
+    expect(gateToolRequest("git_push", { path: "/workspace", force: true }, bypass)).toEqual({
+      kind: "allow",
+    });
+    expect(gateToolRequest("exec", { command: "git push --force origin feature" }, bypass)).toEqual(
+      { kind: "allow" },
+    );
+    expect(gateToolRequest("exec", { command: "rm -rf /workspace/build" }, ctx).kind).toBe("block");
+    expect(gateToolRequest("exec", { command: "rm -rf /workspace/build" }, bypass)).toEqual({
+      kind: "allow",
+    });
+    expect(gateToolRequest("exec", { command: "git push origin main" }, bypass).kind).toBe("block");
+    expect(gateToolRequest("exec", { command: "printenv" }, bypass).kind).toBe("block");
+  });
+
   it("fails schema, blocks force-push / exec / protected head, and refuses credential reads", () => {
     expect(gateToolRequest("file_write", { path: "/workspace/a.ts" }, ctx)).toEqual({
       kind: "fail",

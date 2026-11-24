@@ -8,7 +8,7 @@ import {
 } from "@locus/shared";
 import {
   createGuestRuntime,
-  HostGuestRuntime,
+  createHostGuestRuntime,
   type ChromiumDriver,
   type GuestRuntime,
 } from "@locus/guest-agent";
@@ -65,9 +65,10 @@ export class GuestHub {
     const key = `host:${sessionId}`;
     const existing = this.runtimes.get(key);
     if (existing) return existing;
-    const runtime = new HostGuestRuntime(os, hostRoot, undefined, chromeProfileDir, () =>
-      this.liveBrowser?.(sessionId),
-    );
+    const runtime = createHostGuestRuntime(os, hostRoot, {
+      hostChromeProfileDir: chromeProfileDir,
+      liveBrowser: () => this.liveBrowser?.(sessionId),
+    });
     this.runtimes.set(key, runtime);
     return runtime;
   }

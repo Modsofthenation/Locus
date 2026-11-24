@@ -226,6 +226,71 @@ describe("Sidebar", () => {
     expect(host.querySelector("[aria-label='Session filter']")).toBeTruthy();
   });
 
+  it("labels each session by where its agent runs", () => {
+    const provider = {
+      id: "p",
+      name: "OpenAI",
+      kind: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      models: ["gpt-4.1"],
+      defaultModel: "gpt-4.1",
+      enabled: true,
+      extraHeaders: {},
+    } as const;
+    render({
+      ...initialState,
+      config: {
+        providers: [
+          { ...provider, models: [...provider.models] },
+          { ...provider, id: "cursor", kind: "cursor", models: [] },
+        ],
+        workers: [
+          { id: "cloud", name: "Cloud VM", url: "https://worker.example.com", kind: "cloud" },
+          { id: "lan", name: "LAN worker", url: "https://192.168.1.2" },
+        ],
+      } as NonNullable<UiState["config"]>,
+      sessions: [
+        session,
+        {
+          ...session,
+          id: "cloud",
+          title: "Cloud worker chat",
+          placement: "worker",
+          backendId: "cloud",
+        },
+        { ...session, id: "lan", title: "LAN worker chat", placement: "worker", backendId: "lan" },
+        {
+          ...session,
+          id: "missing",
+          title: "Removed worker chat",
+          placement: "worker",
+          backendId: "missing",
+        },
+        { ...session, id: "cursor", title: "New Cursor chat", providerId: "cursor" },
+        {
+          ...session,
+          id: "saved",
+          title: "Saved Cursor chat",
+          providerId: "old",
+          cursorCloud: { agentId: "bc-1" },
+        },
+      ],
+    });
+
+    for (const [title, label] of [
+      [session.title, "Local"],
+      ["Cloud worker chat", "Cloud"],
+      ["LAN worker chat", "Remote"],
+      ["Removed worker chat", "Remote"],
+      ["New Cursor chat", "Cloud"],
+      ["Saved Cursor chat", "Cloud"],
+    ]) {
+      expect(
+        host.querySelector(`.session-item[title='${title}'] .session-backend-badge`)?.textContent,
+      ).toBe(label);
+    }
+  });
+
   it("lists every unpinned surface in the More menu", () => {
     render({ ...initialState, sessions: [session] });
     act(() => {
@@ -1069,6 +1134,7 @@ describe("Sidebar", () => {
     expect(host.querySelector("[data-testid='rail-peek']")?.textContent).toContain(
       "Build the agent",
     );
+    expect(host.querySelector(".rail-peek-item .session-backend-badge")?.textContent).toBe("Local");
   });
 
   it("creates a new item from the collapsed rail peek", () => {

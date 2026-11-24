@@ -47,7 +47,7 @@ export function WorkersModal({ session, onClose }: { session: AgentSession; onCl
   }
 
   return (
-    <Modal titleId="workers-title" onClose={onClose}>
+    <Modal titleId="workers-title" onClose={onClose} portal>
       <h2 id="workers-title">Run in parallel</h2>
       <p className="modal-lead">
         {host

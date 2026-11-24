@@ -1,4 +1,5 @@
 import { useRef, type CSSProperties, type FormEventHandler, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useDialogFocus } from "@/lib/useDialogFocus";
 
 /** Shared dialog chrome: backdrop, focus trap, Escape, and optional click-outside close. */
@@ -20,6 +21,12 @@ export function Modal(props: {
   onChange?: FormEventHandler<HTMLDivElement>;
   /** Ignore backdrop clicks for this many ms after mount (opening click). */
   closeGuardMs?: number;
+  /**
+   * Render into document.body. Use when the opener sits inside a positioned, z-indexed
+   * parent (e.g. the topbar), whose stacking context would otherwise trap the dialog
+   * below sibling panels.
+   */
+  portal?: boolean;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const openedAt = useRef(Date.now());
@@ -32,7 +39,7 @@ export function Modal(props: {
     if (props.closeGuardMs && Date.now() - openedAt.current < props.closeGuardMs) return;
     props.onClose();
   }
-  return (
+  const backdrop = (
     <div
       className={`modal-backdrop${props.backdropClassName ? ` ${props.backdropClassName}` : ""}`}
       onClick={onBackdrop}
@@ -57,4 +64,5 @@ export function Modal(props: {
       </div>
     </div>
   );
+  return props.portal ? createPortal(backdrop, document.body) : backdrop;
 }

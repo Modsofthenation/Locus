@@ -37,6 +37,7 @@ import {
   parseWorkspaceListDepth,
   readWorkspaceFile,
   readWorkspaceBytes,
+  readWorkspaceUploadBytes,
   writeWorkspaceFile,
   writeWorkspaceBytes,
   mkdirWorkspace,
@@ -242,6 +243,23 @@ export class SessionWorkspace {
       },
       readHost: () => readWorkspaceBytes(root, rel),
     });
+  }
+
+  /**
+   * Bytes of a workspace file for a host-side upload (slack_upload path=). Host and local
+   * Docker read the bind-mounted folder; worker and VM guests are not served yet.
+   */
+  async readWorkspaceUpload(sessionId: string, rel: string, maxBytes: number) {
+    const session = await this.ports.require(sessionId);
+    const kind = workspaceAccessKind(sessionRuntime(session), this.ports.isWorker(session));
+    if (kind !== "host" && kind !== "docker") {
+      throw new Error(
+        "path= uploads read the workspace on this machine (Host or local Docker agents). On a worker or VM agent, pass content or bytes_base64 instead.",
+      );
+    }
+    const root =
+      kind === "host" ? this.ports.hostRoot(session) : this.ports.dockerWorkspaceRoot(session);
+    return readWorkspaceUploadBytes(root, rel, maxBytes);
   }
 
   async writeWorkspace(sessionId: string, rel: string, content: string) {

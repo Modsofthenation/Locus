@@ -15,6 +15,8 @@ import {
   slackRepoNotesKey,
   slackResolvedThreadPicker,
   slackReviewPartNote,
+  slackReviewCommentCap,
+  slackReviewPartSummary,
   SLACK_REVIEW_CI_LOGS_MAX,
   type SlackFindingAnchor,
   type SlackRepoNote,
@@ -51,6 +53,7 @@ import {
   type SlackReviewer,
   type SlackReviewerFeedback,
   type SlackReviewerStatusTemplates,
+  type CompactDiff,
   type SlackReviewOutcome,
   type SlackReviewActive,
   type SlackReviewTrace,
@@ -94,7 +97,7 @@ import {
   type SlackReviewerPollStatus,
   type SlackReviewerPolling,
 } from "@locus/shared";
-import { completeOneShot } from "@locus/providers";
+import { completeOneShot, oneShotCliPrompt } from "@locus/providers";
 import type { JsonStore } from "../core/store.js";
 import { ReviewQuotaReader } from "./reviewQuota.js";
 import { ForgeClient } from "../git/forge.js";
@@ -111,6 +114,7 @@ import {
   type ReviewCheckout,
 } from "./reviewCheckout.js";
 import { ReviewSandboxError, reviewCliSpawner } from "./reviewSandbox.js";
+import { cliSandboxEnv } from "@locus/shared/cliSandbox";
 import type {
   SlackReviewerForge,
   SlackReviewerComplete,
@@ -277,8 +281,12 @@ export class SlackReviewerService {
     // API providers get one completion; CLI agents run once, read-only, in a scratch folder.
     this.complete =
       deps.complete ??
-      ((req, opts) =>
-        completeOneShot(req, {
+      async function* (req, opts) {
+        // Settings → Advanced → CLI agent sandbox, read per review so a change applies at once.
+        const env = deps.cliSandbox?.env
+          ? undefined
+          : cliSandboxEnv((await store.loadConfig()).advanced.cliSandbox);
+        yield* completeOneShot(req, {
           fetchFn: deps.fetch ?? fetch,
           workspace: opts?.workspace,
           // A CLI reads untrusted PR text: keep the server's credentials out of its environment.
@@ -289,11 +297,13 @@ export class SlackReviewerService {
               provider: req.provider,
               workspace,
               locusHome: store.dataDir,
+              ...(env ? { env } : {}),
               ...deps.cliSandbox,
             }),
           ...(opts?.onUsage ? { onUsage: opts.onUsage } : {}),
           ...(opts?.onTrace ? { onTrace: opts.onTrace } : {}),
-        }));
+        });
+      };
     this.ctx = {
       store,
       deps,
@@ -363,6 +373,8 @@ export class SlackReviewerService {
         ...(row.requestTs ? { requestTs: row.requestTs } : {}),
         ...(row.rereview ? { rereview: true } : {}),
         ...(row.retry ? { retry: true } : {}),
+        ...(row.fullRereview ? { fullRereview: true } : {}),
+        ...(row.force ? { force: true } : {}),
       });
       replayed++;
     }
@@ -954,13 +966,13 @@ export class SlackReviewerService {
   /**
    * Review one PR now (Settings "Try it", HTTP route). Replies go to `threadTs` when given. A dry
    * run posts nothing to the PR or Slack, records nothing, and reviews even an already-reviewed
-   * commit; the run carries the findings.
+   * commit; the run carries the findings. `fullRereview` reviews the full PR diff in a live run.
    */
   async reviewNow(
     reviewerId: string,
     url: string,
     threadTs?: string,
-    opts: { dryRun?: boolean } = {},
+    opts: { dryRun?: boolean; fullRereview?: boolean } = {},
   ): Promise<SlackReviewRun> {
     const config = await this.store.loadConfig();
     const reviewer = (config.slackReviewers ?? []).find((row) => row.id === reviewerId);
@@ -973,7 +985,14 @@ export class SlackReviewerService {
     await this.enqueue(
       opts.dryRun
         ? { reviewer, pr, url, channelId: reviewer.channelId, dryRun: true }
-        : { reviewer, pr, url, channelId: reviewer.channelId, messageTs: threadTs },
+        : {
+            reviewer,
+            pr,
+            url,
+            channelId: reviewer.channelId,
+            messageTs: threadTs,
+            fullRereview: opts.fullRereview,
+          },
       (result) => {
         run = result;
       },
@@ -1125,6 +1144,8 @@ export class SlackReviewerService {
         ...(job.requestTs ? { requestTs: job.requestTs } : {}),
         ...(job.rereview ? { rereview: true } : {}),
         ...(job.retry ? { retry: true } : {}),
+        ...(job.fullRereview ? { fullRereview: true } : {}),
+        ...(job.force ? { force: true } : {}),
         at: new Date(this.now()).toISOString(),
       });
     }
@@ -1233,6 +1254,35 @@ export class SlackReviewerService {
 
   private now(): number {
     return this.deps.now?.() ?? Date.now();
+  }
+
+  /**
+   * A large PR reviewed in parts: post what one part found as soon as it finishes, so the thread
+   * shows every part, not only the merged result at the end. A reply that doesn't parse is left
+   * to the merged result to report.
+   */
+  private async sayPartDone(
+    job: ReviewJob,
+    index: number,
+    parts: CompactDiff[],
+    text: string,
+    settle: (text: string, shown: CompactDiff) => { findings: unknown[]; summary: string },
+  ): Promise<void> {
+    let settled: { findings: unknown[]; summary: string };
+    try {
+      settled = settle(text, parts[index]!);
+    } catch {
+      return;
+    }
+    const shown = parts[index]!;
+    await this.say(job, "partDone", {
+      part: `${index + 1} of ${parts.length}`,
+      files:
+        reviewPlural(shown.reviewed.length, "file") +
+        (shown.truncated.length ? ` (${shown.truncated.length} truncated)` : ""),
+      comments: reviewPlural(settled.findings.length, "comment"),
+      summary: slackReviewPartSummary(settled.summary),
+    });
   }
 
   /** Post one status line in the job's thread. Returns the posted message's ts. */
@@ -1450,11 +1500,11 @@ export class SlackReviewerService {
     const prior = reviewerState.reviewed[slackReviewPullKey(pr)];
     // Only a review that ran to the end counts: a draft or opt-out skip at this commit doesn't.
     const lastReviewed = prior?.reviewedSha ?? legacyReviewedSha(prior);
-    // "retry", or asking again after a skip, wants this commit reviewed, so neither same-SHA skip applies.
-    if (!job.dryRun && !job.retry && !job.force && lastReviewed) {
+    // Explicit requests to review this commit bypass the usual head-SHA and follow-up checks.
+    if (!job.dryRun && !job.retry && !job.force && !job.fullRereview && lastReviewed) {
       if (lastReviewed === pull.headSha && job.rereview) {
         return skip(
-          `no new commits since \`${lastReviewed.slice(0, 7)}\`. Push the fixes, then ask again, or say "retry" to review this commit again`,
+          `no new commits since \`${lastReviewed.slice(0, 7)}\`. Push the fixes, then ask again, or say "full re-review" to review the whole PR again`,
           lastReviewed,
           true,
         );
@@ -1513,11 +1563,12 @@ export class SlackReviewerService {
       discussion.length +
       repoNotes.length +
       (guidelineFiles.length ? buildSlackReviewGuidelines(guidelineFiles, pull.baseRef).length : 0);
-    const budget = slackReviewDiffBudget(
+    const cliLimit = this.deps.cliPromptLimit ?? cliPromptCharLimit(process.platform);
+    let budget = slackReviewDiffBudget(
       reviewer,
       pick.cli
         ? {
-            promptLimit: this.deps.cliPromptLimit ?? cliPromptCharLimit(process.platform),
+            promptLimit: cliLimit,
             // System prompt, capped description, extra context, headers, fences, and the CLI's
             // own preamble.
             reservedChars: system.length + SLACK_REVIEW_DESCRIPTION_MAX + contextChars + 2_000,
@@ -1528,9 +1579,7 @@ export class SlackReviewerService {
     // Follow-up after new commits: send only what changed since the last finished review, when
     // the forge can say so and the head moved forward (no force-push).
     const sinceSha =
-      reviewer.incrementalRereview && prior && !job.dryRun
-        ? (prior.reviewedSha ?? legacyReviewedSha(prior))
-        : undefined;
+      reviewer.incrementalRereview && !job.dryRun && !job.fullRereview ? lastReviewed : undefined;
     let incremental: { since: string; files: typeof pull.files } | undefined;
     if (sinceSha && sinceSha !== pull.headSha && this.forge.compareCommits) {
       const files = await this.forge
@@ -1538,41 +1587,50 @@ export class SlackReviewerService {
         .catch(() => undefined);
       if (files?.length) incremental = { since: sinceSha, files };
     }
-    let diff = compactPullDiff(pull.files, budget);
-    // A PR over budget may be split into parts, one model call each, instead of listing files.
-    let parts: ReturnType<typeof planSlackReviewParts> = [];
-    if (incremental) {
-      const step = compactPullDiff(incremental.files, budget);
-      if (!step.reviewed.length) {
-        return skip(
-          `only generated, lockfile, binary, or deleted files changed since \`${incremental.since.slice(0, 7)}\``,
-          pull.headSha,
-        );
-      }
-      // Inline comments can go on any line the whole PR diff shows, not just the new commits.
-      const commentable = compactPullDiff(pull.files, {
-        ...budget,
-        unlimitedTokens: true,
-      }).commentable;
-      diff = { ...step, commentable };
-    } else if (reviewer.splitLargePrs && diff.omitted.length && !reviewer.unlimitedTokens) {
-      parts = planSlackReviewParts(pull.files, budget);
-      if (parts.length > 1) {
-        const commentable = new Map<string, Set<number>>();
-        for (const part of parts) {
-          for (const [path, lines] of part.commentable) commentable.set(path, lines);
+    const planDiff = (b: typeof budget) => {
+      let planned = compactPullDiff(pull.files, b);
+      // A PR over budget may be split into parts, one model call each, instead of listing files.
+      let plannedParts: ReturnType<typeof planSlackReviewParts> = [];
+      if (incremental) {
+        const step = compactPullDiff(incremental.files, b);
+        // Inline comments can go on any line the whole PR diff shows, not just the new commits.
+        const commentable = compactPullDiff(pull.files, {
+          ...b,
+          unlimitedTokens: true,
+        }).commentable;
+        planned = { ...step, commentable };
+      } else if (
+        reviewer.splitLargePrs &&
+        planned.omitted.length &&
+        // A CLI agent's prompt is capped by its command line even with No token limits.
+        (!reviewer.unlimitedTokens || pick.cli)
+      ) {
+        plannedParts = planSlackReviewParts(pull.files, b);
+        if (plannedParts.length > 1) {
+          const commentable = new Map<string, Set<number>>();
+          for (const part of plannedParts) {
+            for (const [path, lines] of part.commentable) commentable.set(path, lines);
+          }
+          const last = plannedParts.at(-1)!;
+          planned = {
+            ...plannedParts[0]!,
+            reviewed: plannedParts.flatMap((part) => part.reviewed),
+            truncated: plannedParts.flatMap((part) => part.truncated),
+            omitted: last.omitted,
+            commentable,
+          };
+        } else {
+          plannedParts = [];
         }
-        const last = parts.at(-1)!;
-        diff = {
-          ...parts[0]!,
-          reviewed: parts.flatMap((part) => part.reviewed),
-          truncated: parts.flatMap((part) => part.truncated),
-          omitted: last.omitted,
-          commentable,
-        };
-      } else {
-        parts = [];
       }
+      return { diff: planned, parts: plannedParts };
+    };
+    let { diff, parts } = planDiff(budget);
+    if (incremental && !diff.reviewed.length) {
+      return skip(
+        `only generated, lockfile, binary, or deleted files changed since \`${incremental.since.slice(0, 7)}\``,
+        pull.headSha,
+      );
     }
     const anchorOf: SlackFindingAnchor = slackDiffAnchors(pull.files);
     if (!diff.reviewed.length) {
@@ -1620,6 +1678,28 @@ export class SlackReviewerService {
           : "";
       return followUp ? `${userBase}\n\n${followUp}` : userBase;
     };
+    if (pick.cli) {
+      // The diff budget above is an estimate (the omitted-file list, earlier findings and the
+      // CLI's preamble aren't in it). Measure the prompt the CLI will get, and shrink the diff
+      // until it fits the command line instead of failing the review.
+      const promptOver = () =>
+        Math.max(
+          ...(parts.length ? parts.map((_part, i) => buildUser(i)) : [buildUser()]).map((text) =>
+            slackReviewCliPromptChars(system, text),
+          ),
+        ) - cliLimit;
+      for (let attempt = 0, over = promptOver(); over > 0 && attempt < 5; attempt++) {
+        const maxDiffChars = Math.max(1_000, budget.maxDiffChars - over - 1_000);
+        if (maxDiffChars === budget.maxDiffChars) break;
+        budget = {
+          ...budget,
+          maxDiffChars,
+          maxFileChars: Math.min(budget.maxFileChars, maxDiffChars),
+        };
+        ({ diff, parts } = planDiff(budget));
+        over = promptOver();
+      }
+    }
     let user = parts.length ? buildUser(0) : buildUser();
     // CLI agents may run on their own default model; say so instead of printing nothing.
     const modelLabel = pick.model || `${pick.provider.name} default`;
@@ -1680,6 +1760,13 @@ export class SlackReviewerService {
       if (guidelineFiles.length) user = parts.length ? buildUser(0) : buildUser();
     }
 
+    // A split PR is several reviews in one: each part may keep the reviewer's comment cap.
+    const capReviewer = {
+      ...reviewer,
+      maxComments: slackReviewCommentCap(reviewer.maxComments, parts.length),
+    };
+    const partSettle = (text: string, shown: CompactDiff) =>
+      settleSlackReview(parseSlackReviewResult(text), shown, reviewer, { dismissed, anchorOf });
     const started = this.now();
     const texts: string[] = [];
     let lookups = 0;
@@ -1705,6 +1792,7 @@ export class SlackReviewerService {
         texts.push(out.text);
         lookups += out.lookups;
         capped = capped || out.capped;
+        if (users.length > 1) await this.sayPartDone(job, index, parts, out.text, partSettle);
       }
       if (reviewer.verifyFindings && checkout) {
         verifySources = await verifySourcesFromCheckout(checkout.dir, texts).catch(
@@ -1730,15 +1818,15 @@ export class SlackReviewerService {
       });
     } finally {
       await checkout?.dispose().catch(() => undefined);
+      await this.deps.budgets
+        ?.record(
+          { id: `slack-reviewer:${reviewer.id}`, providerId: pick.provider.id, model: pick.model },
+          usage,
+          config,
+        )
+        .catch(() => undefined);
     }
     let usd = estimateUsd(usage, resolveUsageRates(pick.provider, pick.model));
-    await this.deps.budgets
-      ?.record(
-        { id: `slack-reviewer:${reviewer.id}`, providerId: pick.provider.id, model: pick.model },
-        usage,
-        config,
-      )
-      .catch(() => undefined);
     const notes = [
       checkoutNote,
       capped ? `stopped reading at the $${reviewer.maxCostUsd.toFixed(2)} cost cap` : "",
@@ -1764,7 +1852,7 @@ export class SlackReviewerService {
       const parsed = mergeSlackReviewResults(
         texts.map((text): SlackReviewResult => parseSlackReviewResult(text)),
       );
-      settled = settleSlackReview(parsed, diff, reviewer, { dismissed, anchorOf });
+      settled = settleSlackReview(parsed, diff, capReviewer, { dismissed, anchorOf });
       resolvedPrior = (parsed.previous ?? [])
         .filter((row) => row.resolved)
         .flatMap((row) => (priorFindings[row.id - 1] ? [priorFindings[row.id - 1]!] : []));
@@ -1807,7 +1895,7 @@ export class SlackReviewerService {
           settled = settleSlackReview(
             { verdict: settled.verdict, summary: settled.summary, comments: checked.comments },
             diff,
-            reviewer,
+            capReviewer,
             { anchorOf },
           );
         }
@@ -1870,7 +1958,8 @@ export class SlackReviewerService {
       try {
         await postReviewWithFallback(this.forge, account, pr, {
           event,
-          summary,
+          // Part summaries are one per line: keep them apart in Markdown too.
+          summary: parts.length ? summary.replace(/\n/g, "\n\n") : summary,
           inline: settled.inline,
           general: settled.general,
           footer,
@@ -1924,7 +2013,8 @@ export class SlackReviewerService {
       outcome as keyof SlackReviewerStatusTemplates,
       {
         comments: reviewPlural(count, "comment"),
-        summary,
+        // Part summaries go one per line under the headline.
+        summary: parts.length && summary.includes("\n") ? `\n${summary}` : summary,
         findings: formatSlackReviewFindings(settled.findings),
         progress,
         usage: usageLine,
@@ -1973,4 +2063,16 @@ function autoReviewFingerprint(rs: {
     .map(([key, row]) => `${key}:${row.ready ? 1 : 0}:${row.updatedAt ?? ""}`)
     .sort()
     .join("|");
+}
+
+/** Length of the single prompt a CLI agent gets for this review (see oneShotCliPrompt). */
+function slackReviewCliPromptChars(system: string, user: string): number {
+  return oneShotCliPrompt(
+    {
+      system,
+      messages: [{ id: "measure", role: "user", content: user, createdAt: "" }],
+    },
+    // The longer preamble (a checkout to read), so either way the prompt fits.
+    { readWorkspace: true },
+  ).length;
 }

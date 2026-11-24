@@ -1,4 +1,5 @@
 import {
+  bitbucketTokenKind,
   forgeAccessMessage,
   forgeLabel,
   formatRemoteError,
@@ -102,7 +103,20 @@ export function bitbucketAuthHeaders(
   extra?: Record<string, string>,
 ): Record<string, string> {
   if (!hasForgeToken(account)) return { ...(extra ?? {}) };
-  return { ...(extra ?? {}), authorization: `Bearer ${account.token ?? ""}` };
+  const token = account.token ?? "";
+  // Atlassian API tokens and app passwords use Basic auth with the account's email
+  // (API tokens) or Bitbucket username (app passwords); access and OAuth tokens use Bearer.
+  const kind = bitbucketTokenKind(token);
+  const user = account.username?.trim();
+  const basic =
+    (kind === "api-token" && user?.includes("@")) || (kind === "app-password" && Boolean(user));
+  if (basic && user) {
+    return {
+      ...(extra ?? {}),
+      authorization: `Basic ${Buffer.from(`${user}:${token}`).toString("base64")}`,
+    };
+  }
+  return { ...(extra ?? {}), authorization: `Bearer ${token}` };
 }
 
 export async function readBody(res: Response): Promise<string> {

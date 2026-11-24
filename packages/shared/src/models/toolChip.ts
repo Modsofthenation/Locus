@@ -10,6 +10,7 @@ import {
 import { playwrightChipDetail } from "./playwrightCanvas.js";
 import { fileReadPaths } from "./tools.js";
 import { parseSubagentKind } from "./subagentKind.js";
+import { TEST_GATE_PROMPT_TOOL } from "./testGateChoice.js";
 
 export function parseExitCode(text?: string): number | undefined {
   if (!text) return undefined;
@@ -709,6 +710,10 @@ export function toolActivityLabel(name: string, args: Record<string, unknown> = 
   if (name === "git_commit") return "Git commit";
   if (name === "git_push") return "Git push";
   if (name === "git_pr") return "Opened a pull request";
+  if (name === TEST_GATE_PROMPT_TOOL) {
+    const tool = strArg(args, "tool") === "git_pr" ? "the pull request" : "the push";
+    return `Run tests before ${tool}?`;
+  }
   if (name === "screenshot") return "Screenshot";
   if (name === "window_focus")
     return strArg(args, "title")

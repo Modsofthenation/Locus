@@ -1398,8 +1398,8 @@ describe("MobileShell", () => {
     expect(row?.textContent).toMatch(/Needs you/);
     expect(host.querySelector("[data-testid='mobile-notify-needs-you']")).toBeTruthy();
     expect(host.querySelector("[data-testid='mobile-pairing']")?.textContent).toMatch(/desktop/i);
-    expect(selectValue(host, "Chat density")).toBe("compact");
-    expect(selectOptionValues(host, "Chat density")).toEqual(["comfortable", "compact", "dense"]);
+    expect(selectValue(host, "Density")).toBe("compact");
+    expect(selectOptionValues(host, "Density")).toEqual(["comfortable", "compact", "dense"]);
   });
 
   it("points Slack sign-in at the desktop", async () => {

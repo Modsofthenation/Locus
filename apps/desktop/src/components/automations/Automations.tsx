@@ -676,8 +676,11 @@ export function AutomationsPane() {
       <RunHistory
         item={item}
         runs={runs}
-        filter={runFilter}
-        onFilterChange={setRunFilter}
+        filter={state.focusedAutomationRunId ? "all" : runFilter}
+        onFilterChange={(filter) => {
+          dispatch({ type: "clearAutomationRunFocus" });
+          setRunFilter(filter);
+        }}
         onOpenChat={(run) => void openChat(run)}
         onReplay={(run) => void replayRun(run)}
         onStop={(run) => void stopLiveRun(run)}
@@ -1320,7 +1323,11 @@ function RunHistory(props: {
     (a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id),
   );
   const filtered = ordered.filter((run) => runMatchesHistoryFilter(run, props.filter));
-  const shown = filtered.slice(0, visible);
+  const focusId = state.focusedAutomationRunId;
+  const focusIndex = focusId ? filtered.findIndex((run) => run.id === focusId) : -1;
+  const focusReady = focusIndex >= 0;
+  const shown = filtered.slice(0, Math.max(visible, focusIndex + 1));
+  const focusedRow = useRef<HTMLTableRowElement>(null);
   const exhausted = serverExhausted || ordered.length < fetchLimit;
   const canLoadMore = filtered.length > visible || (!exhausted && filtered.length >= visible);
   const filters: { value: RunHistoryFilter; label: string }[] = [
@@ -1343,6 +1350,12 @@ function RunHistory(props: {
     setFetchLimit(RUN_HISTORY_FETCH);
     setServerExhausted(false);
   }, [props.item.id, props.filter]);
+
+  useEffect(() => {
+    if (!focusReady) return;
+    focusedRow.current?.scrollIntoView?.({ block: "center" });
+    focusedRow.current?.focus({ preventScroll: true });
+  }, [focusId, focusReady]);
 
   return (
     <section className="auto-runs">
@@ -1399,7 +1412,12 @@ function RunHistory(props: {
                 const statusLabel = runHistoryStatusLabel(run);
                 const live = run.status === "running" || run.status === "queued";
                 return (
-                  <tr key={run.id}>
+                  <tr
+                    key={run.id}
+                    ref={run.id === focusId ? focusedRow : undefined}
+                    tabIndex={run.id === focusId ? -1 : undefined}
+                    className={run.id === focusId ? "run-row-focused" : undefined}
+                  >
                     <td>
                       <span className={`status-chip ${statusLabel}`}>{runStatusText(run)}</span>
                       {outcome ? (
@@ -1424,7 +1442,7 @@ function RunHistory(props: {
                     <td>{runSpendLabel(run, props.item, session, state.config ?? undefined)}</td>
                     <td>{formatWhen(run.startedAt)}</td>
                     <td>
-                      {live || run.sessionId ? (
+                      {live || run.sessionId || run.status === "failed" ? (
                         <div className="run-actions">
                           {run.sessionId ? (
                             <button

@@ -6,6 +6,7 @@ import type {
   BenchmarkHistoryRow,
   BudgetScope,
   DailyBudgetStatus,
+  ModelUsageSummary,
   TelemetrySettings,
   BenchmarkRun,
   BenchmarkTarget,
@@ -43,6 +44,9 @@ import type {
   GuestOs,
   LinkedRepo,
   LocusConfig,
+  E2BTemplateBuildView,
+  E2BTemplateSize,
+  WorkerBackend,
   NamedEnvironment,
   LoadPathReview,
   ArchitectureAnalysis,
@@ -52,6 +56,7 @@ import type {
   RepoAbout,
   RepoBranchList,
   SlackConversation,
+  SlackMember,
   SlackGifSearch,
   SlackMessage,
   SlackRunInput,
@@ -514,6 +519,7 @@ export const api = {
       firstBroken?: { file: string; line: number; seq?: number; reason: string };
     }>("/api/audit/verify"),
   budgets: () => json<{ status: DailyBudgetStatus }>("/api/budgets"),
+  modelUsage: () => json<ModelUsageSummary>("/api/usage/models"),
   budgetOverride: (input: { scope: BudgetScope; id?: string; reason: string }) =>
     json<{ status: DailyBudgetStatus }>("/api/budgets/override", {
       method: "POST",
@@ -524,6 +530,28 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ telemetry }),
     }),
+  verifySandboxWorker: (worker: WorkerBackend) =>
+    json<{ ok: true }>("/api/workers/compute/verify", {
+      method: "POST",
+      body: JSON.stringify(worker),
+    }),
+  startE2BTemplateBuild: (input: {
+    worker: WorkerBackend;
+    size: E2BTemplateSize;
+    agentClis: boolean;
+  }) =>
+    json<{ build: E2BTemplateBuildView }>("/api/workers/compute/e2b/template", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  latestE2BTemplateBuild: (workerId: string) =>
+    json<{ build: E2BTemplateBuildView | null }>(
+      `/api/workers/compute/e2b/template?workerId=${encodeURIComponent(workerId)}`,
+    ),
+  e2bTemplateBuild: (id: string) =>
+    json<{ build: E2BTemplateBuildView }>(
+      `/api/workers/compute/e2b/template/${encodeURIComponent(id)}`,
+    ),
   testWorker: (input: { url: string; token?: string; fingerprint?: string }) =>
     json<{
       ok: true;
@@ -1888,6 +1916,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ starred }),
     }),
+  slackUsers: (refresh = false) =>
+    json<SlackMember[]>(`/api/slack/users${refresh ? "?refresh=1" : ""}`),
   slackEmoji: (refresh = false) =>
     json<Record<string, string>>(`/api/slack/emoji${refresh ? "?refresh=1" : ""}`),
   slackUnwatch: () => json<{ ok: true }>("/api/slack/unwatch", { method: "POST" }),
@@ -1977,13 +2007,14 @@ export const api = {
   slackReviewerRuns: () => json<SlackReviewRunsResponse>("/api/slack/reviewers/runs"),
   /**
    * Review one PR now with a saved reviewer. `threadTs` posts progress into that Slack thread.
-   * `dryRun` posts nothing anywhere and returns the findings.
+   * `dryRun` posts nothing anywhere and returns the findings. `fullRereview` reviews the full PR
+   * diff in a live run, even if the head was already reviewed.
    */
   slackReviewerReview: (
     id: string,
     url: string,
     threadTs?: string,
-    opts: { dryRun?: boolean } = {},
+    opts: { dryRun?: boolean; fullRereview?: boolean } = {},
   ) =>
     json<SlackReviewRun>(`/api/slack/reviewers/${encodeURIComponent(id)}/review`, {
       method: "POST",
@@ -1991,6 +2022,7 @@ export const api = {
         url,
         ...(threadTs ? { threadTs } : {}),
         ...(opts.dryRun ? { dryRun: true } : {}),
+        ...(opts.fullRereview ? { fullRereview: true } : {}),
       }),
     }),
   /** Live logs: the reviewers' Slack and forge calls with `seq` above `after`, oldest first. */

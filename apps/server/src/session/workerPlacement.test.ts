@@ -1,11 +1,15 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { MockComputeBackend } from "@locus/compute";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { MockComputeBackend, SandboxComputeBackend, type ComputeBackend } from "@locus/compute";
 import { MockDockerEngine, MockHypervisor } from "@locus/hypervisor";
 import type { WorkerBackend } from "@locus/shared";
-import { CURSOR_CODING_ROUTING_CARD, formatWorkerAddBlob } from "@locus/shared";
+import {
+  CURSOR_CODING_ROUTING_CARD,
+  WORKER_GATEWAY_TOKEN_HEADER,
+  formatWorkerAddBlob,
+} from "@locus/shared";
 import { createWorkerApp } from "@locus/worker";
 import { createApp } from "../app.js";
 import { Hub } from "../core/hub.js";
@@ -30,10 +34,7 @@ function workerFetch(app: ReturnType<typeof createWorkerApp>): typeof fetch {
   }) as typeof fetch;
 }
 
-async function setupWorkerPlane(opts?: {
-  workers?: WorkerBackend[];
-  compute?: MockComputeBackend;
-}) {
+async function setupWorkerPlane(opts?: { workers?: WorkerBackend[]; compute?: ComputeBackend }) {
   const dir = await mkdtemp(join(tmpdir(), "locus-worker-plane-"));
   const workerDir = await mkdtemp(join(tmpdir(), "locus-worker-engine-"));
   cleanup.push(dir, workerDir);
@@ -1383,6 +1384,81 @@ describe("Fargate compute adapter", () => {
     expect((await sessions.get(created.id))?.remoteGuestId).toBeUndefined();
   });
 
+  it("keeps the cloud task attached when stop fails and clears it after reconciliation", async () => {
+    const compute = new MockComputeBackend({ url: "http://127.0.0.1:7421", token: "secret" });
+    const { app, sessions, config } = await setupWorkerPlane({ workers: [fargateWorker], compute });
+    const created = await sessions.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      providerId: config.providers[0]!.id,
+      model: config.providers[0]!.defaultModel,
+      startVm: true,
+      placement: "worker",
+      backendId: "w1",
+    });
+    const remoteId = created.remoteGuestId!;
+    const destroy = vi.spyOn(compute, "destroy").mockRejectedValue(new Error("AWS unavailable"));
+    sessions.fetchFn = (async () => {
+      throw new Error("Guest unavailable");
+    }) as typeof fetch;
+    await expect(sessions.stopVm(created.id)).rejects.toThrow(/cleanup pending/i);
+    expect(await sessions.get(created.id)).toMatchObject({
+      remoteGuestId: remoteId,
+      status: "error",
+      error: expect.stringMatching(/cleanup pending/i),
+    });
+
+    const reset = await app.request("/api/reset", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: "RESET" }),
+    });
+    expect(reset.status).toBe(400);
+    expect((await sessions.get(created.id))?.remoteGuestId).toBe(remoteId);
+
+    destroy.mockRestore();
+    const orphans = vi
+      .spyOn(compute, "listOrphans")
+      .mockResolvedValueOnce([
+        { id: remoteId, backendId: "w1", sessionId: created.id, cleanupPending: true },
+      ]);
+    expect(await sessions.reapOrphanCompute()).toBe(1);
+    orphans.mockRestore();
+    expect(compute.destroyed).toEqual([remoteId]);
+    const stopped = await sessions.get(created.id);
+    expect(stopped?.remoteGuestId).toBeUndefined();
+    expect(stopped?.status).toBe("stopped");
+  });
+
+  it("checks existing day budgets before calling the compute provider", async () => {
+    const compute = new MockComputeBackend({ url: "http://127.0.0.1:7421", token: "secret" });
+    const { sessions, store, config } = await setupWorkerPlane({
+      workers: [fargateWorker],
+      compute,
+    });
+    const provider = config.providers[0]!;
+    config.budgets = { dailyTokens: 1 };
+    await store.saveConfig(config);
+    await sessions.budgets.record(
+      { id: "previous-turn", providerId: provider.id, model: provider.defaultModel },
+      { inputTokens: 2, outputTokens: 0 },
+      config,
+    );
+    await expect(
+      sessions.create({
+        os: "ubuntu",
+        templateId: config.templates[0]!.id,
+        providerId: provider.id,
+        model: provider.defaultModel,
+        startVm: true,
+        placement: "worker",
+        backendId: "w1",
+      }),
+    ).rejects.toThrow(/daily token cap/i);
+    expect(compute.provisions).toEqual([]);
+    await sessions.budgets.flush();
+  });
+
   it("returns from create at once and boots the cloud task in the background", async () => {
     const compute = new MockComputeBackend({ url: "http://127.0.0.1:7421", token: "secret" });
     const { sessions, config } = await setupWorkerPlane({
@@ -1512,9 +1588,118 @@ describe("Fargate compute adapter", () => {
       workers: [fargateWorker],
       compute: restarted,
     });
-    expect(await restarted.listOrphans(new Set())).toEqual([{ id: handle.id, backendId: "w1" }]);
+    expect(await restarted.listOrphans(new Set())).toEqual([
+      { id: handle.id, backendId: "w1", sessionId: "ghost" },
+    ]);
     expect(await sessions.reapOrphanCompute()).toBe(1);
     expect(restarted.destroyed).toEqual([handle.id]);
     expect(await restarted.listOrphans(new Set())).toEqual([]);
+  });
+});
+
+describe("managed sandbox placement", () => {
+  it("verifies a saved profile, uses the authenticated worker transport, and stops the sandbox", async () => {
+    const backend: WorkerBackend = {
+      id: "w1",
+      kind: "e2b",
+      name: "Cloud profile",
+      url: "",
+      token: "e2b-api-key",
+      hourlyUsd: 0.6,
+      sandbox: {
+        template: "profile-id",
+        maxMinutes: 10,
+        maxUsd: 0.5,
+        rateDate: new Date().toISOString().slice(0, 10),
+      },
+    };
+    let workerToken = "";
+    const driver = {
+      verify: vi.fn(async () => undefined),
+      create: vi.fn(async ({ workerEnv }: { workerEnv: Record<string, string> }) => {
+        workerToken = workerEnv.LOCUS_WORKER_TOKEN!;
+        return {
+          id: "e2b-id",
+          connect: async () => ({
+            url: "https://7421-e2b-id.e2b.app",
+            headers: { "e2b-traffic-access-token": "gateway-key" },
+          }),
+        };
+      }),
+      find: vi.fn(async () => []),
+      destroy: vi.fn(async () => undefined),
+    };
+    const compute = new SandboxComputeBackend({
+      e2b: driver,
+      daytona: driver,
+      modal: driver,
+      runloop: driver,
+    });
+    const { app, sessions, config, workerEngine, workerHypervisor } = await setupWorkerPlane({
+      workers: [backend],
+      compute,
+    });
+    const dir = await mkdtemp(join(tmpdir(), "locus-sandbox-worker-"));
+    cleanup.push(dir);
+    let workerApp: ReturnType<typeof createWorkerApp> | undefined;
+    sessions.fetchFn = (async (input, init) => {
+      const headers = new Headers(init?.headers);
+      expect(new URL(String(input)).origin).toBe("https://7421-e2b-id.e2b.app");
+      expect(headers.get("e2b-traffic-access-token")).toBe("gateway-key");
+      expect(headers.get(WORKER_GATEWAY_TOKEN_HEADER)).toBe(workerToken);
+      expect(headers.get("authorization")).toBeNull();
+      expect(init?.redirect).toBe("error");
+      workerApp ??= createWorkerApp({
+        token: workerToken,
+        gatewayTransport: true,
+        allowHostRuntime: true,
+        dataDir: dir,
+        engine: workerEngine,
+        hypervisor: workerHypervisor,
+      });
+      return workerFetch(workerApp)(input, init);
+    }) as typeof fetch;
+    const tested = await app.request("/api/workers/compute/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...backend, token: undefined }),
+    });
+    expect(tested.status).toBe(200);
+    expect(driver.verify).toHaveBeenCalledWith(
+      expect.objectContaining({ token: backend.token }),
+      backend.sandbox,
+    );
+    expect(driver.create).not.toHaveBeenCalled();
+
+    const agent = await sessions.create({
+      runtime: "docker",
+      os: "ubuntu",
+      startVm: true,
+      placement: "worker",
+      backendId: backend.id,
+      model: config.providers[0]!.defaultModel,
+      providerId: config.providers[0]!.id,
+      templateId: config.templates[0]!.id,
+    });
+    expect(agent).toMatchObject({
+      runtime: "host",
+      instanceSize: "sandbox",
+      remoteGuestId: expect.stringMatching(/^e2b:/),
+    });
+    expect(agent.vmId).toBeTruthy();
+    const edit = await app.request("/api/config", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...config, workers: [] }),
+    });
+    expect(edit.status).toBe(409);
+
+    await sessions.stopVm(agent.id);
+    expect(driver.destroy).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "w1" }),
+      expect.anything(),
+      "e2b-id",
+    );
+    expect((await sessions.get(agent.id))?.status).toBe("stopped");
   });
 });

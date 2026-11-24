@@ -19,9 +19,11 @@ import {
   CompositeComputeBackend,
   FargateComputeBackend,
   GcpComputeBackend,
+  SandboxComputeBackend,
+  sandboxDrivers,
   computeTasksPath,
 } from "@locus/compute";
-import { readProviderUsage } from "@locus/providers";
+import { completeChat, readProviderUsage } from "@locus/providers";
 import { loadOrCreateWorkerTls } from "@locus/worker";
 import { createApp } from "./app.js";
 import { defaultDataDir } from "./defaults.js";
@@ -118,14 +120,17 @@ const sessions = new SessionService(
     new FargateComputeBackend(fetch, undefined, computeTasksPath(dataDir)),
     new AzureComputeBackend(fetch, undefined, join(dataDir, "compute-azure.json")),
     new GcpComputeBackend(fetch, undefined, join(dataDir, "compute-gcp.json")),
+    new SandboxComputeBackend(sandboxDrivers, join(dataDir, "compute-sandboxes.json")),
   ),
   plane,
 );
 sessions.chromeExtension.setToken(
   config.chromeExtension?.enabled ? config.chromeExtension.token : undefined,
 );
+await sessions.reapOrphanCompute().catch(() => {
+  console.warn("Initial compute reconciliation failed. The worker reaper will retry.");
+});
 sessions.startWorkerReaper();
-await sessions.reapOrphanCompute();
 await sessions.recoverInterruptedTurns();
 await sessions.refreshMcp();
 void persistCursorCliModels(store).catch((err) => {
@@ -139,6 +144,7 @@ const repos = new RepoService(store, sessions, hub);
 const projects = new ProjectService(store, hub, sessions, repos);
 plane.projects = projects;
 const brain = new BrainService(store, hub);
+brain.setDistillerComplete(sessions.budgets.trackCompletion(completeChat));
 plane.brain = brain;
 const workflows = new WorkflowService(dataDir, sessions);
 plane.workflows = workflows;

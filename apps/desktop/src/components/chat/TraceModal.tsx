@@ -53,7 +53,7 @@ export function TraceModal({ session, onClose }: { session: AgentSession; onClos
   }, [session.id]);
 
   return (
-    <Modal titleId="trace-title" className="trace-modal" onClose={onClose}>
+    <Modal titleId="trace-title" className="trace-modal" onClose={onClose} portal>
       <h2 id="trace-title">Trace</h2>
       <p className="modal-lead">
         Raw JSONL events for {session.title}. Tool args already drop secret-like keys.

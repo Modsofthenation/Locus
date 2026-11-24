@@ -11,6 +11,7 @@ import type {
   SessionPersona,
 } from "@locus/shared";
 import {
+  parseHarnessGates,
   workerRunsInTask,
   attachLinkedCheckouts,
   assignSessionCloneDests,
@@ -207,9 +208,8 @@ export function prepareCreateInput(
     if (kind === "review") {
       throw new Error("PR reviews need Docker or a VM. Pick this machine or a LAN worker.");
     }
-    // Fargate cannot run Docker or KVM: the task itself is the per-agent sandbox, so
-    // the chat runs as a Host guest inside it. Laptop folders, images, and worktrees
-    // do not apply there.
+    // The provisioned sandbox is the machine boundary. Its Host guest gets a
+    // fresh workspace, separate from laptop folders, images, and worktrees.
     input = {
       ...input,
       runtime: "host",
@@ -346,6 +346,7 @@ export function sessionCreateBase(
     playbook: input.playbook?.trim() || undefined,
     allowedTools: opts.allowedTools,
     branchLock: input.branchLock === true ? true : undefined,
+    bypassGates: parseHarnessGates(input.bypassGates),
     network: opts.network,
     vision: opts.vision,
     webSearch: input.webSearch === true ? true : undefined,

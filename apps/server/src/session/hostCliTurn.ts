@@ -74,7 +74,12 @@ import {
 import { type CliTurnContinueInput, type CliTurnContinueResult } from "./cliTurnContinue.js";
 import { llmResponseDetail, withWorkspaceReadiness } from "./sessionTurnHelpers.js";
 import type { SessionTraceLog } from "./traces.js";
-import { resolveCliSandbox, type CliSandbox, type CliSandboxPolicy } from "./cliSandbox.js";
+import {
+  cliSandboxEnv,
+  resolveCliSandbox,
+  type CliSandbox,
+  type CliSandboxPolicy,
+} from "./cliSandbox.js";
 import type { CliMcpGrant } from "../http/cliMcpGateway.js";
 
 /** `generic` is a Custom CLI agent (provider kind `cli-agent`). */
@@ -147,6 +152,7 @@ export type HostCliTurnPorts = {
       outputTokens: number;
       cachedInputTokens?: number;
       cacheWriteTokens?: number;
+      estimated?: boolean;
       window?: number;
       contextTokens?: number;
     },
@@ -172,7 +178,10 @@ export type HostCliTurnPorts = {
    * `undefined` means the operator opted out (`LOCUS_CLI_SANDBOX=off`). Defaults to
    * bubblewrap / sandbox-exec via {@link resolveCliSandbox}.
    */
-  cliSandbox?: (policy: CliSandboxPolicy) => CliSandbox | undefined;
+  cliSandbox?: (
+    policy: CliSandboxPolicy,
+    opts?: { env?: NodeJS.ProcessEnv },
+  ) => CliSandbox | undefined;
   /**
    * A token-gated, session-scoped MCP URL on the CLI MCP gateway. A sandboxed CLI gets this
    * instead of the control-plane URL, because the sandbox only forwards the gateway port.
@@ -325,11 +334,14 @@ async function hostCliTurn(
   if (!worker && !localVm && sessionRuntime(session) === "docker") {
     const grant = await ports.cliMcpGrant?.(session.id);
     if (grant) cleanup.push(grant.revoke);
-    sandbox = (ports.cliSandbox ?? resolveCliSandbox)({
-      locusHome: ports.dataDir,
-      workspace,
-      loopbackPorts: grant ? [grant.port] : [],
-    });
+    sandbox = (ports.cliSandbox ?? resolveCliSandbox)(
+      {
+        locusHome: ports.dataDir,
+        workspace,
+        loopbackPorts: grant ? [grant.port] : [],
+      },
+      { env: cliSandboxEnv(config.advanced.cliSandbox) },
+    );
     if (sandbox && !sandbox.ok) {
       await ports.appendMessage(input.sessionId, {
         id: randomUUID(),

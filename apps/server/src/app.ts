@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { LocusConfig } from "@locus/shared";
-import { listProviderModels, readProviderUsage } from "@locus/providers";
+import { completeChat, listProviderModels, readProviderUsage } from "@locus/providers";
 import { type ListProviderModelsFn } from "./integrations/cursorCliCatalog.js";
 import type { AutomationService } from "./automations/automations.js";
 import type { BoardService } from "./boards/boards.js";
@@ -34,6 +34,12 @@ import { registerMcpRoutes } from "./http/mcpRoutes.js";
 import { registerPhoneRoutes } from "./http/phoneRoutes.js";
 import { registerChromeExtensionRoutes } from "./http/chromeExtensionRoutes.js";
 import { electronResourcesPath } from "./runtime/chromeExtensionInstall.js";
+import {
+  E2BTemplateBuilds,
+  resolveCredentialHelper,
+  resolveWorkerBundle,
+} from "./runtime/e2bTemplateBuilds.js";
+import { e2bTemplateBuilder } from "@locus/compute";
 import { registerHostRoutes } from "./http/hostRoutes.js";
 import { registerImageRoutes } from "./http/imageRoutes.js";
 import { registerShareRoutes } from "./http/shareRoutes.js";
@@ -103,6 +109,8 @@ export function createApp(opts: {
   peerAddress?: (c: import("hono").Context) => string | undefined;
   phoneTls?: { fingerprint: string };
   agentTerminals?: AgentTerminalRegistry;
+  /** E2B template builds for Settings → Workers (tests inject a fake builder). */
+  templateBuilds?: E2BTemplateBuilds;
   /** Required on loopback `/api` and `/ws` requests. Unset leaves loopback trusted (tests). */
   operatorToken?: string;
 }): Hono {
@@ -116,6 +124,9 @@ export function createApp(opts: {
   const googleOauth = new GoogleOauth(opts.store, opts.fetchFn ?? fetch);
   const hub = opts.hub ?? new Hub();
   const brain = opts.brain ?? opts.sessions.plane.brain ?? new BrainService(opts.store, hub);
+  if (!opts.brain && !opts.sessions.plane.brain) {
+    brain.setDistillerComplete(opts.sessions.budgets.trackCompletion(completeChat));
+  }
   opts.sessions.plane.brain = brain;
   const slack =
     opts.slack ??
@@ -235,6 +246,17 @@ export function createApp(opts: {
     sessions: opts.sessions,
     onConfigSaved: opts.onConfigSaved,
     peerAddress: opts.peerAddress,
+    templateBuilds:
+      opts.templateBuilds ??
+      new E2BTemplateBuilds({
+        builder: e2bTemplateBuilder,
+        workerBundle: () =>
+          resolveWorkerBundle({
+            dataDir: opts.store.dataDir,
+            resourcesPath: electronResourcesPath(),
+          }),
+        credentialHelper: resolveCredentialHelper,
+      }),
   });
   registerForgeAuthRoutes(app, { store: opts.store, oauth, slackOauth, googleOauth });
   registerProviderRoutes(app, {

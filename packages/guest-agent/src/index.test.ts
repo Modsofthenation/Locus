@@ -807,9 +807,10 @@ describe("commandFor", () => {
     expect(linux).toContain("git -C");
     expect(linux).toContain("commit -m");
     expect(linux).toContain("feat: done");
-    expect(commandFor("ubuntu", { name: "git_branch", args: { name: "cursor/work" } })).toContain(
-      "checkout -B",
-    );
+    const branch = commandFor("ubuntu", { name: "git_branch", args: { name: "cursor/work" } });
+    expect(branch).toContain("show-ref --verify --quiet 'refs/heads/cursor/work'");
+    expect(branch).toContain("checkout -b 'cursor/work'");
+    expect(branch).not.toContain("checkout -B");
     expect(commandFor("ubuntu", { name: "git_push", args: { token: "ghs_x" } })).toContain(
       "push -u origin HEAD",
     );
@@ -825,6 +826,20 @@ describe("commandFor", () => {
     expect(bitbucketPush).toContain("$GIT_TOKEN");
     expect(bitbucketPush).not.toContain("bb_x");
     expect(bitbucketPush).not.toContain("http.extraHeader");
+    expect(bitbucketPush).toContain("username=x-token-auth");
+    expect(bitbucketPush).not.toContain("remote set-url");
+    expect(bitbucketPush).toContain("'https://bitbucket.org/acme/app.git' \"HEAD:refs/heads/$b\"");
+    // No URL known (host folder without an attached repo): the forge kind picks the username.
+    const bareBitbucket = commandFor("ubuntu", {
+      name: "git_push",
+      args: { token: "bb_x", forge: "bitbucket" },
+    });
+    expect(bareBitbucket).toContain("username=x-token-auth");
+    const apiToken = commandFor("ubuntu", {
+      name: "git_push",
+      args: { token: "ATATT_x", url: "https://bitbucket.org/acme/app.git" },
+    });
+    expect(apiToken).toContain("username=x-bitbucket-api-token-auth");
     expect(commandFor("windows-11", { name: "git_commit", args: { message: "w" } })).toContain(
       "commit -m",
     );
@@ -985,7 +1000,10 @@ describe("authenticatedCloneUrl", () => {
         url: "https://github.com/acme/app.git",
       },
     });
-    expect(win).toContain("fetch --progress --depth 1 origin 'main'");
+    expect(win).toContain(
+      "fetch --progress @locusDepth 'https://github.com/acme/app.git' '+main:refs/remotes/origin/main'",
+    );
+    expect(win).not.toContain("remote set-url");
     expect(win).toContain("credential.helper=");
     expect(win).toContain("$GIT_TOKEN");
     expect(win).not.toContain("ghs_x");
@@ -1048,7 +1066,7 @@ describe("authenticatedCloneUrl", () => {
     expect(cmd).toContain("credential.helper=");
     expect(cmd).toContain("$GIT_TOKEN");
     expect(cmd).not.toContain("ghs_x");
-    expect(cmd).toContain("GIT_CONFIG_GLOBAL='/dev/null'");
+    expect(cmd).toContain('GIT_CONFIG_GLOBAL="$locus_git_cfg"');
     expect(cmd).toContain("GCM_INTERACTIVE=Never");
   });
 

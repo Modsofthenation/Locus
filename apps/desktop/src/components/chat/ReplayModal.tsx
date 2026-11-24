@@ -26,7 +26,7 @@ export function ReplayModal({ session, onClose }: { session: AgentSession; onClo
   if (!canReplay(session.messages) || !frame) return null;
 
   return (
-    <Modal titleId="replay-modal-title" className="replay-modal" onClose={onClose}>
+    <Modal titleId="replay-modal-title" className="replay-modal" onClose={onClose} portal>
       <h2 id="replay-modal-title">Replay</h2>
       <p className="modal-lead">
         {frame.who}

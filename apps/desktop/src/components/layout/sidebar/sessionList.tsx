@@ -38,6 +38,7 @@ import { showErrorNotice, showUndoNotice } from "@/lib/notice";
 import { askConfirm, askPrompt } from "@/lib/dialog";
 import { archiveOne, deleteSessionWithUndo } from "@/lib/sessionUndo";
 import { useStore } from "@/state/store";
+import { SessionBackendBadge, sessionBackend, type SessionBackend } from "./SessionBackendBadge";
 
 export function agentRuntimeMeta(s: AgentSession): string {
   const where =
@@ -89,7 +90,7 @@ export function sessionRowClass(
     .join(" ");
 }
 
-function SessionTitle(props: { session: AgentSession; unread: boolean }) {
+function SessionTitle(props: { session: AgentSession; unread: boolean; backend: SessionBackend }) {
   return (
     <div className="title">
       {props.session.pinned ? (
@@ -98,6 +99,7 @@ function SessionTitle(props: { session: AgentSession; unread: boolean }) {
         </span>
       ) : null}
       <span className="title-text">{sessionDisplayName(props.session)}</span>
+      <SessionBackendBadge backend={props.backend} />
       {props.unread ? <span className="unread-dot" aria-label="Unread" /> : null}
     </div>
   );
@@ -372,7 +374,7 @@ export function SessionRow(props: {
   const copy = (
     <>
       <div className="session-row-main">
-        <SessionTitle session={s} unread={props.unread} />
+        <SessionTitle session={s} unread={props.unread} backend={sessionBackend(s, state.config)} />
         {stamp ? <span className="session-stamp">{stamp}</span> : null}
       </div>
       <div className="meta">

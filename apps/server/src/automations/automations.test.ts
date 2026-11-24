@@ -41,7 +41,9 @@ afterEach(async () => {
   vi.restoreAllMocks();
   // A run can still be writing its session files when the test ends (ENOTEMPTY).
   await Promise.all(
-    cleanup.map((d) => rm(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })),
+    cleanup.map((d) =>
+      rm(d, { recursive: true, force: true, maxRetries: 8, retryDelay: 50 }).catch(() => undefined),
+    ),
   );
   cleanup = [];
 });

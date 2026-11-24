@@ -1,6 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { fargateResources, fargateUsdPerHour } from "./prices.js";
-import { handleFromRecord, loadComputeTaskRegistry, type ComputeTaskRegistry } from "./registry.js";
+import { fargateResources, quoteCloudSize } from "./prices.js";
+import {
+  handleFromRecord,
+  listRegistryOrphans,
+  loadComputeTaskRegistry,
+  restoreComputeHandle,
+  type ComputeTaskRegistry,
+} from "./registry.js";
 import type {
   ComputeBackend,
   ComputeHandle,
@@ -8,7 +14,7 @@ import type {
   CostQuote,
   ProvisionRequest,
 } from "./types.js";
-import { workerAllowedSizes, workerPickSize, type WorkerBackend } from "@locus/shared";
+import { type WorkerBackend } from "@locus/shared";
 
 const DESCRIBE_ATTEMPTS = 8;
 
@@ -33,11 +39,7 @@ export class AzureComputeBackend implements ComputeBackend {
   }
 
   quote(backend: WorkerBackend, size: string): CostQuote {
-    const resolved = workerPickSize(backend, size);
-    if (!workerAllowedSizes(backend)?.length) {
-      throw new Error("Azure workers need a size allowlist so a runaway agent cannot pick 4 vCPU");
-    }
-    return { size: resolved, usdPerHour: fargateUsdPerHour(resolved) };
+    return quoteCloudSize(backend, size, "Azure");
   }
 
   async provision(req: ProvisionRequest): Promise<ComputeHandle> {
@@ -119,23 +121,11 @@ export class AzureComputeBackend implements ComputeBackend {
   }
 
   get(id: string): ComputeHandle | undefined {
-    const live = this.handles.get(id);
-    if (live) return live;
-    const restored = handleFromRecord(this.registry.get(id) ?? { id: "", backendId: "" });
-    if (!restored) return undefined;
-    this.handles.set(id, restored);
-    return restored;
+    return restoreComputeHandle(this.handles, this.registry, id);
   }
 
   async listOrphans(liveIds: Set<string>): Promise<ComputeOrphan[]> {
-    const seen = new Set<string>();
-    const out: ComputeOrphan[] = [];
-    for (const row of this.registry.list()) {
-      if (liveIds.has(row.id) || seen.has(row.id)) continue;
-      seen.add(row.id);
-      out.push({ id: row.id, backendId: row.backendId });
-    }
-    return out.filter((row) => row.backendId);
+    return listRegistryOrphans(this.registry, liveIds);
   }
 
   private async waitForIp(backend: WorkerBackend, access: string, id: string): Promise<string> {

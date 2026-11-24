@@ -6,6 +6,7 @@ import {
   parseSessionSurface,
   sessionDisplayName,
   sessionKind,
+  effectiveBypassGates,
 } from "@locus/shared";
 import type { ToolResult } from "@locus/guest-agent";
 import type { JsonStore } from "../core/store.js";
@@ -155,6 +156,7 @@ export async function executeSwarmTeamTool(
         title: displayName,
         role,
         personality: personality || defaults.personality,
+        bypassGates: session.bypassGates,
       });
       return {
         ok: true,
@@ -185,6 +187,7 @@ export async function executeSwarmTeamTool(
       model: session.model || provider.defaultModel,
       surface: "swarm",
       autonomy: "guided",
+      bypassGates: effectiveBypassGates(session.bypassGates, config.managedPolicy),
       instructions: brief,
       persona: {
         displayName,

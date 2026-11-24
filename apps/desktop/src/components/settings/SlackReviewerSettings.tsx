@@ -35,6 +35,7 @@ import {
   type AiProvider,
   type IntegrationAccount,
   type SlackConversation,
+  type SlackMember,
   type SlackRepoNote,
   type SlackReviewer,
   type SlackReviewerFeedback,
@@ -58,6 +59,7 @@ import { Select, type SelectOption } from "@/components/layout/Select";
 import { BusyButton, InlineError } from "@/components/layout/Skeleton";
 import { EmptyHint } from "@/components/layout/EmptyHero";
 import { ModelPicker } from "./ModelPicker";
+import { SlackUserMultiSelect } from "./SlackUserMultiSelect";
 import { SlackReviewerAccuracy, SlackReviewerVerifyFields } from "./SlackReviewerAccuracy";
 import { SlackReviewTraceToggle } from "./SlackReviewTraceView";
 import { SlackReviewerLiveLogs } from "./SlackReviewerLiveLogs";
@@ -103,10 +105,11 @@ const STATUS_LABELS: Record<keyof SlackReviewerStatusTemplates, string> = {
   skipped: "Skipped",
   queued: "Queued",
   dismissed: "Dismissed a finding",
+  partDone: "Finished one part of a large PR",
 };
 
 const STATUS_PLACEHOLDERS =
-  "{pr} {url} {title} {author} {sha} {model} {provider} {files} {tokens} {checkout} {comments} {summary} {findings} {progress} {usage} {reason} {ahead} {dismissed}";
+  "{pr} {url} {title} {author} {sha} {model} {provider} {files} {tokens} {checkout} {comments} {summary} {findings} {progress} {usage} {reason} {ahead} {dismissed} {part}";
 
 /** How often the run lists refresh while something is queued or running (same as Home). */
 export const ACTIVE_REFRESH_MS = 5_000;
@@ -214,6 +217,11 @@ export function SlackReviewerSettings(props: {
   const slackAccount = props.integrations.find((row) => row.kind === "slack");
   const [status, setStatus] = useState<SlackStatus | null>(null);
   const [channels, setChannels] = useState<SlackConversation[]>([]);
+  const [members, setMembers] = useState<{
+    rows: SlackMember[];
+    loading: boolean;
+    error: string | null;
+  }>({ rows: [], loading: false, error: null });
   const [runs, setRuns] = useState<SlackReviewRun[]>([]);
   const [feedback, setFeedback] = useState<Record<string, SlackReviewerFeedback>>({});
   const [stats, setStats] = useState<Record<string, SlackReviewerStats>>({});
@@ -245,6 +253,17 @@ export function SlackReviewerSettings(props: {
         if (!live) return;
         setStatus(next);
         if (next.connected) {
+          setMembers((m) => ({ ...m, loading: true }));
+          void api.slackUsers().then(
+            (rows) => live && setMembers({ rows, loading: false, error: null }),
+            (err: unknown) =>
+              live &&
+              setMembers({
+                rows: [],
+                loading: false,
+                error: err instanceof Error ? err.message : "Could not load Slack members",
+              }),
+          );
           const rows = await api.slackConversations();
           if (live)
             setChannels(rows.filter((row) => row.kind === "channel" || row.kind === "private"));
@@ -332,6 +351,7 @@ export function SlackReviewerSettings(props: {
               status?.connected ? { name: status.userName, avatarUrl: status.avatarUrl } : undefined
             }
             channels={channels}
+            members={members}
             feedback={feedback[reviewer.id]}
             stats={stats[reviewer.id]}
             expanded={props.expanded === reviewer.id}
@@ -899,6 +919,7 @@ function SlackReviewerCard(props: {
   canPostAsBot?: boolean;
   me?: { name?: string; avatarUrl?: string };
   channels: SlackConversation[];
+  members?: { rows: SlackMember[]; loading: boolean; error: string | null };
   feedback?: SlackReviewerFeedback;
   stats?: SlackReviewerStats;
   expanded: boolean;
@@ -1228,6 +1249,17 @@ function SlackReviewerCard(props: {
             testId={`slack-reviewer-requesters-${reviewer.id}`}
             onCommit={(ids) => onPatch({ allowedRequesters: parseSlackRequesters(ids) })}
           />
+          <SlackUserMultiSelect
+            label="Don't review for these people"
+            value={reviewer.excludedUsers}
+            users={props.members?.rows ?? []}
+            loading={props.members?.loading}
+            error={props.members?.error}
+            placeholder="Search Slack members…"
+            hint="Their posts, @-mentions, and re-review, retry or question replies are ignored silently, even if they are listed above. With Review new PRs nobody posted on, PRs they author are skipped too, for authors mapped under PR authors in Slack (shown when Mention the PR author is on). Anyone can still dismiss a finding."
+            testId={`slack-reviewer-excluded-${reviewer.id}`}
+            onChange={(ids) => onPatch({ excludedUsers: parseSlackRequesters(ids) })}
+          />
           <PathPromptsField
             reviewerId={reviewer.id}
             value={reviewer.pathPrompts}
@@ -1387,9 +1419,9 @@ function SlackReviewerCard(props: {
           />
           {reviewer.rereviewOnThreadReply ? (
             <p className="hint">
-              A review that fails on a rate limit, overload or timeout is retried once on its own.
-              After that, reply <em>retry</em> in the thread to run it again, even on the same
-              commit.
+              Reply <em>full re-review</em> to review the whole PR again, even on the same commit. A
+              review that fails on a rate limit, overload or timeout is retried once. Reply{" "}
+              <em>retry</em> to try again manually.
             </p>
           ) : null}
           <SettingsToggleRow
@@ -1545,10 +1577,14 @@ function SlackReviewerCard(props: {
               testId={`slack-reviewer-cost-${reviewer.id}`}
               onCommit={(maxCostUsd) => onPatch({ maxCostUsd })}
             />
-            {!reviewer.unlimitedTokens ? (
+            {!reviewer.unlimitedTokens || preview?.cli ? (
               <SettingsToggleRow
                 label="Review large PRs in parts"
-                hint="A PR over the diff budget is reviewed in up to 4 parts, one model call each, and the findings merged, instead of listing the rest by name. Can cost up to 4× a normal review."
+                hint={
+                  reviewer.unlimitedTokens
+                    ? `${preview?.provider.name ?? "This CLI agent"} still gets the prompt on the command line, so a large PR doesn't fit in one call even with No token limits. With this on it is reviewed in up to 12 parts, one model call each, and the findings merged, instead of listing the rest by name. Each part's result is posted in the thread as it finishes. Files in the same folder, and their tests, stay in the same part. Costs about one normal review per part; the cost cap covers them all.`
+                    : "A PR over the diff budget is reviewed in up to 12 parts, one model call each, and the findings merged, instead of listing the rest by name. Each part's result is posted in the thread as it finishes. Files in the same folder, and their tests, stay in the same part. Costs about one normal review per part; the cost cap covers them all."
+                }
                 on={reviewer.splitLargePrs}
                 testId={`slack-reviewer-split-${reviewer.id}`}
                 onChange={(splitLargePrs) => onPatch({ splitLargePrs })}
@@ -1757,7 +1793,10 @@ function StatusTemplateField(props: {
   const fallback = DEFAULT_SLACK_REVIEWER_STATUS[props.name];
   const custom = props.value !== fallback;
   const outcome: SlackReviewOutcome =
-    props.name === "started" || props.name === "queued" || props.name === "dismissed"
+    props.name === "started" ||
+    props.name === "queued" ||
+    props.name === "dismissed" ||
+    props.name === "partDone"
       ? "commented"
       : props.name;
   const text = renderSlackReviewerStatus(
@@ -1931,9 +1970,11 @@ function TestReview(props: {
   const [error, setError] = useState<string | null>(null);
   const [run, setRun] = useState<SlackReviewRun | null>(null);
   const [dryRun, setDryRun] = useState(true);
-  const forgeNote =
-    dryRun || props.reviewer.forgeMode === "none"
-      ? "Nothing is posted to the PR or Slack, and nothing is recorded, so it runs even on a commit already reviewed."
+  const [fullRereview, setFullRereview] = useState(false);
+  const forgeNote = dryRun
+    ? "Reviews the full PR diff without posting to the PR or Slack or recording a review."
+    : props.reviewer.forgeMode === "none"
+      ? "Nothing is posted to the PR or Slack."
       : "The review is posted to the PR. Nothing is posted to Slack.";
   return (
     <div className="slack-reviewer-test">
@@ -1964,7 +2005,7 @@ function TestReview(props: {
                   props.reviewer.id,
                   url.trim(),
                   undefined,
-                  { dryRun },
+                  { dryRun, ...(!dryRun && fullRereview ? { fullRereview: true } : {}) },
                 );
                 setRun(result);
                 props.onRan(result);
@@ -1986,6 +2027,15 @@ function TestReview(props: {
         testId={`slack-reviewer-test-dry-${props.reviewer.id}`}
         onChange={setDryRun}
       />
+      {!dryRun ? (
+        <SettingsToggleRow
+          label="Force full re-review"
+          hint="Review the full PR diff, even if the latest commit has already been reviewed."
+          on={fullRereview}
+          testId={`slack-reviewer-test-full-${props.reviewer.id}`}
+          onChange={setFullRereview}
+        />
+      ) : null}
       <p className="hint">Uses this reviewer&apos;s saved settings. {forgeNote}</p>
       {error ? <InlineError message={error} /> : null}
       {run ? (

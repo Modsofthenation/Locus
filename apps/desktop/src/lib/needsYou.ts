@@ -1,5 +1,7 @@
 import {
   boardNeedsYouItems,
+  askUserItems,
+  canonicalToolCall,
   isAskUserToolName,
   type AgentSession,
   type BoardSummary,
@@ -15,6 +17,7 @@ export type NeedsYouItem = {
   section?: "brain";
   title: string;
   detail: string;
+  at?: string;
 };
 
 /** Tool waits that can Approve / Deny without an answer (not ask_user). */
@@ -30,15 +33,15 @@ export function needsYouHumanItems(sessions: AgentSession[]): NeedsYouItem[] {
   return needsYouItems(sessions).filter((row) => row.key.startsWith("h:"));
 }
 
-function pendingCalls(session: AgentSession): Array<{ id: string; name: string }> {
-  const out: Array<{ id: string; name: string }> = [];
+function pendingCalls(session: AgentSession) {
+  const out = [];
   const seen = new Set<string>();
   for (const message of session.messages) {
     for (const call of message.toolCalls ?? []) {
       if (call.approval !== "needed" || call.finishedAt) continue;
       if (seen.has(call.id)) continue;
       seen.add(call.id);
-      out.push({ id: call.id, name: call.name });
+      out.push(call);
     }
   }
   return out;
@@ -68,11 +71,16 @@ export function needsYouItems(
       const key = `a:${call.id}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      const canonical = canonicalToolCall(call.name, call.arguments);
+      const question = isAskUserToolName(canonical.name)
+        ? askUserItems(canonical.arguments)[0]?.question
+        : undefined;
       out.push({
         key,
         sessionId: session.id,
         title: session.title,
-        detail: call.name.replace(/_/g, " "),
+        detail: question || call.name.replace(/_/g, " "),
+        at: call.startedAt || undefined,
       });
     }
     const reason = session.needsHuman?.trim();
@@ -80,7 +88,20 @@ export function needsYouItems(
       const key = `h:${session.id}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ key, sessionId: session.id, title: session.title, detail: reason });
+      let at: string | undefined;
+      for (let index = session.messages.length - 1; index >= 0; index--) {
+        const message = session.messages[index]!;
+        if (message.role !== "system" || message.content.trim() !== reason) continue;
+        at = message.createdAt;
+        break;
+      }
+      out.push({
+        key,
+        sessionId: session.id,
+        title: session.title,
+        detail: reason,
+        at,
+      });
     }
   }
   for (const row of boardNeedsYouItems(boards ?? [])) {
@@ -93,6 +114,7 @@ export function needsYouItems(
       commentId: row.commentId,
       title: row.title,
       detail: row.detail,
+      at: row.at,
     });
   }
   const inbox = brain?.inboxCount ?? 0;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { VmInstance } from "@locus/shared";
-import { WindowsGuestRuntime } from "@locus/guest-agent";
+import { HostGuestRuntime, WindowsGuestRuntime } from "@locus/guest-agent";
 import { GuestHub } from "./guests.js";
 
 function dockerVm(id = "v1"): VmInstance {
@@ -37,6 +37,7 @@ describe("GuestHub", () => {
     const host = hub.forHost("s1", "ubuntu", "/tmp/host");
     hub.setLiveQemu(true);
     expect(hub.forHost("s1", "ubuntu", "/tmp/host")).toBe(host);
+    expect(host).toBeInstanceOf(HostGuestRuntime);
   });
 
   it("selects Windows SSH+WinRM failover through the Guest factory", () => {

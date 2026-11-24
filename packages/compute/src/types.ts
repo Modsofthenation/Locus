@@ -3,6 +3,8 @@ import type { WorkerBackend } from "@locus/shared";
 export interface CostQuote {
   size: string;
   usdPerHour: number;
+  maxEstimatedUsd?: number;
+  rateDate?: string;
 }
 
 export interface ComputeHandle {
@@ -10,12 +12,16 @@ export interface ComputeHandle {
   url: string;
   token: string;
   fingerprint?: string;
+  requestedAt?: string;
+  gateway?: { headers: Record<string, string>; deadlineAt: number };
   size: string;
 }
 
 export interface ComputeOrphan {
   id: string;
   backendId: string;
+  sessionId?: string;
+  cleanupPending?: boolean;
 }
 
 export interface ProvisionRequest {
@@ -30,6 +36,7 @@ export interface ProvisionRequest {
 }
 
 export interface ComputeBackend {
+  verify?(backend: WorkerBackend): Promise<void>;
   quote(backend: WorkerBackend, size: string): CostQuote;
   provision(req: ProvisionRequest): Promise<ComputeHandle>;
   destroy(id: string, backend?: WorkerBackend): Promise<void>;

@@ -9,6 +9,7 @@ import {
   type ComputerUseToolName,
 } from "@locus/shared";
 import { linuxCommand, wrapNohupCommand } from "./commands.js";
+import { computerCapabilitiesResult } from "./computerCapabilities.js";
 import { writeFileKeepExec } from "./workspaceWrite.js";
 import { applyGuestPatch } from "./applyPatch.js";
 import { isHostFile, lexicalHostPath, resolveReadPath, resolveWritePath } from "./hostPath.js";
@@ -66,17 +67,10 @@ export class DockerGuestRuntime implements GuestRuntime {
       return { ok: false, output: `${req.name} is not available in a Docker agent` };
     }
     if (req.name === "computer_capabilities")
-      return {
-        ok: true,
-        output: JSON.stringify({
-          backend: "cdp",
-          browser: true,
-          nativeDesktop: false,
-          observation: ["browser_snapshot", "screenshot"],
-          actions: ["browser_action", "browser_click", "browser_type", "key"],
-          note: "Chromium must be installed; use a VM guest for native applications.",
-        }),
-      };
+      return computerCapabilitiesResult({
+        browser: true,
+        note: "Chromium must be installed; use a VM guest for native applications.",
+      });
     if (req.name === "preview") {
       return { ok: true, output: "preview is handled by the control plane" };
     }

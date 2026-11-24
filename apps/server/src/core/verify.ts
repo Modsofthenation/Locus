@@ -35,6 +35,7 @@ import {
   type WorkspaceScriptFailureKind,
   type WorkspaceScriptResult,
 } from "./hooks.js";
+import { killTreeOnTimeout, processTreeSpawnOptions } from "./processTree.js";
 
 /**
  * Language-agnostic verify runner behind the publish test gate, post-edit
@@ -452,7 +453,9 @@ function runShellCapture(cwd: string, command: string, timeoutMs: number): Promi
       env,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      ...processTreeSpawnOptions,
     });
+    let fallback: ReturnType<typeof setTimeout> | undefined;
     const append = (chunk: Buffer) => {
       raw += chunk.toString("utf8");
       // Keep the tail: summaries and failure lists print last.
@@ -460,22 +463,25 @@ function runShellCapture(cwd: string, command: string, timeoutMs: number): Promi
     };
     child.stdout?.on("data", append);
     child.stderr?.on("data", append);
+    const onClose = (code: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (fallback) clearTimeout(fallback);
+      resolve({ raw, code, timedOut });
+    };
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      fallback = killTreeOnTimeout(child, () => onClose(null));
     }, timeoutMs);
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (fallback) clearTimeout(fallback);
       resolve({ raw, code: null, timedOut, spawnError: hostSpawnErrorOutput(err, shell, cwd) });
     });
-    child.on("close", (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ raw, code, timedOut });
-    });
+    child.on("close", onClose);
   });
 }
 

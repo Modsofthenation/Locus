@@ -21,3 +21,6 @@ export function guestVisibleToPlane(
   if (!planeId) return false;
   return guest.planeId === planeId;
 }
+
+/** Dedicated worker credential header when a cloud gateway owns Authorization. */
+export const WORKER_GATEWAY_TOKEN_HEADER = "x-locus-worker-token";

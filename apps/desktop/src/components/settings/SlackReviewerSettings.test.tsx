@@ -15,6 +15,7 @@ import {
 const apiMock = vi.hoisted(() => ({
   slackStatus: vi.fn(),
   slackConversations: vi.fn(),
+  slackUsers: vi.fn(),
   slackReviewerRuns: vi.fn(),
   slackReviewerReview: vi.fn(),
   slackReviewerTrace: vi.fn(),
@@ -103,6 +104,11 @@ beforeEach(() => {
   root = createRoot(host);
   apiMock.slackStatus.mockResolvedValue({ connected: true, socket: "up", canPostAsBot: true });
   apiMock.slackConversations.mockResolvedValue([]);
+  apiMock.slackUsers.mockResolvedValue([
+    { id: "U0123ABCD", name: "alice", realName: "Alice Smith" },
+    { id: "U0456EFGH", name: "bob" },
+    { id: "U0789IJKL", name: "deploy-bot", isBot: true },
+  ]);
   apiMock.slackReviewerRuns.mockResolvedValue({ runs: [run] });
 });
 
@@ -707,6 +713,17 @@ describe("previewReviewerModel", () => {
       undefined,
       { dryRun: false },
     );
+
+    act(() => q<HTMLButtonElement>('[data-testid="slack-reviewer-test-full-r1"]').click());
+    await act(async () => {
+      q<HTMLButtonElement>('[data-testid="slack-reviewer-test-run-r1"]').click();
+    });
+    expect(apiMock.slackReviewerReview).toHaveBeenLastCalledWith(
+      "r1",
+      "https://github.com/acme/api/pull/9",
+      undefined,
+      { dryRun: false, fullRereview: true },
+    );
   });
 
   it("edits review context, thread options, the author map and the cost cap", async () => {
@@ -957,6 +974,36 @@ describe("opt-outs, scoping, path prompts and REVIEW.md proposals", () => {
     commit("slack-reviewer-path-prompt-0", "Check locks.");
     expect(seen.rows[0]!.pathPrompts).toEqual([{ glob: "migrations/**", prompt: "Check locks." }]);
     expect(q('[data-testid="slack-reviewer-path-prompts-r1"]').textContent).toContain("tokens");
+  });
+
+  it("picks people to exclude from the Slack member list", async () => {
+    const { seen } = mount([reviewer()]);
+    await flush();
+    const input = q<HTMLInputElement>('[data-testid="slack-reviewer-excluded-r1-input"]');
+    act(() => input.focus());
+    act(() => input.dispatchEvent(new FocusEvent("focusin", { bubbles: true })));
+    act(() => setValue(input, "smith"));
+    expect(
+      document.querySelector('[data-testid="slack-reviewer-excluded-r1-option-U0456EFGH"]'),
+    ).toBeNull();
+    act(() =>
+      q<HTMLElement>('[data-testid="slack-reviewer-excluded-r1-option-U0123ABCD"]').click(),
+    );
+    expect(seen.rows[0]!.excludedUsers).toEqual(["U0123ABCD"]);
+    act(() => setValue(input, "bot"));
+    act(() =>
+      q<HTMLElement>('[data-testid="slack-reviewer-excluded-r1-option-U0789IJKL"]').click(),
+    );
+    expect(seen.rows[0]!.excludedUsers).toEqual(["U0123ABCD", "U0789IJKL"]);
+    expect(q('[data-testid="slack-reviewer-excluded-r1-chip-U0123ABCD"]').textContent).toContain(
+      "alice",
+    );
+    act(() =>
+      q<HTMLButtonElement>(
+        '[data-testid="slack-reviewer-excluded-r1-chip-U0123ABCD"] button',
+      ).click(),
+    );
+    expect(seen.rows[0]!.excludedUsers).toEqual(["U0789IJKL"]);
   });
 
   it("proposes remembered dismissals as REVIEW.md, and disables it on other forges", async () => {

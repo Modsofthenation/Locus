@@ -27,20 +27,20 @@
   --brand-hi: #f4d2aa;
   --brand-mid: #e7b07a;
   --brand-lo: #6f8f8c;
-  --space-0-5: 2px;
-  --space-1: 4px;
-  --space-1-5: 6px;
-  --space-2: 8px;
-  --space-2-5: 10px;
-  --space-3: 12px;
-  --space-3-5: 14px;
-  --space-4: 16px;
-  --space-5: 20px;
-  --space-6: 24px;
-  --space-7: 28px;
-  --space-8: 32px;
-  --space-10: 40px;
-  --space-12: 48px;
+  --space-0-5: calc(2px * var(--density-space));
+  --space-1: calc(4px * var(--density-space));
+  --space-1-5: calc(6px * var(--density-space));
+  --space-2: calc(8px * var(--density-space));
+  --space-2-5: calc(10px * var(--density-space));
+  --space-3: calc(12px * var(--density-space));
+  --space-3-5: calc(14px * var(--density-space));
+  --space-4: calc(16px * var(--density-space));
+  --space-5: calc(20px * var(--density-space));
+  --space-6: calc(24px * var(--density-space));
+  --space-7: calc(28px * var(--density-space));
+  --space-8: calc(32px * var(--density-space));
+  --space-10: calc(40px * var(--density-space));
+  --space-12: calc(48px * var(--density-space));
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;
@@ -50,15 +50,15 @@
   --radius-control: var(--radius-sm);
   --radius-pane: var(--radius);
   --radius-pill: 999px;
-  --type-2xs: 12px;
-  --type-xs: 12px;
-  --type-sm: 13px;
-  --type-md: 14px;
-  --type-body: 14px;
-  --type-lg: 16px;
-  --type-xl: 18px;
-  --type-2xl: 22px;
-  --type-3xl: 28px;
+  --type-2xs: max(12px, calc(12px * var(--density-type)));
+  --type-xs: max(12px, calc(12px * var(--density-type)));
+  --type-sm: max(12px, calc(13px * var(--density-type)));
+  --type-md: calc(14px * var(--density-type));
+  --type-body: calc(14px * var(--density-type));
+  --type-lg: calc(16px * var(--density-type));
+  --type-xl: calc(18px * var(--density-type));
+  --type-2xl: calc(22px * var(--density-type));
+  --type-3xl: calc(28px * var(--density-type));
   --type-micro: var(--type-xs);
   --type-small: var(--type-md);
   --type-title: var(--type-xl);
@@ -179,7 +179,18 @@
   --accent-text: color-mix(in srgb, var(--accent) 70%, var(--text));
 }
 
+/* App-wide density. The space and type tokens multiply by these, so the density
+ * setting reaches every surface, not only chat. Declared on :root alone (not on
+ * [data-theme] cards) so theme previews inherit the user's choice. Custom themes
+ * scale on top of them, so a theme's density and the user's density compose. */
+:root {
+  --density-space: 1;
+  --density-type: 1;
+}
+
 [data-chat-density="comfortable"] {
+  --density-space: 1.2;
+  --density-type: 1.07;
   --chat-font: 14.5px;
   --chat-line: 1.65;
   --chat-who: 12px;
@@ -245,6 +256,8 @@
 }
 
 [data-chat-density="dense"] {
+  --density-space: 0.75;
+  --density-type: 0.93;
   --chat-font: 12px;
   --chat-line: 1.4;
   --chat-who: 10px;
@@ -650,6 +663,16 @@ button:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.rail-peek-title {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+.rail-peek-title .title-text {
+  flex: 1;
+  min-width: 0;
+}
 .rail-peek-item .meta {
   font-size: var(--type-micro);
   color: var(--muted);
@@ -928,6 +951,7 @@ button:disabled {
   width: 100%;
   max-width: none;
   text-align: left;
+  container-type: inline-size;
 }
 .dash-needs .empty-card {
   margin: 0;
@@ -1099,6 +1123,129 @@ button.dash-line:focus-visible {
   padding: var(--space-1) var(--space-2);
   font-size: var(--type-xs);
   color: var(--muted);
+}
+.dash-triage {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+@container (min-width: 500px) {
+  .dash-triage {
+    grid-template-columns: minmax(150px, 0.75fr) minmax(0, 1.25fr);
+    align-items: start;
+  }
+}
+.dash-needs .dash-triage .inbox-next {
+  min-width: 0;
+  margin-top: 0;
+}
+.dash-queue {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  max-height: 215px;
+  min-width: 0;
+  overflow: auto;
+}
+.dash-queue-group + .dash-queue-group,
+.dash-upcoming,
+.dash-resumable {
+  border-top: 1px solid var(--line);
+}
+.dash-queue-group h3,
+.dash-upcoming h4,
+.dash-resumable summary {
+  margin: 0;
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+}
+.dash-resumable summary {
+  cursor: pointer;
+}
+.dash-queue-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--space-2);
+  width: 100%;
+  padding: var(--space-1-5) var(--space-2);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dash-queue-item:hover,
+.dash-queue-item:focus-visible,
+.dash-queue-item[aria-pressed="true"] {
+  background: var(--hover);
+}
+.dash-queue-item[aria-pressed="true"] {
+  box-shadow: inset 2px 0 var(--accent);
+}
+.dash-queue-title {
+  font-size: var(--type-sm);
+}
+.dash-queue-item time,
+.dash-queue-detail {
+  color: var(--muted);
+  font-size: var(--type-xs);
+}
+.dash-queue-detail {
+  grid-column: 1 / -1;
+}
+.dash-queue-title,
+.dash-queue-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-line-detail {
+  font-size: var(--type-xs);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+a.dash-line {
+  text-decoration: none;
+}
+a.dash-line:hover,
+a.dash-line:focus-visible,
+.run-table .run-row-focused {
+  background: var(--hover);
+}
+.dash-usage-scroll {
+  overflow: auto;
+  max-height: 310px;
+}
+.dash-usage table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--type-xs);
+  font-variant-numeric: tabular-nums;
+}
+.dash-usage thead {
+  position: sticky;
+  top: 0;
+  background: var(--bg-1);
+}
+.dash-usage th,
+.dash-usage td {
+  padding: var(--space-1-5) var(--space-2);
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+.dash-usage th:first-child {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.dash-usage small {
+  display: block;
+  color: var(--muted);
+  font-weight: normal;
 }
 @media (max-width: 640px) {
   .inbox-dashboard {
@@ -2034,6 +2181,23 @@ label.search-wrap:has(kbd) > input {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.session-backend-badge {
+  flex: none;
+  margin-inline-start: var(--space-1-5);
+  padding-inline: var(--space-1-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.session-backend-badge[data-backend="cloud"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-2));
 }
 .session-item.unread .title {
   font-weight: var(--weight-semibold);
@@ -3384,6 +3548,20 @@ label.search-wrap.chat-find-wrap > .search-icon {
   gap: var(--space-1-5);
   margin: var(--space-1-5) 0 var(--space-1);
   flex-wrap: wrap;
+}
+.approval-note {
+  margin: var(--space-1-5) 0 0;
+  color: var(--text);
+  font-size: var(--type-small);
+  line-height: 1.45;
+}
+.approval-note code {
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+.test-gate-prompt {
+  display: flex;
+  flex-direction: column;
 }
 .ask-user {
   display: flex;
@@ -12083,6 +12261,9 @@ html:has(.vm-pane.workspace-fs) .slack-toasts {
   gap: var(--space-1-5);
   min-width: 0;
 }
+.composer-more-cell.is-wide {
+  grid-column: 1 / -1;
+}
 .composer-more-label {
   font-size: var(--type-2xs);
   letter-spacing: 0.06em;
@@ -12190,6 +12371,11 @@ html:has(.vm-pane.workspace-fs) .slack-toasts {
   padding: 3px;
   background: var(--bg);
 }
+.runtime-toggle.worker-kind-toggle {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
 .runtime-toggle button {
   border: 0;
   background: transparent;
@@ -14199,7 +14385,8 @@ label.search-wrap.settings-find-wrap > input.search {
 .qemu-install-progress {
   margin: var(--space-2) 0 var(--space-3);
 }
-.qemu-install-log {
+.qemu-install-log,
+.worker-template-log {
   max-height: 180px;
   overflow: auto;
   margin: var(--space-1-5) 0 0;
@@ -16678,6 +16865,20 @@ button.pill {
   background: var(--bg);
   color: var(--text);
   font-size: var(--type-sm);
+}
+.theme-search-row {
+  display: flex;
+  flex: 0 1 340px;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.theme-search-row .theme-search {
+  flex: 1 1 auto;
+}
+.theme-shuffle {
+  flex-shrink: 0;
+  height: 34px;
 }
 .theme-search::placeholder {
   color: var(--faint);
@@ -26201,4 +26402,115 @@ img.slack-emoji {
     flex-direction: column;
     align-items: stretch;
   }
+}
+
+/* Slack member multi-select (reviewer exclusions). */
+.slack-user-select {
+  position: relative;
+}
+.slack-user-select-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 34px;
+  padding: var(--space-1) var(--space-1-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  cursor: text;
+}
+.slack-user-select-box:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.field .slack-user-select-box input {
+  flex: 1 1 120px;
+  width: auto;
+  min-width: 80px;
+  border-radius: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  padding: var(--space-0-5) var(--space-1);
+  font: inherit;
+}
+.slack-user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding: var(--space-0-5) var(--space-1) var(--space-0-5) var(--space-1-5);
+  border-radius: var(--radius-pill);
+  background: var(--bg-3);
+  color: var(--text);
+  font-size: var(--type-sm);
+}
+.slack-user-chip img,
+.slack-user-select-list img {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-xs);
+  flex: 0 0 auto;
+}
+.slack-user-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.slack-user-chip button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 var(--space-0-5);
+  font-size: var(--type-sm);
+  line-height: 1;
+}
+.slack-user-chip button:hover {
+  color: var(--text);
+}
+.slack-user-select-list {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  top: calc(100% - var(--space-1));
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  box-shadow: var(--elev-2);
+}
+.slack-user-select-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1-5) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.slack-user-select-list li.active {
+  background: var(--bg-3);
+}
+.slack-user-select-list li.slack-user-select-empty {
+  color: var(--muted);
+  cursor: default;
+}
+.slack-user-select-name {
+  color: var(--text);
+}
+.slack-user-select-sub {
+  color: var(--faint);
+  font-size: var(--type-sm);
+}
+.field .slack-user-select-list input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
 }

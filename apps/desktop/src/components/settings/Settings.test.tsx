@@ -57,6 +57,9 @@ vi.mock("@/lib/api", () => ({
     setTailscaleFunnel: vi.fn(),
     testWorker: vi.fn(),
     addWorker: vi.fn(),
+    startE2BTemplateBuild: vi.fn(),
+    e2bTemplateBuild: vi.fn(),
+    latestE2BTemplateBuild: vi.fn(async () => ({ build: null })),
     workersStatus: vi.fn(async () => []),
     phone: vi.fn(async () => ({
       enabled: false,
@@ -76,7 +79,7 @@ vi.mock("@/lib/api", () => ({
     rotateChromeExtension: vi.fn(),
     checkUpdates: vi.fn(async () => ({
       status: "unavailable",
-      current: "0.24.0",
+      current: "0.29.0",
       message: "No GitHub release found yet. Check for updates works after a v* tag is published.",
     })),
     refreshCursorCli: vi.fn(async () => ({ changed: false, models: [] })),
@@ -860,6 +863,105 @@ describe("Settings", () => {
         .value,
     ).toBe("https://192.168.1.8:7421");
   });
+
+  it("builds the E2B worker template from Settings and fills in its ID", async () => {
+    {
+      const worker = {
+        id: "e1",
+        name: "E2B small",
+        kind: "e2b" as const,
+        url: "",
+        token: "e2b-key",
+        hourlyUsd: 0.2,
+        sandbox: { template: "", maxMinutes: 15, maxUsd: 1, rateDate: "2026-11-22" },
+      };
+      const running = {
+        id: "build-1",
+        workerId: "e1",
+        state: "running" as const,
+        startedAt: Date.now(),
+        logs: ["Preparing the Locus worker bundle"],
+      };
+      vi.mocked(api.startE2BTemplateBuild).mockResolvedValue({ build: running });
+      vi.mocked(api.e2bTemplateBuild).mockResolvedValue({
+        build: {
+          ...running,
+          state: "succeeded",
+          templateId: "tpl-built",
+          logs: [...running.logs, "Template locus-worker ready (tpl-built)"],
+        },
+      });
+      await render({ ...config, workers: [worker] });
+      await act(async () => {
+        navButton("Workers")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      // The Workers tab opens the first worker card.
+      expect(host!.textContent).toContain("No Docker or registry needed");
+      await act(async () => {
+        [...host!.querySelectorAll("button")]
+          .find((btn) => btn.textContent === "Build template")!
+          .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+      expect(api.startE2BTemplateBuild).toHaveBeenCalledWith({
+        worker: expect.objectContaining({ id: "e1", token: "e2b-key" }),
+        size: "2-2",
+        agentClis: true,
+      });
+      expect(host!.textContent).toContain("Building in E2B");
+      await act(async () => {
+        await vi.waitFor(() => expect(api.e2bTemplateBuild).toHaveBeenCalledWith("build-1"), {
+          timeout: 4000,
+        });
+        await Promise.resolve();
+      });
+      expect(host!.textContent).toContain("Template ready · tpl-built");
+      const templateInput = [...host!.querySelectorAll(".field")]
+        .find((field) => field.querySelector("label")?.textContent === "Template ID")!
+        .querySelector("input") as HTMLInputElement;
+      expect(templateInput.value).toBe("tpl-built");
+    }
+  }, 10_000);
+
+  it("resumes an E2B template build that kept running while Settings was closed", async () => {
+    const worker = {
+      id: "e1",
+      name: "E2B small",
+      kind: "e2b" as const,
+      url: "",
+      token: "e2b-key",
+      hourlyUsd: 0.2,
+      sandbox: { template: "", maxMinutes: 15, maxUsd: 1, rateDate: "2026-11-22" },
+    };
+    const running = {
+      id: "build-7",
+      workerId: "e1",
+      state: "running" as const,
+      startedAt: Date.now(),
+      logs: ["Uploading to E2B and building the template"],
+    };
+    vi.mocked(api.latestE2BTemplateBuild).mockResolvedValue({ build: running });
+    vi.mocked(api.e2bTemplateBuild).mockResolvedValue({
+      build: { ...running, state: "succeeded", templateId: "tpl-resumed" },
+    });
+    await render({ ...config, workers: [worker] });
+    await act(async () => {
+      navButton("Workers")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(api.latestE2BTemplateBuild).toHaveBeenCalledWith("e1");
+    expect(host!.textContent).toContain("Uploading to E2B and building the template");
+    await act(async () => {
+      await vi.waitFor(() => expect(api.e2bTemplateBuild).toHaveBeenCalledWith("build-7"), {
+        timeout: 4000,
+      });
+      await Promise.resolve();
+    });
+    const templateInput = [...host!.querySelectorAll(".field")]
+      .find((field) => field.querySelector("label")?.textContent === "Template ID")!
+      .querySelector("input") as HTMLInputElement;
+    expect(templateInput.value).toBe("tpl-resumed");
+  }, 10_000);
 
   it("shows Integrations for Jira, Slack, Grafana, incident.io, and Sentry", async () => {
     await render();
@@ -1771,6 +1873,31 @@ describe("Settings", () => {
     expect(host!.textContent).toContain("Approval timeout (ms)");
     expect(host!.textContent).toContain("Prompt queue depth");
     expect(host!.textContent).toContain("Job chats to keep");
+  });
+
+  it("edits the CLI agent sandbox under Advanced", async () => {
+    await render({
+      ...config,
+      advanced: { ...config.advanced, cliSandbox: { allowPorts: [3128] } },
+    });
+    await act(async () => {
+      navButton("Advanced")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(host!.textContent).toContain("CLI agent sandbox");
+    const ports = host!.querySelector(
+      "[data-testid='advanced-cliSandbox-allowPorts']",
+    ) as HTMLInputElement;
+    expect(ports.value).toBe("3128");
+    await act(async () => {
+      ports.value = "3128, 8080, nope";
+      ports.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    await flushAutosave();
+    expect(api.saveConfig).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        advanced: expect.objectContaining({ cliSandbox: { allowPorts: [3128, 8080] } }),
+      }),
+    );
   });
 
   it("shows the QEMU install command as a copyable block beside a secondary button", async () => {

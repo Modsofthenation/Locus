@@ -127,15 +127,16 @@ export async function answerQuestion(
   } catch (err) {
     trace?.note(`Failed: ${modelCallFailure(err)}`);
     return fail(modelCallFailure(err), { model: modelLabel, usage });
+  } finally {
+    await ctx.deps.budgets
+      ?.record(
+        { id: `slack-reviewer:${reviewer.id}`, providerId: pick.provider.id, model: pick.model },
+        usage,
+        config,
+      )
+      .catch(() => undefined);
   }
   const usd = estimateUsd(usage, resolveUsageRates(pick.provider, pick.model));
-  await ctx.deps.budgets
-    ?.record(
-      { id: `slack-reviewer:${reviewer.id}`, providerId: pick.provider.id, model: pick.model },
-      usage,
-      config,
-    )
-    .catch(() => undefined);
   const reply = text.trim();
   if (!reply) return fail("the model returned nothing", { model: modelLabel, usage, usd });
   await ctx.postText(

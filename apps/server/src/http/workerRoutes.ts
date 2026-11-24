@@ -5,9 +5,12 @@ import {
   isMaskedSecret,
   normalizeWorkerUrl,
   parseWorkerAddBlob,
+  e2bTemplateSize,
+  parseWorkerBackend,
+  sandboxWorkerKind,
   parseWorkerFingerprint,
   workerBackendError,
-  workerKind,
+  workerProvisionsCompute,
 } from "@locus/shared";
 import { WorkerClient } from "@locus/worker";
 import { isLocalOperator } from "../core/localguard.js";
@@ -15,6 +18,7 @@ import { redactConfig } from "../core/redact.js";
 import type { JsonStore } from "../core/store.js";
 import type { SessionService } from "../session/sessions.js";
 import type { HostCapabilities } from "@locus/hypervisor";
+import type { E2BTemplateBuilds } from "../runtime/e2bTemplateBuilds.js";
 
 export function registerWorkerRoutes(
   app: Hono,
@@ -23,6 +27,8 @@ export function registerWorkerRoutes(
     sessions: SessionService;
     onConfigSaved?: (config: LocusConfig) => Promise<HostCapabilities | void>;
     peerAddress?: (c: import("hono").Context) => string | undefined;
+    /** E2B template builds started from Settings → Workers. */
+    templateBuilds?: E2BTemplateBuilds;
   },
 ): void {
   async function probeWorkerHealth(url: string, token: string, fingerprint?: string) {
@@ -151,11 +157,102 @@ export function registerWorkerRoutes(
     });
   });
 
+  app.post("/api/workers/compute/verify", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress)) {
+      return c.json({ error: "Sandbox profile verification is desktop-only" }, 403);
+    }
+    const backend = parseWorkerBackend(await c.req.json().catch(() => undefined));
+    if (!backend || !sandboxWorkerKind(backend.kind)) {
+      return c.json({ error: "Select a managed sandbox worker" }, 400);
+    }
+    if (!backend.token || isMaskedSecret(backend.token)) {
+      const config = await opts.store.loadConfig();
+      backend.token = config.workers?.find(
+        (row) => row.id === backend.id && row.kind === backend.kind,
+      )?.token;
+    }
+    try {
+      await opts.sessions.verifySandboxWorker(backend);
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : "Profile verification failed" },
+        400,
+      );
+    }
+  });
+
+  app.post("/api/workers/compute/e2b/template", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress)) {
+      return c.json({ error: "Template builds are desktop-only" }, 403);
+    }
+    if (!opts.templateBuilds) {
+      return c.json({ error: "Template builds are unavailable on this server" }, 503);
+    }
+    const body = ((await c.req.json().catch(() => undefined)) ?? {}) as {
+      worker?: unknown;
+      size?: unknown;
+      agentClis?: unknown;
+    };
+    const backend = parseWorkerBackend(body.worker);
+    if (!backend || backend.kind !== "e2b") {
+      return c.json({ error: "Select an E2B worker" }, 400);
+    }
+    let apiKey = backend.token && !isMaskedSecret(backend.token) ? backend.token : undefined;
+    if (!apiKey) {
+      const config = await opts.store.loadConfig();
+      apiKey = config.workers?.find((row) => row.id === backend.id && row.kind === "e2b")?.token;
+    }
+    try {
+      const { view } = opts.templateBuilds.start({
+        workerId: backend.id,
+        apiKey: apiKey ?? "",
+        size: e2bTemplateSize(body.size).id,
+        agentClis: body.agentClis !== false,
+      });
+      return c.json({ build: view });
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : "Template build failed to start" },
+        409,
+      );
+    }
+  });
+
+  app.get("/api/workers/compute/e2b/template", (c) => {
+    if (!isLocalOperator(c, opts.peerAddress)) {
+      return c.json({ error: "Template builds are desktop-only" }, 403);
+    }
+    const workerId = c.req.query("workerId")?.trim();
+    if (!workerId) return c.json({ error: "workerId is required" }, 400);
+    return c.json({ build: opts.templateBuilds?.latest(workerId) ?? null });
+  });
+
+  app.get("/api/workers/compute/e2b/template/:id", (c) => {
+    if (!isLocalOperator(c, opts.peerAddress)) {
+      return c.json({ error: "Template builds are desktop-only" }, 403);
+    }
+    const build = opts.templateBuilds?.get(c.req.param("id"));
+    if (!build) return c.json({ error: "Template build not found" }, 404);
+    return c.json({ build });
+  });
+
+  app.get("/api/workers/compute/cleanup", async (c) => {
+    if (!isLocalOperator(c, opts.peerAddress)) {
+      return c.json({ error: "Compute cleanup status is desktop-only" }, 403);
+    }
+    try {
+      return c.json(await opts.sessions.pendingComputeCleanup());
+    } catch {
+      return c.json({ error: "Compute cleanup status is unavailable" }, 503);
+    }
+  });
+
   app.get("/api/workers/status", async (c) => {
     const config = await opts.store.loadConfig();
     const rows = await Promise.all(
       (config.workers ?? []).map(async (row) => {
-        if (workerKind(row) === "fargate" || !row.url) {
+        if (workerProvisionsCompute(row) || !row.url) {
           return { id: row.id, live: false as const, skipped: true as const };
         }
         const token = row.token?.trim();

@@ -13,6 +13,7 @@ import {
 } from "@locus/shared/windowsCliSpawn";
 import { readCursorUsagePayload, type CursorCloudEvent } from "./cursor.js";
 import { ProviderError, type TokenUsageEvent } from "./types.js";
+import { reapCliProcess, streamCliLines } from "./cliStream.js";
 
 const CLI_TOOL_NAMES: Record<string, string> = {
   read: "file_read",
@@ -294,40 +295,39 @@ export async function* streamCursorCli(input: {
     throw rewriteCliSpawnError(err, argv.command);
   }
   let streamedText = false;
-  let sawTerminal = false;
-  try {
-    for await (const line of handle.lines) {
-      if (input.signal?.aborted) break;
+  yield* streamCliLines({
+    command: argv.command,
+    handle,
+    signal: input.signal,
+    rewriteError: rewriteCliSpawnError,
+    onLine: (line) => {
+      const events: CursorCliEvent[] = [];
       const terminal = isCursorCliTerminalLine(line);
       const sessionId = sessionIdFromCliLine(line);
       const event = parseCursorCliLine(line);
       if (sessionId && event?.type !== "session") {
-        yield { type: "session", sessionId };
+        events.push({ type: "session", sessionId });
       }
       if (event) {
         if (event.type === "text") streamedText = true;
         if (event.type === "result" && event.text && streamedText) {
-          yield { ...event, text: undefined };
+          events.push({ ...event, text: undefined });
         } else {
-          yield event;
+          events.push(event);
         }
       }
-      if (terminal) {
-        sawTerminal = true;
-        break;
-      }
-    }
-    const done = await reapCursorCli(handle, CLI_EXIT_GRACE_MS);
-    if (!sawTerminal && !input.signal?.aborted && done.code !== 0) {
-      const detail = done.stderr.trim() || `exit ${done.code}`;
-      yield { type: "error", message: `Cursor CLI failed: ${detail}` };
-    }
-    yield { type: "done" };
-  } catch (err) {
-    throw rewriteCliSpawnError(err, argv.command);
-  } finally {
-    handle.kill?.();
-  }
+      return { events, stop: terminal };
+    },
+    reap: () => reapCliProcess(handle, CLI_EXIT_GRACE_MS, "Cursor CLI did not exit"),
+    failedExit: (done) =>
+      done.code !== 0
+        ? {
+            type: "error" as const,
+            message: `Cursor CLI failed: ${done.stderr.trim() || `exit ${done.code}`}`,
+          }
+        : undefined,
+    doneEvent: { type: "done" },
+  });
 }
 
 export async function listCursorCliModels(
@@ -457,28 +457,6 @@ export function spawnCursorCli(req: CursorCliSpawnRequest): CursorCliSpawnHandle
         }
       : {}),
   };
-}
-
-async function reapCursorCli(
-  handle: CursorCliSpawnHandle,
-  killAfterMs: number,
-): Promise<{ code: number; stderr: string }> {
-  const exited = handle.wait();
-  const winner = await Promise.race([exited, delay(killAfterMs).then(() => "timeout" as const)]);
-  if (winner !== "timeout") return winner;
-  handle.kill?.();
-  const afterKill = await Promise.race([
-    exited,
-    delay(2_000).then(() => ({ code: 1, stderr: "Cursor CLI did not exit" })),
-  ]);
-  return afterKill;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
 }
 
 function isCursorCliTerminalLine(line: string): boolean {

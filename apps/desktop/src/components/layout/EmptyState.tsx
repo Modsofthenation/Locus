@@ -30,6 +30,8 @@ import {
   type HubAvatarId,
   type HubAvatarPose,
   type CodexReasoningEffort,
+  policyAllowedGateBypasses,
+  type HarnessGate,
   type NamedEnvironment,
   type NetworkJail,
   type VisionMode,
@@ -132,6 +134,7 @@ export function EmptyState() {
   const [netDirty, setNetDirty] = useState(false);
   const [namedEnvId, setNamedEnvId] = useState("");
   const [branchLock, setBranchLock] = useState(false);
+  const [bypassGates, setBypassGates] = useState<HarnessGate[]>([]);
   const hubMode = parseProductMode(state.config?.productMode) === "swarm";
   const activeTeamId = hubMode
     ? state.projects.find((row) => row.id === state.selectedProjectId && row.surface === "swarm")
@@ -439,6 +442,7 @@ export function EmptyState() {
         ...(primaryCheckout ? { repo: primaryCheckout } : {}),
         ...(extraCheckouts.length ? { extraRepos: extraCheckouts } : {}),
         ...(repoIds[0] && branchLock ? { branchLock: true } : {}),
+        ...(bypassGates.length ? { bypassGates } : {}),
         ...(sessionBackendId ? { placement: "worker" as const, backendId: sessionBackendId } : {}),
       });
       setFiles([]);
@@ -936,6 +940,13 @@ export function EmptyState() {
               onMaxUsdChange={setMaxUsd}
               onNamedEnvChange={selectNamedEnv}
               onBranchLockChange={setBranchLock}
+              bypassGates={bypassGates}
+              allowedGateBypasses={
+                state.config?.managedPolicy?.active
+                  ? policyAllowedGateBypasses(state.config.managedPolicy)
+                  : undefined
+              }
+              onBypassGatesChange={setBypassGates}
             />
           ) : null}
 

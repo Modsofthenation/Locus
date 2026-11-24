@@ -75,6 +75,16 @@ describe("TraceModal", () => {
     });
   }
 
+  it("portals to document.body so the topbar's stacking context cannot trap it", async () => {
+    vi.mocked(api.debugLog).mockResolvedValue(detail);
+    vi.mocked(api.sessionEgress).mockResolvedValue(null as never);
+    vi.mocked(api.sessionApprovals).mockResolvedValue({ approvals: [] });
+    await render();
+    const backdrop = document.querySelector(".modal-backdrop:has(.trace-modal)");
+    expect(backdrop?.parentElement).toBe(document.body);
+    expect(host.querySelector(".trace-modal")).toBeNull();
+  });
+
   it("loads this agent's trace and keeps eval actions in a ⋯ menu", async () => {
     expect(css).toMatch(/\.debug-log-actions \{[\s\S]*?flex-shrink:\s*0/);
     expect(css).toMatch(/\.debug-log-actions \.btn \{[\s\S]*?white-space:\s*nowrap/);
@@ -115,23 +125,27 @@ describe("TraceModal", () => {
     });
     await render();
     expect(api.debugLog).toHaveBeenCalledWith("trace", "sess-1");
-    expect(host.querySelector("[data-testid='egress-summary']")?.textContent).toMatch(
+    expect(document.body.querySelector("[data-testid='egress-summary']")?.textContent).toMatch(
       /api\.anthropic\.com/,
     );
-    expect(host.querySelector("[data-testid='approvals-export']")?.textContent).toMatch(/git_push/);
-    expect(host.querySelector("#trace-title")?.textContent).toBe("Trace");
-    expect(host.textContent).toContain("Host chat");
-    expect(host.querySelector(".debug-log-raw")?.textContent).toContain("tool.call");
-    const actions = host.querySelector(".debug-log-actions");
+    expect(document.body.querySelector("[data-testid='approvals-export']")?.textContent).toMatch(
+      /git_push/,
+    );
+    expect(document.body.querySelector("#trace-title")?.textContent).toBe("Trace");
+    expect(document.body.textContent).toContain("Host chat");
+    expect(document.body.querySelector(".debug-log-raw")?.textContent).toContain("tool.call");
+    const actions = document.body.querySelector(".debug-log-actions");
     expect([...actions!.querySelectorAll(":scope > button")].map((btn) => btn.textContent)).toEqual(
       ["Copy raw"],
     );
-    expect(host.querySelector("[aria-label='Trace actions']")).toBeTruthy();
+    expect(document.body.querySelector("[aria-label='Trace actions']")).toBeTruthy();
     expect(
-      [...host.querySelectorAll(".debug-log-actions .menu-item")].map((btn) => btn.textContent),
+      [...document.body.querySelectorAll(".debug-log-actions .menu-item")].map(
+        (btn) => btn.textContent,
+      ),
     ).toEqual(["Copy eval", "Save as eval"]);
     await act(async () => {
-      [...host.querySelectorAll(".debug-log-actions .menu-item")]
+      [...document.body.querySelectorAll(".debug-log-actions .menu-item")]
         .find((btn) => btn.textContent === "Save as eval")!
         .dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await Promise.resolve();
@@ -144,8 +158,8 @@ describe("TraceModal", () => {
     vi.mocked(api.sessionEgress).mockRejectedValue(new HttpError("Not found", 404));
     vi.mocked(api.sessionApprovals).mockRejectedValue(new HttpError("Not found", 404));
     await render();
-    expect(host.textContent).toContain("No trace yet");
-    expect(host.textContent).toContain("Host chat");
-    expect(host.querySelector(".debug-log-raw")).toBeNull();
+    expect(document.body.textContent).toContain("No trace yet");
+    expect(document.body.textContent).toContain("Host chat");
+    expect(document.body.querySelector(".debug-log-raw")).toBeNull();
   });
 });

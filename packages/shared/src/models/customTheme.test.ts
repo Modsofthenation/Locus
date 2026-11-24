@@ -292,7 +292,7 @@ describe("expressive theme fields", () => {
 
     const css = customThemeCss(theme);
     expect(css).toContain('"Space Grotesk", ');
-    expect(css).toContain("--space-4: 20px;");
+    expect(css).toContain("--space-4: calc(20px * var(--density-space, 1));");
     expect(css).toContain("--ease-standard: cubic-bezier(0.34, 1.56, 0.64, 1);");
     expect(css).toContain("--dur-slow: 600ms;");
     expect(css).toContain("@keyframes locus-custom-sample-enter");

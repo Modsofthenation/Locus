@@ -15,6 +15,7 @@ import {
   type CursorCliSpawner,
 } from "./cursorCli.js";
 import { ProviderError, readTokenUsage, type TokenUsageEvent } from "./types.js";
+import { reapCliProcess, streamCliLines } from "./cliStream.js";
 
 export type CodexCliEvent =
   | { type: "session"; sessionId: string }
@@ -476,29 +477,30 @@ export async function* streamCodexCli(input: {
   } catch (err) {
     throw rewriteCodexSpawnError(err, argv.command);
   }
-  let sawTerminal = false;
-  try {
-    for await (const line of handle.lines) {
-      if (input.signal?.aborted) break;
+  yield* streamCliLines({
+    command: argv.command,
+    handle,
+    signal: input.signal,
+    rewriteError: rewriteCodexSpawnError,
+    onLine: (line) => {
+      const events: CodexCliEvent[] = [];
+      let stop = false;
       for (const event of parseCodexCliEvents(line)) {
-        if (event.type === "result" || (event.type === "error" && event.terminal)) {
-          sawTerminal = true;
-        }
-        yield event;
+        if (event.type === "result" || (event.type === "error" && event.terminal)) stop = true;
+        events.push(event);
       }
-      if (sawTerminal) break;
-    }
-    const done = await reapCodexCli(handle, 5_000);
-    if (!sawTerminal && !input.signal?.aborted && done.code !== 0) {
-      const detail = done.stderr.trim() || `exit ${done.code}`;
-      yield { type: "error", message: `Codex CLI failed: ${detail}` };
-    }
-    yield { type: "done" };
-  } catch (err) {
-    throw rewriteCodexSpawnError(err, argv.command);
-  } finally {
-    handle.kill?.();
-  }
+      return { events, stop };
+    },
+    reap: () => reapCliProcess(handle, 5_000, "Codex CLI did not exit"),
+    failedExit: (done) =>
+      done.code !== 0
+        ? {
+            type: "error" as const,
+            message: `Codex CLI failed: ${done.stderr.trim() || `exit ${done.code}`}`,
+          }
+        : undefined,
+    doneEvent: { type: "done" },
+  });
 }
 
 export function spawnCodexCli(req: CodexCliSpawnRequest): CodexCliSpawnHandle {
@@ -552,30 +554,16 @@ function isPositiveCodexLoginStatus(text: string): boolean {
   return /logged\s+in|authenticated|using\s+ChatGPT/i.test(text);
 }
 
-function rewriteCodexSpawnError(err: unknown, command: string): ProviderError {
-  if (err instanceof ProviderError) return err;
-  return new ProviderError(
-    cursorCliSpawnFailureMessage(err, command).replace(/Cursor CLI/g, "Codex CLI"),
-  );
-}
-
-async function reapCodexCli(
-  handle: CodexCliSpawnHandle,
-  killAfterMs: number,
-): Promise<{ code: number; stderr: string }> {
-  const exited = handle.wait();
-  const winner = await Promise.race([exited, delay(killAfterMs).then(() => "timeout" as const)]);
-  if (winner !== "timeout") return winner;
-  handle.kill?.();
-  return Promise.race([
-    exited,
-    delay(2_000).then(() => ({ code: 1, stderr: "Codex CLI did not exit" })),
-  ]);
-}
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
     timer.unref?.();
   });
+}
+
+function rewriteCodexSpawnError(err: unknown, command: string): ProviderError {
+  if (err instanceof ProviderError) return err;
+  return new ProviderError(
+    cursorCliSpawnFailureMessage(err, command).replace(/Cursor CLI/g, "Codex CLI"),
+  );
 }

@@ -192,6 +192,48 @@ describe("BudgetService", () => {
     expect((await tomorrow.today()).global.tokens).toBe(0);
     expect(await tomorrow.listOverrides()).toEqual([]);
   });
+
+  it("keeps usage by provider and model after daily spend has expired", async () => {
+    const dir = await tempDir();
+    let at = Date.parse("2026-11-14T12:00:00Z");
+    const service = new BudgetService(dir, () => at);
+    const provider = {
+      id: "paid",
+      name: "Paid",
+      inputUsdPerMillion: 1,
+      outputUsdPerMillion: 2,
+    } as LocusConfig["providers"][number];
+    const config = { providers: [provider] } as LocusConfig;
+    await service.record(
+      { id: "same-chat", providerId: provider.id, model: "pro" },
+      { inputTokens: 500_000, outputTokens: 250_000 },
+      config,
+    );
+    await service.record(
+      { id: "same-chat", providerId: "unpriced", model: "pro" },
+      { inputTokens: 50, outputTokens: 30, estimated: true },
+      config,
+    );
+    const complete = service.trackCompletion(async function* () {
+      yield { type: "usage", inputTokens: 12, outputTokens: 5 };
+    });
+    for await (const _event of complete({ provider, model: "mini", messages: [], system: "" })) {
+      // The caller consumes the completion as usual.
+    }
+    expect((await service.today()).global.tokens).toBe(750_080);
+    at += 40 * 86_400_000;
+    await service.flush();
+    const reopened = new BudgetService(dir, () => at);
+    expect((await reopened.today()).global.tokens).toBe(0);
+    expect(await reopened.modelUsage()).toMatchObject({
+      since: "2026-11-14T12:00:00.000Z",
+      models: [
+        { providerId: "paid", model: "pro", inputTokens: 500_000, outputTokens: 250_000, usd: 1 },
+        { providerId: "unpriced", model: "pro", estimatedTokens: 80, unpricedTokens: 80 },
+        { providerId: "paid", model: "mini", inputTokens: 12, outputTokens: 5 },
+      ],
+    });
+  });
 });
 
 describe("TelemetryExporter", () => {
@@ -375,6 +417,18 @@ describe("server-enforced daily budgets", () => {
       status: { spentTokens: number; capTokens: number };
     };
     expect(status.status).toMatchObject({ spentTokens: 450, capTokens: 100 });
+    const usage = await app.request("/api/usage/models");
+    expect(usage.status).toBe(200);
+    expect(await usage.json()).toMatchObject({
+      models: [
+        {
+          providerId: provider.id,
+          model: provider.defaultModel,
+          inputTokens: 400,
+          outputTokens: 50,
+        },
+      ],
+    });
     const override = await app.request("/api/budgets/override", {
       method: "POST",
       body: JSON.stringify({ scope: "global", reason: "ship it" }),

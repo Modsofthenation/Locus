@@ -3,6 +3,7 @@ import {
   buildSlackReviewDiscussion,
   buildSlackReviewRepoNotes,
   isLocusReviewComment,
+  isSlackFullRereviewRequest,
   isSlackRereviewRequest,
   isSlackRetryRequest,
   isTransientReviewError,
@@ -11,6 +12,8 @@ import {
   mergeSlackReviewResults,
   parseSlackReviewer,
   planSlackReviewParts,
+  slackReviewCommentCap,
+  slackReviewModuleKey,
   slackDiffAnchors,
   slackDismissReason,
   slackFindingSimilarity,
@@ -21,6 +24,16 @@ import {
 } from "./slackReviewer.js";
 
 const budget = { ignorePaths: [], maxDiffChars: 2_500, maxFileChars: 2_400, contextLines: 2 };
+
+describe("full re-review", () => {
+  it("matches explicit commands, including a mention of the reviewer", () => {
+    expect(isSlackFullRereviewRequest("full re-review", [])).toBe(true);
+    expect(isSlackFullRereviewRequest("<@ULOCUS> please force re-review!", ["ULOCUS"])).toBe(true);
+    expect(isSlackFullRereviewRequest("<@UOTHER> full re-review", ["ULOCUS"])).toBe(false);
+    expect(isSlackFullRereviewRequest("re-review", [])).toBe(false);
+    expect(isSlackFullRereviewRequest("Thanks for the full review", [])).toBe(false);
+  });
+});
 
 describe("new reviewer settings", () => {
   it("defaults the new toggles", () => {
@@ -259,6 +272,59 @@ describe("large PRs in parts", () => {
     ).toHaveLength(1);
   });
 
+  it("keeps a folder's files, and its tests, in the same part", () => {
+    const small = (name: string) =>
+      ["@@ -1,1 +1,40 @@", ...Array.from({ length: 40 }, (_, i) => `+${name} ${i}`)].join("\n");
+    // Interleaved on purpose: forge order mixes the two folders.
+    const parts = planSlackReviewParts(
+      [
+        { path: "src/auth/login.ts", status: "modified", patch: small("l") },
+        { path: "src/billing/invoice.ts", status: "modified", patch: small("i") },
+        { path: "src/auth/__tests__/login.test.ts", status: "modified", patch: small("t") },
+        { path: "src/billing/tax.ts", status: "modified", patch: small("x") },
+        { path: "src/auth/old.ts", status: "removed" },
+      ],
+      { ...budget, maxDiffChars: 1_200, maxFileChars: 1_200 },
+    );
+    expect(parts.map((part) => part.reviewed)).toEqual([
+      ["src/auth/__tests__/login.test.ts", "src/auth/login.ts"],
+      ["src/billing/invoice.ts", "src/billing/tax.ts"],
+    ]);
+    // Deleted files are noted once, in the first part.
+    expect(parts[0]!.text).toContain("deleted: src/auth/old.ts");
+    expect(parts[1]!.text).not.toContain("deleted:");
+  });
+
+  it("packs tightly when grouping would need too many parts, and lists the rest", () => {
+    const parts = planSlackReviewParts(
+      ["a", "b", "c", "d", "e"].map((name) => ({
+        path: `${name}/x.ts`,
+        status: "added" as const,
+        patch: big(name),
+      })),
+      budget,
+      2,
+    );
+    expect(parts).toHaveLength(2);
+    expect(parts.flatMap((part) => part.reviewed)).toEqual(["a/x.ts", "b/x.ts"]);
+    expect(parts[1]!.omitted).toEqual(["c/x.ts", "d/x.ts", "e/x.ts"]);
+  });
+
+  it("caps comments per part, up to the setting's bound", () => {
+    expect(slackReviewCommentCap(8, 0)).toBe(8);
+    expect(slackReviewCommentCap(8, 1)).toBe(8);
+    expect(slackReviewCommentCap(8, 4)).toBe(32);
+    expect(slackReviewCommentCap(8, 12)).toBe(50);
+    expect(slackReviewCommentCap(0, 4)).toBe(0);
+  });
+
+  it("groups test folders with their parent folder", () => {
+    expect(slackReviewModuleKey("src/auth/__tests__/login.test.ts")).toBe("src/auth");
+    expect(slackReviewModuleKey("src/auth/test/login.ts")).toBe("src/auth");
+    expect(slackReviewModuleKey("src/auth/login.ts")).toBe("src/auth");
+    expect(slackReviewModuleKey("README.md")).toBe("");
+  });
+
   it("merges results: strictest verdict, all comments, open wins", () => {
     const merged = mergeSlackReviewResults([
       {
@@ -272,13 +338,13 @@ describe("large PRs in parts", () => {
       },
       {
         verdict: "request_changes",
-        summary: "Two.",
+        summary: "Part 2 of 2: Two.",
         comments: [{ path: "b.ts", line: 1, severity: "major", body: "y" }],
         previous: [{ id: 2, resolved: false }],
       },
     ]);
     expect(merged.verdict).toBe("request_changes");
-    expect(merged.summary).toBe("One. Two.");
+    expect(merged.summary).toBe("Part 1 of 2: One.\nPart 2 of 2: Two.");
     expect(merged.comments).toHaveLength(2);
     expect(merged.previous).toEqual([
       { id: 1, resolved: true },

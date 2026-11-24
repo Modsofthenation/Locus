@@ -97,6 +97,7 @@ function resolveLaunch(opts) {
         ELECTRON_RUN_AS_NODE: "1",
         LOCUS_UI: packagedUiDir(resourcesPath, opts.home),
         LOCUS_IMAGES: join(resourcesPath, "images", "agent"),
+        LOCUS_WORKER_BUNDLE: join(resourcesPath, "worker", "locus-worker.mjs"),
       },
       detached: platform !== "win32",
       shell: false,

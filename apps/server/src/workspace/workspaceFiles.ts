@@ -348,6 +348,39 @@ export async function readWorkspaceBytes(
   }
 }
 
+/**
+ * Any regular file under root, as bytes, for a host-side upload (slack_upload path=).
+ * No extension filter; symlinks and paths outside root are refused.
+ */
+export async function readWorkspaceUploadBytes(
+  root: string,
+  rel: string,
+  maxBytes: number,
+): Promise<{ path: string; bytes: Buffer }> {
+  const clean = sanitizeWorkspaceRel(rel, root);
+  if (!clean) throw new Error("Invalid path");
+  const dest = underRoot(root, clean);
+  if (!dest) throw new Error("Path is outside the workspace");
+  let link;
+  try {
+    link = await lstat(dest);
+  } catch (err) {
+    if (isMissingFsError(err)) throw new Error(`File not found: ${clean}`);
+    throw err instanceof Error ? err : new Error("Could not read file");
+  }
+  if (link.isSymbolicLink()) throw new Error("Symlinks cannot be uploaded");
+  if (link.isDirectory()) {
+    throw new Error(`${clean} is a folder. Zip it first (for example zip -r report.zip ${clean})`);
+  }
+  if (!link.isFile()) throw new Error(`${clean} is not a regular file`);
+  if (link.size > maxBytes) {
+    throw new Error(`File is larger than ${Math.floor(maxBytes / (1024 * 1024))} MiB`);
+  }
+  const real = await containedPath(root, dest);
+  if (!real) throw new Error("Path is outside the workspace");
+  return { path: clean, bytes: await readFile(real) };
+}
+
 function looksText(buf: Buffer): boolean {
   const slice = buf.subarray(0, 800);
   return !slice.includes(0);

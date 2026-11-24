@@ -2346,7 +2346,7 @@ describe("themes", () => {
     expect(resolveTheme("nord")).toBe("nord");
     expect(resolveTheme()).toBe("ember");
     expect(resolveTheme("not-a-theme")).toBe("ember");
-    expect(THEME_OPTIONS).toHaveLength(186);
+    expect(THEME_OPTIONS).toHaveLength(210);
     expect(THEME_OPTIONS.map((t) => t.id)).toEqual([
       "ember",
       "midnight",
@@ -2534,6 +2534,30 @@ describe("themes", () => {
       "thermal",
       "duplicate",
       "register",
+      "versailles",
+      "rococo",
+      "gilded",
+      "rosette",
+      "chapel",
+      "vitrail",
+      "clockwork",
+      "dirigible",
+      "foundry",
+      "absinthe",
+      "lily",
+      "peacock",
+      "jackpot",
+      "highroller",
+      "baccarat",
+      "bigtop",
+      "funhouse",
+      "midway",
+      "mirrorball",
+      "boogie",
+      "rink",
+      "lavalamp",
+      "flowerpower",
+      "kaleido",
     ]);
     expect(THEME_OPTIONS.filter((t) => t.chatScene).map((t) => t.id)).toEqual([
       "cosmos",
@@ -2625,6 +2649,16 @@ describe("themes", () => {
       "boba",
       "thermal",
       "duplicate",
+      "versailles",
+      "rococo",
+      "vitrail",
+      "dirigible",
+      "lily",
+      "baccarat",
+      "bigtop",
+      "midway",
+      "rink",
+      "flowerpower",
     ]);
     expect(THEME_OPTIONS.filter((t) => t.contrast).map((t) => t.id)).toEqual([
       "contrast",
@@ -2742,6 +2776,16 @@ describe("themes", () => {
     expect(themeFamily(themeOption("datamosh"))).toBe("glitch");
     expect(themeFamily(themeOption("mochi"))).toBe("kawaii");
     expect(themeFamily(themeOption("thermal"))).toBe("receipt");
+    expect(themeFamily(themeOption("versailles"))).toBe("baroque");
+    expect(themeFamily(themeOption("rosette"))).toBe("stained");
+    expect(themeFamily(themeOption("clockwork"))).toBe("steampunk");
+    expect(themeFamily(themeOption("absinthe"))).toBe("nouveau");
+    expect(themeFamily(themeOption("jackpot"))).toBe("casino");
+    expect(themeFamily(themeOption("bigtop"))).toBe("circus");
+    expect(themeFamily(themeOption("mirrorball"))).toBe("disco");
+    expect(themeFamily(themeOption("lavalamp"))).toBe("psychedelic");
+    expect(themeFamilyLabel("stained")).toBe("Stained Glass");
+    expect(themeFamilyLabel("nouveau")).toBe("Art Nouveau");
     expect(themeFamilyLabel("deco")).toBe("Art Deco");
     expect(themeFamilyLabel("hud")).toBe("HUD");
     expect(themeFamilyLabel("y2k")).toBe("Y2K");

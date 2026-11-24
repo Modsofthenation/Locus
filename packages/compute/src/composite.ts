@@ -1,4 +1,4 @@
-import { workerKind, type WorkerBackend } from "@locus/shared";
+import { sandboxWorkerKind, workerKind, type WorkerBackend } from "@locus/shared";
 import type {
   ComputeBackend,
   ComputeHandle,
@@ -12,13 +12,24 @@ export class CompositeComputeBackend implements ComputeBackend {
     private readonly fargate: ComputeBackend,
     private readonly azure: ComputeBackend,
     private readonly gcp: ComputeBackend,
+    private readonly sandbox?: ComputeBackend,
   ) {}
 
   private forBackend(backend: WorkerBackend): ComputeBackend {
     const kind = workerKind(backend);
     if (kind === "azure") return this.azure;
     if (kind === "gcp") return this.gcp;
+    if (sandboxWorkerKind(kind)) {
+      if (!this.sandbox) throw new Error("Managed sandboxes are unavailable on this server");
+      return this.sandbox;
+    }
     return this.fargate;
+  }
+
+  async verify(backend: WorkerBackend): Promise<void> {
+    const provider = this.forBackend(backend);
+    if (!provider.verify) throw new Error("This worker has no provider profile to verify");
+    await provider.verify(backend);
   }
 
   quote(backend: WorkerBackend, size: string): CostQuote {
@@ -30,6 +41,9 @@ export class CompositeComputeBackend implements ComputeBackend {
   }
 
   destroy(id: string, backend?: WorkerBackend): Promise<void> {
+    if (sandboxWorkerKind(id.split(":", 1)[0]) && this.sandbox) {
+      return this.sandbox.destroy(id, backend);
+    }
     if (backend) return this.forBackend(backend).destroy(id, backend);
     return Promise.all([
       this.fargate.destroy(id),
@@ -39,7 +53,7 @@ export class CompositeComputeBackend implements ComputeBackend {
   }
 
   get(id: string): ComputeHandle | undefined {
-    return this.fargate.get(id) ?? this.azure.get(id) ?? this.gcp.get(id);
+    return this.fargate.get(id) ?? this.azure.get(id) ?? this.gcp.get(id) ?? this.sandbox?.get(id);
   }
 
   async listOrphans(liveIds: Set<string>): Promise<ComputeOrphan[]> {
@@ -47,6 +61,7 @@ export class CompositeComputeBackend implements ComputeBackend {
       this.fargate.listOrphans(liveIds),
       this.azure.listOrphans(liveIds),
       this.gcp.listOrphans(liveIds),
+      this.sandbox?.listOrphans(liveIds) ?? [],
     ]);
     const seen = new Set<string>();
     const out: ComputeOrphan[] = [];

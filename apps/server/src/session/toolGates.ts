@@ -32,6 +32,8 @@ export type ToolGateContext = {
   branchLock?: boolean;
   repoRef?: string;
   gitBranch?: string;
+  /** Harness gates this session opted out of (`force-push`, `recursive-delete`, ...). */
+  bypassGates?: readonly string[];
   /**
    * `policy` runs before websearch/runtime dispatch.
    * `access` runs after, so allowlist does not block those tools.
@@ -56,14 +58,18 @@ function gatePolicy(
     if (invalid) return { kind: "fail", output: invalid };
   }
   if (name === "exec" || name === "powershell") {
-    const allowHosts = ctx.allowHosts !== undefined ? { allowHosts: ctx.allowHosts } : undefined;
+    const opts = {
+      ...(ctx.allowHosts !== undefined ? { allowHosts: ctx.allowHosts } : {}),
+      ...(ctx.bypassGates?.length ? { bypass: ctx.bypassGates } : {}),
+    };
     for (const command of execCommandsFromArgs(args)) {
-      const refused = refuseExecCommand(command, allowHosts);
+      const refused = refuseExecCommand(command, opts);
       if (refused) return { kind: "block", output: refused };
     }
   }
   if (
     name === "git_push" &&
+    !ctx.bypassGates?.includes("force-push") &&
     (args.force === true || args.force === "-f" || args.force === "--force")
   ) {
     return { kind: "block", output: FORCE_PUSH_REFUSAL };

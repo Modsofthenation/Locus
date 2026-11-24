@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { completeChat } from "@locus/providers";
 import {
   AGENT_RECIPES,
   DEFAULT_DOCKER_IMAGE,
@@ -96,7 +97,8 @@ export class RepoService {
     private readonly sessions: SessionService,
     private readonly hub: Hub,
     fetchFn: ForgeFetcher = fetch,
-    private readonly summarizer: ChangeStackSummarizer | null = summarizeChangeStack,
+    private readonly summarizer: ChangeStackSummarizer | null = (input) =>
+      summarizeChangeStack({ ...input, complete: sessions.budgets.trackCompletion(completeChat) }),
   ) {
     this.fetchFn = fetchFn;
     this.forge = new ForgeClient(fetchFn);

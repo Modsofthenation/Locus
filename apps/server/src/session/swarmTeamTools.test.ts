@@ -63,4 +63,35 @@ describe("executeSwarmTeamTool", () => {
     expect(result.ok).toBe(true);
     expect(create).toHaveBeenCalled();
   });
+
+  it("passes the coordinator's bypassed gates to a new teammate, minus what policy forbids", async () => {
+    const create = vi.fn(async (_input: { bypassGates?: string[] }) =>
+      session({ id: "s9", title: "New" }),
+    );
+    const coordinator = session({ bypassGates: ["test-gate", "force-push"] });
+    await executeSwarmTeamTool(ports({ create }), coordinator, "team_add_teammate", {
+      name: "Bo",
+      role: "engineer",
+    });
+    expect(create.mock.calls[0]?.[0].bypassGates).toEqual(["test-gate", "force-push"]);
+
+    const policed = ports({
+      create,
+      store: {
+        loadConfig: async () => ({
+          providers: [{ id: "p1", enabled: true, defaultModel: "m" }],
+          managedPolicy: {
+            active: true,
+            locked: [],
+            policy: { version: 1, sandbox: { allowedGateBypasses: ["test-gate"] } },
+          },
+        }),
+      } as unknown as SwarmTeamPorts["store"],
+    });
+    await executeSwarmTeamTool(policed, coordinator, "team_add_teammate", {
+      name: "Cy",
+      role: "engineer",
+    });
+    expect(create.mock.calls[1]?.[0].bypassGates).toEqual(["test-gate"]);
+  });
 });

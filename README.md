@@ -6,7 +6,7 @@
 
 Locus is a desktop control plane for AI coding agents that run on hardware you own — a Docker container, a QEMU virtual machine, or a folder on disk. Chat on one side, the live guest on the other. Code, keys, sessions, and disks stay under `~/.locus`.
 
-This is **v0.24.0** (MIT). The API binds to loopback. Linux, macOS, and Windows. Bring any LLM provider you have a key for.
+This is **v0.29.0** (MIT). The API binds to loopback. Linux, macOS, and Windows. Bring any LLM provider you have a key for.
 
 ## Install
 
@@ -252,7 +252,7 @@ Settings → About checks GitHub Releases at launch and every six hours. **Insta
 
 Settings → Phone mints a LAN pairing token (QR on that tab). Settings → Workers lists LAN / Cloud VM / Fargate hosts. Settings → Environments lists named boxes saved from New agent or Automations. Settings → Notifications toggles desktop alerts and quiet hours. Settings → Appearance searches and filters themes by colour and style, and sets chat density, editor font size, format on save, and the minimap. Its **Generated** tab builds a theme in an editor (colours with a contrast check, fonts including any Google font, shapes, backdrops, motion and effects) or generates one from a sentence with any enabled provider; agents can do the same in chat with `manage_theme`. Themes are stored as validated data, never raw CSS. Settings → Advanced **Tailscale Funnel** exposes **only** `/api/hooks` (never the whole control plane) so GitHub can reach forge webhooks; `locus config funnel enable|disable`.
 
-Integrations: Slack, Grafana, Jira, Confluence, Linear, Miro, Figma, incident.io, AWS IAM, Portainer, Kubernetes, Sentry, Gmail, Google Calendar, Google Drive, and agent-authored HTTP plugins. Settings → About is **0.24.0**.
+Integrations: Slack, Grafana, Jira, Confluence, Linear, Miro, Figma, incident.io, AWS IAM, Portainer, Kubernetes, Sentry, Gmail, Google Calendar, Google Drive, and agent-authored HTTP plugins. Settings → About is **0.29.0**.
 
 <table>
 <tr>
@@ -351,7 +351,7 @@ Developer / Swarm in the sidebar switches the product shell. Developer keeps the
 
 **CLI.** `npx locus` / `npm run locus --` is a loopback client for the same control plane: agents, design, games, assets, IDE, projects, Codebase, Brain, Slack, Grafana, Docker, automations, workflows, Settings, phone remote, and Funnel. `locus serve` starts the server when the app is not running. `locus project keep` leaves that control plane up after the desktop quits. `locus workflow` imports and runs Agent Loop Builder graphs. `locus brain setup` writes personal editor hooks that send a redacted transcript tail to the local brain. Live VNC and canvas clicking stay in the desktop. Guide: [docs/cli.md](docs/cli.md).
 
-**App.** 186 built-in themes with colour and style filters (Ember default), plus generated themes. Settings → About is **0.24.0**. Electron packages (Linux AppImage, macOS dmg, Windows NSIS), or `npm run dev` in the browser. **Ctrl/Cmd+K** command palette. **Ctrl/Cmd+N** new agent, new automation, or (on Design, Games, Assets) the empty composer. **Ctrl/Cmd+F** find in chat. **Ctrl/Cmd+,** settings.
+**App.** 210 built-in themes with colour and style filters (Ember default), plus generated themes. Settings → About is **0.29.0**. Electron packages (Linux AppImage, macOS dmg, Windows NSIS), or `npm run dev` in the browser. **Ctrl/Cmd+K** command palette. **Ctrl/Cmd+N** new agent, new automation, or (on Design, Games, Assets) the empty composer. **Ctrl/Cmd+F** find in chat. **Ctrl/Cmd+,** settings.
 
 ## Security model
 
@@ -479,6 +479,8 @@ Each automation has a **When** trigger, a **Then** prompt, guest OS, provider/mo
 - **on webhook** — same URL, no git repo. Slack URL verification (`challenge`) is answered automatically. A Slack incoming notify webhook receives the last assistant message as `text`
 
 A run creates a Docker, VM, or **host** session (or reuses the last machine / chat), sends the prompt, and records the outcome. To hand a step to another model, say so in the prompt ("have Anthropic claude-haiku-5-5 summarise the logs, then…"): the agent calls `spawn_agent` with that `provider` / `model` and continues from the child's summary. Overlap can skip if busy, run the latest event when free, or queue one. On webhook automations, MCP tools listed on the job skip chat approval. Without **Reuse the last chat**, each run opens a new thread; Locus keeps the newest 60 chats for that job.
+
+**Sharing a run's files.** `slack_upload` takes `path=` for a workspace file, which Locus reads on the host and uploads directly, so large files never pass through the model. Use this for a Playwright report, for example: "run `npx playwright test`, zip `playwright-report/` into `report.zip`, then `slack_upload` it to #qa with the pass/fail counts". List `slack_upload` on the job. The file can be up to 20 MiB, and folders and symlinks are refused. `path=` works on Host and local Docker agents. Worker and VM agents still need `content` / `bytes_base64`.
 
 ## Guest network
 

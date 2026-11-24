@@ -3,6 +3,7 @@ import { extname, join, relative, resolve, sep } from "node:path";
 import { isPreviewTargetHost, parsePreviewPort, sanitizePreviewPath } from "@locus/shared";
 import { containedPath } from "@locus/guest-agent";
 import type { DockerEngine } from "@locus/hypervisor";
+import { WORKER_GATEWAY_HEADERS } from "./token.js";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -40,6 +41,7 @@ const HOP = new Set([
   "content-length",
   "authorization",
   "cookie",
+  ...WORKER_GATEWAY_HEADERS,
 ]);
 
 function underRoot(root: string, relPath: string): string | undefined {

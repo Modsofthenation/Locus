@@ -403,7 +403,7 @@ export const COMPUTER_USE_TOOLS: ToolSpec[] = [
   {
     name: "git_fetch",
     description:
-      "Fetch a branch, tag, SHA, or pull request into an existing guest checkout using the forge token over HTTPS. Optional pull number for PR heads from forks.",
+      "Fetch (and pull) a branch, tag, SHA, or pull request into an existing checkout using the forge token over HTTPS. Use this instead of shell git pull/fetch, which has no forge credentials. With ref=<branch> it updates origin/<branch> and fast-forwards the local branch (switching to it, or creating it if missing); a diverged local branch is reported, not merged. Never makes a full clone shallow. Optional pull number for PR heads from forks.",
     os: [...ALL_TOOL_OS],
   },
   {
@@ -429,19 +429,20 @@ export const COMPUTER_USE_TOOLS: ToolSpec[] = [
   },
   {
     name: "git_branch",
-    description: "Create or switch a git branch in the guest workspace.",
+    description:
+      "Switch to a git branch, creating it if missing (optional from=<start point>, e.g. origin/develop). An existing branch is never reset.",
     os: [...ALL_TOOL_OS],
   },
   {
     name: "git_push",
     description:
-      "Push the current branch to origin using the forge token. Optional path for a non-primary checkout in a multi-repo workspace. Waits for operator approval in chat.",
+      "Push the current branch to origin using the forge token (origin's URL is not rewritten). Refuses detached HEAD and main/master/trunk. Optional path for a non-primary checkout in a multi-repo workspace. Waits for operator approval in chat. The harness runs the workspace tests first; when the user asks to push without running tests, pass skipTests=true and skipTestsReason (their words) and the operator chooses.",
     os: [...ALL_TOOL_OS],
   },
   {
     name: "git_pr",
     description:
-      "Open a GitHub, GitLab, or Bitbucket pull request for the guest workspace branch. Optional path for a non-primary checkout in a multi-repo workspace. Optional draft=true. Waits for operator approval in chat.",
+      "Open a GitHub, GitLab, or Bitbucket pull request for the current branch (git_push it first). base defaults to the repository's default branch. Optional path for a non-primary checkout in a multi-repo workspace. Optional draft=true. Waits for operator approval in chat. The harness runs the workspace tests first; when the user asks to skip them, pass skipTests=true and skipTestsReason (their words) and the operator chooses.",
     os: [...ALL_TOOL_OS],
   },
   {
@@ -612,7 +613,7 @@ export const COMPUTER_USE_TOOLS: ToolSpec[] = [
   {
     name: "slack_upload",
     description:
-      'Upload a file to Slack. Default is the signed-in operator. Pass as="bot" to upload as the Locus app. Pass channel, filename, and content or bytes_base64. Waits for operator approval. Host-side. Max 20 MiB.',
+      'Upload a file to Slack. Pass the conversation ID as channel and either path (a workspace file, read host-side; preferred for reports and anything large) or filename plus UTF-8 content or bytes_base64. For a folder such as playwright-report/, zip it first or upload its index.html. Pass thread_ts to upload in a thread. Uses the signed-in operator by default or the Locus app with as="bot". Waits for operator approval. Host-side. Max 20 MiB.',
     os: [...ALL_TOOL_OS],
   },
   {
@@ -1352,7 +1353,7 @@ const DOCKER_HEADED_TOOLS: ComputerUseToolName[] = [
   ...HOST_BROWSER_TOOLS,
 ];
 
-const HOST_PLANNING_TOOLS: ComputerUseToolName[] = [
+export const HOST_PLANNING_TOOLS: ComputerUseToolName[] = [
   "board_list",
   "board_get",
   "board_upsert",
@@ -1375,36 +1376,13 @@ const HOST_PLANNING_TOOLS: ComputerUseToolName[] = [
   "team_message",
 ];
 
-export const DOCKER_TOOLS: ComputerUseToolName[] = uniqueCatalog(
-  SHARED_RUNTIME_TOOLS,
-  DOCKER_HEADED_TOOLS,
+const BOARD_PLANNING_TOOLS = HOST_PLANNING_TOOLS.filter((name) => name.startsWith("board_"));
+const PROJECT_PLANNING_TOOLS = HOST_PLANNING_TOOLS.filter(
+  (name) => name.startsWith("project_") || name.startsWith("team_"),
 );
 
-/** File, git, and shell tools that run on this machine, plus opt-in headed Chrome. */
-export const HOST_TOOLS: ComputerUseToolName[] = uniqueCatalog(
-  SHARED_RUNTIME_TOOLS,
-  [
-    "unity_editor",
-    "unity_result",
-    "godot_editor",
-    "godot_result",
-    "unreal_editor",
-    "unreal_result",
-    "blender_editor",
-    "blender_result",
-  ],
-  HOST_PLANNING_TOOLS,
-  HOST_BROWSER_TOOLS,
-);
-
-/** Host-only catalog for planning-board chat. No guest file/exec tools. */
-export const BOARD_CHAT_TOOLS: ComputerUseToolName[] = [
-  "board_list",
-  "board_get",
-  "board_upsert",
-  "board_delete",
-  "board_comment",
-  "board_cluster",
+/** Read-only integration tools a Board chat may call. Names must exist on SHARED_RUNTIME_TOOLS. */
+const BOARD_CHAT_INTEGRATION_TOOLS = new Set<ComputerUseToolName>([
   "jira_search",
   "jira_get",
   "confluence_search",
@@ -1450,28 +1428,14 @@ export const BOARD_CHAT_TOOLS: ComputerUseToolName[] = [
   "k8s_get",
   "k8s_logs",
   "k8s_events",
-];
+]);
 
-/** Host-only catalog for a Project coordinator. No apply_patch / exec. */
-export const PROJECT_CHAT_TOOLS: ComputerUseToolName[] = [
-  "project_get",
-  "project_spawn",
-  "project_steer",
-  "project_stop",
-  "project_replace",
-  "team_directory",
-  "team_handoff",
-  "project_collect",
-  "project_propose_merge",
-  "project_propose_rule",
+/** Coordinator extras a Project chat may call. Names must exist on SHARED_RUNTIME_TOOLS. */
+const PROJECT_CHAT_SHARED_TOOLS = new Set<ComputerUseToolName>([
   "project_context_list",
   "project_context_read",
   "project_context_write",
   "project_context_delete",
-  "team_roster",
-  "team_peer_status",
-  "team_add_teammate",
-  "team_message",
   "git_pr_list",
   "git_pr_get",
   "git_pr_checks",
@@ -1497,9 +1461,42 @@ export const PROJECT_CHAT_TOOLS: ComputerUseToolName[] = [
   "calendar_get",
   "drive_list",
   "drive_get",
-  "board_list",
-  "board_get",
-];
+]);
+
+export const DOCKER_TOOLS: ComputerUseToolName[] = uniqueCatalog(
+  SHARED_RUNTIME_TOOLS,
+  DOCKER_HEADED_TOOLS,
+);
+
+/** File, git, and shell tools that run on this machine, plus opt-in headed Chrome. */
+export const HOST_TOOLS: ComputerUseToolName[] = uniqueCatalog(
+  SHARED_RUNTIME_TOOLS,
+  [
+    "unity_editor",
+    "unity_result",
+    "godot_editor",
+    "godot_result",
+    "unreal_editor",
+    "unreal_result",
+    "blender_editor",
+    "blender_result",
+  ],
+  HOST_PLANNING_TOOLS,
+  HOST_BROWSER_TOOLS,
+);
+
+/** Host-only catalog for planning-board chat. No guest file/exec tools. */
+export const BOARD_CHAT_TOOLS: ComputerUseToolName[] = uniqueCatalog(
+  BOARD_PLANNING_TOOLS,
+  SHARED_RUNTIME_TOOLS.filter((name) => BOARD_CHAT_INTEGRATION_TOOLS.has(name)),
+);
+
+/** Host-only catalog for a Project coordinator. No apply_patch / exec. */
+export const PROJECT_CHAT_TOOLS: ComputerUseToolName[] = uniqueCatalog(
+  PROJECT_PLANNING_TOOLS,
+  SHARED_RUNTIME_TOOLS.filter((name) => PROJECT_CHAT_SHARED_TOOLS.has(name)),
+  BOARD_PLANNING_TOOLS.filter((name) => name === "board_list" || name === "board_get"),
+);
 
 /**
  * Lean catalog for a Swarm group-chat coordinator. Mentions fan out to

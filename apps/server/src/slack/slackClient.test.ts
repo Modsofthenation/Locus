@@ -223,6 +223,41 @@ describe("Slack client", () => {
     expect(appSource).not.toMatch(/\/api\/slack\/.*join/);
   });
 
+  it("lists workspace members across pages, people before bots, deleted users dropped", async () => {
+    const urls: string[] = [];
+    const fetchFn: typeof fetch = async (url) => {
+      urls.push(String(url));
+      const page2 = String(url).includes("cursor=next");
+      const body = page2
+        ? { ok: true, members: [{ id: "U2", name: "zed", profile: { real_name: "Zed" } }] }
+        : {
+            ok: true,
+            members: [
+              { id: "U3", name: "ci", is_bot: true },
+              { id: "U1", name: "amy", profile: { display_name: "Amy" } },
+              { id: "U4", name: "gone", deleted: true },
+            ],
+            response_metadata: { next_cursor: "next" },
+          };
+      return new Response(JSON.stringify(body), {
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    const api = new SlackApi(fetchFn);
+    const rows = await api.listUsers({
+      id: "s1",
+      kind: "slack",
+      name: "Slack",
+      enabled: true,
+      baseUrl: "https://slack.com/api",
+      userToken: "xoxp-user",
+    });
+    expect(rows.map((row) => row.id)).toEqual(["U1", "U2", "U3"]);
+    expect(rows[2]?.isBot).toBe(true);
+    expect(urls).toHaveLength(2);
+    expect(urls[0]).toContain("/users.list?");
+  });
+
   it("keeps thread_ts on a user-token reply when Slack omits it from chat.postMessage", async () => {
     const calls: Array<{ url: string; auth?: string; body?: string }> = [];
     const fetchFn: typeof fetch = async (url, init) => {

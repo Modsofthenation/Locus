@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { ChatEvent, CompleteRequest } from "@locus/providers";
 import {
   SpendBook,
   checkDailyBudgets,
@@ -8,11 +9,14 @@ import {
   localDayKey,
   resolveUsageRates,
   type BudgetOverride,
+  type AiProvider,
   type BudgetScope,
   type DailyBudgetStatus,
   type DailyBudgetVerdict,
   type DaySpend,
   type LocusConfig,
+  type ModelUsageSummary,
+  type ModelUsageTotal,
   type TokenUsage,
 } from "@locus/shared";
 
@@ -37,6 +41,11 @@ export interface UsageRecorded {
 interface StoredSpend {
   days?: DaySpend[];
   overrides?: BudgetOverride[];
+  modelUsage?: ModelUsageSummary;
+}
+
+function modelKey(providerId: string, model: string): string {
+  return JSON.stringify([providerId, model]);
 }
 
 /**
@@ -47,6 +56,8 @@ interface StoredSpend {
 export class BudgetService {
   private book: SpendBook | undefined;
   private overrides: BudgetOverride[] = [];
+  private readonly models = new Map<string, ModelUsageTotal>();
+  private usageSince?: string;
   private loading: Promise<void> | undefined;
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   private saving: Promise<void> = Promise.resolve();
@@ -77,18 +88,23 @@ export class BudgetService {
       }
       this.book = new SpendBook(Array.isArray(stored.days) ? stored.days : []);
       this.overrides = Array.isArray(stored.overrides) ? stored.overrides : [];
+      this.usageSince = stored.modelUsage?.since;
+      const usage = stored.modelUsage?.models;
+      for (const row of Array.isArray(usage) ? usage : []) {
+        this.models.set(modelKey(row.providerId, row.model), row);
+      }
     })();
     await this.loading;
     return this.book!;
   }
 
   async record(session: BudgetSessionRef, delta: TokenUsage, config: LocusConfig): Promise<void> {
-    const tokens = Math.max(0, delta.inputTokens) + Math.max(0, delta.outputTokens);
-    if (tokens <= 0) return;
     const book = await this.ensure();
     const provider = config.providers.find((row) => row.id === session.providerId);
-    const usd = estimateUsd(delta, resolveUsageRates(provider, session.model));
     const atMs = this.now();
+    const total = this.addModelUsage(session.providerId, session.model, delta, provider, atMs);
+    if (!total) return;
+    const { tokens, usd } = total;
     book.add({
       atMs,
       sessionId: session.id,
@@ -97,7 +113,6 @@ export class BudgetService {
       usd,
       tokens,
     });
-    this.scheduleSave();
     const event: UsageRecorded = {
       sessionId: session.id,
       atMs,
@@ -116,8 +131,60 @@ export class BudgetService {
     }
   }
 
+  /** Track auxiliary completions that do not participate in session budget enforcement. */
+  trackCompletion(complete: (req: CompleteRequest) => AsyncIterable<ChatEvent>) {
+    const record = async (req: CompleteRequest, usage: TokenUsage) => {
+      await this.ensure();
+      this.addModelUsage(req.provider.id, req.model, usage, req.provider, this.now());
+    };
+    return async function* (req: CompleteRequest) {
+      for await (const event of complete(req)) {
+        if (event.type === "usage") await record(req, event);
+        yield event;
+      }
+    };
+  }
+
+  private addModelUsage(
+    providerId: string,
+    model: string,
+    delta: TokenUsage,
+    provider: AiProvider | undefined,
+    atMs: number,
+  ): { tokens: number; usd?: number } | undefined {
+    const inputTokens = Math.max(0, delta.inputTokens);
+    const outputTokens = Math.max(0, delta.outputTokens);
+    const tokens = inputTokens + outputTokens;
+    if (!Number.isFinite(tokens) || tokens <= 0) return;
+    const rates = resolveUsageRates(provider, model);
+    const usd = estimateUsd(delta, rates);
+    const unpricedTokens =
+      (rates?.inputUsdPerMillion === undefined ? inputTokens : 0) +
+      (rates?.outputUsdPerMillion === undefined ? outputTokens : 0);
+    this.usageSince ??= new Date(atMs).toISOString();
+    const key = modelKey(providerId, model);
+    const previous = this.models.get(key);
+    this.models.set(key, {
+      providerId,
+      providerName: provider?.name ?? previous?.providerName,
+      model,
+      inputTokens: (previous?.inputTokens ?? 0) + inputTokens,
+      outputTokens: (previous?.outputTokens ?? 0) + outputTokens,
+      estimatedTokens: (previous?.estimatedTokens ?? 0) + (delta.estimated ? tokens : 0),
+      unpricedTokens: (previous?.unpricedTokens ?? 0) + unpricedTokens,
+      usd: usd === undefined ? previous?.usd : (previous?.usd ?? 0) + usd,
+    });
+    this.scheduleSave();
+    return { tokens, usd };
+  }
+
   async today(): Promise<DaySpend> {
     return (await this.ensure()).day(this.now());
+  }
+
+  async modelUsage(): Promise<ModelUsageSummary> {
+    await this.ensure();
+    return { since: this.usageSince, models: [...this.models.values()] };
   }
 
   async check(
@@ -189,7 +256,11 @@ export class BudgetService {
     const book = this.book;
     if (!book) return;
     book.prune(35);
-    const body: StoredSpend = { days: book.all(), overrides: this.overrides };
+    const body: StoredSpend = {
+      days: book.all(),
+      overrides: this.overrides,
+      modelUsage: { since: this.usageSince, models: [...this.models.values()] },
+    };
     this.saving = this.saving
       .catch(() => undefined)
       .then(async () => {

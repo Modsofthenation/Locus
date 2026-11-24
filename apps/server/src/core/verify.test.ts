@@ -57,6 +57,38 @@ const PYTEST_RED = `console.log([
   "1 failed, 2 passed in 0.05s",
 ].join("\\n")); process.exit(1);`;
 
+describe("verify timeouts kill the whole process tree", () => {
+  // A grandchild (`sh -c "sleep 30"` under npm, like `playwright test`) holds
+  // stdout open; killing only the direct child used to wait for the whole run.
+  it.skipIf(isWin)(
+    "npm script returns at the timeout, not when the suite ends",
+    async () => {
+      await writeFile(
+        join(dir, "package.json"),
+        JSON.stringify({ name: "slow", scripts: { test: "sleep 30; echo done" } }),
+        "utf8",
+      );
+      const started = Date.now();
+      const result = await runWorkspaceNpmScript(dir, "test", 1_000);
+      expect(Date.now() - started).toBeLessThan(10_000);
+      expect(result).toMatchObject({ ran: true, ok: false, failureKind: "timeout" });
+    },
+    20_000,
+  );
+
+  it.skipIf(isWin)(
+    "configured command returns at the timeout",
+    async () => {
+      await writeVerify({ test: "sleep 30 | cat; echo done" });
+      const started = Date.now();
+      const result = await runWorkspaceVerify(dir, "test", { timeoutMs: 1_000 });
+      expect(Date.now() - started).toBeLessThan(10_000);
+      expect(result).toMatchObject({ ran: true, ok: false, failureKind: "timeout" });
+    },
+    20_000,
+  );
+});
+
 describe("runWorkspaceVerify", () => {
   it("skips when there is no workspace or nothing to run", async () => {
     expect(await runWorkspaceVerify(undefined, "test")).toEqual({

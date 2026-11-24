@@ -1,11 +1,11 @@
+import { workerPickSize, workerSizeAllowed, type WorkerBackend } from "@locus/shared";
+import { quoteCloudSize } from "./prices.js";
 import {
-  workerAllowedSizes,
-  workerPickSize,
-  workerSizeAllowed,
-  type WorkerBackend,
-} from "@locus/shared";
-import { fargateUsdPerHour } from "./prices.js";
-import { loadComputeTaskRegistry, handleFromRecord, type ComputeTaskRegistry } from "./registry.js";
+  handleFromRecord,
+  loadComputeTaskRegistry,
+  restoreComputeHandle,
+  type ComputeTaskRegistry,
+} from "./registry.js";
 import type {
   ComputeBackend,
   ComputeHandle,
@@ -36,12 +36,7 @@ export class MockComputeBackend implements ComputeBackend {
     if (!workerSizeAllowed(backend, resolved)) {
       throw new Error(`Size ${resolved} is not on the allowlist`);
     }
-    if (!workerAllowedSizes(backend)?.length) {
-      throw new Error(
-        "Fargate workers need a size allowlist so a runaway agent cannot pick 4 vCPU",
-      );
-    }
-    return { size: resolved, usdPerHour: fargateUsdPerHour(resolved) };
+    return quoteCloudSize(backend, size, "Fargate");
   }
 
   async provision(req: ProvisionRequest): Promise<ComputeHandle> {
@@ -75,12 +70,7 @@ export class MockComputeBackend implements ComputeBackend {
   }
 
   get(id: string): ComputeHandle | undefined {
-    const live = this.handles.get(id);
-    if (live) return live;
-    const restored = handleFromRecord(this.registry.get(id) ?? { id: "", backendId: "" });
-    if (!restored) return undefined;
-    this.handles.set(id, restored);
-    return restored;
+    return restoreComputeHandle(this.handles, this.registry, id);
   }
 
   async listOrphans(liveIds: Set<string>): Promise<ComputeOrphan[]> {
@@ -89,7 +79,7 @@ export class MockComputeBackend implements ComputeBackend {
     for (const row of this.registry.list()) {
       if (liveIds.has(row.id) || seen.has(row.id)) continue;
       seen.add(row.id);
-      out.push({ id: row.id, backendId: row.backendId });
+      out.push({ id: row.id, backendId: row.backendId, sessionId: row.sessionId });
     }
     for (const id of this.handles.keys()) {
       if (liveIds.has(id) || seen.has(id)) continue;

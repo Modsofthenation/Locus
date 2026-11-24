@@ -15,6 +15,22 @@ export interface SpendTotals {
   tokens: number;
 }
 
+export interface ModelUsageTotal {
+  providerId: string;
+  providerName?: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  estimatedTokens: number;
+  unpricedTokens: number;
+  usd?: number;
+}
+
+export interface ModelUsageSummary {
+  since?: string;
+  models: ModelUsageTotal[];
+}
+
 export interface DaySpend {
   day: string;
   global: SpendTotals;

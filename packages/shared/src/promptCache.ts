@@ -1,4 +1,5 @@
 import type { ChatMessage } from "./models/session.js";
+import { isTestGatePromptMessage } from "./models/testGateChoice.js";
 
 export const PROMPT_CACHE_CONTROL = { type: "ephemeral" as const };
 
@@ -36,7 +37,9 @@ export function assemblePrompt(input: {
     system: input.system,
     cacheBlocks,
     volatilePrefix: volatile || undefined,
-    messages: input.messages.filter((message) => !message.compact),
+    messages: input.messages.filter(
+      (message) => !message.compact && !isTestGatePromptMessage(message),
+    ),
   };
 }
 

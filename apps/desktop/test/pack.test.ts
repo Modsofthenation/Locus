@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -13,6 +13,7 @@ const SERVER_BUNDLE_BANNER =
   "import { createRequire as __locusCreateRequire } from 'node:module'; const require = __locusCreateRequire(import.meta.url);";
 const pkg = JSON.parse(readFileSync(join(desktopRoot, "package.json"), "utf8")) as {
   homepage?: string;
+  scripts?: Record<string, string>;
   devDependencies?: { electron?: string };
   build?: {
     productName?: string;
@@ -94,6 +95,7 @@ describe("electron packaging", () => {
       expect.arrayContaining([
         expect.objectContaining({ from: "dist", to: "ui" }),
         expect.objectContaining({ from: "build/server", to: "server" }),
+        expect.objectContaining({ from: "build/worker", to: "worker" }),
         expect.objectContaining({
           from: "build/server-typescript-ls",
           to: "server/node_modules/typescript-ls",
@@ -138,6 +140,7 @@ describe("electron packaging", () => {
       ELECTRON_RUN_AS_NODE: "1",
       LOCUS_UI: "/tmp/Locus.app/Contents/Resources/ui",
       LOCUS_IMAGES: "/tmp/Locus.app/Contents/Resources/images/agent",
+      LOCUS_WORKER_BUNDLE: "/tmp/Locus.app/Contents/Resources/worker/locus-worker.mjs",
     });
     expect(launch?.shell).toBe(false);
     expect(launch?.stdio).toBe("inherit");
@@ -455,6 +458,49 @@ describe("electron packaging", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("bundles a worker that starts on plain Node behind a vendor gateway", async () => {
+    expect(pkg.scripts?.build).toContain("bundle-worker.mjs");
+    const { bundleWorker } = (await import(
+      pathToFileURL(join(desktopRoot, "scripts/bundle-worker.mjs")).href
+    )) as { bundleWorker: (outfile: string) => Promise<string> };
+    const dir = mkdtempSync(join(tmpdir(), "locus-worker-bundle-"));
+    const port = 20_000 + Math.floor(Math.random() * 20_000);
+    const child = spawn(process.execPath, [await bundleWorker(join(dir, "locus-worker.mjs"))], {
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: dir,
+        LOCUS_WORKER_TOKEN: "bundle-token",
+        LOCUS_WORKER_TRANSPORT: "vendor-gateway",
+        LOCUS_WORKER_HOME: join(dir, "home"),
+        LOCUS_WORKER_HOST: "127.0.0.1",
+        LOCUS_WORKER_PORT: String(port),
+        LOCUS_WORKER_ALLOW_HOST: "1",
+      },
+      stdio: "ignore",
+    });
+    try {
+      const info = async (token: string) => {
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          try {
+            return await fetch(`http://127.0.0.1:${port}/v1/info`, {
+              headers: { "x-locus-worker-token": token },
+            });
+          } catch {
+            await new Promise((done) => setTimeout(done, 100));
+          }
+        }
+        throw new Error("bundled worker did not listen");
+      };
+      expect((await info("wrong")).status).toBe(401);
+      const ok = await info("bundle-token");
+      expect(ok.status).toBe(200);
+      expect(await ok.json()).toMatchObject({ ok: true, service: "locus-worker" });
+    } finally {
+      child.kill();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it("bundles AWS IAM tools without the AWS SDK", async () => {
     const serverPkg = JSON.parse(

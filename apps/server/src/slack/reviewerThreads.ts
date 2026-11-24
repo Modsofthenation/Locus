@@ -4,6 +4,7 @@
  * and Slack posts through `SlackReviewerContext`.
  */
 import {
+  isSlackFullRereviewRequest,
   isSlackRetryRequest,
   mergeSlackRepoNotes,
   slackDismissReason,
@@ -140,6 +141,7 @@ export async function scanThreads(
     }
     let newest = thread.cursor;
     let retry = false;
+    let fullRereview = false;
     let question: { text: string; asker?: string } | undefined;
     const dismissals: Array<{
       request: NonNullable<ReturnType<typeof parseSlackDismissRequest>>;
@@ -154,14 +156,16 @@ export async function scanThreads(
       // Re-review, retry and questions spend tokens: only listed people may ask. Dismissals
       // cost nothing and stay open to anyone in the thread.
       const mayAsk = slackReviewerRequesterAllowed(reviewer, message.userId);
+      const mayRereview = mayAsk && reviewer.rereviewOnThreadReply;
+      const full = mayRereview && isSlackFullRereviewRequest(message.text, mentionIds);
+      if (full) fullRereview = true;
       const rereview =
-        mayAsk &&
-        reviewer.rereviewOnThreadReply &&
-        (isSlackRereviewRequest(message.text) ||
-          isSlackMentionReviewRequest(message.text, mentionIds));
+        full ||
+        (mayRereview &&
+          (isSlackRereviewRequest(message.text) ||
+            isSlackMentionReviewRequest(message.text, mentionIds)));
       if (rereview) asked = true;
-      const again =
-        mayAsk && !rereview && reviewer.rereviewOnThreadReply && isSlackRetryRequest(message.text);
+      const again = mayRereview && !rereview && isSlackRetryRequest(message.text);
       if (again) retry = true;
       if (dismiss || rereview || again || question || !reviewer.answerQuestions || !mayAsk) {
         continue;
@@ -182,6 +186,7 @@ export async function scanThreads(
         ...job,
         rereview: true,
         ...(retry ? { retry: true } : {}),
+        ...(fullRereview ? { fullRereview: true } : {}),
         ...(thread.skipped ? { force: true } : {}),
       });
     } else if (question && (thread.answers ?? 0) < MAX_ANSWERS_PER_THREAD) {

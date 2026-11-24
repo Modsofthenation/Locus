@@ -40,7 +40,7 @@ import {
 import { isWorkerVmGuest, WorkerGuestHub } from "./guests.js";
 import { resolveWorkerVmTemplate } from "./vmMedia.js";
 import { serveWorkerPreview, workerPreviewPath } from "./previewProxy.js";
-import { workerTokenMatches } from "./token.js";
+import { workerRequestToken, workerTokenMatches } from "./token.js";
 import {
   listWorkerWorkspace,
   readWorkerWorkspaceBytes,
@@ -62,6 +62,7 @@ import {
 export interface WorkerAppOptions {
   engine: DockerEngine;
   token: string;
+  gatewayTransport?: boolean;
   name?: string;
   hostname?: string;
   guests?: WorkerGuestHub;
@@ -114,6 +115,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
     return vm;
   };
   const app = new Hono();
+  let creatingGatewayGuest = false;
   const jailProxies = new Map<string, AllowlistProxy>();
   const cliRuns = new Map<string, WorkerCliReplay>();
   const cliMcpPending = new Map<
@@ -129,8 +131,7 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
 
   app.use("/*", async (c, next) => {
     if (c.req.path === "/health") return next();
-    const header = c.req.header("authorization") ?? "";
-    const provided = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+    const provided = workerRequestToken((name) => c.req.header(name), opts.gatewayTransport);
     if (!workerTokenMatches(provided, opts.token)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
@@ -161,7 +162,14 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
 
   app.post("/v1/guests", async (c) => {
     const body = (await c.req.json()) as CreateContainerRequest;
+    if (
+      opts.gatewayTransport &&
+      (body.runtime !== "host" || body.hostDir || hostGuests.size || creatingGatewayGuest)
+    ) {
+      return c.json({ error: "This sandbox serves one Host guest in its own workspace" }, 400);
+    }
     if (body.runtime === "host") {
+      if (opts.gatewayTransport) creatingGatewayGuest = true;
       try {
         if (!opts.allowHostRuntime) {
           throw new Error(
@@ -193,6 +201,8 @@ export function createWorkerApp(opts: WorkerAppOptions): Hono {
         return c.json(vm, 201);
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : "Failed" }, 400);
+      } finally {
+        if (opts.gatewayTransport) creatingGatewayGuest = false;
       }
     }
     if (body.runtime === "vm") {

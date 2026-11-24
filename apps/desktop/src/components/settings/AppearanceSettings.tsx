@@ -38,9 +38,13 @@ import { api } from "@/lib/api";
 import { setDraftThemeCss, themeSurfaceAttrs } from "@/lib/theme";
 
 const CHAT_DENSITY_OPTIONS: { id: ChatDensity; label: string; hint: string }[] = [
-  { id: "comfortable", label: "Comfortable", hint: "The original spacing." },
-  { id: "compact", label: "Compact", hint: "Fits more transcript." },
-  { id: "dense", label: "Dense", hint: "The tightest spacing." },
+  {
+    id: "comfortable",
+    label: "Comfortable",
+    hint: "Roomier spacing and slightly larger text across the app.",
+  },
+  { id: "compact", label: "Compact", hint: "The default. Fits more on screen." },
+  { id: "dense", label: "Dense", hint: "The tightest spacing everywhere." },
 ];
 
 const PRODUCT_MODE_OPTIONS: { id: ProductMode; label: string; hint: string }[] = [
@@ -279,6 +283,13 @@ export function AppearanceSettings(props: {
     props.onSelect(id);
   }
 
+  /** Apply a random theme from what the current filter and search show, never the current one. */
+  function shuffleTheme() {
+    const pool = items.filter((row) => row.id !== selected);
+    if (!pool.length) return;
+    selectTheme(pool[Math.floor(Math.random() * pool.length)].id);
+  }
+
   function pickFilter(id: ThemeFilter) {
     setFilter(id);
     if (id !== "all") setSeeAll(false);
@@ -447,15 +458,27 @@ export function AppearanceSettings(props: {
               <h3 id="theme-label">Theme</h3>
               <p>Hover or focus a theme to preview it. Click to apply.</p>
             </div>
-            <input
-              type="search"
-              className="theme-search"
-              data-testid="theme-search"
-              placeholder={`Search ${totalThemes} themes`}
-              aria-label="Search themes"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
+            <div className="theme-search-row">
+              <input
+                type="search"
+                className="theme-search"
+                data-testid="theme-search"
+                placeholder={`Search ${totalThemes} themes`}
+                aria-label="Search themes"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              <button
+                type="button"
+                className="btn chip theme-shuffle"
+                data-testid="theme-shuffle"
+                title="Apply a random theme from the current filter"
+                disabled={!items.some((row) => row.id !== selected) || Boolean(editing)}
+                onClick={shuffleTheme}
+              >
+                ⤨ Shuffle
+              </button>
+            </div>
           </header>
           <div className="theme-filters" role="radiogroup" aria-label="Theme filters">
             <div className="theme-filter-row">
@@ -644,12 +667,12 @@ export function AppearanceSettings(props: {
         >
           <header className="appearance-section-head">
             <div>
-              <h3 id="chat-editor-label">Chat &amp; editor</h3>
+              <h3 id="chat-editor-label">Density &amp; editor</h3>
             </div>
           </header>
           <div className="appearance-prefs-grid">
             <div className="field appearance-chat-density">
-              <span id="chat-density-label">Chat density</span>
+              <span id="chat-density-label">Density</span>
               <div
                 className="theme-filter-pills"
                 role="radiogroup"

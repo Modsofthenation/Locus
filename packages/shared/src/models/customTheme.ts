@@ -1083,10 +1083,12 @@ export function customThemeCss(theme: CustomTheme): string {
   }
   if (l.density && l.density !== "cozy") {
     const k = DENSITY_SCALE[l.density];
-    for (const [name, px] of SPACE_TOKENS) vars.push([name, `${round(px * k, 1)}px`]);
+    for (const [name, px] of SPACE_TOKENS)
+      vars.push([name, `calc(${round(px * k, 1)}px * var(--density-space, 1))`]);
   }
   if (t.scale !== undefined && t.scale !== 1) {
-    for (const [name, px] of TYPE_TOKENS) vars.push([name, `${round(px * t.scale, 1)}px`]);
+    for (const [name, px] of TYPE_TOKENS)
+      vars.push([name, `calc(${round(px * t.scale, 1)}px * var(--density-type, 1))`]);
   }
   if (m.speed) {
     const k = SPEED_SCALE[m.speed];
