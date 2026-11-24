@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   BUILTIN_PROVIDERS,
   CURSOR_CLI_BASE_URL,
@@ -50,11 +50,19 @@ import {
   sessionDisplayName,
   slackAccountLinked,
   usesCursorModelIds,
+  E2B_TEMPLATE_SIZES,
+  SANDBOX_WORKER_KINDS,
+  SANDBOX_WORKER_NAMES,
+  sandboxTemplateStale,
+  sandboxWorkerKind,
   workerDestroyOnStop,
   workerIsMetered,
   workerKind,
   workerProvisionsCompute,
   workerRunsInTask,
+  type E2BTemplateBuildView,
+  type E2BTemplateSize,
+  type SandboxWorkerConfig,
   type AgentSkill,
   type AiProvider,
   type CliAgentConfig,
@@ -78,6 +86,7 @@ import { IconChevron, IconLock } from "@/components/layout/Icons";
 import { Select } from "@/components/layout/Select";
 import { BusyButton, InlineError } from "@/components/layout/Skeleton";
 import { useDialogFocus } from "@/lib/useDialogFocus";
+import { APP_VERSION } from "@/lib/appInfo";
 
 export function isBuiltinProvider(provider: AiProvider): boolean {
   return BUILTIN_PROVIDERS.some((row) => row.kind === provider.kind && row.name === provider.name);
@@ -1441,7 +1450,8 @@ export function workerKindLabel(kind: ReturnType<typeof workerKind>): string {
   if (kind === "azure") return "Azure";
   if (kind === "gcp") return "GCP";
   if (kind === "cloud") return "Cloud VM";
-  return "LAN";
+  const sandbox = sandboxWorkerKind(kind);
+  return sandbox ? SANDBOX_WORKER_NAMES[sandbox] : "LAN";
 }
 
 export function workerWhereHint(row: WorkerBackend): string {
@@ -1454,6 +1464,7 @@ export function workerWhereHint(row: WorkerBackend): string {
   if (workerKind(row) === "gcp") {
     return [row.zone, row.project].filter(Boolean).join(" · ") || "GCP";
   }
+  if (sandboxWorkerKind(row.kind)) return row.sandbox?.template || "Select a profile";
   try {
     return new URL(row.url).host;
   } catch {
@@ -1667,6 +1678,145 @@ export function McpServerCard({
   );
 }
 
+/** Builds the locus-worker template in the operator's E2B team and fills in its ID. */
+function E2BTemplateBuild({
+  worker,
+  onBuilt,
+}: {
+  worker: WorkerBackend;
+  onBuilt: (templateId: string) => void;
+}) {
+  const [size, setSize] = useState<E2BTemplateSize>(E2B_TEMPLATE_SIZES[0].id);
+  const [agentClis, setAgentClis] = useState(true);
+  const [build, setBuild] = useState<E2BTemplateBuildView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const timer = useRef(0);
+  const onBuiltRef = useRef(onBuilt);
+  onBuiltRef.current = onBuilt;
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  // A build keeps running on the server while this card is closed: pick it back up.
+  const workerId = worker.id;
+  useEffect(() => {
+    let live = true;
+    void api
+      .latestE2BTemplateBuild(workerId)
+      .then(({ build: latest }) => {
+        if (!live || !latest) return;
+        setBuild(latest);
+        if (latest.state === "running") {
+          timer.current = window.setTimeout(() => void poll(latest.id), 2000);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per worker
+  }, [workerId]);
+
+  const running = build?.state === "running";
+  const hasKey = Boolean(worker.token?.trim());
+  const stale = sandboxTemplateStale(worker.sandbox, APP_VERSION);
+  const built = Boolean(worker.sandbox?.builtFor && worker.sandbox.template);
+  // Finished while the card was closed, and not yet copied into this worker.
+  const unapplied =
+    build?.state === "succeeded" &&
+    !!build.templateId &&
+    (build.templateId !== worker.sandbox?.template || worker.sandbox?.builtFor !== APP_VERSION);
+
+  async function poll(id: string) {
+    try {
+      const { build: next } = await api.e2bTemplateBuild(id);
+      setBuild(next);
+      if (next.state === "running") {
+        timer.current = window.setTimeout(() => void poll(id), 2000);
+      } else if (next.state === "succeeded" && next.templateId) {
+        onBuiltRef.current(next.templateId);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Lost track of the template build");
+    }
+  }
+
+  async function start() {
+    setError(null);
+    try {
+      const { build: next } = await api.startE2BTemplateBuild({ worker, size, agentClis });
+      setBuild(next);
+      timer.current = window.setTimeout(() => void poll(next.id), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Template build failed to start");
+    }
+  }
+
+  const status = running
+    ? `Building in E2B… ${Math.max(1, Math.round((Date.now() - build.startedAt) / 60_000))} min. This usually takes 3–8 minutes.`
+    : build?.state === "succeeded"
+      ? unapplied
+        ? `Template ready · ${build.templateId}.`
+        : `Template ready · ${build.templateId}. Template ID is filled in below.`
+      : build?.state === "failed"
+        ? `Build failed: ${build.error ?? "unknown error"}`
+        : stale
+          ? `This template was built for Locus ${worker.sandbox?.builtFor}. Rebuild it so the worker matches ${APP_VERSION}.`
+          : built
+            ? `Template built by Locus ${worker.sandbox?.builtFor}.`
+            : "Locus builds the worker template in your E2B team. No Docker or registry needed.";
+
+  return (
+    <div className="worker-template-build">
+      <div className="grid-2">
+        <div className="field">
+          <label>Template size</label>
+          <Select
+            ariaLabel="E2B template size"
+            disabled={running}
+            value={size}
+            options={E2B_TEMPLATE_SIZES.map((row) => ({ value: row.id, label: row.label }))}
+            onChange={(value) => setSize(value as E2BTemplateSize)}
+          />
+        </div>
+        <div className="field">
+          <label>&nbsp;</label>
+          <BusyButton
+            className="btn small"
+            busy={running}
+            busyLabel="Building…"
+            disabled={!hasKey}
+            disabledReason="Enter the E2B API key first"
+            onClick={() => void start()}
+          >
+            {built ? "Rebuild template" : "Build template"}
+          </BusyButton>
+        </div>
+      </div>
+      <label className="hint check">
+        <input
+          type="checkbox"
+          checked={agentClis}
+          disabled={running}
+          onChange={(e) => setAgentClis(e.target.checked)}
+        />
+        Include Claude Code and Codex CLIs
+      </label>
+      <p className={`hint${stale || build?.state === "failed" ? " warn" : ""}`}>{status}</p>
+      {unapplied ? (
+        <button
+          type="button"
+          className="btn small"
+          onClick={() => onBuiltRef.current(build.templateId!)}
+        >
+          Use this template
+        </button>
+      ) : null}
+      {build?.logs.length ? (
+        <pre className="worker-template-log">{build.logs.slice(-12).join("\n")}</pre>
+      ) : null}
+      {error ? <InlineError message={error} /> : null}
+    </div>
+  );
+}
+
 export function WorkerCard({
   worker,
   expanded,
@@ -1687,6 +1837,16 @@ export function WorkerCard({
   onRemove: () => void;
 }) {
   const kind = workerKind(worker);
+  const sandboxKind = sandboxWorkerKind(kind);
+  const patchSandbox = (patch: Partial<SandboxWorkerConfig>) =>
+    onPatch((row) => ({
+      ...row,
+      sandbox: {
+        ...{ template: "", maxMinutes: 15, maxUsd: 0, rateDate: "" },
+        ...row.sandbox,
+        ...patch,
+      },
+    }));
   return (
     <div className={`provider-card ${expanded ? "open" : ""}`}>
       <div className="provider-card-head">
@@ -1734,7 +1894,11 @@ export function WorkerCard({
           </div>
           <div className="field">
             <label>Kind</label>
-            <div className="runtime-toggle" role="tablist" aria-label="Worker kind">
+            <div
+              className="runtime-toggle worker-kind-toggle"
+              role="tablist"
+              aria-label="Worker kind"
+            >
               <button
                 type="button"
                 role="tab"
@@ -1829,6 +1993,26 @@ export function WorkerCard({
               >
                 GCP
               </button>
+              {SANDBOX_WORKER_KINDS.map((candidate) => (
+                <button
+                  key={candidate}
+                  type="button"
+                  role="tab"
+                  aria-selected={kind === candidate}
+                  className={kind === candidate ? "active" : ""}
+                  onClick={() =>
+                    onPatch((row) => ({
+                      ...row,
+                      kind: candidate,
+                      ...(kind !== candidate ? { token: undefined, sandbox: undefined } : {}),
+                      destroyOnStop: true,
+                      ...(row.idleTtlMs === 0 ? { idleTtlMs: undefined } : {}),
+                    }))
+                  }
+                >
+                  {SANDBOX_WORKER_NAMES[candidate]}
+                </button>
+              ))}
             </div>
           </div>
           <div className="field">
@@ -1839,7 +2023,11 @@ export function WorkerCard({
                   ? "Client secret"
                   : kind === "gcp"
                     ? "Access token"
-                    : "Token"}
+                    : kind === "modal"
+                      ? "Token secret"
+                      : sandboxKind
+                        ? "API key"
+                        : "Token"}
             </label>
             <input
               type="password"
@@ -2075,7 +2263,117 @@ export function WorkerCard({
                 />
               </div>
             </>
-          ) : (
+          ) : sandboxKind ? (
+            <>
+              {kind === "e2b" ? (
+                <E2BTemplateBuild
+                  worker={worker}
+                  onBuilt={(templateId) =>
+                    patchSandbox({ template: templateId, builtFor: APP_VERSION })
+                  }
+                />
+              ) : null}
+              <div className="grid-2">
+                <div className="field">
+                  <label>
+                    {
+                      {
+                        daytona: "Snapshot name",
+                        e2b: "Template ID",
+                        modal: "Image ID",
+                        runloop: "Blueprint ID",
+                      }[sandboxKind]
+                    }
+                  </label>
+                  <input
+                    value={worker.sandbox?.template ?? ""}
+                    onChange={(e) =>
+                      patchSandbox({ template: e.target.value, builtFor: undefined })
+                    }
+                    spellCheck={false}
+                  />
+                </div>
+                {kind === "daytona" || kind === "modal" ? (
+                  <div className="field">
+                    <label>Region</label>
+                    <input
+                      value={worker.region ?? ""}
+                      onChange={(e) => onPatch({ region: e.target.value })}
+                      spellCheck={false}
+                    />
+                  </div>
+                ) : null}
+              </div>
+              {kind === "modal" ? (
+                <div className="grid-2">
+                  <div className="field">
+                    <label>App name</label>
+                    <input
+                      value={worker.sandbox?.app ?? ""}
+                      onChange={(e) => patchSandbox({ app: e.target.value })}
+                      spellCheck={false}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Token ID</label>
+                    <input
+                      value={worker.accessKeyId ?? ""}
+                      onChange={(e) => onPatch({ accessKeyId: e.target.value })}
+                      spellCheck={false}
+                    />
+                  </div>
+                </div>
+              ) : null}
+              <div className="grid-2">
+                <div className="field">
+                  <label>Maximum runtime (minutes)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    step={1}
+                    value={worker.sandbox?.maxMinutes ?? 15}
+                    onChange={(e) => patchSandbox({ maxMinutes: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Session compute limit (USD)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={worker.sandbox?.maxUsd || ""}
+                    onChange={(e) => patchSandbox({ maxUsd: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="field">
+                  <label>All-in hourly upper bound (USD)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={worker.hourlyUsd ?? ""}
+                    onChange={(e) =>
+                      onPatch({ hourlyUsd: e.target.value ? Number(e.target.value) : undefined })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Rate verified on</label>
+                  <input
+                    type="date"
+                    value={worker.sandbox?.rateDate ?? ""}
+                    onChange={(e) => patchSandbox({ rateDate: e.target.value })}
+                  />
+                </div>
+              </div>
+              <p className="hint">
+                {kind === "e2b"
+                  ? "Build the template above, or paste the ID of one with locus-worker installed. Stop or expiry deletes its workspace."
+                  : "Use a profile with locus-worker installed. Stop or expiry deletes its workspace."}
+              </p>
+            </>
+          ) : workerProvisionsCompute(worker) ? null : (
             <div className="field">
               <label>TLS fingerprint</label>
               <input
@@ -2186,7 +2484,7 @@ export function WorkerCard({
               />
             </div>
           )}
-          {workerProvisionsCompute(worker) ? (
+          {workerProvisionsCompute(worker) && !sandboxKind ? (
             <div className="field">
               <label>Allowed sizes</label>
               <textarea
@@ -2226,9 +2524,9 @@ export function WorkerCard({
             Destroy guest on stop
           </label>
           <div className="row-actions">
-            {workerProvisionsCompute(worker) ? null : (
+            {workerProvisionsCompute(worker) && !sandboxKind ? null : (
               <button type="button" className="btn small" disabled={busy} onClick={onTest}>
-                Test connection
+                {sandboxKind ? "Verify profile" : "Test connection"}
               </button>
             )}
             <button type="button" className="btn small danger ghost" onClick={onRemove}>

@@ -1,7 +1,8 @@
 export { applyGuestPatch } from "./applyPatch.js";
 export type { GuestRuntime, ToolRequest, ToolResult } from "./types.js";
-export { createGuestRuntime } from "./factory.js";
+export { createGuestRuntime, createHostGuestRuntime } from "./factory.js";
 export type { GuestFactoryOpts } from "./factory.js";
+export { computerCapabilitiesResult } from "./computerCapabilities.js";
 export { MockGuestRuntime } from "./mock.js";
 export {
   DockerGuestRuntime,

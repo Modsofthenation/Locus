@@ -77,6 +77,7 @@ import {
   type SwarmTeamHandoff,
   type SwarmTeamHandoffAction,
   type SwarmTeamStatus,
+  effectiveBypassGates,
 } from "@locus/shared";
 import type { ToolResult } from "@locus/guest-agent";
 import { inspectOfflineProfile } from "./offlineProject.js";
@@ -1140,6 +1141,8 @@ export class ProjectService {
       capabilities?: string[];
       repo?: AgentSession["repo"];
       pull?: AgentSession["pull"];
+      /** Harness gates the spawning session bypasses; filtered by the managed policy. */
+      bypassGates?: AgentSession["bypassGates"];
     },
   ): Promise<{ project: ProjectDocument; sessionId: string; title: string }> {
     if (!this.sessions) throw new Error("Sessions unavailable");
@@ -1198,6 +1201,14 @@ export class ProjectService {
         placement: placement === "worker" ? "worker" : undefined,
         backendId: placement === "worker" ? project.backendId : undefined,
         maxUsd: project.maxUsd,
+        ...(input.bypassGates?.length
+          ? {
+              bypassGates: effectiveBypassGates(
+                input.bypassGates,
+                (await this.store.loadConfig()).managedPolicy,
+              ),
+            }
+          : {}),
         prompt: brief,
         ...(role || personality
           ? {
@@ -1718,7 +1729,7 @@ export class ProjectService {
   }
 
   async executeTool(
-    session: Pick<AgentSession, "id" | "kind" | "projectId">,
+    session: Pick<AgentSession, "id" | "kind" | "projectId" | "bypassGates">,
     name: string,
     args: Record<string, unknown>,
   ): Promise<ToolResult> {
@@ -1827,6 +1838,7 @@ export class ProjectService {
           title: str(args, "title") || undefined,
           role: str(args, "role") || undefined,
           personality: str(args, "personality") || undefined,
+          bypassGates: session.bypassGates,
           capabilities: Array.isArray(args.capabilities)
             ? args.capabilities.filter((value): value is string => typeof value === "string")
             : undefined,

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { Hono } from "hono";
+import { completeOneShot } from "@locus/providers";
 import { clearIntegrationCredentials, type LocusConfig } from "@locus/shared";
 import type { AutomationService } from "../automations/automations.js";
 import { redactConfig, redactVm } from "../core/redact.js";
@@ -41,6 +42,7 @@ export function registerConfigRoutes(
       current: body.current,
       providerId: typeof body.providerId === "string" ? body.providerId : undefined,
       model: typeof body.model === "string" ? body.model : undefined,
+      complete: opts.sessions.budgets.trackCompletion(completeOneShot),
     });
     if (!result.ok) return c.json({ error: result.error }, result.status);
     return c.json({ theme: result.theme });
@@ -93,6 +95,17 @@ export function registerConfigRoutes(
     const current = await opts.store.loadConfig();
     const saved = prepareSavedConfig(current, body, opts.store.dataDir);
     if (!saved.ok) return c.json({ error: saved.error }, 400);
+    try {
+      await opts.sessions.assertSandboxWorkersRetained(
+        current.workers ?? [],
+        saved.config.workers ?? [],
+      );
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : "Sandbox cleanup status is unavailable" },
+        409,
+      );
+    }
     try {
       await opts.store.saveConfig(saved.config);
     } catch (err) {

@@ -15,6 +15,7 @@ import {
   type TestReport,
 } from "@locus/shared";
 import { resolveWindowsCliSpawn } from "@locus/shared/windowsCliSpawn";
+import { killTreeOnTimeout, processTreeSpawnOptions } from "./processTree.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -687,6 +688,7 @@ function runNpm(
       windowsVerbatimArguments: target.windowsVerbatimArguments,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
+      ...processTreeSpawnOptions,
     });
     let output = "";
     const append = (chunk: Buffer) => {
@@ -695,14 +697,16 @@ function runNpm(
     };
     child.stdout?.on("data", append);
     child.stderr?.on("data", append);
+    let fallback: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      fallback = killTreeOnTimeout(child, () => onClose(null));
     }, timeoutMs);
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (fallback) clearTimeout(fallback);
       const output = err.message;
       resolve({
         ran: true,
@@ -712,10 +716,11 @@ function runNpm(
         failureKind: classifyScriptFailure(script, output, undefined, false, manager),
       });
     });
-    child.on("close", (code) => {
+    const onClose = (code: number | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (fallback) clearTimeout(fallback);
       const body =
         stripAnsi(output).trim() || `(${manager} run ${script} exited ${code ?? "null"})`;
       const report = script === "test" ? parseTestOutput(body) : undefined;
@@ -742,7 +747,8 @@ function runNpm(
               ...(uniqueFails.length ? { failedTests: uniqueFails } : {}),
             }),
       });
-    });
+    };
+    child.on("close", onClose);
   });
 }
 
@@ -815,7 +821,10 @@ function runShell(cwd: string, command: string, timeoutMs: number): Promise<Work
       env: hookEnv(),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      ...processTreeSpawnOptions,
     });
+    let settled = false;
+    let fallback: ReturnType<typeof setTimeout> | undefined;
     let output = "";
     const append = (chunk: Buffer) => {
       output += chunk.toString("utf8");
@@ -823,17 +832,24 @@ function runShell(cwd: string, command: string, timeoutMs: number): Promise<Work
     };
     child.stdout?.on("data", append);
     child.stderr?.on("data", append);
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-    }, timeoutMs);
-    child.on("error", (err) => {
+    const onClose = (code: number | null) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      resolve({ ran: true, ok: false, output: hostSpawnErrorOutput(err, posixShellPath(), cwd) });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
+      if (fallback) clearTimeout(fallback);
       const body = stripAnsi(output).trim() || `(hook exited ${code ?? "null"})`;
       resolve({ ran: true, ok: code === 0, output: body });
+    };
+    const timer = setTimeout(() => {
+      fallback = killTreeOnTimeout(child, () => onClose(null));
+    }, timeoutMs);
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (fallback) clearTimeout(fallback);
+      resolve({ ran: true, ok: false, output: hostSpawnErrorOutput(err, posixShellPath(), cwd) });
     });
+    child.on("close", onClose);
   });
 }

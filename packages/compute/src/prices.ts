@@ -1,4 +1,11 @@
-import { isFargateSizeId, type FargateSizeId } from "@locus/shared";
+import {
+  isFargateSizeId,
+  workerAllowedSizes,
+  workerPickSize,
+  type FargateSizeId,
+  type WorkerBackend,
+} from "@locus/shared";
+import type { CostQuote } from "./types.js";
 
 /** Fargate Linux/x86 list prices, US East (N. Virginia). Not a live quote. */
 export const FARGATE_PRICING_AS_OF = "2026-08";
@@ -25,4 +32,13 @@ export function fargateUsdPerHour(size: string): number {
   if (!isFargateSizeId(size)) throw new Error(`Unknown Fargate size ${size}`);
   const row = SIZE_RESOURCES[size];
   return row.vcpu * FARGATE_VCPU_USD_PER_HOUR + row.gb * FARGATE_GB_USD_PER_HOUR;
+}
+
+/** Shared allowlist + Fargate-named list-price quote for cloud Compute adapters. */
+export function quoteCloudSize(backend: WorkerBackend, size: string, label: string): CostQuote {
+  const resolved = workerPickSize(backend, size);
+  if (!workerAllowedSizes(backend)?.length) {
+    throw new Error(`${label} workers need a size allowlist so a runaway agent cannot pick 4 vCPU`);
+  }
+  return { size: resolved, usdPerHour: fargateUsdPerHour(resolved) };
 }

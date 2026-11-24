@@ -199,6 +199,14 @@ describe("applyTheme", () => {
     expect(styleCss).toMatch(
       /@media \(prefers-reduced-motion: reduce\) \{\s*@scope \(\[data-theme-style="glitch"\]\)[\s\S]*?animation: none/,
     );
+    for (const style of ["steampunk", "disco", "psychedelic"]) {
+      expect(styleCss).toMatch(
+        new RegExp(
+          `@media \\(prefers-reduced-motion: reduce\\) \\{\\s*@scope \\(\\[data-theme-style="${style}"\\]\\)[\\s\\S]*?animation: none`,
+        ),
+      );
+    }
+    expect(styleCss).toMatch(/@property --disco-sweep/);
     expect(styleCss).toMatch(
       /@media \(prefers-reduced-transparency: reduce\) \{\s*html\[data-theme-style="riso"\] body::after/,
     );
@@ -250,6 +258,12 @@ describe("applyTheme", () => {
     expect(document.documentElement.dataset.themeStyle).toBe("glitch");
     applyTheme("thermal");
     expect(document.documentElement.dataset.themeStyle).toBe("receipt");
+    applyTheme("mirrorball");
+    expect(document.documentElement.dataset.themeStyle).toBe("disco");
+    expect(document.documentElement.style.colorScheme).toBe("dark");
+    applyTheme("bigtop");
+    expect(document.documentElement.dataset.themeStyle).toBe("circus");
+    expect(document.documentElement.style.colorScheme).toBe("light");
     applyTheme("nord");
     expect(document.documentElement.dataset.themeStyle).toBeUndefined();
   });
@@ -296,5 +310,15 @@ describe("applyChatDensity", () => {
     expect(css).toMatch(/\[data-chat-density="comfortable"\][\s\S]*?--chat-font: 14\.5px;/);
     expect(css).toMatch(/\[data-chat-density="dense"\][\s\S]*?--chat-font: 12px;/);
     expect(css).toMatch(/\.thread \{[\s\S]*?padding: var\(--chat-thread-pad\)/);
+  });
+
+  it("scales the app-wide space and type tokens", () => {
+    expect(css).toMatch(/--space-4: calc\(16px \* var\(--density-space\)\);/);
+    expect(css).toMatch(
+      /\[data-chat-density="comfortable"\] \{\n  --density-space: 1\.2;\n  --density-type: 1\.07;/,
+    );
+    expect(css).toMatch(
+      /\[data-chat-density="dense"\] \{\n  --density-space: 0\.75;\n  --density-type: 0\.93;/,
+    );
   });
 });

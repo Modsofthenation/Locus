@@ -1,7 +1,7 @@
 import { act, useReducer } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentSession } from "@locus/shared";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentSession, Automation, AutomationRun } from "@locus/shared";
 import { Store, initialState, reducer, type Action, type UiState } from "@/state/store";
 import { api } from "@/lib/api";
 import { InboxPane } from "./InboxPane";
@@ -25,9 +25,15 @@ describe("InboxPane", () => {
   let host: HTMLDivElement;
   let root: Root;
 
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.spyOn(api, "modelUsage").mockResolvedValue({ models: [] });
+  });
+
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
+    vi.restoreAllMocks();
   });
 
   /** Runs the real reducer so focus changes (J/K, Prev/Next) re-render. */
@@ -224,5 +230,41 @@ describe("InboxPane", () => {
     act(() => more.click());
     expect(dispatch).toHaveBeenCalledWith({ type: "section", section: "agents" });
     expect(host.querySelector("[data-testid='dash-jobs'] .dash-panel-count")).toBeNull();
+  });
+
+  it("shows why a job failed, opens that run, and counts only executing jobs as running", () => {
+    const job = {
+      id: "nightly",
+      name: "Nightly build",
+      enabled: true,
+    } as Automation;
+    const failed: AutomationRun = {
+      id: "failed-run",
+      automationId: job.id,
+      status: "failed",
+      trigger: "schedule",
+      error: "Cannot connect to the Docker daemon",
+      startedAt: "2026-11-21T10:00:00Z",
+      finishedAt: "2026-11-21T10:01:00Z",
+    };
+    const dispatch = render({
+      ...initialState,
+      automations: [job],
+      runs: [failed, { ...failed, id: "queued", automationId: "other", status: "queued" }],
+    });
+    expect(host.querySelector("[aria-controls='dash-jobs']")?.textContent).toContain(
+      "0Jobs running1 queued · 1 failing",
+    );
+    expect(host.querySelector(".dash-queue")?.textContent).toContain("Docker isn't running");
+    const view = Array.from(host.querySelectorAll("button")).find(
+      (button) => button.textContent === "View run",
+    );
+    expect(view).toBeDefined();
+    act(() => view!.click());
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "selectAutomation",
+      id: job.id,
+      runId: failed.id,
+    });
   });
 });

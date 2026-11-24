@@ -6,6 +6,7 @@
 import {
   parsePullUrl,
   resolveForgeAccount,
+  slackReviewerAuthorExcluded,
   slackReviewerRepoAllowed,
   slackReviewPullKey,
   slackReviewPullLabel,
@@ -182,6 +183,8 @@ async function autoReviewPull(
 ): Promise<boolean> {
   const { row, pr, key } = item;
   if (!slackReviewerRepoAllowed(reviewer, pr)) return true;
+  // An author the operator excluded: not posted, not reviewed.
+  if (slackReviewerAuthorExcluded(reviewer, row.author)) return true;
   if (ctx.pending.has(`${reviewer.id}:${key}`)) return true;
   const prior = rs.reviewed[key];
   const reviewedSha = prior?.reviewedSha ?? legacyReviewedSha(prior);

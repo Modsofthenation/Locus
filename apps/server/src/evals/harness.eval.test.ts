@@ -1,13 +1,14 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MockHypervisor, sessionHostWorkspace } from "@locus/hypervisor";
 import {
   REVIEW_PASS_NEEDS_INSPECT,
   REVIEW_TOOLS,
   isGuestReady,
   mcpDescriptionPin,
+  parseManagedPolicy,
   turnCalledReviewTools,
 } from "@locus/shared";
 import { Hub } from "../core/hub.js";
@@ -495,6 +496,111 @@ describe("harness eval", () => {
     });
     expect(write.ok).toBe(false);
     expect(write.output).toMatch(/PreToolUse hook failed/i);
+
+    const bypassed = await sessions.patchMeta(created.id, { bypassGates: ["pre-tool-use-hooks"] });
+    expect(bypassed.bypassGates).toEqual(["pre-tool-use-hooks"]);
+    const skipped = await sessions.executeTool(created.id, {
+      name: "file_write",
+      args: { path: "/workspace/a.ts", content: "export const a = 1;\n" },
+    });
+    expect(skipped.output ?? "").not.toMatch(/PreToolUse hook failed/i);
+    await expect(
+      sessions.patchMeta(created.id, { bypassGates: ["nope" as never] }),
+    ).rejects.toThrow(/Unknown harness gate/);
+    const restored = await sessions.patchMeta(created.id, { bypassGates: null });
+    expect(restored.bypassGates).toBeUndefined();
+    hypervisor.shutdown();
+  });
+
+  it("records bypassGates from create input", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-harness-"));
+    cleanup.push(dir);
+    const store = new JsonStore(dir);
+    await store.init();
+    const config = await store.loadConfig();
+    const hypervisor = new MockHypervisor(dir);
+    const sessions = new SessionService(store, hypervisor, new Hub());
+    const created = await sessions.create({
+      os: "ubuntu",
+      templateId: config.templates[0]!.id,
+      runtime: "host",
+      providerId: config.providers[0]!.id,
+      model: config.providers[0]!.defaultModel,
+      startVm: false,
+      bypassGates: ["test-gate", "test-gate"],
+    });
+    expect(created.bypassGates).toEqual(["test-gate"]);
+    hypervisor.shutdown();
+  });
+
+  it("enforces the managed policy on bypassGates at create, patch, tool time, and fork", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-harness-"));
+    cleanup.push(dir);
+    const store = new JsonStore(dir);
+    await store.init();
+    const config = await store.loadConfig();
+    const realLoad = store.loadConfig.bind(store);
+    let policyOn = false;
+    const managedPolicy = {
+      active: true,
+      locked: [],
+      policy: parseManagedPolicy({
+        version: 1,
+        allowedProviders: [config.providers[0]!.id],
+        blockConsumerLogins: false,
+        blockArbitraryBaseUrls: false,
+        sandbox: { allowHostAgents: true, allowedGateBypasses: ["test-gate"] },
+      })!,
+    };
+    vi.spyOn(store, "loadConfig").mockImplementation(async () => {
+      const loaded = await realLoad();
+      return policyOn ? { ...loaded, managedPolicy } : loaded;
+    });
+    const hypervisor = new MockHypervisor(dir);
+    const sessions = new SessionService(store, hypervisor, new Hub());
+    const base = {
+      os: "ubuntu" as const,
+      templateId: config.templates[0]!.id,
+      runtime: "host" as const,
+      providerId: config.providers[0]!.id,
+      model: config.providers[0]!.defaultModel,
+      startVm: false,
+    };
+
+    // Created before the policy lands, with a hook bypass.
+    const early = await sessions.create({ ...base, bypassGates: ["pre-tool-use-hooks"] });
+    policyOn = true;
+
+    await expect(sessions.create({ ...base, bypassGates: ["pre-tool-use-hooks"] })).rejects.toThrow(
+      /does not allow bypassing harness gate pre-tool-use-hooks/,
+    );
+    const allowed = await sessions.create({ ...base, bypassGates: ["test-gate"] });
+    expect(allowed.bypassGates).toEqual(["test-gate"]);
+    await expect(sessions.patchMeta(allowed.id, { bypassGates: ["force-push"] })).rejects.toThrow(
+      /does not allow bypassing harness gate force-push/,
+    );
+
+    // The policy wins at tool time even for a session created before it.
+    const root = sessionHostWorkspace(dir, early);
+    await mkdir(join(root, ".locus"), { recursive: true });
+    await writeFile(
+      join(root, ".locus", "hooks.json"),
+      JSON.stringify({
+        PreToolUse: [{ matcher: "file_write", command: 'node -e "process.exit(1)"' }],
+      }),
+      "utf8",
+    );
+    const write = await sessions.executeTool(early.id, {
+      name: "file_write",
+      args: { path: "/workspace/a.ts", content: "export const a = 1;\n" },
+    });
+    expect(write.output).toMatch(/PreToolUse hook failed/i);
+
+    // A fork keeps only the bypasses the policy still allows.
+    const forked = await sessions.fork(early.id);
+    expect(forked.bypassGates).toBeUndefined();
+    const forkedAllowed = await sessions.fork(allowed.id);
+    expect(forkedAllowed.bypassGates).toEqual(["test-gate"]);
     hypervisor.shutdown();
   });
 

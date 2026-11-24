@@ -1,5 +1,6 @@
 import { providerLooksLikeAws } from "../awsEndpoint.js";
 import type { AutonomyTier } from "./autonomy.js";
+import { HARNESS_GATES, isHarnessGate, type HarnessGate } from "./harnessGates.js";
 import type { LocusConfig } from "./config.js";
 import type { IntegrationAccount } from "./integration.js";
 import type { McpServerConfig } from "./mcp.js";
@@ -45,6 +46,11 @@ export interface ManagedSandboxPolicy {
   allowLiveChrome?: boolean;
   allowPhoneRemote?: boolean;
   allowAutonomous?: boolean;
+  /**
+   * Harness gates a session may bypass (`bypassGates`). Default none when a profile is
+   * active; list ids such as `test-gate` to allow them.
+   */
+  allowedGateBypasses?: HarnessGate[];
   /** Forced guest jail. Default restricted. */
   defaultJail?: "restricted" | "none";
   /** When true, operators cannot pick open networking. Default true when a profile is active. */
@@ -103,6 +109,7 @@ export const DEFAULT_MANAGED_POLICY: ManagedPolicy = {
     allowLiveChrome: false,
     allowPhoneRemote: false,
     allowAutonomous: false,
+    allowedGateBypasses: [],
     defaultJail: "restricted",
     forceJail: true,
   },
@@ -180,6 +187,9 @@ export function parseManagedPolicy(raw: unknown): ManagedPolicy | undefined {
           allowLiveChrome: sandboxRaw.allowLiveChrome === true,
           allowPhoneRemote: sandboxRaw.allowPhoneRemote === true,
           allowAutonomous: sandboxRaw.allowAutonomous === true,
+          allowedGateBypasses: (strList(sandboxRaw.allowedGateBypasses) ?? []).filter(
+            isHarnessGate,
+          ),
           defaultJail: defaultJail ?? "restricted",
           forceJail: sandboxRaw.forceJail === false ? false : true,
         }
@@ -216,6 +226,9 @@ export function managedPolicyLockedControls(policy: ManagedPolicy): string[] {
   if (effective.sandbox?.allowLiveChrome === false) locked.push("liveChrome");
   if (effective.sandbox?.allowPhoneRemote === false) locked.push("phoneRemote");
   if (effective.sandbox?.allowAutonomous === false) locked.push("autonomous");
+  if (HARNESS_GATES.some((gate) => !effective.sandbox?.allowedGateBypasses?.includes(gate))) {
+    locked.push("gateBypass");
+  }
   if (effective.sandbox?.forceJail !== false) locked.push("jail");
   locked.push("brainDistiller");
   if (effective.gifLookup !== true) locked.push("gifLookup");
@@ -369,6 +382,41 @@ export function policyAllowsPhoneRemote(status?: ManagedPolicyStatus | null): bo
 export function policyAllowsAutonomous(status?: ManagedPolicyStatus | null): boolean {
   if (!status?.active) return true;
   return status.policy.sandbox?.allowAutonomous === true;
+}
+
+/** Gates the managed policy lets a session bypass. All of them when no profile is active. */
+export function policyAllowedGateBypasses(status?: ManagedPolicyStatus | null): HarnessGate[] {
+  if (!status?.active) return [...HARNESS_GATES];
+  return (status.policy.sandbox?.allowedGateBypasses ?? []).filter(isHarnessGate);
+}
+
+/** Error text when the managed policy forbids any of `gates`, else undefined. */
+export function policyRejectsGateBypass(
+  gates: readonly string[] | undefined,
+  status?: ManagedPolicyStatus | null,
+): string | undefined {
+  if (!gates?.length || !status?.active) return undefined;
+  const allowed = policyAllowedGateBypasses(status);
+  const denied = gates.filter((gate) => !(allowed as readonly string[]).includes(gate));
+  if (!denied.length) return undefined;
+  return `Managed policy does not allow bypassing harness gate${denied.length > 1 ? "s" : ""} ${denied.join(", ")}`;
+}
+
+/**
+ * The gates a session actually bypasses right now: its `bypassGates` minus anything the
+ * managed policy forbids. Applied at tool time, so tightening the policy takes effect on
+ * sessions that already exist.
+ */
+export function effectiveBypassGates(
+  gates: readonly string[] | undefined,
+  status?: ManagedPolicyStatus | null,
+): HarnessGate[] | undefined {
+  if (!gates?.length) return undefined;
+  const allowed = policyAllowedGateBypasses(status) as readonly string[];
+  const out = gates.filter(
+    (gate): gate is HarnessGate => isHarnessGate(gate) && allowed.includes(gate),
+  );
+  return out.length ? out : undefined;
 }
 
 export function policyForcedJail(status?: ManagedPolicyStatus | null): NetworkJail | undefined {
@@ -535,6 +583,7 @@ export function policyRejectsCreate(input: {
   autonomy?: string;
   network?: string;
   liveChrome?: boolean;
+  bypassGates?: readonly string[];
   /** Host runtime inside a dedicated cloud task (Fargate), not this machine. */
   cloudTask?: boolean;
   status?: ManagedPolicyStatus | null;
@@ -554,5 +603,5 @@ export function policyRejectsCreate(input: {
   if (forced && input.network === "open") {
     return `Managed policy requires the ${forced} network jail`;
   }
-  return undefined;
+  return policyRejectsGateBypass(input.bypassGates, status);
 }

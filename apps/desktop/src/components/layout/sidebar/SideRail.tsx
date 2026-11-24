@@ -13,8 +13,9 @@ import { sessionFitsSection } from "@/state/store";
 import type { UiSection } from "@/state/store";
 import { isLockedRailSection } from "@/lib/railNav";
 import type { SectionMeta } from "./sectionMeta";
+import { SessionBackendBadge, type SessionBackend } from "./SessionBackendBadge";
 
-export type RailPeekRow = { key: string; title: string; detail?: string };
+export type RailPeekRow = { key: string; title: string; detail?: string; backend?: SessionBackend };
 
 /** A create action shown at the top of the collapsed-rail flyout. */
 export type RailPeekAction = { key: string; label: string; run: () => void };
@@ -434,7 +435,10 @@ export function SideRail(props: {
                   setPeek(null);
                 }}
               >
-                <span className="title-text">{row.title}</span>
+                <span className="rail-peek-title">
+                  <span className="title-text">{row.title}</span>
+                  {row.backend ? <SessionBackendBadge backend={row.backend} /> : null}
+                </span>
                 {row.detail ? <span className="meta">{row.detail}</span> : null}
               </button>
             ))

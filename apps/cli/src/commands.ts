@@ -10,6 +10,9 @@ import {
   isAgentPlacement,
   isAgentRuntime,
   isAutonomyTier,
+  isHarnessGate,
+  HARNESS_GATES,
+  type HarnessGate,
   isGuestOs,
   GUEST_OSES,
   isPullListState,
@@ -940,6 +943,16 @@ async function cmdAgentNew(ctx: Ctx): Promise<void> {
   const autonomy = flagStr(ctx.flags, "autonomy");
   if (autonomy && isAutonomyTier(autonomy)) input.autonomy = autonomy;
   else if (autonomy) throw new UsageError("--autonomy must be guided, supervised, or autonomous");
+  const bypassGates = flagList(ctx.flags, "bypass-gate");
+  if (bypassGates.length) {
+    const unknown = bypassGates.filter((gate) => !isHarnessGate(gate));
+    if (unknown.length) {
+      throw new UsageError(
+        `Unknown --bypass-gate ${unknown.join(", ")}. Known gates: ${HARNESS_GATES.join(", ")}`,
+      );
+    }
+    input.bypassGates = bypassGates as HarnessGate[];
+  }
   const network = flagStr(ctx.flags, "network");
   if (network === "open" || network === "restricted" || network === "none") input.network = network;
   const vision = flagStr(ctx.flags, "vision");

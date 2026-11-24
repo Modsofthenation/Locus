@@ -234,6 +234,7 @@ export interface BoardPendingComment {
   objectId: string;
   body: string;
   author: "operator" | "agent";
+  createdAt?: string;
 }
 
 export interface BoardSummary {
@@ -454,6 +455,7 @@ export function boardSummary(board: BoardDocument): BoardSummary {
       objectId: row.objectId,
       body: row.body,
       author: row.author,
+      createdAt: row.createdAt,
     }));
   return {
     id: board.id,
@@ -2455,6 +2457,7 @@ export function boardNeedsYouItems(boards: BoardSummary[]): Array<{
   commentId: string;
   title: string;
   detail: string;
+  at?: string;
 }> {
   const out: Array<{
     key: string;
@@ -2463,6 +2466,7 @@ export function boardNeedsYouItems(boards: BoardSummary[]): Array<{
     commentId: string;
     title: string;
     detail: string;
+    at?: string;
   }> = [];
   for (const board of boards) {
     if (board.archived) continue;
@@ -2474,6 +2478,7 @@ export function boardNeedsYouItems(boards: BoardSummary[]): Array<{
         commentId: row.id,
         title: board.title,
         detail: row.body,
+        at: row.createdAt,
       });
     }
   }

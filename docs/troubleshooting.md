@@ -40,7 +40,7 @@ The composer queue holds 32 prompts (configurable in Settings → Advanced). Sen
 
 ## Image tag `locus/agent:0.1`
 
-The runtime tag stays `locus/agent:0.1` so existing guests keep working. `npm run images` also tags `locus/agent:0.24.0`. Rebuild after Dockerfile changes.
+The runtime tag stays `locus/agent:0.1` so existing guests keep working. `npm run images` also tags `locus/agent:0.29.0`. Rebuild after Dockerfile changes.
 
 ## Worker VNC is blank
 
@@ -49,6 +49,18 @@ Worker QEMU VNC listens on the worker loopback only. The laptop pane uses WSS `/
 ## Slack Approve does nothing for git_push
 
 That is intentional. Slack buttons may approve `slack_post` / `slack_upload` only. Open Locus for forge writes.
+
+## Shell `git pull` says "could not read Username"
+
+The agent's shell never gets the forge token. Agents use `git_fetch` with `ref=<branch>` to pull: it fetches with the saved token and fast-forwards the local branch, or reports `LOCUS_DIVERGED` if the local branch has its own commits. `git_fetch` and `git_push` call the HTTPS URL directly for that one command. They never rewrite `origin`, so an SSH origin you set stays as it is. They only use `--depth` in a checkout that is already shallow.
+
+In a host folder that already holds a clone but has no attached repo, Locus picks the forge account from that clone's `origin`. Only a token for the same forge is sent. If push or PR still fails with an auth error, check Settings → Git:
+
+- **Bitbucket repository/workspace access tokens and OAuth** use git username `x-token-auth` and Bearer auth on the API.
+- **Atlassian API tokens** (`ATATT…`) use git username `x-bitbucket-api-token-auth`. The API needs the account's **email** in the username field.
+- **App passwords** (`ATBB…`) use your Bitbucket username for both git and the API.
+
+Token-isolated git commands keep your proxy, CA, `safe.directory`, SSH command and LFS settings. They drop credential helpers, `url.*.insteadOf`, and `http.extraHeader`.
 
 ## Windows opens a stack of terminal windows on each prompt
 

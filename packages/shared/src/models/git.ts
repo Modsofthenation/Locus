@@ -408,8 +408,15 @@ export function cursorGithubRepoUrl(url?: string): string | undefined {
   return `https://github.com/${ownerRepo.owner}/${ownerRepo.repo}`;
 }
 
-/** SSH-over-443 hosts that serve the same repos as the forge's main host. */
+/**
+ * Hosts that serve the same repos as the forge's main host: SSH-over-443 hosts, and the
+ * `www.` names that redirect to the main host (a cross-host redirect makes libcurl drop
+ * auth headers, and URL matching against `origin` misses).
+ */
 const FORGE_HOST_ALIASES: Record<string, string> = {
+  "www.github.com": "github.com",
+  "www.bitbucket.org": "bitbucket.org",
+  "www.gitlab.com": "gitlab.com",
   "ssh.github.com": "github.com",
   "ssh.bitbucket.org": "bitbucket.org",
   "altssh.bitbucket.org": "bitbucket.org",
@@ -614,7 +621,7 @@ export function parseOwnerRepo(url: string): { owner: string; repo: string } | n
 }
 
 export function normalizeRepoUrl(url: string): string {
-  return url
+  return canonicalRemote(url)
     .toLowerCase()
     .replace(/\.git$/i, "")
     .replace(/\/+$/, "");
@@ -776,6 +783,37 @@ export function isGitHubAppAccessToken(token: string): boolean {
   return /^(ghs_|ghu_)/.test(token.trim());
 }
 
+/**
+ * Bitbucket Cloud credential kinds, by token prefix. Atlassian API tokens (`ATATT…`) use
+ * the git username `x-bitbucket-api-token-auth` and Basic `email:token` on the REST API.
+ * App passwords (`ATBB…`) use the Bitbucket username for both. Access tokens and OAuth
+ * tokens use `x-token-auth` for git and Bearer on the REST API.
+ */
+export type BitbucketTokenKind = "api-token" | "app-password" | "bearer";
+
+export function bitbucketTokenKind(token?: string): BitbucketTokenKind {
+  const raw = token?.trim() ?? "";
+  if (raw.startsWith("ATATT")) return "api-token";
+  if (raw.startsWith("ATBB")) return "app-password";
+  return "bearer";
+}
+
+function bitbucketGitUser(token?: string, username?: string): string {
+  const kind = bitbucketTokenKind(token);
+  if (kind === "api-token") return "x-bitbucket-api-token-auth";
+  const named = username?.trim();
+  if (kind === "app-password" && named && !named.includes("@")) return named;
+  return "x-token-auth";
+}
+
+/** A host name `gitHttpsAuthUser` recognises for a forge kind (when no remote URL is known). */
+export function forgeGitHost(kind?: ForgeKind): string {
+  if (kind === "bitbucket") return "bitbucket.org";
+  if (kind === "gitlab") return "gitlab.com";
+  if (kind === "azuredevops") return "dev.azure.com";
+  return "github.com";
+}
+
 /** HTTPS username git expects for a forge host or clone URL. */
 export function gitHttpsAuthUser(hostOrUrl: string, token?: string, username?: string): string {
   let host = hostOrUrl.trim().toLowerCase();
@@ -786,7 +824,7 @@ export function gitHttpsAuthUser(hostOrUrl: string, token?: string, username?: s
       /* keep the raw value */
     }
   }
-  if (host.includes("bitbucket")) return "x-token-auth";
+  if (host.includes("bitbucket")) return bitbucketGitUser(token, username);
   if (host.includes("gitlab")) return "oauth2";
   if (host.includes("dev.azure.com") || host.includes("visualstudio.com")) {
     return username?.trim() || "azdo";
@@ -842,6 +880,11 @@ export const GIT_CREDENTIAL_HELPER_SCRIPT =
     "done",
     'token="${GIT_TOKEN:-${GITHUB_TOKEN:-${GITLAB_TOKEN:-${BITBUCKET_TOKEN:-}}}}"',
     '[ -n "$token" ] || exit 0',
+    'if [ "$user" = x-token-auth ]; then',
+    '  case "$token" in',
+    "    ATATT*) user=x-bitbucket-api-token-auth ;;",
+    "  esac",
+    "fi",
     'if [ "$user" = x-access-token ]; then',
     '  case "$token" in',
     "    ghs_*|ghu_*) ;;",

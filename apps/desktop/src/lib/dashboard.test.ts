@@ -3,7 +3,7 @@ import type { AgentSession, Automation, AutomationRun, SlackReviewRun } from "@l
 import {
   activeAgents,
   automationActivity,
-  nextScheduledRun,
+  nextScheduledRuns,
   recentSessions,
   reviewSessions,
   slackReviewActivity,
@@ -72,7 +72,7 @@ describe("dashboard", () => {
       ["3", "Job"],
       ["1", "Nightly"],
     ]);
-    expect(nextScheduledRun(automations)?.id).toBe("j2");
+    expect(nextScheduledRuns(automations)[0]?.id).toBe("j2");
   });
 
   it("drops dry-run Slack reviews from recent", () => {

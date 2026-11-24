@@ -1,15 +1,21 @@
 import type { GuestOs, VmInstance, WorkerBackend } from "@locus/shared";
-import { WORKER_PLANE_HEADER } from "@locus/shared";
+import { WORKER_GATEWAY_TOKEN_HEADER, WORKER_PLANE_HEADER } from "@locus/shared";
 import type { CreateContainerRequest } from "@locus/hypervisor";
 import type { ChromiumDriver, GuestRuntime, ToolRequest, ToolResult } from "@locus/guest-agent";
 import { isWorkerHealth, parseWorkerFingerprint } from "@locus/shared";
 import { WORKER_CLI_REPLAY_HEADER } from "./cliReplay.js";
 import { WorkerBrowserDriver } from "./browserDriver.js";
+import { WORKER_GATEWAY_HEADERS } from "./token.js";
 import { packDirectory } from "./archive.js";
 import { pinnedHttpsFetch, pinnedHttpsWebSocket } from "./tls.js";
 import type { WebSocket } from "ws";
 
 const HEALTH_TIMEOUT_MS = 8_000;
+
+export interface WorkerGateway {
+  headers: Readonly<Record<string, string>>;
+  deadlineAt: number;
+}
 
 export class WorkerCliStartError extends Error {}
 
@@ -30,6 +36,7 @@ export class WorkerClient {
       id: string,
       onMessage: (raw: string) => void,
     ) => Promise<WebSocket>,
+    private readonly gateway?: WorkerGateway,
   ) {
     this.resolvedFingerprint = parseWorkerFingerprint(backend.fingerprint);
   }
@@ -54,6 +61,29 @@ export class WorkerClient {
     return this.resolvedFingerprint ?? parseWorkerFingerprint(this.backend.fingerprint);
   }
 
+  private gatewayTimeRemaining(): number {
+    const remaining = (this.gateway?.deadlineAt ?? 0) - Date.now();
+    if (remaining <= 0) throw new Error("Cloud worker runtime deadline elapsed");
+    return remaining;
+  }
+
+  private gatewayHeaders(headers: RequestInit["headers"]): Headers {
+    const result = new Headers(headers);
+    for (const name of [
+      "authorization",
+      "host",
+      "forwarded",
+      "x-forwarded-host",
+      ...WORKER_GATEWAY_HEADERS,
+    ]) {
+      result.delete(name);
+    }
+    for (const [name, value] of Object.entries(this.gateway?.headers ?? {}))
+      result.set(name, value);
+    result.set(WORKER_GATEWAY_TOKEN_HEADER, this.backend.token ?? "");
+    return result;
+  }
+
   private async request(
     url: string,
     init: RequestInit,
@@ -65,6 +95,22 @@ export class WorkerClient {
       !/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])[:/]/i.test(url)
     ) {
       throw new Error("Worker URL must be https");
+    }
+    if (this.gateway) {
+      const remaining = this.gatewayTimeRemaining();
+      const deadline = AbortSignal.timeout(remaining);
+      const signal = init.signal ? AbortSignal.any([init.signal, deadline]) : deadline;
+      const response = await (this.fetchFn ?? fetch)(url, {
+        ...init,
+        redirect: "error",
+        headers: this.gatewayHeaders(init.headers),
+        signal,
+      });
+      if (tofu && [502, 503, 504].includes(response.status)) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new Error("Cloud worker gateway is waiting for the guest");
+      }
+      return response;
     }
     const pin = this.pin();
     if (!pin && !tofu && url.startsWith("https:")) {
@@ -126,7 +172,7 @@ export class WorkerClient {
     signal?: AbortSignal;
   }): Promise<Awaited<ReturnType<WorkerClient["health"]>>> {
     const wait = opts.wait ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
-    const deadline = Date.now() + opts.timeoutMs;
+    const deadline = Math.min(Date.now() + opts.timeoutMs, this.gateway?.deadlineAt ?? Infinity);
     let last: unknown;
     for (;;) {
       if (opts.signal?.aborted) throw new Error("Worker start was cancelled");
@@ -497,7 +543,7 @@ export class WorkerClient {
     const wsUrl = this.url(path)
       .replace(/^https:/, "wss:")
       .replace(/^http:/, "ws:");
-    return pinnedHttpsWebSocket(wsUrl, {
+    return this.openSocket(wsUrl, {
       headers: this.headers(),
       fingerprint: this.pin(),
       binary: true,
@@ -511,11 +557,33 @@ export class WorkerClient {
     const wsUrl = this.url(path)
       .replace(/^https:/, "wss:")
       .replace(/^http:/, "ws:");
-    return pinnedHttpsWebSocket(wsUrl, {
+    return this.openSocket(wsUrl, {
       headers: this.headers(),
       fingerprint: this.pin(),
       onMessage: (raw) => onMessage(String(raw)),
     });
+  }
+
+  private async openSocket(
+    url: string,
+    opts: Parameters<typeof pinnedHttpsWebSocket>[1],
+  ): Promise<WebSocket> {
+    if (!this.gateway) return pinnedHttpsWebSocket(url, opts);
+    this.gatewayTimeRemaining();
+    const ws = await pinnedHttpsWebSocket(url, {
+      ...opts,
+      headers: Object.fromEntries(this.gatewayHeaders(opts.headers)),
+      verifyPublicTls: true,
+    });
+    const remaining = this.gateway.deadlineAt - Date.now();
+    if (remaining <= 0) {
+      ws.close();
+      throw new Error("Cloud worker runtime deadline elapsed");
+    }
+    const timer = setTimeout(() => ws.close(), remaining);
+    timer.unref?.();
+    ws.once("close", () => clearTimeout(timer));
+    return ws;
   }
 
   private remember(vm: VmInstance): void {

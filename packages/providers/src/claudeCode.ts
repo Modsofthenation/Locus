@@ -3,6 +3,7 @@ import { cursorCliSpawnFailureMessage } from "@locus/shared/windowsCliSpawn";
 import { ProviderError, readTokenUsage, type TokenUsageEvent } from "./types.js";
 import type { CursorCliEvent, CursorCliSpawner } from "./cursorCli.js";
 import { spawnCursorCli } from "./cursorCli.js";
+import { streamCliLines } from "./cliStream.js";
 
 const CLI_TOOL_NAMES: Record<string, string> = {
   Read: "file_read",
@@ -294,15 +295,18 @@ export async function* streamClaudeCode(input: {
   }
   let streamedText = false;
   let streamedReasoning = false;
-  let sawTerminal = false;
   const toolNames = new Map<string, string>();
   let contextTokens: number | undefined;
-  try {
-    for await (const line of handle.lines) {
-      if (input.signal?.aborted) break;
+  yield* streamCliLines({
+    command: argv.command,
+    handle,
+    signal: input.signal,
+    rewriteError: rewriteSpawnError,
+    onLine: (line) => {
       contextTokens = claudeCodeCallPromptTokens(line) ?? contextTokens;
-      const events = parseClaudeCodeEventsRaw(line);
-      for (const event of events) {
+      const events: ClaudeCodeEvent[] = [];
+      let stop = false;
+      for (const event of parseClaudeCodeEventsRaw(line)) {
         if (event.type === "tool_call" && event.id) {
           if (event.status === "running" && event.name && event.name !== "tool") {
             toolNames.set(event.id, event.name);
@@ -319,27 +323,24 @@ export async function* streamClaudeCode(input: {
           published.usage = { ...published.usage, contextTokens };
         }
         if (published.type === "result" && published.text && streamedText) {
-          yield { ...published, text: undefined };
+          events.push({ ...published, text: undefined });
         } else {
-          yield published;
+          events.push(published);
         }
-        if (published.type === "result" || published.type === "error") {
-          sawTerminal = true;
-        }
+        if (published.type === "result" || published.type === "error") stop = true;
       }
-      if (sawTerminal) break;
-    }
-    const done = await handle.wait();
-    if (!sawTerminal && !input.signal?.aborted && done.code !== 0) {
-      const detail = done.stderr.trim() || `exit ${done.code}`;
-      yield { type: "error", message: `Claude Code failed: ${detail}` };
-    }
-    yield { type: "done" };
-  } catch (err) {
-    throw rewriteSpawnError(err, argv.command);
-  } finally {
-    handle.kill?.();
-  }
+      return { events, stop };
+    },
+    reap: () => handle.wait(),
+    failedExit: (done) =>
+      done.code !== 0
+        ? {
+            type: "error" as const,
+            message: `Claude Code failed: ${done.stderr.trim() || `exit ${done.code}`}`,
+          }
+        : undefined,
+    doneEvent: { type: "done" },
+  });
 }
 
 export function spawnClaudeCode(req: Parameters<ClaudeCodeSpawner>[0]) {

@@ -8,6 +8,7 @@ import {
   slackChannelAllowed,
 } from "./integration.js";
 import {
+  parseSlackMember,
   SLACK_BOT_SCOPES,
   SLACK_MOCK_USER_TOKEN,
   SLACK_USER_SCOPES,
@@ -953,5 +954,37 @@ describe("slack helpers", () => {
       "C_ENG",
     );
     expect(listening.map((row) => row.id)).toEqual(["s1"]);
+  });
+});
+
+describe("parseSlackMember", () => {
+  it("prefers the display name and keeps a different real name", () => {
+    expect(
+      parseSlackMember({
+        id: "U0123ABCD",
+        name: "alice",
+        profile: { display_name: "Al", real_name: "Alice Smith", image_72: "https://x/a.png" },
+      }),
+    ).toEqual({
+      id: "U0123ABCD",
+      name: "Al",
+      realName: "Alice Smith",
+      avatarUrl: "https://x/a.png",
+    });
+    expect(parseSlackMember({ id: "U1", name: "bob", profile: { real_name: "Bob" } })).toEqual({
+      id: "U1",
+      name: "Bob",
+    });
+  });
+
+  it("marks bots and drops deleted users and Slackbot", () => {
+    expect(parseSlackMember({ id: "B1", name: "ci", is_bot: true })).toEqual({
+      id: "B1",
+      name: "ci",
+      isBot: true,
+    });
+    expect(parseSlackMember({ id: "U2", name: "gone", deleted: true })).toBeUndefined();
+    expect(parseSlackMember({ id: "USLACKBOT", name: "slackbot" })).toBeUndefined();
+    expect(parseSlackMember({ name: "no id" })).toBeUndefined();
   });
 });

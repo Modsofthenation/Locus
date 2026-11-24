@@ -842,8 +842,8 @@ describe("Topbar", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(host.querySelector("#trace-title")?.textContent).toBe("Trace");
-    expect(host.querySelector(".debug-log-raw")?.textContent).toContain("turn.start");
+    expect(document.body.querySelector("#trace-title")?.textContent).toBe("Trace");
+    expect(document.body.querySelector(".debug-log-raw")?.textContent).toContain("turn.start");
     expect(api.debugLog).toHaveBeenCalledWith("trace", "s1");
   });
 
@@ -1181,8 +1181,8 @@ describe("Topbar", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(host.querySelector("#trace-title")?.textContent).toBe("Trace");
-    expect(host.querySelector(".debug-log-raw")?.textContent).toContain("turn.start");
+    expect(document.body.querySelector("#trace-title")?.textContent).toBe("Trace");
+    expect(document.body.querySelector(".debug-log-raw")?.textContent).toContain("turn.start");
     expect(api.debugLog).toHaveBeenCalledWith("trace", "d1");
   });
 

@@ -20,6 +20,7 @@ export type TraceKind =
   | "approval"
   | "selfCorrect"
   | "blocked"
+  | "testGate"
   | "error";
 
 export interface TraceEvent {

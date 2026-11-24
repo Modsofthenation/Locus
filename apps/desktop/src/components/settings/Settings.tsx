@@ -25,11 +25,14 @@ import {
   approvalTimeoutMs,
   automationChatLimit,
   guestBootTimeoutMs,
+  parseCliSandboxMode,
+  parseCliSandboxPorts,
   promptQueueLimit,
   UBUNTU_DEFAULT_HARDWARE,
   defaultNetworking,
   parseCheckForUpdates,
   parseProductMode,
+  sandboxWorkerKind,
   type AgentSkill,
   type AiProvider,
   type GoldenImage,
@@ -1023,6 +1026,11 @@ export function Settings() {
     setBusyWorker(row.id);
     setWorkerProbe((current) => ({ ...current, [row.id]: "Testing…" }));
     try {
+      if (sandboxWorkerKind(row.kind)) {
+        await api.verifySandboxWorker(row);
+        setWorkerProbe((current) => ({ ...current, [row.id]: "Profile verified" }));
+        return;
+      }
       const result = await api.testWorker({
         url: row.url,
         token: row.token,
@@ -2371,6 +2379,76 @@ export function Settings() {
                       })
                     }
                   />
+                </div>
+              </div>
+            </details>
+            <details className="advanced" open id="settings-advanced-cli-sandbox">
+              <summary>CLI agent sandbox</summary>
+              <p className="hint">
+                Cursor CLI, Claude Code, Codex, Kiro and custom CLI agents on Docker sessions and
+                Slack reviewers run on this machine inside bubblewrap (plus passt on Linux) or
+                sandbox-exec (macOS). Without a working sandbox those turns and reviews fail. A{" "}
+                <code>LOCUS_CLI_SANDBOX*</code> environment variable, if set when Locus starts,
+                overrides these. Workers read their own environment.
+              </p>
+              <div className="grid-2">
+                <div className="field">
+                  <label>Sandbox</label>
+                  <Select
+                    ariaLabel="CLI agent sandbox"
+                    testId="advanced-cliSandbox-mode"
+                    value={parseCliSandboxMode(draft.advanced.cliSandbox?.mode)}
+                    options={[
+                      { value: "on", label: "Filesystem and network (recommended)" },
+                      { value: "filesystem", label: "Filesystem only" },
+                      { value: "off", label: "Off (unsandboxed)" },
+                    ]}
+                    onChange={(value) =>
+                      setDraft({
+                        ...draft,
+                        advanced: {
+                          ...draft.advanced,
+                          cliSandbox: {
+                            ...draft.advanced.cliSandbox,
+                            mode: parseCliSandboxMode(value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                  <p className="hint">
+                    {parseCliSandboxMode(draft.advanced.cliSandbox?.mode) === "off"
+                      ? "The CLI can read everything you can, including Locus config, other sessions, and your home directory, and can call the Locus API. A malicious PR could leak them through a reviewer."
+                      : parseCliSandboxMode(draft.advanced.cliSandbox?.mode) === "filesystem"
+                        ? "Keeps the filesystem sandbox but shares this machine's network, so the CLI can call the Locus API on loopback, including other sessions' transcripts. Use when passt is not available."
+                        : "Hides Locus data and gives the CLI its own network namespace. Linux needs bubblewrap and passt."}
+                  </p>
+                </div>
+                <div className="field">
+                  <label>Allowed loopback ports</label>
+                  <input
+                    key={(draft.advanced.cliSandbox?.allowPorts ?? []).join(",")}
+                    data-testid="advanced-cliSandbox-allowPorts"
+                    defaultValue={(draft.advanced.cliSandbox?.allowPorts ?? []).join(", ")}
+                    placeholder="3128, 8080"
+                    disabled={parseCliSandboxMode(draft.advanced.cliSandbox?.mode) !== "on"}
+                    onBlur={(e) =>
+                      setDraft({
+                        ...draft,
+                        advanced: {
+                          ...draft.advanced,
+                          cliSandbox: {
+                            ...draft.advanced.cliSandbox,
+                            allowPorts: parseCliSandboxPorts(e.target.value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                  <p className="hint">
+                    Host loopback ports the sandboxed CLI may reach, e.g. a local HTTPS proxy. Only
+                    list a proxy that refuses loopback targets.
+                  </p>
                 </div>
               </div>
             </details>

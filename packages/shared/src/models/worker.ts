@@ -4,9 +4,84 @@ import { parseDockerImage } from "./vm.js";
 import { DEFAULT_WORKER_PORT } from "./placement.js";
 import { parseWorkerAllowedSizes } from "./fargate.js";
 
-export type WorkerKind = "lan" | "cloud" | "fargate" | "azure" | "gcp";
+export const SANDBOX_WORKER_KINDS = ["daytona", "e2b", "modal", "runloop"] as const;
+export type SandboxWorkerKind = (typeof SANDBOX_WORKER_KINDS)[number];
+export type WorkerKind = "lan" | "cloud" | "fargate" | "azure" | "gcp" | SandboxWorkerKind;
 
-export const WORKER_KINDS: WorkerKind[] = ["lan", "cloud", "fargate", "azure", "gcp"];
+export const WORKER_KINDS: WorkerKind[] = [
+  "lan",
+  "cloud",
+  "fargate",
+  "azure",
+  "gcp",
+  ...SANDBOX_WORKER_KINDS,
+];
+
+export const SANDBOX_WORKER_NAMES: Record<SandboxWorkerKind, string> = {
+  daytona: "Daytona",
+  e2b: "E2B",
+  modal: "Modal",
+  runloop: "Runloop",
+};
+
+export interface SandboxWorkerConfig {
+  template: string;
+  /** Existing Modal app (in the default workspace environment). */
+  app?: string;
+  /** Absolute provider-enforced lifetime. */
+  maxMinutes: number;
+  maxUsd: number;
+  /** ISO date (UTC) when the operator verified the hourly upper bound. */
+  rateDate: string;
+  /** Locus version that built this template from Settings (E2B). Absent for operator-built profiles. */
+  builtFor?: string;
+}
+
+/** Sizes Settings offers when it builds the E2B worker template. */
+export const E2B_TEMPLATE_SIZES = [
+  { id: "2-2", label: "2 vCPU · 2 GiB", cpuCount: 2, memoryMB: 2048 },
+  { id: "4-4", label: "4 vCPU · 4 GiB", cpuCount: 4, memoryMB: 4096 },
+  { id: "8-8", label: "8 vCPU · 8 GiB", cpuCount: 8, memoryMB: 8192 },
+] as const;
+export type E2BTemplateSize = (typeof E2B_TEMPLATE_SIZES)[number]["id"];
+
+export function e2bTemplateSize(id: unknown) {
+  return E2B_TEMPLATE_SIZES.find((size) => size.id === id) ?? E2B_TEMPLATE_SIZES[0];
+}
+
+/** A Settings-started E2B template build, as the desktop polls it. */
+export interface E2BTemplateBuildView {
+  id: string;
+  workerId: string;
+  state: "running" | "succeeded" | "failed";
+  startedAt: number;
+  finishedAt?: number;
+  logs: string[];
+  templateId?: string;
+  error?: string;
+}
+
+/** True when Settings built this template for another Locus version, so its worker may not match. */
+export function sandboxTemplateStale(
+  sandbox: SandboxWorkerConfig | undefined,
+  version: string,
+): boolean {
+  return Boolean(sandbox?.builtFor && sandbox.builtFor !== version);
+}
+
+export const SANDBOX_WORKER_SIZE = "sandbox";
+export const SANDBOX_WORKER_BILLING_BUFFER_MINUTES = 2;
+
+export function sandboxWorkerKind(kind: unknown): SandboxWorkerKind | undefined {
+  return SANDBOX_WORKER_KINDS.find((candidate) => candidate === kind);
+}
+
+export function sandboxMaxEstimatedUsd(maxMinutes: number, hourlyUsd: number): number {
+  return (
+    Math.ceil(((maxMinutes + SANDBOX_WORKER_BILLING_BUFFER_MINUTES) * hourlyUsd * 1_000_000) / 60) /
+    1_000_000
+  );
+}
 export const DEFAULT_WORKER_IDLE_TTL_MS = 15 * 60 * 1000;
 
 /** A LAN box, paste-URL cloud VM, or a provisioned Fargate / Azure / GCP worker. */
@@ -50,6 +125,8 @@ export interface WorkerBackend {
   accessKeyId?: string;
   /** Optional ECS endpoint (PrivateLink or API Gateway). Empty uses `ecs.{region}.amazonaws.com`. */
   ecsUrl?: string;
+  /** Operator-approved profile for a managed sandbox worker. */
+  sandbox?: SandboxWorkerConfig;
   /** Azure AD tenant id. */
   tenantId?: string;
   /** Azure AD application (client) id. */
@@ -88,7 +165,9 @@ export function parseWorkerBackend(raw: unknown): WorkerBackend | undefined {
   const id = typeof value.id === "string" ? value.id.trim() : "";
   const name = typeof value.name === "string" ? value.name.trim() : "";
   const kind = parseWorkerKind(value.kind);
-  const url = normalizeWorkerUrl(typeof value.url === "string" ? value.url : "") ?? "";
+  const url = sandboxWorkerKind(kind)
+    ? ""
+    : (normalizeWorkerUrl(typeof value.url === "string" ? value.url : "") ?? "");
   if (!id || !name) return undefined;
   if (!workerProvisionsCompute({ kind }) && !url) return undefined;
   const token =
@@ -131,6 +210,20 @@ export function parseWorkerBackend(raw: unknown): WorkerBackend | undefined {
       : undefined;
   const ecsUrl =
     typeof value.ecsUrl === "string" && value.ecsUrl.trim() ? value.ecsUrl.trim() : undefined;
+  let sandbox: SandboxWorkerConfig | undefined;
+  if (value.sandbox && typeof value.sandbox === "object") {
+    const input = value.sandbox as Record<string, unknown>;
+    sandbox = {
+      template: typeof input.template === "string" ? input.template.trim() : "",
+      ...(typeof input.app === "string" && input.app.trim() ? { app: input.app.trim() } : {}),
+      maxMinutes: typeof input.maxMinutes === "number" ? input.maxMinutes : 0,
+      maxUsd: typeof input.maxUsd === "number" ? input.maxUsd : 0,
+      rateDate: typeof input.rateDate === "string" ? input.rateDate.trim() : "",
+      ...(typeof input.builtFor === "string" && input.builtFor.trim()
+        ? { builtFor: input.builtFor.trim() }
+        : {}),
+    };
+  }
   const optional = (key: string): string | undefined => {
     const raw = value[key];
     return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
@@ -155,6 +248,7 @@ export function parseWorkerBackend(raw: unknown): WorkerBackend | undefined {
     ...(optional("securityGroup") ? { securityGroup: optional("securityGroup") } : {}),
     ...(accessKeyId ? { accessKeyId } : {}),
     ...(ecsUrl ? { ecsUrl } : {}),
+    ...(sandbox ? { sandbox } : {}),
     ...(optional("tenantId") ? { tenantId: optional("tenantId") } : {}),
     ...(optional("clientId") ? { clientId: optional("clientId") } : {}),
     ...(optional("subscriptionId") ? { subscriptionId: optional("subscriptionId") } : {}),
@@ -210,7 +304,7 @@ export function parseWorkerFingerprint(raw: string | undefined): string | undefi
 
 export function parseWorkerKind(raw: unknown): WorkerKind | undefined {
   if (raw === "fargate" || raw === "cloud" || raw === "azure" || raw === "gcp") return raw;
-  return undefined;
+  return sandboxWorkerKind(raw);
 }
 
 export function workerKind(backend: { kind?: WorkerKind }): WorkerKind {
@@ -226,7 +320,9 @@ export function workerIsMetered(backend: { kind?: WorkerKind }): boolean {
 /** Fargate, Azure, and GCP: Locus starts a worker VM, then talks to it over HTTPS. */
 export function workerProvisionsCompute(backend: { kind?: WorkerKind }): boolean {
   const kind = workerKind(backend);
-  return kind === "fargate" || kind === "azure" || kind === "gcp";
+  return (
+    kind === "fargate" || kind === "azure" || kind === "gcp" || Boolean(sandboxWorkerKind(kind))
+  );
 }
 
 /**
@@ -235,7 +331,7 @@ export function workerProvisionsCompute(backend: { kind?: WorkerKind }): boolean
  * KVM). Runtime, image, and host folder choices do not apply.
  */
 export function workerRunsInTask(backend: { kind?: WorkerKind }): boolean {
-  return workerKind(backend) === "fargate";
+  return workerKind(backend) === "fargate" || Boolean(sandboxWorkerKind(backend.kind));
 }
 
 export function workerDestroyOnStop(backend: { destroyOnStop?: boolean }): boolean {
@@ -266,6 +362,8 @@ export function workerWhereLabel(backend: WorkerBackend): string {
   if (kind === "azure") return `${backend.name} · azure`;
   if (kind === "gcp") return `${backend.name} · gcp`;
   if (kind === "cloud") return `${backend.name} · cloud`;
+  const sandbox = sandboxWorkerKind(kind);
+  if (sandbox) return `${backend.name} · ${SANDBOX_WORKER_NAMES[sandbox]}`;
   return backend.name;
 }
 
@@ -274,6 +372,11 @@ export function workerPlacementHint(
   backend: WorkerBackend | undefined,
   runtime: "docker" | "vm" | "host",
 ): string {
+  const sandbox = sandboxWorkerKind(backend?.kind);
+  if (sandbox && backend?.sandbox && backend.hourlyUsd) {
+    const estimate = sandboxMaxEstimatedUsd(backend.sandbox.maxMinutes, backend.hourlyUsd);
+    return `${SANDBOX_WORKER_NAMES[sandbox]} sandbox · ${backend.sandbox.template} · ${backend.sandbox.maxMinutes} min max · estimated ceiling $${estimate.toFixed(estimate < 0.01 ? 4 : 2)}. Stop deletes the workspace.`;
+  }
   if (backend && workerRunsInTask(backend)) {
     return `Runs in its own ${workerKind(backend) === "fargate" ? "Fargate" : "cloud"} task on ${backend.name} — a fresh sandbox that starts in about a minute. Chat and keys stay on this machine. Stop ends the task.`;
   }
@@ -340,6 +443,7 @@ export function workerAllowedSizes(backend: {
   kind?: WorkerKind;
   allowedSizes?: string[];
 }): string[] | undefined {
+  if (sandboxWorkerKind(backend.kind)) return [SANDBOX_WORKER_SIZE];
   if (backend.allowedSizes !== undefined) return backend.allowedSizes;
   return workerProvisionsCompute(backend) ? [] : undefined;
 }
@@ -381,6 +485,44 @@ export function workerImageAllowed(
   return list.some((row) => parseDockerImage(row) === canonical);
 }
 
+export function sandboxWorkerConfigError(backend: WorkerBackend, now?: number): string | undefined {
+  const kind = sandboxWorkerKind(backend.kind);
+  if (!kind) return undefined;
+  const profile = backend.sandbox;
+  if (!profile?.template.trim())
+    return "Select a provisioned template or image with locus-worker installed";
+  if (kind === "modal" && (!profile.app?.trim() || !backend.accessKeyId?.trim())) {
+    return "Modal requires an existing app name and a token ID";
+  }
+  if (kind === "modal" && !/^im-[A-Za-z0-9]+$/.test(profile.template)) {
+    return "Modal requires an existing image ID (im-…)";
+  }
+  if (!Number.isInteger(profile.maxMinutes) || profile.maxMinutes < 1 || profile.maxMinutes > 60) {
+    return "Sandbox maximum runtime must be a whole number from 1 to 60 minutes";
+  }
+  const hourly = workerHourlyUsd(backend);
+  if (!hourly) return "Enter a conservative all-in hourly USD rate for this sandbox profile";
+  const rateDate = Date.parse(profile.rateDate);
+  const dayNow = Math.floor((now ?? Date.now()) / 86_400_000) * 86_400_000;
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(profile.rateDate) ||
+    !Number.isFinite(rateDate) ||
+    new Date(rateDate).toISOString().slice(0, 10) !== profile.rateDate ||
+    rateDate > dayNow ||
+    (now !== undefined && rateDate < dayNow - 30 * 86_400_000)
+  ) {
+    return "Verify the sandbox rate and enter a date within the last 30 days";
+  }
+  if (
+    !Number.isFinite(profile.maxUsd) ||
+    profile.maxUsd <= 0 ||
+    sandboxMaxEstimatedUsd(profile.maxMinutes, hourly) > profile.maxUsd
+  ) {
+    return "Sandbox maximum USD must cover the estimated runtime and teardown buffer";
+  }
+  return undefined;
+}
+
 export function workerBackendError(backend: WorkerBackend): string | undefined {
   if (!backend.name.trim()) return "Worker name is required";
   const kind = workerKind(backend);
@@ -415,6 +557,10 @@ export function workerBackendError(backend: WorkerBackend): string | undefined {
   ) {
     return "Cloud workers need an image allowlist so a runaway agent cannot pull arbitrary images";
   }
+  const sandboxError = sandboxWorkerConfigError(backend);
+  if (sandboxError) return sandboxError;
+  if (sandboxWorkerKind(kind) && !backend.token?.trim())
+    return "Enter the sandbox provider credentials";
   if (kind === "fargate" && !backend.region?.trim()) {
     return "Fargate workers need a region";
   }

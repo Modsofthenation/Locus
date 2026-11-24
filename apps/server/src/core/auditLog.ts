@@ -256,6 +256,8 @@ export function auditConfigChanges(
   adv("maxAgentRounds");
   adv("extraAllowHosts");
   adv("approvalTimeoutMs");
+  adv("testGatePromptMs");
+  adv("testGateSlowMs");
   adv("bindHost");
   if (!same(before.budgets, after.budgets)) policyFields.push("budgets");
   const telemetryShape = (config: LocusConfig) =>

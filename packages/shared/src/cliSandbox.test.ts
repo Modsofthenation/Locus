@@ -4,6 +4,7 @@ import {
   bwrapArgs,
   cliSandboxAllowedPorts,
   cliSandboxDisabled,
+  cliSandboxEnv,
   loopbackProxyPorts,
   pastaArgs,
   resolvConfUsesLoopback,
@@ -13,6 +14,7 @@ import {
   seatbeltProfile,
   wrapCliSpawnRequest,
 } from "./cliSandbox.js";
+import { parseCliSandboxSettings } from "./models/config.js";
 
 const policy = { locusHome: "/home/op/.locus", workspace: "/home/op/.locus/docker-workspaces/s1" };
 const req = {
@@ -178,5 +180,39 @@ describe("cliSandbox network is opt-in", () => {
     expect(sandbox.isolatesNetwork).toBe(false);
     expect(sandbox.wrap(req).args[1]).not.toContain("network-outbound");
     expect(wrapCliSpawnRequest("bwrap", policy, req).command).toBe("bwrap");
+  });
+});
+
+describe("cliSandbox settings from the app", () => {
+  it("normalizes the saved settings", () => {
+    expect(parseCliSandboxSettings(undefined)).toBeUndefined();
+    expect(parseCliSandboxSettings({ mode: "on", allowPorts: [] })).toBeUndefined();
+    expect(parseCliSandboxSettings({ mode: "bogus", allowPorts: "3128, 3128,x,0,70000" })).toEqual({
+      allowPorts: [3128],
+    });
+    expect(parseCliSandboxSettings({ mode: "filesystem" })).toEqual({ mode: "filesystem" });
+  });
+
+  it("maps settings onto the env vars, with env set at launch winning", () => {
+    expect(cliSandboxEnv({ mode: "off" }, {})).toEqual({ LOCUS_CLI_SANDBOX: "off" });
+    expect(cliSandboxEnv({ mode: "filesystem", allowPorts: [3128, 8080] }, {})).toEqual({
+      LOCUS_CLI_SANDBOX_NET: "host",
+      LOCUS_CLI_SANDBOX_ALLOW_PORTS: "3128,8080",
+    });
+    const launch = { LOCUS_CLI_SANDBOX: "on", LOCUS_CLI_SANDBOX_ALLOW_PORTS: "9000" };
+    expect(cliSandboxEnv({ mode: "off", allowPorts: [3128] }, launch)).toEqual(launch);
+    expect(cliSandboxDisabled(cliSandboxEnv({ mode: "off" }, {}))).toBe(true);
+    expect(resolveCliSandbox(policy, { env: cliSandboxEnv({ mode: "off" }, {}) })).toBeUndefined();
+  });
+
+  it("points the failure message at Settings", () => {
+    const none = resolveCliSandbox(policy, {
+      env: {},
+      platform: "linux",
+      network: true,
+      detect: () => ({ reason: "pasta (package passt) is not installed." }),
+    });
+    if (none?.ok !== false) throw new Error("expected a refusal");
+    expect(none.reason).toMatch(/Settings → Advanced → CLI agent sandbox/);
   });
 });

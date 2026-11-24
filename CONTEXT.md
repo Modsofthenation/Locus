@@ -12,15 +12,15 @@ The machine the agent tools target. Docker, VM, and host are adapters behind one
 
 ## Guest factory
 
-Picks the Guest runtime adapter (Docker, Host, Windows SSH+WinRM, SSH, or mock) from a Machine. Control-plane GuestHub and worker WorkerGuestHub are thin adapters on that interface.
+Picks the Guest runtime adapter (Docker, Host, Windows SSH+WinRM, SSH, or mock) from a Machine. Control-plane GuestHub and worker WorkerGuestHub are thin adapters on that interface. `GuestHub.forHost` goes through `createHostGuestRuntime` so Host construction stays on the factory.
 
 ## Runtime catalog
 
-The shared Guest tool list Host and Docker catalogs are derived from. Host adds Board / Project / Swarm planning tools and headed Chrome; Docker adds `start_process`, `record_screen`, and headed Chromium.
+The shared Guest tool list Host and Docker catalogs are derived from. Host adds Board / Project / Swarm planning tools and headed Chrome; Docker adds `start_process`, `record_screen`, and headed Chromium. Board chat and Project coordinator catalogs derive from that same planning list plus shared integration slices. After control-plane and gate exits, catalog execution lives in the Guest catalog execute module (allow → Guest/Host adapter → settle/publish).
 
 ## Studio continue
 
-Turn policy after a Design / Game / Asset round: look, incomplete canvas, quality, juice, sculpt, unused assets, mutate follow-up. Model, tool, and CLI Turns share the predicates; coding / review / ops continue stays on the Turn module.
+Turn policy after a Design / Game / Asset round: look, incomplete canvas, quality, juice, sculpt, unused assets, mutate follow-up. Model, tool, and CLI Turns share one `pickStudioContinue` policy; coding / review / ops continue stays on the Turn module.
 
 ## Session
 

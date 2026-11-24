@@ -1,10 +1,10 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FargateComputeBackend } from "./fargate.js";
 import { MockComputeBackend } from "./mock.js";
-import { fargateUsdPerHour } from "./prices.js";
+import { fargateUsdPerHour, quoteCloudSize } from "./prices.js";
 import type { WorkerBackend } from "@locus/shared";
 
 const fargate: WorkerBackend = {
@@ -42,7 +42,11 @@ const describeTasks = {
   ],
 };
 const stopTask = {
-  task: { taskArn: "arn:aws:ecs:us-east-1:123:task/locus/abc", desiredStatus: "STOPPED" },
+  task: {
+    taskArn: "arn:aws:ecs:us-east-1:123:task/locus/abc",
+    desiredStatus: "STOPPED",
+    lastStatus: "STOPPED",
+  },
 };
 
 function fixtureFetch(opts?: { describeBodies?: unknown[] }): typeof fetch {
@@ -53,6 +57,8 @@ function fixtureFetch(opts?: { describeBodies?: unknown[] }): typeof fetch {
     );
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
     if (target.endsWith("RunTask")) {
+      expect(body.startedBy).toMatch(/^locus-[a-f0-9]{24}$/);
+      expect(body.clientToken).toBe(body.startedBy);
       expect(body.overrides.cpu).toBe("256");
       expect(body.overrides.memory).toBe("512");
       expect(body.tags).toEqual(
@@ -84,6 +90,10 @@ describe("compute quote", () => {
       /size allowlist/i,
     );
     expect(fargateUsdPerHour("0.25-0.5")).toBeCloseTo(0.25 * 0.04048 + 0.5 * 0.004445);
+    expect(quoteCloudSize(fargate, "0.25-0.5", "Fargate")).toEqual({
+      size: "0.25-0.5",
+      usdPerHour: fargateUsdPerHour("0.25-0.5"),
+    });
   });
 });
 
@@ -164,7 +174,9 @@ describe("Fargate recorded HTTP", () => {
     const first = new FargateComputeBackend(fixtureFetch(), wait, registryPath);
     const handle = await first.provision({ backend: fargate, sessionId: "s1", size: "0.25-0.5" });
     expect(handle.id).toBe("arn:aws:ecs:us-east-1:123:task/locus/abc");
-    expect(await first.listOrphans(new Set())).toEqual([{ id: handle.id, backendId: "f1" }]);
+    expect(await first.listOrphans(new Set())).toEqual([
+      { id: handle.id, backendId: "f1", sessionId: "s1" },
+    ]);
     expect(await first.listOrphans(new Set([handle.id]))).toEqual([]);
 
     const stopped: string[] = [];
@@ -185,13 +197,163 @@ describe("Fargate recorded HTTP", () => {
     );
     expect(second.get(handle.id)?.url).toBe("https://203.0.113.8:7421");
     expect(second.get(handle.id)?.token).toBeTruthy();
-    expect(await second.listOrphans(new Set())).toEqual([{ id: handle.id, backendId: "f1" }]);
+    expect(await second.listOrphans(new Set())).toEqual([
+      { id: handle.id, backendId: "f1", sessionId: "s1" },
+    ]);
     await second.destroy(handle.id, fargate);
     expect(stopped).toEqual([handle.id]);
     expect(await second.listOrphans(new Set())).toEqual([]);
 
     const third = new FargateComputeBackend(fixtureFetch(), wait, registryPath);
     expect(await third.listOrphans(new Set())).toEqual([]);
+  });
+
+  it("persists before RunTask and recovers an accepted request whose response was lost", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-compute-intent-"));
+    const registryPath = join(dir, "compute-tasks.json");
+    const arn = runTask.tasks[0]!.taskArn;
+    let intentId = "";
+    const first = new FargateComputeBackend(
+      (async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        intentId = body.startedBy;
+        const persisted = await readFile(registryPath, "utf8");
+        expect(JSON.parse(persisted).tasks).toEqual([
+          expect.objectContaining({
+            id: intentId,
+            backendId: "f1",
+            sessionId: "s1",
+            size: "0.25-0.5",
+          }),
+        ]);
+        expect(persisted).not.toContain("secret");
+        expect(await first.listOrphans(new Set())).toEqual([]);
+        throw new Error("network disconnected after RunTask");
+      }) as typeof fetch,
+      wait,
+      registryPath,
+    );
+    const request = { backend: fargate, sessionId: "s1", size: "0.25-0.5" };
+    await expect(first.provision(request)).rejects.toThrow(/disconnected/);
+    await expect(first.provision(request)).rejects.toThrow(/already has/);
+
+    const listing = [{ taskArns: [] }, { taskArns: [arn] }];
+    const restarted = new FargateComputeBackend(
+      (async (input, init) => {
+        const target = String((init?.headers as Record<string, string>)["x-amz-target"]);
+        if (target.endsWith("ListTasks")) {
+          expect(JSON.parse(String(init?.body))).toEqual({ cluster: "locus", startedBy: intentId });
+          return Response.json(listing.shift());
+        }
+        return fixtureFetch()(input, init);
+      }) as typeof fetch,
+      wait,
+      registryPath,
+    );
+    const orphan = { id: intentId, backendId: "f1", sessionId: "s1" };
+    expect(await restarted.listOrphans(new Set())).toEqual([orphan]);
+    await expect(restarted.destroy(intentId, fargate)).rejects.toThrow(/still unconfirmed/);
+    expect(await restarted.listOrphans(new Set())).toEqual([{ ...orphan, cleanupPending: true }]);
+    await restarted.destroy(intentId, fargate);
+    expect(await restarted.listOrphans(new Set())).toEqual([]);
+  });
+
+  it("keeps a failed stop across restart and waits for AWS to confirm termination", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-compute-stop-"));
+    const registryPath = join(dir, "compute-tasks.json");
+    const arn = runTask.tasks[0]!.taskArn;
+    let ready = false;
+    const first = new FargateComputeBackend(
+      (async (input, init) => {
+        const target = String((init?.headers as Record<string, string>)["x-amz-target"]);
+        if (ready && target.endsWith("StopTask")) return new Response(null, { status: 503 });
+        return fixtureFetch()(input, init);
+      }) as typeof fetch,
+      wait,
+      registryPath,
+    );
+    const handle = await first.provision({ backend: fargate, sessionId: "s1", size: "0.25-0.5" });
+    ready = true;
+    await expect(first.destroy(arn)).rejects.toThrow(/not confirmed/);
+    expect(first.get(arn)).toBeUndefined();
+
+    let stopping = true;
+    const actions: string[] = [];
+    const restarted = new FargateComputeBackend(
+      (async (_input, init) => {
+        const action = String((init?.headers as Record<string, string>)["x-amz-target"])
+          .split(".")
+          .at(-1)!;
+        actions.push(action);
+        if (action === "StopTask") {
+          return Response.json({
+            task: { taskArn: arn, lastStatus: "STOPPING", desiredStatus: "STOPPED" },
+          });
+        }
+        if (action === "DescribeTasks") {
+          return Response.json({
+            tasks: [{ taskArn: arn, lastStatus: stopping ? "STOPPING" : "STOPPED" }],
+          });
+        }
+        return new Response(null, { status: 500 });
+      }) as typeof fetch,
+      wait,
+      registryPath,
+    );
+    expect(restarted.get(handle.id)).toBeUndefined();
+    expect(await restarted.listOrphans(new Set([arn]))).toEqual([
+      { id: arn, backendId: "f1", sessionId: "s1", cleanupPending: true },
+    ]);
+    await expect(restarted.destroy(arn, fargate)).rejects.toThrow(/not confirmed/);
+    stopping = false;
+    await restarted.destroy(arn, fargate);
+    expect(actions).toEqual(["StopTask", "DescribeTasks", "DescribeTasks"]);
+    expect(await restarted.listOrphans(new Set())).toEqual([]);
+  });
+
+  it("enforces the concurrency limit before concurrent tasks call ECS", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const calls: string[] = [];
+    const compute = new FargateComputeBackend(
+      (async (input, init) => {
+        const target = String((init?.headers as Record<string, string>)["x-amz-target"]);
+        if (target.endsWith("RunTask")) {
+          calls.push(target);
+          await gate;
+        }
+        return fixtureFetch()(input, init);
+      }) as typeof fetch,
+      wait,
+    );
+    const first = compute.provision({ backend: fargate, sessionId: "s1", size: "0.25-0.5" });
+    try {
+      await expect(
+        compute.provision({ backend: fargate, sessionId: "s2", size: "0.25-0.5" }),
+      ).rejects.toThrow(/maxConcurrent/);
+      expect(calls).toHaveLength(1);
+    } finally {
+      release();
+      await first;
+    }
+  });
+
+  it("fails closed when its registry cannot be read or written", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "locus-compute-persistence-"));
+    const corrupt = join(dir, "corrupt.json");
+    await writeFile(corrupt, "invalid json");
+    const blocked = join(dir, "blocked.json");
+    const unwritable = new FargateComputeBackend(fixtureFetch(), wait, blocked);
+    await mkdir(blocked);
+    const request = { backend: fargate, sessionId: "s1", size: "0.25-0.5" };
+    await expect(unwritable.provision(request)).rejects.toThrow(/could not persist/i);
+    expect(await unwritable.listOrphans(new Set())).toEqual([]);
+    await expect(
+      new FargateComputeBackend(fixtureFetch(), wait, corrupt).provision(request),
+    ).rejects.toThrow(/unreadable/i);
+    expect(await readFile(corrupt, "utf8")).toBe("invalid json");
   });
 
   it("reclaims a live Fargate handle after restart instead of StopTask", async () => {

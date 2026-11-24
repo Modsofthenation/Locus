@@ -22,6 +22,7 @@ Agents (coding chats):
                    [--provider] [--model] [--repo id]... [--recipe] [--host-dir]
                    [--image] [--docker-image] [--autonomy] [--network]
                    [--vision] [--placement] [--worker] [--live-chrome] [--no-start] [--plan]
+                   [--bypass-gate test-gate|pre-tool-use-hooks|force-push|recursive-delete]...
   locus agent chat <id> [message] [--steer] [--plan] [--skill] [--wait] [--timeout] [--stream] [--notify]
   locus agent queue send <id> <itemId> [--timeout] [--stream]
   locus agent abort <id>

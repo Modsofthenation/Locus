@@ -1,7 +1,18 @@
+import { WORKER_GATEWAY_TOKEN_HEADER } from "@locus/shared";
 import { timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, writeFile, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
+
+/** Credential and routing headers that must never reach a guest's preview application. */
+export const WORKER_GATEWAY_HEADERS = [
+  WORKER_GATEWAY_TOKEN_HEADER,
+  "x-daytona-preview-token",
+  "e2b-traffic-access-token",
+  "x-modal-connect-token",
+  "x-runloop-tunnel-authorization",
+  "x-runloop-host",
+] as const;
 
 export function workerTokenPath(dataDir: string): string {
   return join(dataDir, "token");
@@ -34,4 +45,13 @@ export function workerTokenMatches(provided: string | undefined, expected: strin
     return false;
   }
   return timingSafeEqual(got, want);
+}
+
+export function workerRequestToken(
+  header: (name: string) => string | undefined,
+  gatewayTransport?: boolean,
+): string {
+  if (gatewayTransport) return header(WORKER_GATEWAY_TOKEN_HEADER)?.trim() ?? "";
+  const authorization = header("authorization") ?? "";
+  return authorization.toLowerCase().startsWith("bearer ") ? authorization.slice(7).trim() : "";
 }

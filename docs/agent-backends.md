@@ -38,7 +38,7 @@ POST /api/sessions
       placement worker → WorkerClient HTTPS → locus-worker Docker, Host, **or QEMU**
         fargate/azure/gcp: ComputeBackend.quote/provision then WorkerClient
         stop: destroy guest (default) unless LAN destroyOnStop=false
-        fargate stop: destroy guest, then StopTask
+        fargate stop: StopTask and confirm the task terminated
         idle reaper: destroy guest after idleTtlMs (cloud/fargate cannot disable)
         create: reject when live guests >= maxConcurrent (cloud/fargate default 1)
         create: reject image not on allowlist (metered empty = none; LAN omitted = any)
@@ -141,7 +141,7 @@ Placement: Host, Docker, and Linux VM (SSH, stdin piped through `ssh`) work. Wor
 
 ## Native Fargate
 
-`@locus/compute` quotes dated Fargate Linux/x86 US-East-1 list prices (`2026-08`) and POSTs `RunTask` / `DescribeTasks` / `StopTask` to `ecs.{region}.amazonaws.com`, or to the worker **ECS endpoint** when set (PrivateLink or API Gateway; path kept; execute-api hosts sign as `execute-api`). Empty `allowedSizes` cannot provision. Known sizes: `0.25-0.5`, `0.5-1`, `1-2`, `2-4`. The handle is `https://<publicIPv4 or privateIPv4>:7421` after `DescribeTasks` returns an ENI address (no loopback fallback), plus a generated `LOCUS_WORKER_TOKEN` injected as a container env override. Existing `WorkerClient` then creates the Docker guest on that worker. Operator registers a task definition that already runs `locus-worker` and pastes the ARN. Locus does not create VPCs, NAT gateways, or GPU nodes. Destroying a Docker guest does not stop a paste-URL VM; Fargate session stop does `StopTask`. Azure Container Instances (`kind: azure`) and GCP Compute Engine (`kind: gcp`) follow the same quote → provision → WorkerClient path with recorded `fetch` (no SDKs).
+`@locus/compute` quotes dated Fargate Linux/x86 US-East-1 list prices (`2026-08`) and POSTs `RunTask` / `DescribeTasks` / `ListTasks` / `StopTask` to `ecs.{region}.amazonaws.com`, or to the worker **ECS endpoint** when set (PrivateLink or API Gateway; path kept; execute-api hosts sign as `execute-api`). Empty `allowedSizes` cannot provision. Known sizes: `0.25-0.5`, `0.5-1`, `1-2`, `2-4`. The handle is `https://<publicIPv4 or privateIPv4>:7421` after `DescribeTasks` returns an ENI address (no loopback fallback), plus a generated `LOCUS_WORKER_TOKEN` injected as a container env override. The existing `WorkerClient` then creates a Host guest inside the task. Operator registers a task definition that already runs `locus-worker` and pastes the ARN. Locus does not create VPCs, NAT gateways, or GPU nodes. Destroying a Docker guest does not stop a paste-URL VM; Fargate session stop does `StopTask`. Azure Container Instances (`kind: azure`) and GCP Compute Engine (`kind: gcp`) follow the same quote → provision → WorkerClient path with recorded `fetch` (no SDKs).
 
 
 ### Fargate chats (each agent is its own task)
@@ -149,12 +149,24 @@ Placement: Host, Docker, and Linux VM (SSH, stdin piped through `ssh`) work. Wor
 Picking a Fargate worker in New agent → **Where** is the whole user flow: runtime, image, and host-folder choices disappear, and the chat opens immediately. Behind it:
 
 1. Create returns at once; the boot list shows **Start cloud task → Connect agent → (Clone repo) → Ready**.
-2. The control plane mints a TLS key pair and a bearer token, then `RunTask`s the operator's task definition with them as `worker` container env (`LOCUS_WORKER_TLS_CERT_B64` / `LOCUS_WORKER_TLS_KEY_B64`, `LOCUS_WORKER_TOKEN`, `LOCUS_WORKER_ALLOW_HOST=1`). The cert fingerprint is pinned before the task exists — no trust-on-first-use over the internet.
-3. `DescribeTasks` polls for the ENI address (up to 3 minutes; a `STOPPED` task or a `RunTask` failure such as missing capacity is reported with ECS's reason), then `/v1/info` is polled until the cold container answers (up to 4 minutes). A refusal or a pin mismatch fails at once; any failure `StopTask`s the task.
+2. The control plane persists a provisioning intent and claims a concurrency slot before contacting ECS. It mints a TLS key pair and a bearer token, then `RunTask`s the operator's task definition with them as `worker` container env (`LOCUS_WORKER_TLS_CERT_B64` / `LOCUS_WORKER_TLS_KEY_B64`, `LOCUS_WORKER_TOKEN`, `LOCUS_WORKER_ALLOW_HOST=1`). The cert fingerprint is pinned before the task exists — no trust-on-first-use over the internet.
+3. `DescribeTasks` polls for the ENI address (up to 3 minutes; a `STOPPED` task or a `RunTask` failure such as missing capacity is reported with ECS's reason), then `/v1/info` is polled until the cold container answers (up to 4 minutes). A refusal or a pin mismatch fails at once and initiates task cleanup.
 4. Fargate has no Docker daemon or KVM, so the agent runs as a **Host guest inside the task** (`host-workspaces/<session>`). The task is single-tenant and destroyed on Stop / idle TTL; the worker drops the token and TLS key from its environment so guest commands cannot read them. A later turn after the reaper provisions a fresh task and re-clones the repo.
 5. The image allowlist does not apply (the task definition is the image). Managed policy's "no Host agents" does not block it — that rule is about this machine. PR reviews still need Docker or a VM.
 
 Build the image and register the task definition from [`images/worker`](../images/worker/README.md). Optional **Security group** must allow inbound TCP 7421 from this machine.
+
+### Fargate cleanup and recovery
+
+Grant the control plane `ecs:ListTasks` for recovery alongside the existing ECS actions. An ECS API Gateway override must forward `ListTasks`. The original cluster and region are saved with each new task. Keep credentials for that AWS account available under the same worker ID while tasks or provisioning intents remain.
+
+Locus uses the provisioning ID as both the ECS `clientToken` and the `startedBy` marker. If ECS accepts `RunTask` but the response is lost, reconciliation uses `ListTasks` filtered by that exact marker in the recorded cluster. Empty results leave the intent pending because ECS listings can lag. Failed or incomplete cleanup keeps the provider slot occupied and retries at startup and on the worker reaper interval. A session with a failed stop retains its task ID and shows a cleanup error. Reset requires confirmed cloud cleanup before it wipes local state.
+
+The desktop-only `GET /api/workers/compute/cleanup` lists resource IDs, worker IDs, optional session IDs, and pending stop markers. If an ambiguous intent remains after repeated retries, an operator can use the provisioning ID in ECS and CloudTrail to verify what happened. If AWS confirms there is no billable resource left but Locus cannot confirm it through ECS, stop the control plane and back up `compute-tasks.json` before removing that specific stale row. Restart after repairing an unreadable registry.
+
+## Daytona, E2B, Modal, and Runloop
+
+These providers run one disposable Linux worker per agent. Select a provider in **Settings → Workers**, verify its profile and rate, then select that worker under **New agent → Where**. [Managed sandbox setup and verification](managed-sandboxes.md).
 
 ## v1 limits
 
@@ -171,13 +183,8 @@ Build the image and register the task definition from [`images/worker`](../image
 - Design/Games/Assets kits (`ASSET.md`, `GAME.md`, `vendor/reconstruct.js`, design-system files) land after the worker guest is attached. Do not write them during `create` before `bootGuest` — `writeWorkspace` needs `vmId`. Host workers land the same files from `ensureWorkerHost`. Create-time Games `assetIds` copy into `vendor/assets/` on that attach even when there is no first prompt.
 - Browser live pane: screencast/input proxy over the same pinned worker HTTPS WebSocket. VM CDP, host Chrome, and phone-specific takeover stay out of this slice.
 
-## Cost walls (required before billable APIs)
+## Compute governance
 
-The governor today meters **LLM** USD / time / rounds / tokens / sub-agents (`packages/shared/src/governor.ts`). It does not see EC2/Fargate time.
+The existing daily model spend and token policies are checked before managed compute provisioning. When a turn encounters an exhausted daily budget with an attached cloud task, the server starts task cleanup. The per-turn governor also uses the existing compute estimate alongside model usage. For new Fargate tasks the elapsed estimate starts at the provisioning request and continues through confirmed teardown. The pricing basis remains the dated US-East-1 Linux/x86 fixture. Hard compute-dollar ceilings require conservative regional rates, durable spend reservations, and a runtime deadline.
 
-1. Destroy-on-stop for remote guests (default; cloud cannot turn this off). **Done.**
-2. Idle TTL (default 15 minutes; cloud cannot set `0`). **Done.**
-3. Concurrent guest cap (cloud default 1). **Done.**
-4. Compute meter next to token `maxUsd` (operator hourly USD × live-guest wall clock). Hitting the cap destroys the worker guest. **Done.**
-5. Docker image allowlist (cloud/fargate: empty cannot create guests; LAN omitted = any image). **Done.** This is the paste-URL analog of size allowlists.
-6. Size allowlist + recorded-HTTP Fargate adapter so a runaway agent cannot pick 4 vCPU. **Done.** Task ARNs persist in `compute-tasks.json` so a control-plane restart can `StopTask` orphans (live `remoteGuestId`s are left running).
+See [Cloud compute architecture decision](cloud-compute-architecture.md) for the rollout sequence.

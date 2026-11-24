@@ -59,6 +59,8 @@ export interface SlackReviewerStatusTemplates {
   queued: string;
   /** Reply to "won't fix #2" / "false positive #1" in the review thread. */
   dismissed: string;
+  /** A large PR reviewed in parts: posted as each part finishes. `{part}` is "2 of 5". */
+  partDone: string;
 }
 
 export interface SlackReviewer {
@@ -95,6 +97,13 @@ export interface SlackReviewer {
    * open to anyone.
    */
   allowedRequesters: string[];
+  /**
+   * Slack member ids whose posts and requests this reviewer never reviews: a top-level post, an
+   * @-mention, or a re-review / retry / question in a review thread is ignored silently, even when
+   * `allowedRequesters` lists them. With `autoReview`, PRs whose author maps to one of them through
+   * `authorSlackIds` aren't posted or reviewed either. Dismissals stay open to anyone. Empty = none.
+   */
+  excludedUsers: string[];
   /** Extra operator instructions sent with a review when its changed files match `glob`. */
   pathPrompts: SlackReviewerPathPrompt[];
   /** Diff budget in characters (~4 chars per token). Default 48 000. */
@@ -187,8 +196,9 @@ export interface SlackReviewer {
   learnFromDismissals: boolean;
   /**
    * A PR whose diff doesn't fit the budget is reviewed in up to `SLACK_REVIEW_MAX_PARTS` parts,
-   * one model call each, and the findings are merged, instead of listing the rest by name.
-   * Default false: it multiplies the cost of a large PR.
+   * one model call each, and the findings are merged, instead of listing the rest by name. Each
+   * part's result is posted in the Slack thread as it finishes. Default false: it multiplies the
+   * cost of a large PR.
    */
   splitLargePrs: boolean;
   /**
@@ -249,6 +259,7 @@ export const DEFAULT_SLACK_REVIEWER_STATUS: SlackReviewerStatusTemplates = {
   skipped: ":fast_forward: Skipped {pr}: {reason}",
   queued: ":hourglass_flowing_sand: Queued {pr} behind {ahead}. It starts when those finish.",
   dismissed: ":ok_hand: Dismissed {dismissed} on {pr}. Later reviews won't raise it again.",
+  partDone: ":jigsaw: {pr} part {part} done: {files}, {comments}. {summary}",
 };
 
 export const SLACK_REVIEWER_DEFAULTS = {
@@ -509,6 +520,7 @@ export function parseSlackReviewer(raw: unknown, index = 0): SlackReviewer | und
       : [...DEFAULT_SLACK_REVIEWER_SKIP_LABELS],
     baseBranches: strList(value.baseBranches),
     allowedRequesters: parseSlackRequesters(value.allowedRequesters),
+    excludedUsers: parseSlackRequesters(value.excludedUsers),
     pathPrompts: parseSlackPathPrompts(value.pathPrompts),
     maxDiffChars: clampSlackReviewerNumber("maxDiffChars", value.maxDiffChars),
     maxFileChars: clampSlackReviewerNumber("maxFileChars", value.maxFileChars),
@@ -779,6 +791,20 @@ export function isSlackRereviewRequest(text: string | undefined): boolean {
   return Boolean(text && SLACK_REREVIEW_REQUEST.test(text));
 }
 
+/** An explicit thread command to review the full PR diff, even at the same commit. */
+export function isSlackFullRereviewRequest(
+  text: string | undefined,
+  mentionIds: string[],
+): boolean {
+  const request = slackReviewerQuestion(text, mentionIds) ?? text?.trim();
+  return Boolean(
+    request &&
+    /^(?:please\s+)?(?:(?:force )?full (?:re[- ]?)?review|force re[- ]?review)(?:\s+please)?[.!?]*$/i.test(
+      request,
+    ),
+  );
+}
+
 const SLACK_DISMISS_WORDS =
   /(?:^|[^a-z0-9])(?:won[’']?t[- ]?fix|wontfix|false[- ]positives?|not (?:an? )?(?:issue|bug|problem)s?|by design|intended|dismiss(?:ed)?|ignore)(?:$|[^a-z0-9])/i;
 
@@ -939,13 +965,28 @@ export function slackReviewerBaseAllowed(
   return reviewer.baseBranches.some((pattern) => reviewGlobToRegExp(pattern).test(ref));
 }
 
-/** Who may ask for a review: anyone with an empty `allowedRequesters`, otherwise only those ids. */
+/**
+ * Who may ask for a review: never anyone in `excludedUsers`; otherwise anyone with an empty
+ * `allowedRequesters`, else only those ids.
+ */
 export function slackReviewerRequesterAllowed(
-  reviewer: Pick<SlackReviewer, "allowedRequesters">,
+  reviewer: Pick<SlackReviewer, "allowedRequesters"> &
+    Partial<Pick<SlackReviewer, "excludedUsers">>,
   userId: string | undefined,
 ): boolean {
+  if (userId && reviewer.excludedUsers?.includes(userId.toUpperCase())) return false;
   if (!reviewer.allowedRequesters?.length) return true;
   return Boolean(userId && reviewer.allowedRequesters.includes(userId.toUpperCase()));
+}
+
+/** A PR author whose forge login maps (`authorSlackIds`) to a Slack id in `excludedUsers`. */
+export function slackReviewerAuthorExcluded(
+  reviewer: Pick<SlackReviewer, "authorSlackIds"> & Partial<Pick<SlackReviewer, "excludedUsers">>,
+  author: string | undefined,
+): boolean {
+  if (!reviewer.excludedUsers?.length || !author) return false;
+  const id = reviewer.authorSlackIds[author.trim().replace(/^@/, "").toLowerCase()];
+  return Boolean(id && reviewer.excludedUsers.includes(id.toUpperCase()));
 }
 
 /** `[skip review]`, `[no review]`, `[skip-review]` or `[no-review]` in a PR title. */
@@ -2564,30 +2605,101 @@ export function slackResolvedThreadPicker(
 // ---------------------------------------------------------------------------------------------
 // Large PRs in parts
 
-/** Parts one large PR may be split into. Each part is a full model call. */
-export const SLACK_REVIEW_MAX_PARTS = 4;
+/**
+ * Parts one large PR may be split into. Each part is a full model call. High enough that a PR of a
+ * few hundred thousand tokens is reviewed in full; the cost cap still covers all parts together.
+ */
+export const SLACK_REVIEW_MAX_PARTS = 12;
 
 /**
- * Split a diff that doesn't fit the budget into parts that each do: the first part is what
- * `compactPullDiff` keeps, each next one takes the files the previous left out. At most `maxParts`;
- * files still left out stay listed by name in the last part. One part when everything fits.
+ * Split a diff that doesn't fit the budget into parts that each do, keeping related files
+ * together: files are grouped by folder (a `__tests__` / `test` / `tests` folder counts as its
+ * parent, so tests travel with the code they test), groups are taken in path order, and a new part
+ * starts when the next group doesn't fit. A group bigger than a whole part is split file by file.
+ * If grouping needs more than `maxParts` parts, files are packed tightly in path order instead.
+ * Files that still don't fit stay listed by name in the last part. Deleted, binary and ignored
+ * files are noted in the first part. One part when everything fits.
  */
 export function planSlackReviewParts(
   files: PullFile[],
   budget: Parameters<typeof compactPullDiff>[1],
   maxParts = SLACK_REVIEW_MAX_PARTS,
 ): CompactDiff[] {
+  const whole = compactPullDiff(files, budget);
+  if (!whole.omitted.length || maxParts <= 1) return [whole];
+  const reviewable = new Set([...whole.reviewed, ...whole.omitted]);
+  const others = files.filter((file) => !reviewable.has(file.path));
+  const sorted = files
+    .filter((file) => reviewable.has(file.path))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const cap = budget.maxDiffChars;
+  // What each file costs on its own (truncated to the per-file cap), plus the section separator.
+  const size = new Map(
+    sorted.map((file) => [file.path, compactPullDiff([file], budget).text.length + 2]),
+  );
+
+  const pack = (groups: PullFile[][]): PullFile[][] => {
+    const bins: PullFile[][] = [];
+    let current: PullFile[] = [];
+    let used = 0;
+    const add = (file: PullFile) => {
+      const cost = size.get(file.path)!;
+      if (current.length && used + cost > cap) {
+        bins.push(current);
+        current = [];
+        used = 0;
+      }
+      current.push(file);
+      used += cost;
+    };
+    for (const group of groups) {
+      const total = group.reduce((sum, file) => sum + size.get(file.path)!, 0);
+      if (total <= cap && current.length && used + total > cap) {
+        bins.push(current);
+        current = [];
+        used = 0;
+      }
+      for (const file of group) add(file);
+    }
+    if (current.length) bins.push(current);
+    return bins;
+  };
+
+  const byModule = new Map<string, PullFile[]>();
+  for (const file of sorted) {
+    const key = slackReviewModuleKey(file.path);
+    byModule.set(key, [...(byModule.get(key) ?? []), file]);
+  }
+  const grouped = pack(
+    [...byModule.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, g]) => g),
+  );
+  const bins = grouped.length <= maxParts ? grouped : pack(sorted.map((file) => [file]));
+
   const parts: CompactDiff[] = [];
-  let remaining = files;
-  while (remaining.length && parts.length < maxParts) {
-    const part = compactPullDiff(remaining, budget);
+  let carry: PullFile[] = [];
+  let next = 0;
+  while ((next < bins.length || carry.length) && parts.length < maxParts) {
+    // The last part also takes every bin past the limit, so those files are listed by name.
+    const last = parts.length === maxParts - 1;
+    const batch = [...carry, ...(last ? bins.slice(next).flat() : (bins[next] ?? []))];
+    next = last ? bins.length : next + 1;
+    const part = compactPullDiff([...(parts.length ? [] : others), ...batch], budget);
     if (!part.reviewed.length) break;
     parts.push(part);
-    if (!part.omitted.length) break;
+    // The size estimate can be a little off: whatever a part couldn't fit moves to the next one.
     const left = new Set(part.omitted);
-    remaining = remaining.filter((row) => left.has(row.path));
+    carry = batch.filter((file) => left.has(file.path));
   }
-  return parts.length ? parts : [compactPullDiff(files, budget)];
+  return parts.length > 1 ? parts : [whole];
+}
+
+/** The folder a file belongs to for grouping review parts; a test folder counts as its parent. */
+export function slackReviewModuleKey(path: string): string {
+  const dirs = path.split("/").slice(0, -1);
+  while (dirs.length && /^(__tests__|__test__|tests?|spec|__mocks__)$/i.test(dirs.at(-1)!)) {
+    dirs.pop();
+  }
+  return dirs.join("/");
 }
 
 /** Says which part of a split PR one call sees, and which files the other parts cover. */
@@ -2595,13 +2707,13 @@ export function slackReviewPartNote(index: number, parts: CompactDiff[]): string
   const others = parts.flatMap((part, i) => (i === index ? [] : part.reviewed));
   const list =
     others.slice(0, 40).join(", ") + (others.length > 40 ? `, … (${others.length - 40} more)` : "");
-  return `This PR is too large for one review, so it is reviewed in ${parts.length} parts. This is part ${index + 1} of ${parts.length}. Review only the files in the diff below; other parts cover: ${list}. You may still read those files in the checkout for context. Keep the summary to this part.`;
+  return `This PR is too large for one review, so it is reviewed in ${parts.length} parts. This is part ${index + 1} of ${parts.length}. Review only the files in the diff below; other parts cover: ${list}. You may still read those files in the checkout for context. Keep the summary to this part, and don't say which part it is: the reply labels it.`;
 }
 
 /**
  * Merge per-part results into one: all comments (settling ranks and caps them later), the
- * strictest verdict, the part summaries joined, and an earlier finding counted resolved only when
- * no part says it is still open.
+ * strictest verdict, the part summaries one per line ("Part 2 of 4: …"), and an earlier finding
+ * counted resolved only when no part says it is still open.
  */
 export function mergeSlackReviewResults(results: SlackReviewResult[]): SlackReviewResult {
   if (results.length === 1) return results[0]!;
@@ -2619,10 +2731,30 @@ export function mergeSlackReviewResults(results: SlackReviewResult[]): SlackRevi
   return {
     verdict,
     summary: results
-      .map((row) => row.summary.trim())
+      .map((row, i) => {
+        const text = slackReviewPartSummary(row.summary);
+        return text ? `Part ${i + 1} of ${results.length}: ${text}` : "";
+      })
       .filter(Boolean)
-      .join(" "),
+      .join("\n"),
     comments: results.flatMap((row) => row.comments),
     ...(status.size ? { previous: [...status].map(([id, resolved]) => ({ id, resolved })) } : {}),
   };
+}
+
+/** One part's summary on one line, without a "Part 3 of 4:" the model added itself. */
+export function slackReviewPartSummary(summary: string): string {
+  return summary
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^part \d+(?: of \d+)?\s*[:.,–—-]\s*/i, "");
+}
+
+/**
+ * Comment cap for a review in `parts` parts: each part may keep the reviewer's `maxComments`,
+ * up to the setting's upper bound, so a large PR's later parts aren't crowded out.
+ */
+export function slackReviewCommentCap(maxComments: number, parts: number): number {
+  if (parts <= 1) return maxComments;
+  return Math.max(maxComments, Math.min(maxComments * parts, SLACK_REVIEWER_LIMITS.maxComments[1]));
 }

@@ -566,6 +566,20 @@ describe("ProjectService", () => {
     expect(fifth.output).toMatch(/Concurrent member cap/);
   });
 
+  it("passes the spawning coordinator's bypassed gates to a project_spawn member", async () => {
+    const { projects, sessions } = await setup();
+    const created = await projects.create({ starter: "feature", title: "Gates" });
+    const spawned = await projects.executeTool(
+      { id: "coord", kind: "project", projectId: created.id, bypassGates: ["test-gate"] },
+      "project_spawn",
+      { task: "slice one" },
+    );
+    expect(spawned.ok).toBe(true);
+    const fleet = await projects.require(created.id);
+    const member = await sessions.get(fleet.memberIds.at(-1)!);
+    expect(member?.bypassGates).toEqual(["test-gate"]);
+  });
+
   it("spawns one fix member when CI goes red and flags Needs you when it is green", async () => {
     const detail: {
       number: number;

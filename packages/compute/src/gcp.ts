@@ -1,7 +1,13 @@
 import { randomBytes } from "node:crypto";
-import { workerAllowedSizes, workerPickSize, type WorkerBackend } from "@locus/shared";
-import { fargateUsdPerHour } from "./prices.js";
-import { handleFromRecord, loadComputeTaskRegistry, type ComputeTaskRegistry } from "./registry.js";
+import { type WorkerBackend } from "@locus/shared";
+import { quoteCloudSize } from "./prices.js";
+import {
+  handleFromRecord,
+  listRegistryOrphans,
+  loadComputeTaskRegistry,
+  restoreComputeHandle,
+  type ComputeTaskRegistry,
+} from "./registry.js";
 import type {
   ComputeBackend,
   ComputeHandle,
@@ -33,11 +39,7 @@ export class GcpComputeBackend implements ComputeBackend {
   }
 
   quote(backend: WorkerBackend, size: string): CostQuote {
-    const resolved = workerPickSize(backend, size);
-    if (!workerAllowedSizes(backend)?.length) {
-      throw new Error("GCP workers need a size allowlist so a runaway agent cannot pick 4 vCPU");
-    }
-    return { size: resolved, usdPerHour: fargateUsdPerHour(resolved) };
+    return quoteCloudSize(backend, size, "GCP");
   }
 
   async provision(req: ProvisionRequest): Promise<ComputeHandle> {
@@ -104,23 +106,11 @@ export class GcpComputeBackend implements ComputeBackend {
   }
 
   get(id: string): ComputeHandle | undefined {
-    const live = this.handles.get(id);
-    if (live) return live;
-    const restored = handleFromRecord(this.registry.get(id) ?? { id: "", backendId: "" });
-    if (!restored) return undefined;
-    this.handles.set(id, restored);
-    return restored;
+    return restoreComputeHandle(this.handles, this.registry, id);
   }
 
   async listOrphans(liveIds: Set<string>): Promise<ComputeOrphan[]> {
-    const out: ComputeOrphan[] = [];
-    const seen = new Set<string>();
-    for (const row of this.registry.list()) {
-      if (liveIds.has(row.id) || seen.has(row.id)) continue;
-      seen.add(row.id);
-      out.push({ id: row.id, backendId: row.backendId });
-    }
-    return out.filter((row) => row.backendId);
+    return listRegistryOrphans(this.registry, liveIds);
   }
 
   private async waitForIp(backend: WorkerBackend, id: string): Promise<string> {

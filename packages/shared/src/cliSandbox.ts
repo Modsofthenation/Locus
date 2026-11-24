@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isLoopbackHost } from "./security.js";
+import { parseCliSandboxSettings, type CliSandboxSettings } from "./models/config.js";
 
 /**
  * Containment for CLI agents (Cursor / Claude Code / Codex / Kiro / Custom) that a Locus
@@ -266,6 +267,28 @@ export function cliSandboxDisabled(env: NodeJS.ProcessEnv = process.env): boolea
  */
 export function cliSandboxSharesHostNetwork(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.LOCUS_CLI_SANDBOX_NET?.trim().toLowerCase() === "host";
+}
+
+/**
+ * `env` with Settings → Advanced → CLI agent sandbox filled in as `LOCUS_CLI_SANDBOX*` vars.
+ * A var already set in `env` wins, so an operator can still override the app at launch.
+ */
+export function cliSandboxEnv(
+  settings: CliSandboxSettings | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const parsed = parseCliSandboxSettings(settings);
+  if (!parsed) return env;
+  const out: NodeJS.ProcessEnv = { ...env };
+  const unset = (key: string) => !env[key]?.trim();
+  if (parsed.mode === "off" && unset("LOCUS_CLI_SANDBOX")) out.LOCUS_CLI_SANDBOX = "off";
+  if (parsed.mode === "filesystem" && unset("LOCUS_CLI_SANDBOX_NET")) {
+    out.LOCUS_CLI_SANDBOX_NET = "host";
+  }
+  if (parsed.allowPorts?.length && unset("LOCUS_CLI_SANDBOX_ALLOW_PORTS")) {
+    out.LOCUS_CLI_SANDBOX_ALLOW_PORTS = parsed.allowPorts.join(",");
+  }
+  return out;
 }
 
 /** `LOCUS_CLI_SANDBOX_ALLOW_PORTS=3128,8080`: extra host loopback ports, e.g. a local proxy. */
@@ -631,8 +654,9 @@ export function resolveCliSandbox(
   if (!found.backend) {
     const where = opts.where ?? "this machine";
     const install = opts.network
-      ? `Install bubblewrap and passt (Linux), set LOCUS_CLI_SANDBOX_NET=host to keep only the ` +
-        `filesystem sandbox, or LOCUS_CLI_SANDBOX=off to run unsandboxed (see SECURITY.md).`
+      ? `Install bubblewrap and passt (Linux), set Settings → Advanced → CLI agent sandbox to ` +
+        `"Filesystem only" (LOCUS_CLI_SANDBOX_NET=host) to keep only the filesystem sandbox, or ` +
+        `"Off" (LOCUS_CLI_SANDBOX=off) to run unsandboxed (see SECURITY.md).`
       : `Install bubblewrap (Linux) or set LOCUS_CLI_SANDBOX=off to run unsandboxed (see SECURITY.md).`;
     return {
       ok: false,
@@ -653,9 +677,10 @@ export function resolveCliSandbox(
         ok: false,
         reason:
           `This machine's proxy is on loopback port ${blocked.join(", ")}, which the CLI sandbox ` +
-          `blocks. If that proxy refuses loopback targets, allow it with ` +
-          `LOCUS_CLI_SANDBOX_ALLOW_PORTS=${blocked.join(",")}. Otherwise set ` +
-          `LOCUS_CLI_SANDBOX_NET=host (see docs/cli-agent-sandbox.md).`,
+          `blocks. If that proxy refuses loopback targets, add it to Settings → Advanced → CLI ` +
+          `agent sandbox → Allowed loopback ports (LOCUS_CLI_SANDBOX_ALLOW_PORTS=${blocked.join(",")}). ` +
+          `Otherwise choose "Filesystem only" there (LOCUS_CLI_SANDBOX_NET=host) ` +
+          `(see docs/cli-agent-sandbox.md).`,
       };
     }
   }

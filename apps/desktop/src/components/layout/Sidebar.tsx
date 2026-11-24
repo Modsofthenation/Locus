@@ -36,6 +36,7 @@ import {
   brainClaimsForRepo,
   parseProductMode,
   sessionMatchesSurface,
+  type AgentSession,
 } from "@locus/shared";
 import { api } from "@/lib/api";
 import { useCanvasPrefetch } from "@/lib/useCanvasPrefetch";
@@ -132,6 +133,7 @@ import {
   agentMeta,
   sessionPassesListFilter,
 } from "@/components/layout/sidebar/sessionList";
+import { sessionBackend } from "@/components/layout/sidebar/SessionBackendBadge";
 import {
   SlackChannelListSkeleton,
   SlackKindMark,
@@ -867,23 +869,31 @@ export function Sidebar() {
   }
 
   function peekRows(target: "inbox" | UiSection): RailPeekRow[] {
+    function sessionPeekRow(session: AgentSession): RailPeekRow {
+      return {
+        key: session.id,
+        title: session.title,
+        backend: sessionBackend(session, state.config),
+      };
+    }
+
     if (target === "inbox") {
       return inboxAll.map((row) => ({ key: row.key, title: row.title, detail: row.detail }));
     }
     if (target === "agents") {
-      return agentCatalog.map((s) => ({ key: s.id, title: s.title }));
+      return agentCatalog.map(sessionPeekRow);
     }
     if (target === "design") {
-      return designCatalog.map((s) => ({ key: s.id, title: s.title }));
+      return designCatalog.map(sessionPeekRow);
     }
     if (target === "games") {
-      return gameCatalog.map((s) => ({ key: s.id, title: s.title }));
+      return gameCatalog.map(sessionPeekRow);
     }
     if (target === "assets") {
-      return assetCatalog.map((s) => ({ key: s.id, title: s.title }));
+      return assetCatalog.map(sessionPeekRow);
     }
     if (target === "ide") {
-      return ideCatalog.map((s) => ({ key: s.id, title: s.title }));
+      return ideCatalog.map(sessionPeekRow);
     }
     if (target === "codebase") {
       return repos.map((row) => ({ key: row.id, title: row.name }));

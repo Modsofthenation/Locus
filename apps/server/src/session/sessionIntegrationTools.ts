@@ -1,5 +1,6 @@
 import type { ToolResult } from "@locus/guest-agent";
 import {
+  SLACK_UPLOAD_MAX_BYTES,
   automationAllowsIntegration,
   integrationKindForTool,
   integrationReady,
@@ -17,6 +18,12 @@ export type SessionIntegrationDeps = {
     rows: IntegrationAccount[] | undefined,
   ) => Promise<ToolResult>;
   noteSlackPost: (sessionId: string, ts: string) => Promise<void>;
+  /** Read a workspace file for slack_upload path=. Throws with an operator-readable reason. */
+  readWorkspaceUpload?: (
+    sessionId: string,
+    path: string,
+    maxBytes: number,
+  ) => Promise<{ path: string; bytes: Uint8Array }>;
 };
 
 const SLACK_WRITE = new Set(["slack_post", "slack_upload"]);
@@ -44,6 +51,54 @@ export function slackToolLastPostTs(
   return /\bts=([0-9.]+)/.exec(result.output)?.[1];
 }
 
+const UPLOAD_MIME: Record<string, string> = {
+  ".html": "text/html",
+  ".htm": "text/html",
+  ".zip": "application/zip",
+  ".json": "application/json",
+  ".xml": "application/xml",
+  ".txt": "text/plain",
+  ".log": "text/plain",
+  ".md": "text/markdown",
+  ".csv": "text/csv",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webm": "video/webm",
+  ".pdf": "application/pdf",
+};
+
+function uploadMime(path: string): string | undefined {
+  const dot = path.lastIndexOf(".");
+  return dot < 0 ? undefined : UPLOAD_MIME[path.slice(dot).toLowerCase()];
+}
+
+/**
+ * slack_upload path= reads the file from the session workspace host-side, so a large
+ * report (Playwright HTML, a zip) never has to pass through the model as content.
+ */
+export async function resolveSlackUploadPath(
+  deps: Pick<SessionIntegrationDeps, "readWorkspaceUpload">,
+  sessionId: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const path = typeof args.path === "string" ? args.path.trim() : "";
+  if (!path) return args;
+  if (typeof args.content === "string" && args.content) return args;
+  if (typeof args.bytes_base64 === "string" && args.bytes_base64) return args;
+  if (!deps.readWorkspaceUpload) throw new Error("path= uploads are not available here");
+  const file = await deps.readWorkspaceUpload(sessionId, path, SLACK_UPLOAD_MAX_BYTES);
+  if (!file.bytes.byteLength) throw new Error(`${file.path} is empty`);
+  const base = file.path.split("/").pop() || "upload";
+  const { path: _path, ...rest } = args;
+  return {
+    ...rest,
+    filename: typeof args.filename === "string" && args.filename.trim() ? args.filename : base,
+    mime: (typeof args.mime === "string" && args.mime) || uploadMime(base),
+    bytes_base64: Buffer.from(file.bytes).toString("base64"),
+  };
+}
+
 export async function executeIntegrationTool(
   deps: SessionIntegrationDeps,
   session: AgentSession,
@@ -61,7 +116,9 @@ export async function executeIntegrationTool(
   if (!integrationReady(name, config.integrations)) {
     throw new Error(`Add a ${integrationKindForTool(name)} token in Settings → Integrations`);
   }
-  const bound = bindSlackToolArgs(session.slack, name, args);
+  const withFile =
+    name === "slack_upload" ? await resolveSlackUploadPath(deps, session.id, args) : args;
+  const bound = bindSlackToolArgs(session.slack, name, withFile);
   const result = await deps.call(name, bound, config.integrations);
   const ts = slackToolLastPostTs(name, result);
   if (ts) await deps.noteSlackPost(session.id, ts);

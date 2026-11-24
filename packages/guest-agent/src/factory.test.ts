@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { VmInstance } from "@locus/shared";
-import { createGuestRuntime } from "./factory.js";
+import { createGuestRuntime, createHostGuestRuntime } from "./factory.js";
 import { DockerGuestRuntime } from "./docker.js";
 import { HostGuestRuntime } from "./host.js";
 import { MockGuestRuntime } from "./mock.js";
@@ -30,6 +30,7 @@ describe("createGuestRuntime", () => {
     );
     expect(createGuestRuntime(vm({ runtime: "docker" }))).toBeInstanceOf(MockGuestRuntime);
     expect(createGuestRuntime(vm({ runtime: "host" }))).toBeInstanceOf(HostGuestRuntime);
+    expect(createHostGuestRuntime("ubuntu", "/tmp/ws")).toBeInstanceOf(HostGuestRuntime);
     expect(
       createGuestRuntime(
         vm({

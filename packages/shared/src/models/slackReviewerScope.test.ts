@@ -9,6 +9,7 @@ import {
   parseSlackReviewer,
   slackReviewConventionLine,
   slackReviewConventionsBranch,
+  slackReviewerAuthorExcluded,
   slackReviewerBaseAllowed,
   slackReviewerRequesterAllowed,
   slackReviewOptOut,
@@ -92,6 +93,35 @@ describe("opt-out and scoping settings", () => {
     expect(slackReviewerRequesterAllowed(reviewer, "U0123ABCD")).toBe(true);
     expect(slackReviewerRequesterAllowed(reviewer, "U0999ZZZZ")).toBe(false);
     expect(slackReviewerRequesterAllowed(reviewer, undefined)).toBe(false);
+  });
+
+  it("parses excluded users and never lets them ask, even when also allowed", () => {
+    expect(base().excludedUsers).toEqual([]);
+    const reviewer = base({
+      excludedUsers: ["u0123abcd", "<@U0456EFGH|bob>", "nope", "U0123ABCD"],
+    });
+    expect(reviewer.excludedUsers).toEqual(["U0123ABCD", "U0456EFGH"]);
+    expect(slackReviewerRequesterAllowed(reviewer, "U0123ABCD")).toBe(false);
+    expect(slackReviewerRequesterAllowed(reviewer, "u0456efgh")).toBe(false);
+    expect(slackReviewerRequesterAllowed(reviewer, "U0999ZZZZ")).toBe(true);
+    expect(slackReviewerRequesterAllowed(reviewer, undefined)).toBe(true);
+    const both = base({ allowedRequesters: ["U0123ABCD"], excludedUsers: ["U0123ABCD"] });
+    expect(slackReviewerRequesterAllowed(both, "U0123ABCD")).toBe(false);
+  });
+
+  it("excludes PR authors mapped to an excluded Slack member", () => {
+    const reviewer = base({
+      excludedUsers: ["U0123ABCD"],
+      authorSlackIds: { alice: "U0123ABCD", bob: "U0456EFGH" },
+    });
+    expect(slackReviewerAuthorExcluded(reviewer, "Alice")).toBe(true);
+    expect(slackReviewerAuthorExcluded(reviewer, "@alice")).toBe(true);
+    expect(slackReviewerAuthorExcluded(reviewer, "bob")).toBe(false);
+    expect(slackReviewerAuthorExcluded(reviewer, "carol")).toBe(false);
+    expect(slackReviewerAuthorExcluded(reviewer, undefined)).toBe(false);
+    expect(
+      slackReviewerAuthorExcluded(base({ authorSlackIds: { alice: "U0123ABCD" } }), "alice"),
+    ).toBe(false);
   });
 });
 

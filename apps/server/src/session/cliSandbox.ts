@@ -18,6 +18,7 @@ import type { CursorCliSpawner } from "@locus/providers";
 export {
   bwrapArgs,
   cliSandboxDisabled,
+  cliSandboxEnv,
   scrubCliEnv,
   seatbeltProfile,
   wrapCliSpawnRequest,

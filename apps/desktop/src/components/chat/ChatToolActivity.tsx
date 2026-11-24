@@ -20,8 +20,16 @@ import {
   askUserItems,
   askUserIntro,
   formatAskUserReply,
+  isPublishTool,
+  testGateAnswer,
+  testGateSkipRequest,
+  formatTestGateDuration,
+  TEST_GATE_CHOICES,
+  TEST_GATE_CHOICE_LABELS,
+  TEST_GATE_PROMPT_TOOL,
   type ChatMessage,
   type SubagentLive,
+  type TestGateChoice,
   type ToolCall,
 } from "@locus/shared";
 import { api } from "@/lib/api";
@@ -222,24 +230,32 @@ const ToolFollowup = memo(function ToolFollowup({
           <SlackPostDraft sessionId={sessionId} call={call} />
         ) : call.name === "brain_brief" ? (
           <BrainBriefDraft sessionId={sessionId} call={call} />
+        ) : call.name === TEST_GATE_PROMPT_TOOL ? (
+          <TestGatePrompt sessionId={sessionId} call={call} />
         ) : (
-          <ApprovalRow sessionId={sessionId} callId={call.id} />
+          <ApprovalRow sessionId={sessionId} call={call} />
         )
       ) : null}
     </div>
   );
 });
 
-function ApprovalRow({ sessionId, callId }: { sessionId: string; callId: string }) {
+function ApprovalRow({ sessionId, call }: { sessionId: string; call: ToolCall }) {
+  const callId = call.id;
   const [working, setWorking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const publish = isPublishTool(call.name);
+  const skip = publish ? testGateSkipRequest(call.arguments) : { requested: false };
 
-  async function resolve(decision: "approved" | "denied", always?: boolean) {
+  async function resolve(
+    decision: "approved" | "denied",
+    opts: { always?: boolean; answer?: string; busy?: string } = {},
+  ) {
     if (working) return;
-    setWorking(decision);
+    setWorking(opts.busy ?? decision);
     setError(null);
     try {
-      await api.resolveApproval(sessionId, callId, decision, undefined, always);
+      await api.resolveApproval(sessionId, callId, decision, opts.answer, opts.always);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update approval");
       setWorking(null);
@@ -247,35 +263,170 @@ function ApprovalRow({ sessionId, callId }: { sessionId: string; callId: string 
   }
 
   return (
-    <div className="approval-row">
-      <BusyButton
-        className="btn small primary"
-        disabled={Boolean(working)}
-        busy={working === "approved"}
-        busyLabel="Approving…"
-        onClick={() => void resolve("approved")}
-      >
-        Approve
-      </BusyButton>
-      <BusyButton
-        className="btn small"
-        disabled={Boolean(working)}
-        title="Allow this tool for the rest of this session"
-        aria-label="Allow this tool for the rest of this session"
-        onClick={() => void resolve("approved", true)}
-      >
-        Always allow
-      </BusyButton>
-      <BusyButton
-        className="btn small"
-        disabled={Boolean(working)}
-        busy={working === "denied"}
-        busyLabel="Denying…"
-        onClick={() => void resolve("denied")}
-      >
-        Deny
-      </BusyButton>
-      {error ? <InlineError message={error} /> : null}
+    <>
+      {skip.requested ? (
+        <p className="approval-note" data-testid="approval-skip-request">
+          The agent asks to skip the test gate
+          {skip.reason ? <>: &ldquo;{skip.reason}&rdquo;</> : "."}
+        </p>
+      ) : null}
+      <div className="approval-row">
+        <BusyButton
+          className="btn small primary"
+          disabled={Boolean(working)}
+          busy={working === "approved"}
+          busyLabel="Approving…"
+          title={publish ? "Approve and run the workspace tests first" : undefined}
+          onClick={() => void resolve("approved")}
+        >
+          {publish ? "Approve, run tests" : "Approve"}
+        </BusyButton>
+        {publish ? (
+          <>
+            <BusyButton
+              className="btn small"
+              disabled={Boolean(working)}
+              busy={working === "skip"}
+              busyLabel="Approving…"
+              title="Publish without running the workspace tests"
+              onClick={() =>
+                void resolve("approved", { answer: testGateAnswer("skip"), busy: "skip" })
+              }
+            >
+              Approve, skip tests
+            </BusyButton>
+            <BusyButton
+              className="btn small"
+              disabled={Boolean(working)}
+              busy={working === "defer"}
+              busyLabel="Approving…"
+              title="Publish now, then run the tests in the background and post the result here"
+              onClick={() =>
+                void resolve("approved", { answer: testGateAnswer("defer"), busy: "defer" })
+              }
+            >
+              Approve, test after
+            </BusyButton>
+          </>
+        ) : null}
+        <BusyButton
+          className="btn small"
+          disabled={Boolean(working)}
+          title="Allow this tool for the rest of this session"
+          aria-label="Allow this tool for the rest of this session"
+          onClick={() => void resolve("approved", { always: true })}
+        >
+          Always allow
+        </BusyButton>
+        <BusyButton
+          className="btn small"
+          disabled={Boolean(working)}
+          busy={working === "denied"}
+          busyLabel="Denying…"
+          onClick={() => void resolve("denied")}
+        >
+          Deny
+        </BusyButton>
+        {error ? <InlineError message={error} /> : null}
+      </div>
+    </>
+  );
+}
+
+function useCountdown(deadline: string | undefined): number | undefined {
+  const target = deadline ? Date.parse(deadline) : NaN;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!Number.isFinite(target)) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [target]);
+  return Number.isFinite(target) ? Math.max(0, Math.ceil((target - now) / 1000)) : undefined;
+}
+
+function formatCountdown(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m ? `${m}:${String(s).padStart(2, "0")}` : `${s}s`;
+}
+
+/** Countdown card before a slow git_push / git_pr test gate; no answer runs the tests. */
+function TestGatePrompt({ sessionId, call }: { sessionId: string; call: ToolCall }) {
+  const [working, setWorking] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const args = call.arguments ?? {};
+  const tool = args.tool === "git_pr" ? "the pull request" : "the push";
+  const last = formatTestGateDuration(
+    typeof args.lastDurationMs === "number" ? args.lastDurationMs : undefined,
+  );
+  const reason = typeof args.reason === "string" ? args.reason : undefined;
+  const command = typeof args.command === "string" ? args.command : undefined;
+  const left = useCountdown(typeof args.deadline === "string" ? args.deadline : undefined);
+
+  async function choose(choice: TestGateChoice | "deny") {
+    if (working) return;
+    setWorking(choice);
+    setError(null);
+    try {
+      await (choice === "deny"
+        ? api.resolveApproval(sessionId, call.id, "denied")
+        : api.resolveApproval(sessionId, call.id, "approved", testGateAnswer(choice)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send your choice");
+      setWorking(null);
+    }
+  }
+
+  return (
+    <div className="test-gate-prompt" data-testid="test-gate-prompt">
+      <p className="approval-note">
+        {args.skipRequested ? (
+          <>
+            The agent asks to skip the tests before {tool}
+            {reason ? <>: &ldquo;{reason}&rdquo;</> : null}.
+          </>
+        ) : (
+          <>The tests before {tool} are slow.</>
+        )}{" "}
+        {last ? <>The last run took {last}. </> : null}
+        {command ? (
+          <>
+            Command: <code>{command}</code>.{" "}
+          </>
+        ) : null}
+        {left !== undefined ? (
+          <strong>
+            {left > 0
+              ? `The tests run automatically in ${formatCountdown(left)} if you don't choose.`
+              : "Running the tests…"}
+          </strong>
+        ) : null}
+      </p>
+      <div className="approval-row">
+        {TEST_GATE_CHOICES.map((choice) => (
+          <BusyButton
+            key={choice}
+            className={choice === "run" ? "btn small primary" : "btn small"}
+            disabled={Boolean(working)}
+            busy={working === choice}
+            busyLabel="Sending…"
+            onClick={() => void choose(choice)}
+          >
+            {TEST_GATE_CHOICE_LABELS[choice]}
+          </BusyButton>
+        ))}
+        <BusyButton
+          className="btn small"
+          disabled={Boolean(working)}
+          busy={working === "deny"}
+          busyLabel="Cancelling…"
+          title={`Don't publish: cancel ${tool}`}
+          onClick={() => void choose("deny")}
+        >
+          Don&apos;t publish
+        </BusyButton>
+        {error ? <InlineError message={error} /> : null}
+      </div>
     </div>
   );
 }

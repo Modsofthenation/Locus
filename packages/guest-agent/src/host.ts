@@ -30,6 +30,7 @@ import {
   type ChromiumDriver,
 } from "./chromium.js";
 import { launchHostChrome, type HostChromeHandle } from "./hostChrome.js";
+import { computerCapabilitiesResult } from "./computerCapabilities.js";
 
 const HOST_SET = new Set<string>(HOST_TOOLS);
 
@@ -71,17 +72,10 @@ export class HostGuestRuntime implements GuestRuntime {
       return { ok: false, output: `${req.name} is not available in a host agent` };
     }
     if (req.name === "computer_capabilities")
-      return {
-        ok: true,
-        output: JSON.stringify({
-          backend: "cdp",
-          browser: !!this.chromium(),
-          nativeDesktop: false,
-          observation: ["browser_snapshot", "screenshot"],
-          actions: ["browser_action", "browser_click", "browser_type", "key"],
-          note: "Host agents use isolated Chrome or opt-in live Chrome. Native desktop actions require a VM guest.",
-        }),
-      };
+      return computerCapabilitiesResult({
+        browser: !!this.chromium(),
+        note: "Host agents use isolated Chrome or opt-in live Chrome. Native desktop actions require a VM guest.",
+      });
     if (isBrowserToolRequest(req)) {
       const live = this.liveBrowser?.();
       if (live) return dispatchBrowserTool(req, live);

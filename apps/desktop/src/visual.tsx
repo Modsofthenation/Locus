@@ -37,6 +37,7 @@ import { WorkspaceStage } from "@/components/workspace/WorkspaceStage";
 import { api } from "@/lib/api";
 import { showUndoNotice } from "@/lib/notice";
 import { applyTheme } from "@/lib/theme";
+import { useDrawerSidebar } from "@/lib/useDrawerSidebar";
 import { Store, initialState, type Action, type UiState } from "@/state/store";
 import "./index.css";
 import "./styles/phone.css";
@@ -177,6 +178,31 @@ function stubApi(): void {
       },
     ],
   });
+  api.modelUsage = async () => ({
+    since: "2026-11-21T08:00:00.000Z",
+    models: [
+      {
+        providerId: "openai-review",
+        providerName: "OpenAI",
+        model: "gpt-4.1",
+        inputTokens: 124_608,
+        outputTokens: 8_422,
+        estimatedTokens: 0,
+        unpricedTokens: 0,
+        usd: 0.29,
+      },
+      {
+        providerId: "ollama-local",
+        providerName: "Ollama",
+        model: "qwen3-coder",
+        inputTokens: 38_241,
+        outputTokens: 2_123,
+        estimatedTokens: 0,
+        unpricedTokens: 0,
+        usd: 0,
+      },
+    ],
+  });
   api.slackReviewerRuns = async () => ({
     runs: [
       {
@@ -250,7 +276,7 @@ function stubApi(): void {
   api.checkUpdates = async () =>
     ({
       status: "unavailable",
-      current: "0.24.0",
+      current: "0.29.0",
       message: "No GitHub release found yet.",
     }) as never;
 }
@@ -515,7 +541,17 @@ function visualState(screen: VisualScreen, theme: ThemeId): UiState {
   if (screen === "sidebar" || screen === "rail") {
     return {
       ...initialState,
-      config: themed,
+      config: {
+        ...themed,
+        workers: [
+          {
+            id: "cloud-worker",
+            name: "Cloud worker",
+            url: "https://worker.example.com",
+            kind: "cloud",
+          },
+        ],
+      },
       section: "agents",
       connected: true,
       sessions: [
@@ -524,6 +560,8 @@ function visualState(screen: VisualScreen, theme: ThemeId): UiState {
           ...visualSession,
           id: "s2",
           title: "Review checkout",
+          placement: "worker",
+          backendId: "cloud-worker",
           needsHuman: "Approve git_push",
           updatedAt: "2020-01-02T00:00:00.000Z",
         } as AgentSession,
@@ -740,7 +778,7 @@ function GeneratedAppearance() {
   );
 }
 
-function Screen(props: { screen: VisualScreen; theme: ThemeId }): ReactNode {
+function Screen(props: { screen: VisualScreen; theme: ThemeId; drawer: boolean }): ReactNode {
   if (props.screen === "android-start" || props.screen === "android-canvas")
     return (
       <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
@@ -821,7 +859,7 @@ function Screen(props: { screen: VisualScreen; theme: ThemeId }): ReactNode {
   if (props.screen === "splitter") return <SplitterPreview />;
   if (props.screen === "inbox") {
     return (
-      <div className="app">
+      <div className={props.drawer ? "app collapsed" : "app"}>
         <Sidebar />
         <main className="workspace">
           <InboxPane />
@@ -858,6 +896,8 @@ function Screen(props: { screen: VisualScreen; theme: ThemeId }): ReactNode {
 }
 
 function Harness(props: { screen: VisualScreen; theme: ThemeId }) {
+  const [inboxFocusKey, setInboxFocusKey] = useState<string | null>(null);
+  const drawer = useDrawerSidebar();
   useEffect(() => {
     let frame2 = 0;
     const frame1 = requestAnimationFrame(() => {
@@ -876,12 +916,18 @@ function Harness(props: { screen: VisualScreen; theme: ThemeId }) {
   return (
     <Store.Provider
       value={{
-        state: visualState(props.screen, props.theme),
-        dispatch: (_action: Action) => undefined,
+        state: {
+          ...visualState(props.screen, props.theme),
+          ...(props.screen === "inbox" ? { inboxFocusKey, collapsed: drawer } : {}),
+        },
+        dispatch: (action: Action) => {
+          if (props.screen === "inbox" && action.type === "inboxFocus")
+            setInboxFocusKey(action.key);
+        },
       }}
     >
       <DialogHost />
-      <Screen screen={props.screen} theme={props.theme} />
+      <Screen screen={props.screen} theme={props.theme} drawer={drawer} />
     </Store.Provider>
   );
 }

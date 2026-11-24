@@ -100,6 +100,7 @@ export async function pinnedHttpsWebSocket(
   opts: {
     headers?: Record<string, string>;
     fingerprint?: string;
+    verifyPublicTls?: boolean;
     binary?: boolean;
     onMessage?: (raw: string | Buffer) => void;
   },
@@ -109,14 +110,16 @@ export async function pinnedHttpsWebSocket(
     throw new Error("Worker URL must be https");
   }
   const want = parseWorkerFingerprint(opts.fingerprint);
-  if (!want) {
+  if (!want && !opts.verifyPublicTls) {
     throw new Error("Test connection in Settings → Workers to pin this worker's TLS fingerprint");
   }
   const { WebSocket } = await import("ws");
   return new Promise((resolve, reject) => {
     let done = false;
     const ws = new WebSocket(url, {
-      rejectUnauthorized: false,
+      rejectUnauthorized: opts.verifyPublicTls === true,
+      followRedirects: false,
+      handshakeTimeout: opts.verifyPublicTls ? 8_000 : undefined,
       perMessageDeflate: false,
       headers: opts.headers,
     });
@@ -139,6 +142,7 @@ export async function pinnedHttpsWebSocket(
       fail(new Error(`Worker browser WS failed (${res.statusCode})`));
     });
     ws.once("upgrade", (res) => {
+      if (opts.verifyPublicTls) return;
       const tlsSock = res.socket as TLSSocket;
       const raw = tlsSock.getPeerCertificate?.()?.raw as Buffer | undefined;
       const seen = raw ? certFingerprint(raw) : "";

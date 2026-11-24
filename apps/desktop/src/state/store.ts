@@ -143,6 +143,7 @@ export interface UiState {
   gameStyles: GameStyle[];
   selectedId: string | null;
   selectedAutomationId: string | null;
+  focusedAutomationRunId: string | null;
   selectedBoardId: string | null;
   selectedProjectId: string | null;
   boardFocusObjectId: string | null;
@@ -262,6 +263,7 @@ export const initialState: UiState = {
   gameStyles: [],
   selectedId: null,
   selectedAutomationId: null,
+  focusedAutomationRunId: null,
   selectedBoardId: null,
   selectedProjectId: null,
   boardFocusObjectId: null,
@@ -385,7 +387,8 @@ export type Action =
   | { type: "select"; id: string | null }
   /** Close a chat that is being removed; a no-op when another chat is open. */
   | { type: "deselect"; id: string }
-  | { type: "selectAutomation"; id: string | null }
+  | { type: "selectAutomation"; id: string | null; runId?: string }
+  | { type: "clearAutomationRunFocus" }
   | { type: "selectBoard"; id: string | null; objectId?: string }
   | { type: "selectProject"; id: string | null }
   | { type: "selectRepo"; id: string | null }
@@ -796,6 +799,7 @@ function reduceUiState(state: UiState, action: Action): UiState {
       return {
         ...state,
         selectedAutomationId: action.id,
+        focusedAutomationRunId: action.id ? (action.runId ?? null) : null,
         section: "automations",
         unreadAutomationIds: action.id
           ? state.unreadAutomationIds.filter((id) => id !== action.id)
@@ -805,6 +809,8 @@ function reduceUiState(state: UiState, action: Action): UiState {
             ? state.highlightAutomationWebhookId
             : null,
       };
+    case "clearAutomationRunFocus":
+      return { ...state, focusedAutomationRunId: null };
     case "highlightAutomationWebhook":
       return { ...state, highlightAutomationWebhookId: action.id };
     case "selectBoard": {
@@ -1193,6 +1199,8 @@ function reduceUiState(state: UiState, action: Action): UiState {
         runs: state.runs.filter((r) => r.automationId !== action.id),
         selectedAutomationId:
           state.selectedAutomationId === action.id ? null : state.selectedAutomationId,
+        focusedAutomationRunId:
+          state.selectedAutomationId === action.id ? null : state.focusedAutomationRunId,
         unreadAutomationIds: state.unreadAutomationIds.filter((id) => id !== action.id),
       };
     case "run": {

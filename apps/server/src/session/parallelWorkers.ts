@@ -40,6 +40,7 @@ import {
   workerBranchName,
   workerPlaybook,
   worktreeWorkerPlaybook,
+  effectiveBypassGates,
 } from "@locus/shared";
 import type { DockerEngine } from "@locus/hypervisor";
 import type { ToolRequest, ToolResult } from "@locus/guest-agent";
@@ -137,6 +138,10 @@ export class ParallelWorkers {
           diskSizeGb: session.hardware.diskSizeGb,
         }
       : undefined;
+    const bypassGates = effectiveBypassGates(
+      session.bypassGates,
+      (await this.ports.store.loadConfig()).managedPolicy,
+    );
     const created: AgentSession[] = [];
     for (let i = 1; i <= count; i += 1) {
       const role = String(i);
@@ -165,6 +170,7 @@ export class ParallelWorkers {
           network: session.network,
           vision: session.vision,
           webSearch: session.webSearch,
+          bypassGates,
           startVm: true,
         }),
       );
@@ -340,6 +346,7 @@ export class ParallelWorkers {
             autonomy: parent.autonomy,
             maxUsd: parent.maxUsd,
             maxMs: parent.maxMs,
+            bypassGates: effectiveBypassGates(parent.bypassGates, config.managedPolicy),
             surface: parent.surface,
             startVm: false,
           }),

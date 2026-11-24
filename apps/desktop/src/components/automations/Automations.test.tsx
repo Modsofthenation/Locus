@@ -921,6 +921,22 @@ describe("AutomationsPane memory editor", () => {
     expect(host.querySelector("[data-testid='auto-runs-load-more']")).toBeNull();
   });
 
+  it("shows and focuses a linked run beyond the first page", () => {
+    const runs = Array.from({ length: 26 }, (_, index) => ({
+      id: `run-${index}`,
+      automationId: item.id,
+      status: index === 0 ? ("failed" as const) : ("succeeded" as const),
+      trigger: "schedule" as const,
+      startedAt: new Date(Date.UTC(2026, 10, 20, 0, index)).toISOString(),
+      ...(index === 0 ? { error: "The linked failure" } : {}),
+    }));
+    render(item, { runs, focusedAutomationRunId: "run-0" });
+    const linked = host.querySelector(".run-row-focused");
+    expect(linked?.textContent).toContain("The linked failure");
+    expect(linked?.textContent).toContain("Run again");
+    expect(document.activeElement).toBe(linked);
+  });
+
   it("shows duplicate errors inline instead of alert", async () => {
     const alert = vi.spyOn(window, "alert").mockImplementation(() => undefined);
     vi.mocked(api.cloneAutomation).mockRejectedValue(new Error("clone blocked"));

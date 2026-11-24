@@ -100,6 +100,87 @@ describe("ToolActivity slack_post draft", () => {
     );
   });
 
+  async function renderCall(call: ToolCall) {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(<ToolActivity sessionId="s1" calls={[call]} tools={[]} />);
+    });
+  }
+
+  async function clickButton(label: string) {
+    const button = [...host!.querySelectorAll("button")].find(
+      (btn) => btn.textContent?.trim() === label,
+    );
+    expect(button, `button ${label}`).toBeTruthy();
+    await act(async () => {
+      button!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it("offers skip and test-after on a git_push approval and shows the agent's reason", async () => {
+    await renderCall({
+      id: "t-push",
+      name: "git_push",
+      arguments: { skipTests: true, skipTestsReason: "push without running the tests" },
+      approval: "needed",
+      startedAt: "2020-01-01T00:00:00.000Z",
+    });
+    expect(host!.querySelector("[data-testid='approval-skip-request']")?.textContent).toMatch(
+      /push without running the tests/,
+    );
+    await clickButton("Approve, skip tests");
+    expect(api.resolveApproval).toHaveBeenCalledWith(
+      "s1",
+      "t-push",
+      "approved",
+      "test-gate:skip",
+      undefined,
+    );
+  });
+
+  it("keeps a plain Approve for tools that are not publishes", async () => {
+    await renderCall({
+      id: "t-exec",
+      name: "exec",
+      arguments: { command: "rm build" },
+      approval: "needed",
+      startedAt: "2020-01-01T00:00:00.000Z",
+    });
+    expect(host!.textContent).not.toContain("skip tests");
+    await clickButton("Approve");
+    expect(api.resolveApproval).toHaveBeenCalledWith(
+      "s1",
+      "t-exec",
+      "approved",
+      undefined,
+      undefined,
+    );
+  });
+
+  it("shows the test gate countdown and sends the operator's choice", async () => {
+    await renderCall({
+      id: "t-gate",
+      name: "test_gate_choice",
+      arguments: {
+        tool: "git_push",
+        command: "npm run test",
+        lastDurationMs: 45 * 60_000,
+        deadline: new Date(Date.now() + 90_000).toISOString(),
+      },
+      approval: "needed",
+      startedAt: "2020-01-01T00:00:00.000Z",
+    });
+    const prompt = host!.querySelector("[data-testid='test-gate-prompt']");
+    expect(prompt?.textContent).toMatch(/last run took ~45 min/);
+    expect(prompt?.textContent).toMatch(/run automatically in 1:(29|30)/);
+    await clickButton("Push now, test after");
+    expect(api.resolveApproval).toHaveBeenCalledWith("s1", "t-gate", "approved", "test-gate:defer");
+  });
+
   it("renders ADD/edit cards next to the matching activity row", async () => {
     const patchA = [
       "--- /dev/null",

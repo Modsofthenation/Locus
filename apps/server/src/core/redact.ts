@@ -6,6 +6,8 @@ import {
   pluginFieldIsSecret,
   redactText,
   resolveThemeRef,
+  workerKind,
+  workerProvisionsCompute,
 } from "@locus/shared";
 
 function redactPassword(value: string): string {
@@ -134,7 +136,7 @@ export function mergeSecrets(current: LocusConfig, incoming: LocusConfig): Locus
   const integrationRefreshTokens = new Map(
     (current.integrations ?? []).map((row) => [row.id, row.refreshToken]),
   );
-  const workerTokens = new Map((current.workers ?? []).map((row) => [row.id, row.token]));
+  const workers = new Map((current.workers ?? []).map((row) => [row.id, row]));
   const templates = new Map(current.templates.map((t) => [t.id, t]));
   const customThemes = incoming.customThemes ?? current.customThemes ?? [];
   return {
@@ -220,10 +222,17 @@ export function mergeSecrets(current: LocusConfig, incoming: LocusConfig): Locus
       }
       return { ...server, env };
     }),
-    workers: (incoming.workers ?? current.workers ?? []).map((row) => ({
-      ...row,
-      token: isMaskedSecret(row.token) ? workerTokens.get(row.id) : row.token,
-    })),
+    workers: (incoming.workers ?? current.workers ?? []).map((row) => {
+      const previous = workers.get(row.id);
+      const sameTransport =
+        previous &&
+        (workerKind(previous) === workerKind(row) ||
+          (!workerProvisionsCompute(previous) && !workerProvisionsCompute(row)));
+      return {
+        ...row,
+        token: isMaskedSecret(row.token) ? (sameTransport ? previous.token : undefined) : row.token,
+      };
+    }),
     phoneRemote: isMaskedSecret(incoming.phoneRemote?.token)
       ? current.phoneRemote
       : incoming.phoneRemote

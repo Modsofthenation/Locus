@@ -131,6 +131,87 @@ describe("executeForgeTool", () => {
     expect(result.output).toMatch(/named branch/);
   });
 
+  const bitbucketReady = async () => ({
+    account: {
+      id: "bb",
+      kind: "bitbucket" as const,
+      name: "Bitbucket",
+      apiBaseUrl: "https://api.bitbucket.org/2.0",
+    },
+    owner: "signiq",
+    repo: "signiq8",
+  });
+
+  it("targets the forge default branch (develop) when no base is given", async () => {
+    const createPull = vi.fn(async () => ({
+      number: 3,
+      url: "https://example.test/pr/3",
+      title: "Fix",
+      state: "open",
+    }));
+    const listBranches = vi.fn(async () => ({ branches: ["develop"], defaultBranch: "develop" }));
+    const result = await executeForgeTool(
+      {
+        forge: { createPull, listBranches } as never,
+        attachPull: async () => undefined,
+        requireForge: bitbucketReady,
+        resolveGitHeadBranch: async () => "fix/batch-actions",
+        loadLoadPathNotes: async () => undefined,
+      },
+      session(),
+      "git_pr",
+      { title: "Fix" },
+    );
+    expect(result.ok).toBe(true);
+    expect(createPull).toHaveBeenCalledWith(
+      expect.anything(),
+      "signiq",
+      "signiq8",
+      expect.objectContaining({ head: "fix/batch-actions", base: "develop" }),
+    );
+  });
+
+  it("refuses a PR whose base is its own head", async () => {
+    const result = await executeForgeTool(
+      {
+        forge: {} as never,
+        attachPull: async () => undefined,
+        requireForge: bitbucketReady,
+        resolveGitHeadBranch: async () => "develop",
+        loadLoadPathNotes: async () => undefined,
+      },
+      session(),
+      "git_pr",
+      { title: "Fix", base: "develop" },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.output).toMatch(/feature branch/);
+  });
+
+  it("says to git_push first when the head branch is not on the remote", async () => {
+    const createPull = vi.fn(async () => {
+      throw new Error("Bitbucket 400: source branch not found");
+    });
+    const latestCommitSha = vi.fn(async (_a: unknown, _o: string, _r: string, ref: string) =>
+      ref === "develop" ? "abc123" : undefined,
+    );
+    const result = await executeForgeTool(
+      {
+        forge: { createPull, latestCommitSha } as never,
+        attachPull: async () => undefined,
+        requireForge: bitbucketReady,
+        resolveGitHeadBranch: async () => "fix/x",
+        loadLoadPathNotes: async () => undefined,
+      },
+      session(),
+      "git_pr",
+      { title: "Fix", base: "develop" },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("source branch not found");
+    expect(result.output).toContain("Run git_push first");
+  });
+
   it("honors git_pr_get include and paths so the card stays small", async () => {
     const getPull = vi.fn(async () => ({
       number: 12,

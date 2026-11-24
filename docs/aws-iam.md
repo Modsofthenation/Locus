@@ -36,7 +36,7 @@ Do not curl IAM or STS from `exec`. Do not paste keys into chat.
 
 | Hop | Where |
 | --- | --- |
-| Fargate RunTask / DescribeTasks / StopTask | Settings → Workers → Fargate → **ECS endpoint** (optional PrivateLink or API Gateway URL) |
+| Fargate RunTask / DescribeTasks / ListTasks / StopTask | Settings → Workers → Fargate → **ECS endpoint** (optional PrivateLink or API Gateway URL) |
 | Amazon Bedrock or an OpenAI-compatible API Gateway | Settings → Providers → Amazon Bedrock (or a custom base URL). Set **Access key ID**; the secret is the provider key. Leave Access key ID empty to send Bearer / `x-api-key` instead. |
 | AWS MCP / AgentCore HTTP gateway | Settings → MCP → HTTP URL. Env `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, optional `AWS_SESSION_TOKEN`, `AWS_REGION`, `AWS_SIGV4` (service, default `execute-api`). |
 | Webhook automations in through API Gateway | Settings → Advanced → **Webhook base URL** = the execute-api origin. Funnel or HTTP integration still targets loopback `/api/hooks` only. Locus unwraps REST/HTTP API proxy events and accepts `x-api-key` as the hook secret. Bind host stays loopback. |

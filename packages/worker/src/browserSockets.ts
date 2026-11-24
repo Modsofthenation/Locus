@@ -5,7 +5,7 @@ import type { VmInstance } from "@locus/shared";
 import { WebSocketServer } from "ws";
 import type { WorkerBrowserHub } from "./browserHub.js";
 import type { WorkerGuestHub } from "./guests.js";
-import { workerTokenMatches } from "./token.js";
+import { workerRequestToken, workerTokenMatches } from "./token.js";
 
 export type WorkerUpgradeServer = {
   on(
@@ -18,6 +18,7 @@ export function attachWorkerBrowser(
   server: WorkerUpgradeServer,
   opts: {
     token: string;
+    gatewayTransport?: boolean;
     engine: DockerEngine;
     guests: WorkerGuestHub;
     browsers: WorkerBrowserHub;
@@ -32,7 +33,10 @@ export function attachWorkerBrowser(
       socket.destroy();
       return;
     }
-    const provided = bearer(req);
+    const provided = workerRequestToken((name) => {
+      const value = req.headers[name];
+      return typeof value === "string" ? value : undefined;
+    }, opts.gatewayTransport);
     if (!workerTokenMatches(provided, opts.token)) {
       socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
       socket.destroy();
@@ -48,11 +52,6 @@ export function attachWorkerBrowser(
       opts.browsers.attach(vmId, ws);
     });
   });
-}
-
-function bearer(req: IncomingMessage): string {
-  const header = req.headers.authorization ?? "";
-  return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
 }
 
 function pathnameOf(req: IncomingMessage): string {

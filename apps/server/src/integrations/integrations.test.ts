@@ -518,6 +518,114 @@ describe("IntegrationsClient", () => {
     expect(slack.output).toMatch(/^Uploaded notes.txt to C1/);
   });
 
+  it.each([
+    {
+      filename: "notes & minutes.txt",
+      args: { content: "Résumé\n" },
+      bytes: Buffer.from("Résumé\n"),
+      token: "xoxp-user",
+      mime: "application/octet-stream",
+    },
+    {
+      filename: "image.png",
+      args: { bytes_base64: "iVBORw0KGgo=", as: "bot", mime: "image/png" },
+      bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      token: "xoxb-bot",
+      mime: "image/png",
+    },
+  ])("uploads $filename and shares it in the selected Slack thread", async (upload) => {
+    const api = "https://slack.com/api";
+    const uploadUrl = "https://files.slack.com/upload/v1/abc123";
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const client = new IntegrationsClient(async (input, init) => {
+      const url = String(input);
+      if (url.startsWith(`${api}/users.info?`)) return Response.json({ ok: true });
+      calls.push({ url, init });
+      if (url === `${api}/files.getUploadURLExternal`) {
+        return Response.json({ ok: true, upload_url: uploadUrl, file_id: "F1" });
+      }
+      if (url === uploadUrl) return new Response("OK");
+      if (url === `${api}/files.completeUploadExternal`) {
+        return Response.json({ ok: true, files: [{ id: "F1", title: upload.filename }] });
+      }
+      throw new Error(`Unexpected Slack request: ${url}`);
+    });
+
+    const result = await client.call(
+      "slack_upload",
+      {
+        ...upload.args,
+        filename: upload.filename,
+        channel: "C1",
+        thread_ts: "1.2",
+        comment: "Here it is",
+      },
+      [
+        {
+          id: "s1",
+          kind: "slack",
+          name: "Slack",
+          enabled: true,
+          baseUrl: api,
+          token: "xoxb-bot",
+          userToken: "xoxp-user",
+        },
+      ],
+    );
+
+    expect(result.ok).toBe(true);
+    expect(calls.map(({ url }) => url)).toEqual([
+      `${api}/files.getUploadURLExternal`,
+      uploadUrl,
+      `${api}/files.completeUploadExternal`,
+    ]);
+    const [start, transfer, complete] = calls.map(({ url, init }) => new Request(url, init));
+    expect(start!.headers.get("authorization")).toBe(`Bearer ${upload.token}`);
+    expect(start!.headers.get("content-type")).toBe("application/x-www-form-urlencoded");
+    expect(Object.fromEntries(new URLSearchParams(await start!.text()))).toEqual({
+      filename: upload.filename,
+      length: String(upload.bytes.length),
+    });
+    expect(transfer!.method).toBe("POST");
+    expect(transfer!.headers.has("authorization")).toBe(false);
+    expect(transfer!.headers.get("content-type")).toBe(upload.mime);
+    expect(Buffer.from(await transfer!.arrayBuffer())).toEqual(upload.bytes);
+    expect(complete!.headers.get("authorization")).toBe(`Bearer ${upload.token}`);
+    expect(await complete!.json()).toEqual({
+      files: [{ id: "F1", title: upload.filename }],
+      channel_id: "C1",
+      thread_ts: "1.2",
+      initial_comment: "Here it is",
+    });
+  });
+
+  it("reports a Slack upload failure if completion does not acknowledge success", async () => {
+    const uploadUrl = "https://files.slack.com/upload/v1/abc123";
+    const client = new IntegrationsClient(async (url) => {
+      if (String(url).endsWith("/files.getUploadURLExternal")) {
+        return Response.json({ ok: true, upload_url: uploadUrl, file_id: "F1" });
+      }
+      if (url === uploadUrl) return new Response("OK");
+      if (String(url).endsWith("/files.completeUploadExternal")) return Response.json({});
+      throw new Error(`Unexpected Slack request: ${String(url)}`);
+    });
+    const result = await client.call(
+      "slack_upload",
+      { channel: "C1", filename: "notes.txt", content: "hello" },
+      [
+        {
+          id: "s1",
+          kind: "slack",
+          name: "Slack",
+          enabled: true,
+          baseUrl: "https://slack.com/api",
+          userToken: "xoxp-user",
+        },
+      ],
+    );
+    expect(result).toEqual({ ok: false, output: "Slack file upload failed" });
+  });
+
   it("rejects Slack writes outside the channel allowlist", async () => {
     const account = {
       id: "s1",

@@ -124,10 +124,13 @@ async function openPullRequest(
       output: "Could not determine the current branch. Create a named branch before opening a PR.",
     };
   }
-  const base =
-    typeof args.base === "string" && args.base.trim()
-      ? args.base.trim()
-      : session.repo?.ref || "main";
+  const base = await pullBaseBranch(deps, session, ready, args, head);
+  if (base === head) {
+    return {
+      ok: false,
+      output: `The pull request base and head are both ${head}. Create a feature branch with git_branch, git_push it, then open the PR (or pass base).`,
+    };
+  }
   try {
     const created = await deps.forge.createPull(account, owner, repo, {
       title,
@@ -146,8 +149,63 @@ async function openPullRequest(
     });
     return { ok: true, output: formatPrCard(created) };
   } catch (err) {
-    return { ok: false, output: err instanceof Error ? err.message : "PR failed" };
+    const message = err instanceof Error ? err.message : "PR failed";
+    return { ok: false, output: await explainPullFailure(deps, ready, head, base, message) };
   }
+}
+
+/**
+ * Base branch for a new pull request: the explicit `base`, then the branch the session was
+ * started from (unless that is the head itself), then the forge's default branch (a repo whose
+ * default is `develop` must not get a PR against a missing `main`), then `main`.
+ */
+async function pullBaseBranch(
+  deps: SessionForgeDeps,
+  session: AgentSession,
+  ready: ForgeReady,
+  args: Record<string, unknown>,
+  head: string,
+): Promise<string> {
+  if (typeof args.base === "string" && args.base.trim()) return args.base.trim();
+  const started = session.repo?.ref?.trim();
+  if (
+    started &&
+    started !== head &&
+    !/^(?:refs\/)?(?:pull|merge-requests|pull-requests)\//.test(started)
+  ) {
+    return started;
+  }
+  try {
+    const listed = await deps.forge.listBranches(ready.account, ready.owner, ready.repo);
+    if (listed.defaultBranch?.trim()) return listed.defaultBranch.trim();
+  } catch {
+    /* fall through to main */
+  }
+  return "main";
+}
+
+/** Turn a forge PR error into the step the agent should take next. */
+async function explainPullFailure(
+  deps: SessionForgeDeps,
+  ready: ForgeReady,
+  head: string,
+  base: string,
+  message: string,
+): Promise<string> {
+  const [headSha, baseSha] = await Promise.all([
+    deps.forge.latestCommitSha(ready.account, ready.owner, ready.repo, head),
+    deps.forge.latestCommitSha(ready.account, ready.owner, ready.repo, base),
+  ]);
+  if (!headSha && baseSha) {
+    return `${message}\n\nBranch ${head} is not on the remote yet. Run git_push first, then git_pr.`;
+  }
+  if (headSha && !baseSha) {
+    return `${message}\n\nBase branch ${base} was not found on the remote. Pass base=<the target branch>.`;
+  }
+  if (/\b(401|403)\b|unauthori[sz]ed|forbidden|bad credentials|access token/i.test(message)) {
+    return `${message}\n\nThe forge rejected the saved token for this repository. Check Settings → Git: the account must match this repository's forge and the token needs pull request write access.`;
+  }
+  return message;
 }
 
 async function reviewPullRequest(

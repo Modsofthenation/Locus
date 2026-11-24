@@ -12,6 +12,7 @@ import {
   normalizeSlackReactionName,
   parseGiphyHit,
   parseSlackConversation,
+  parseSlackMember,
   parseSlackMessage,
   parseSlackPostAs,
   slackActivityFeed,
@@ -26,6 +27,7 @@ import {
   type IntegrationAccount,
   type SlackPostAs,
   type SlackConversation,
+  type SlackMember,
   type SlackEmojiMap,
   type SlackFile,
   type SlackGifHit,
@@ -801,23 +803,23 @@ export class SlackApi {
       if (conv) conv.lastTs = ts;
       return { ...message, files: files.map((row) => ({ ...row })) };
     }
-    const start = (await this.postJson(
+    const start = (await this.postForm(
       joinUrl(slackApiBase(account), "/files.getUploadURLExternal"),
       token,
-      { filename, length: input.bytes.byteLength },
+      { filename, length: String(input.bytes.byteLength) },
     )) as { ok?: boolean; error?: string; upload_url?: string; file_id?: string };
-    if (start.ok === false || !start.upload_url || !start.file_id) {
+    if (start.ok !== true || !start.upload_url || !start.file_id) {
       throw formatSlackApiError(start, "Slack file upload URL failed");
     }
     if (!isSlackPrivateFileUrl(start.upload_url)) {
       throw new Error("Slack file upload URL is not a Slack file host");
     }
-    const put = await this.fetchFn(start.upload_url, {
+    const uploaded = await this.fetchFn(start.upload_url, {
       method: "POST",
-      headers: input.mime ? { "content-type": input.mime } : undefined,
+      headers: { "Content-Type": input.mime || "application/octet-stream" },
       body: input.bytes,
     });
-    if (!put.ok) throw new Error(`Slack file upload failed (${put.status})`);
+    if (!uploaded.ok) throw new Error(`Slack file upload failed (${uploaded.status})`);
     const done = (await this.postJson(
       joinUrl(slackApiBase(account), "/files.completeUploadExternal"),
       token,
@@ -832,7 +834,7 @@ export class SlackApi {
       error?: string;
       files?: Array<Record<string, unknown>>;
     };
-    if (done.ok === false) throw formatSlackApiError(done, "Slack file upload failed");
+    if (done.ok !== true) throw formatSlackApiError(done, "Slack file upload failed");
     const ts = `${(Date.now() / 1000).toFixed(3)}`;
     const parsed = parseSlackMessage(
       {
@@ -1039,6 +1041,50 @@ export class SlackApi {
       notice = "Local catalog — set LOCUS_GIPHY_API_KEY for live Giphy search.";
     }
     return { hits: searchGifCatalog(q), source: "catalog", notice };
+  }
+
+  /** Workspace members (`users.list`, `users:read`), people first then bots, by name. */
+  async listUsers(account: IntegrationAccount): Promise<SlackMember[]> {
+    const token = this.tokenFor(account);
+    const rows: SlackMember[] = [];
+    if (isMockSlackToken(token)) {
+      for (const [id, user] of Object.entries(MOCK_USERS)) {
+        rows.push({
+          id,
+          name: user.name,
+          avatarUrl: user.avatarUrl,
+          ...(id === "U_BOT" ? { isBot: true } : {}),
+        });
+      }
+    } else {
+      let cursor = "";
+      for (let i = 0; i < 20; i++) {
+        const params = new URLSearchParams({ limit: "200" });
+        if (cursor) params.set("cursor", cursor);
+        const body = (await this.get(
+          `${joinUrl(slackApiBase(account), "/users.list")}?${params}`,
+          token,
+        )) as {
+          ok?: boolean;
+          error?: string;
+          needed?: string;
+          members?: unknown[];
+          response_metadata?: { next_cursor?: string };
+        };
+        if (body.ok === false) throw formatSlackApiError(body, "Slack users failed");
+        for (const raw of body.members ?? []) {
+          const member = parseSlackMember(raw);
+          if (member) rows.push(member);
+        }
+        cursor = body.response_metadata?.next_cursor?.trim() ?? "";
+        if (!cursor) break;
+      }
+    }
+    return rows.sort(
+      (a, b) =>
+        Number(Boolean(a.isBot)) - Number(Boolean(b.isBot)) ||
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+    );
   }
 
   async listEmoji(account: IntegrationAccount): Promise<SlackEmojiMap> {

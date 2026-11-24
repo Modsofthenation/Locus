@@ -20,6 +20,7 @@ import {
   type IntegrationAccount,
   type SlackPostAs,
   type SlackConversation,
+  type SlackMember,
   type SlackEmojiMap,
   type SlackGifSearch,
   type SlackMessage,
@@ -37,6 +38,8 @@ import { SlackCache } from "./slackCache.js";
 import { SlackSocket, type SlackSocketConnect, type SlackSocketEnvelope } from "./slackSocket.js";
 import type { JsonStore } from "../core/store.js";
 
+const USERS_TTL_MS = 15 * 60_000;
+
 export class SlackGateway {
   private readonly api: SlackApi;
   private readonly cache: SlackCache;
@@ -46,6 +49,8 @@ export class SlackGateway {
   private lastStatus: SlackStatus = { connected: false, socket: "down", canPostAsBot: false };
   private conversationRefresh: Promise<void> | undefined;
   private emojiRefresh: Promise<void> | undefined;
+  /** `users.list` per team, kept for `USERS_TTL_MS`: pickers only, so a short in-memory cache is enough. */
+  private users = new Map<string, { at: number; rows: SlackMember[] }>();
   private readonly historyRefresh = new Map<string, Promise<void>>();
   private readonly messageListeners = new Set<(event: SlackMessageEvent) => void>();
 
@@ -167,6 +172,16 @@ export class SlackGateway {
     const cached = await this.cache.loadConversations(teamId);
     const rows = this.cache.applyStars(cached.rows, [...ids]);
     await this.cache.saveConversations(teamId, rows);
+    return rows;
+  }
+
+  async listUsers(force = false): Promise<SlackMember[]> {
+    const account = await this.requireClient();
+    const teamId = account.teamId || "default";
+    const cached = this.users.get(teamId);
+    if (!force && cached && Date.now() - cached.at < USERS_TTL_MS) return cached.rows;
+    const rows = await this.api.listUsers(account);
+    this.users.set(teamId, { at: Date.now(), rows });
     return rows;
   }
 

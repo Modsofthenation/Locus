@@ -31,7 +31,7 @@ export function CompareModal({ session, onClose }: { session: AgentSession; onCl
   }
 
   return (
-    <Modal titleId="compare-title" onClose={onClose}>
+    <Modal titleId="compare-title" onClose={onClose} portal>
       <h2 id="compare-title">Compare models</h2>
       <p className="modal-lead">
         Fork this guest, run the last prompt on a second model, then pick a winner.

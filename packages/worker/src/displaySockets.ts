@@ -4,7 +4,7 @@ import type { Duplex } from "node:stream";
 import type { VmInstance } from "@locus/shared";
 import { WebSocket, WebSocketServer } from "ws";
 import { guestVisibleToPlane, parseWorkerPlaneId, WORKER_PLANE_HEADER } from "@locus/shared";
-import { workerTokenMatches } from "./token.js";
+import { workerRequestToken, workerTokenMatches } from "./token.js";
 
 export type WorkerUpgradeServer = {
   on(
@@ -17,6 +17,7 @@ export function attachWorkerDisplay(
   server: WorkerUpgradeServer,
   opts: {
     token: string;
+    gatewayTransport?: boolean;
     lookupGuest: (id: string) => VmInstance | undefined;
   },
 ): void {
@@ -25,7 +26,10 @@ export function attachWorkerDisplay(
     const pathname = pathnameOf(req);
     const match = /^\/v1\/guests\/([^/]+)\/display$/.exec(pathname);
     if (!match?.[1]) return;
-    const provided = bearer(req);
+    const provided = workerRequestToken((name) => {
+      const value = req.headers[name];
+      return typeof value === "string" ? value : undefined;
+    }, opts.gatewayTransport);
     if (!workerTokenMatches(provided, opts.token)) {
       socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
       socket.destroy();
@@ -69,11 +73,6 @@ export function pipeVnc(ws: WebSocket, host: string, port: number): void {
   });
   ws.on("close", () => tcp.destroy());
   ws.on("error", () => tcp.destroy());
-}
-
-function bearer(req: IncomingMessage): string {
-  const headerValue = req.headers.authorization ?? "";
-  return headerValue.toLowerCase().startsWith("bearer ") ? headerValue.slice(7).trim() : "";
 }
 
 function header(req: IncomingMessage, name: string): string | undefined {

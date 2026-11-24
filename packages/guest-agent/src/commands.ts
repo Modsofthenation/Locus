@@ -11,7 +11,14 @@ import {
   windowsSendKey,
   computerKey,
 } from "@locus/shared";
-import { gitCloneCommand, gitFetchCommand, gitPushCommand, argPull, argForge } from "./git.js";
+import {
+  gitBranchCommand,
+  gitCloneCommand,
+  gitFetchCommand,
+  gitPushCommand,
+  argPull,
+  argForge,
+} from "./git.js";
 import type { ToolRequest, ToolResult } from "./types.js";
 import { num, optNum, str, truthy, grepContextLines } from "./types.js";
 import {
@@ -115,13 +122,19 @@ export function linuxCommand(req: ToolRequest, _os: GuestOs = "ubuntu"): string 
         false,
       );
     case "git_branch":
-      return `git -C ${shell(str(req.args, "path", "/home/locus/workspace"))} checkout -B ${shell(str(req.args, "name"))}`;
+      return gitBranchCommand({
+        path: str(req.args, "path", "/home/locus/workspace"),
+        name: str(req.args, "name"),
+        from: str(req.args, "from") || undefined,
+        windows: false,
+      });
     case "git_push":
       return gitPushCommand({
         path: str(req.args, "path", "/home/locus/workspace"),
         token: str(req.args, "token") || undefined,
         windows: false,
         url: str(req.args, "url") || undefined,
+        forge: argForge(req.args, str(req.args, "url") || undefined),
       });
     case "git_stash":
       return linuxGitStash(req, "/home/locus/workspace");
@@ -233,13 +246,19 @@ export function windowsCommand(req: ToolRequest): string {
         true,
       );
     case "git_branch":
-      return `git -C '${str(req.args, "path", "C:\\Users\\locus\\workspace").replace(/'/g, "''")}' checkout -B '${str(req.args, "name").replace(/'/g, "''")}'`;
+      return gitBranchCommand({
+        path: str(req.args, "path", "C:\\Users\\locus\\workspace"),
+        name: str(req.args, "name"),
+        from: str(req.args, "from") || undefined,
+        windows: true,
+      });
     case "git_push":
       return gitPushCommand({
         path: str(req.args, "path", "C:\\Users\\locus\\workspace"),
         token: str(req.args, "token") || undefined,
         windows: true,
         url: str(req.args, "url") || undefined,
+        forge: argForge(req.args, str(req.args, "url") || undefined),
       });
     case "git_stash":
       return windowsGitStash(req);

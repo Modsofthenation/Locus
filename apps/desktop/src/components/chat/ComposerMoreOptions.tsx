@@ -1,5 +1,5 @@
-import type { NamedEnvironment, NetworkJail } from "@locus/shared";
-import { formatNetworkJail } from "@locus/shared";
+import type { HarnessGate, NamedEnvironment, NetworkJail } from "@locus/shared";
+import { HARNESS_GATES, HARNESS_GATE_LABELS, formatNetworkJail } from "@locus/shared";
 import { Select } from "@/components/layout/Select";
 
 export type ComposerMoreOptionsProps = {
@@ -15,6 +15,11 @@ export type ComposerMoreOptionsProps = {
   onMaxUsdChange: (next: string) => void;
   onNamedEnvChange: (id: string, env?: NamedEnvironment) => void;
   onBranchLockChange: (next: boolean) => void;
+  /** Harness gates turned off for the new agent. Omit the handler to hide the section. */
+  bypassGates?: HarnessGate[];
+  /** Gates the managed policy lets a session bypass. Omit when every gate is allowed. */
+  allowedGateBypasses?: readonly HarnessGate[];
+  onBypassGatesChange?: (next: HarnessGate[]) => void;
 };
 
 export function ComposerMoreOptions(props: ComposerMoreOptionsProps) {
@@ -107,6 +112,43 @@ export function ComposerMoreOptions(props: ComposerMoreOptionsProps) {
             />
           </div>
         </div>
+
+        {props.onBypassGatesChange ? (
+          <div className="composer-more-cell is-wide" data-testid="composer-harness-gates">
+            <span className="composer-more-label">Harness gates</span>
+            {HARNESS_GATES.map((gate) => {
+              const bypassed = props.bypassGates?.includes(gate) ?? false;
+              const locked = props.allowedGateBypasses
+                ? !props.allowedGateBypasses.includes(gate)
+                : false;
+              return (
+                <div
+                  key={gate}
+                  className={`composer-more-field${locked ? " is-disabled" : ""}`}
+                  title={locked ? "Locked on by managed policy" : undefined}
+                >
+                  <span className="composer-more-field-text">{HARNESS_GATE_LABELS[gate]}</span>
+                  {locked ? <span className="composer-more-optional">Policy</span> : null}
+                  {bypassed ? <span className="composer-more-optional">Off</span> : null}
+                  <button
+                    type="button"
+                    className={`settings-switch${bypassed ? "" : " on"}`}
+                    role="switch"
+                    aria-checked={!bypassed}
+                    aria-label={HARNESS_GATE_LABELS[gate]}
+                    disabled={locked}
+                    onClick={() => {
+                      const current = props.bypassGates ?? [];
+                      props.onBypassGatesChange?.(
+                        bypassed ? current.filter((g) => g !== gate) : [...current, gate],
+                      );
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
     </div>
   );

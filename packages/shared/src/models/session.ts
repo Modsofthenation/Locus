@@ -13,6 +13,7 @@ import type { TaskItem } from "./workingState.js";
 import type { PromptQueueItem } from "./queue.js";
 import type { AgentRole } from "./roles.js";
 import type { AutonomyTier } from "./autonomy.js";
+import type { HarnessGate } from "./harnessGates.js";
 import type { AgentPlacement } from "./placement.js";
 import type { SessionSlack } from "./slack.js";
 import type { SessionSubscription } from "./subscribe.js";
@@ -768,6 +769,8 @@ export interface AgentSession {
   gitBranch?: string;
   /** When true, reject checkout / git_branch away from the create ref (or first observed head). */
   branchLock?: boolean;
+  /** Harness gates this session opted out of (e.g. `test-gate` on git_push / git_pr). */
+  bypassGates?: HarnessGate[];
   /** Design canvas this coding agent was promoted from. */
   sourceDesignId?: string;
   /** Coding agent this design canvas promoted into. */
@@ -1292,6 +1295,8 @@ export interface CreateSessionInput {
   extraRepoIds?: string[];
   /** Lock workspace branch after create (reject checkout / git_branch away from create ref). */
   branchLock?: boolean;
+  /** Harness gates to turn off for this session. See `HARNESS_GATES`. */
+  bypassGates?: HarnessGate[];
   sourceDesignId?: string;
   /** Assets session ids to copy into vendor/assets when creating a game. */
   assetIds?: string[];
@@ -1378,6 +1383,8 @@ export interface PatchSessionInput {
   maxUsd?: number | null;
   maxMs?: number | null;
   autonomy?: AutonomyTier | null;
+  /** Replace the session's bypassed harness gates; `null` or `[]` turns every gate back on. */
+  bypassGates?: HarnessGate[] | null;
   defaultSubagent?: SubagentKind;
   /** Pass `null` to clear hub persona. */
   persona?: SessionPersona | null;

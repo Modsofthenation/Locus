@@ -3,7 +3,10 @@ import {
   BUILTIN_SLASH_NAMES,
   agentRoundLimit,
   approvalTimeoutMs,
+  testGatePromptMs,
+  testGateSlowMs,
   automationChatLimit,
+  parseCliSandboxSettings,
   guestBootTimeoutMs,
   invalidHttpUrl,
   awsEndpointUrlError,
@@ -196,8 +199,15 @@ export function normalizeSavedConfig(
   }
   merged.advanced.guestBootTimeoutMs = guestBootTimeoutMs(merged.advanced.guestBootTimeoutMs);
   merged.advanced.approvalTimeoutMs = approvalTimeoutMs(merged.advanced.approvalTimeoutMs);
+  if (merged.advanced.testGatePromptMs !== undefined) {
+    merged.advanced.testGatePromptMs = testGatePromptMs(merged.advanced.testGatePromptMs);
+  }
+  if (merged.advanced.testGateSlowMs !== undefined) {
+    merged.advanced.testGateSlowMs = testGateSlowMs(merged.advanced.testGateSlowMs);
+  }
   merged.advanced.maxPromptQueue = promptQueueLimit(merged.advanced.maxPromptQueue);
   merged.advanced.maxAutomationChats = automationChatLimit(merged.advanced.maxAutomationChats);
+  merged.advanced.cliSandbox = parseCliSandboxSettings(merged.advanced.cliSandbox);
   if (
     merged.advanced.notifyWebhook &&
     invalidHttpUrl(merged.advanced.notifyWebhook, "Notify webhook")

@@ -25,6 +25,8 @@ export type InboxRow = {
   boardId?: string;
   objectId?: string;
   automationId?: string;
+  runId?: string;
+  at?: string;
 };
 
 export function inboxKindLabel(kind: InboxKind, mode: ProductMode = "developer"): string {
@@ -65,6 +67,7 @@ export function buildInboxRows(opts: {
         kind: "board",
         title: row.title,
         detail: row.detail,
+        at: row.at,
         boardId: row.boardId,
         objectId: row.objectId,
       };
@@ -74,6 +77,7 @@ export function buildInboxRows(opts: {
       kind: "session",
       title: row.title,
       detail: row.detail,
+      at: row.at,
       sessionId: row.sessionId,
       callId: row.key.startsWith("a:") ? row.key.slice(2) : undefined,
     };
@@ -81,7 +85,8 @@ export function buildInboxRows(opts: {
   const seen = new Set(rows.map((row) => row.automationId).filter(Boolean));
   const runs = opts.runs ?? [];
   for (const item of opts.automations ?? []) {
-    const health = automationHealth(item, automationLatestAgentRun(runs, item.id));
+    const run = automationLatestAgentRun(runs, item.id);
+    const health = automationHealth(item, run);
     if (health !== "failing" && health !== "needs_you") continue;
     if (seen.has(item.id)) continue;
     seen.add(item.id);
@@ -91,6 +96,8 @@ export function buildInboxRows(opts: {
       title: item.name,
       detail: health === "needs_you" ? "Needs you" : "Failing",
       automationId: item.id,
+      runId: run?.id,
+      at: run?.finishedAt ?? run?.startedAt,
     });
   }
   return rows;
@@ -115,7 +122,7 @@ export function openInboxRow(row: InboxRow, dispatch: Dispatch<Action>): void {
     rememberBrainInbox();
     dispatch({ type: "section", section: "brain" });
   } else if (row.automationId) {
-    dispatch({ type: "selectAutomation", id: row.automationId });
+    dispatch({ type: "selectAutomation", id: row.automationId, runId: row.runId });
   }
   dispatch({ type: "inbox", open: false });
 }

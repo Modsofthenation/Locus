@@ -1,11 +1,16 @@
-import type {
-  AgentSession,
-  Automation,
-  AutomationRun,
-  SlackReviewActive,
-  SlackReviewOutcome,
-  SlackReviewRun,
-  SlackReviewer,
+import {
+  clipFact,
+  operatorVisibleText,
+  sessionRuntime,
+  toolActivityLabel,
+  toolChipLabel,
+  type AgentSession,
+  type Automation,
+  type AutomationRun,
+  type SlackReviewActive,
+  type SlackReviewOutcome,
+  type SlackReviewRun,
+  type SlackReviewer,
 } from "@locus/shared";
 
 /** A chat that is booting or mid-turn right now. */
@@ -36,6 +41,54 @@ export function activeAgents(sessions: AgentSession[]): DashboardAgent[] {
     session,
     subagents: (session.subagents ?? []).filter((row) => row.status === "running").length,
   }));
+}
+
+export function agentRuntimeLabel(session: AgentSession): string {
+  if (session.cursorCloud) return "Cursor Cloud";
+  return { host: "Host", docker: "Docker", vm: "VM" }[sessionRuntime(session)];
+}
+
+export function agentActivity(session: AgentSession): string | undefined {
+  if (session.workerInterrupted) return "Worker connection interrupted";
+  if (session.status === "provisioning") return `Provisioning ${agentRuntimeLabel(session)}`;
+  if (session.status !== "running") return undefined;
+  const task = session.taskList?.find((item) => item.status === "in_progress");
+  for (let index = session.messages.length - 1; index >= 0; index--) {
+    const message = session.messages[index]!;
+    if (message.hidden) continue;
+    if (message.role === "user") break;
+    const tool = message.toolCalls?.at(-1);
+    if (tool) {
+      const label = toolActivityLabel(tool.name, tool.arguments);
+      if (
+        !tool.finishedAt &&
+        /^(Ran|Executed)\b.*\b(test|pytest|vitest|jest|playwright)\b/i.test(label)
+      ) {
+        return "Running tests";
+      }
+      if (task) return clipFact(task.text, 100);
+      if (tool.finishedAt) return clipFact(label, 100);
+      return clipFact(`Using ${toolChipLabel(tool.name, tool.arguments)}`, 100);
+    }
+  }
+  return task ? clipFact(task.text, 100) : undefined;
+}
+
+export function sessionOutcome(session: AgentSession): { at: string; detail: string } | undefined {
+  if (session.archived || session.automationId || session.needsHuman) return undefined;
+  if (session.status === "error" && session.error) {
+    return { at: session.updatedAt, detail: clipFact(session.error, 140) };
+  }
+  if (session.status !== "idle") return undefined;
+  for (let index = session.messages.length - 1; index >= 0; index--) {
+    const message = session.messages[index]!;
+    if (message.hidden) continue;
+    if (message.role === "user") break;
+    if (message.role !== "assistant" || message.toolCalls?.length) continue;
+    const detail = operatorVisibleText(message.role, message.content).trim();
+    if (detail) return { at: message.createdAt, detail: clipFact(detail, 140) };
+  }
+  return undefined;
 }
 
 /** Review chats: running ones first, then the most recently touched. */
@@ -79,10 +132,16 @@ export function automationActivity(
   return { live, recent };
 }
 
-/** The soonest scheduled run among enabled jobs. */
-export function nextScheduledRun(automations: Automation[]): Automation | undefined {
-  const future = automations.filter((row) => row.enabled && row.nextRunAt);
-  return [...future].sort((a, b) => Date.parse(a.nextRunAt!) - Date.parse(b.nextRunAt!))[0];
+/** The next clock runs among enabled jobs, including any overdue run. */
+export function nextScheduledRuns(automations: Automation[], limit = 3) {
+  return automations
+    .flatMap((row) =>
+      row.enabled && row.nextRunAt && Number.isFinite(Date.parse(row.nextRunAt))
+        ? [{ id: row.id, name: row.name, at: row.nextRunAt }]
+        : [],
+    )
+    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+    .slice(0, limit);
 }
 
 export const REVIEW_OUTCOME_LABEL: Record<SlackReviewOutcome, string> = {

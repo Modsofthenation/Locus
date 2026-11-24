@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.29.0 — 2026-11-24
+
+Choose how slow tests run before a push, more reliable git tools on host clones, managed cloud sandboxes, a CLI sandbox setting, extra themes, and Slack reviewers that finish large PRs in parts. Settings → About is **0.29.0**.
+
+**Harness and git.** The push and PR approval card can run tests, skip them, or publish now and test in the background. Slow suites prompt first instead of blocking silently; if nobody answers in two minutes, the tests run. A timed-out test gate now kills the whole process tree, not just `npm`. Git tools work on a folder that already holds a clone: they pick the forge from origin, fast-forward instead of merging, and say what to try next. A session can bypass named harness gates (test gate, pre-tool-use hooks, force-push refusal, recursive-delete refusal) when a managed policy allows it. Protected-branch pushes, secrets, sensitive paths, and allowlists stay non-bypassable.
+
+**Managed sandboxes.** Run agents on Daytona, E2B, Modal, and Runloop from Settings → Workers. E2B templates can be built entirely in the app. Fargate tasks recover after interrupted provisioning. Set the CLI agent sandbox (filesystem and network, filesystem only, or off) under Settings → Advanced, including allowed loopback ports for a local proxy.
+
+**Slack reviewers.** Large PRs can split into up to 12 parts grouped by folder, with a live summary as each part finishes. CLI reviewers can split with No token limits on, and prompts that used to overflow the command line now fit. Tag the bot in any thread of its channel to start a review. Adaptive and smart polling, live logs, and exclusions for people you do not want reviewed. Reply `full re-review` (or enable Force full re-review under Try it) to use the full PR diff even when the current commit has already been reviewed. Upload a workspace file to Slack by path; uploads wait for Slack to confirm they were shared.
+
+**Appearance.** Eight extravagant theme styles (Baroque, Stained Glass, Steampunk, Art Nouveau, Casino, Circus, Disco, Psychedelic) add 24 palettes, 210 in total. Motion stops when the OS asks for reduced motion.
+
 ## 0.24.0 — 2026-11-22
 
 Slack PR reviewers, operator-token API auth, sandboxed CLI agents, generated themes and 48 new palettes (186 in total), Android and Unreal workspaces, Fargate workers that open as a chat, any-language verification, and computer-use reliability. Settings → About is **0.24.0**.

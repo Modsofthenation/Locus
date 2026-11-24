@@ -23,6 +23,7 @@ import type {
   CursorCliSpawnRequest,
   OneShotTraceEvent,
 } from "@locus/providers";
+import { oneShotCliPrompt } from "@locus/providers";
 import type { JsonStore } from "../core/store.js";
 import type { PostReviewInput, ReviewThreadInfo } from "../git/forgeAdapter.js";
 import type { ReviewCheckout, ReviewCheckoutInput } from "./reviewCheckout.js";
@@ -427,6 +428,26 @@ describe("SlackReviewerService", () => {
     expect(req.messages[0]!.content).toContain("omitted for budget");
     expect(h.posts[0]!.text).toContain("`Claude Code default` (Claude Code)");
     expect(run.model).toBe("Claude Code default");
+  });
+
+  it("shrinks the diff when the CLI prompt would still overrun the command line", async () => {
+    const h = await harness(
+      { providerId: "claude-code", unlimitedTokens: true },
+      { providers: [provider, claudeCode], cliPromptLimit: 12_000 },
+    );
+    const patch = ["@@ -1,1 +1,40 @@", ...Array.from({ length: 40 }, (_, i) => `+line ${i}`)].join(
+      "\n",
+    );
+    // Many files with long paths: the omitted-file list the budget estimate leaves out is long.
+    h.pull.files = Array.from({ length: 60 }, (_, i) => ({
+      path: `src/some/deeply/nested/feature/folder/module-${i}/component-with-a-long-name.ts`,
+      status: "added" as const,
+      patch,
+    }));
+    await h.service.reviewNow("r1", "https://github.com/acme/api/pull/7", "555.0");
+    const req = h.requests[0]!;
+    expect(oneShotCliPrompt(req, { readWorkspace: true }).length).toBeLessThanOrEqual(12_000);
+    expect(req.messages[0]!.content).toContain("omitted for budget");
   });
 
   it("puts skills the prompt names into the review's system prompt", async () => {
@@ -1244,6 +1265,49 @@ describe("helpers", () => {
       expect(whole).toContain("The diff above is the whole PR as it is now.");
     });
 
+    it("reviews the full PR when asked in Slack, with or without new commits", async () => {
+      const h = await reviewedOnce({ rereviewOnNewCommits: false });
+      h.pull.headSha = "fff9999aaa";
+      h.compare["abc1234def...fff9999aaa"] = [
+        { path: "src/a.ts", status: "modified", patch: "@@ -2,1 +2,1 @@\n-B\n+B2" },
+      ];
+
+      h.replies.push(post("600.0", "full re-review", { threadTs: "101.0" }));
+      await h.service.tick();
+      await h.service.idle();
+      expect(h.requests[1]!.messages[0]!.content).toContain("3+ C");
+      expect(h.compareCalls).toEqual([]);
+
+      h.replies.push(post("700.0", "force re-review", { threadTs: "101.0" }));
+      await h.service.tick();
+      await h.service.idle();
+      expect(h.requests[2]!.messages[0]!.content).toContain("3+ C");
+      expect(h.reviews).toHaveLength(3);
+      expect(h.posts.at(-1)!.threadTs).toBe("101.0");
+    });
+
+    it("forces a live Try it review of the full PR diff", async () => {
+      const h = await reviewedOnce({ rereviewOnNewCommits: false });
+      h.pull.headSha = "fff9999aaa";
+      h.compare["abc1234def...fff9999aaa"] = [
+        { path: "src/a.ts", status: "modified", patch: "@@ -2,1 +2,1 @@\n-B\n+B2" },
+      ];
+      const posts = h.posts.length;
+
+      expect((await h.service.reviewNow("r1", URL7)).outcome).toBe("skipped");
+      const options = { fullRereview: true };
+      expect((await h.service.reviewNow("r1", URL7, undefined, options)).outcome).toBe("commented");
+      expect((await h.service.reviewNow("r1", URL7)).outcome).toBe("skipped");
+      expect((await h.service.reviewNow("r1", URL7, undefined, options)).outcome).toBe("commented");
+      expect(h.requests.slice(1).map((req) => req.messages[0]!.content)).toEqual([
+        expect.stringContaining("3+ C"),
+        expect.stringContaining("3+ C"),
+      ]);
+      expect(h.compareCalls).toEqual([]);
+      expect(h.reviews).toHaveLength(3);
+      expect(h.posts).toHaveLength(posts);
+    });
+
     it("tells the model about CI, and won't approve over a failing check", async () => {
       const h = await harness({ forgeMode: "verdict" });
       h.pull.checks = [
@@ -1795,6 +1859,32 @@ describe("reliability and learning", () => {
     expect(h.resolved).toEqual([h.threads[0]]);
   });
 
+  it("splits a CLI review in parts even with No token limits, since the command line caps it", async () => {
+    const big = (name: string) =>
+      ["@@ -1,1 +1,300 @@", ...Array.from({ length: 300 }, (_, i) => `+${name} ${i}`)].join("\n");
+    const files = [
+      { path: "src/a/x.ts", status: "added" as const, patch: big("a") },
+      { path: "src/b/y.ts", status: "added" as const, patch: big("b") },
+    ];
+    const h = await harness(
+      { providerId: "claude-code", unlimitedTokens: true, splitLargePrs: true },
+      { providers: [provider, claudeCode], cliPromptLimit: 8_000 },
+    );
+    h.pull.files = files;
+    await h.service.reviewNow("r1", "https://github.com/acme/api/pull/7");
+    expect(h.requests).toHaveLength(2);
+    expect(h.requests[0]!.messages[0]!.content).toContain("part 1 of 2");
+    for (const req of h.requests) {
+      expect(oneShotCliPrompt(req, { readWorkspace: true }).length).toBeLessThanOrEqual(8_000);
+    }
+
+    // An API model with No token limits gets the whole PR in one call.
+    const api = await harness({ unlimitedTokens: true, splitLargePrs: true });
+    api.pull.files = files;
+    await api.service.reviewNow("r1", "https://github.com/acme/api/pull/7");
+    expect(api.requests).toHaveLength(1);
+  });
+
   it("reviews a PR over budget in parts when asked, and merges the findings", async () => {
     const big = (name: string) =>
       ["@@ -1,1 +1,200 @@", ...Array.from({ length: 200 }, (_, i) => `+${name} ${i}`)].join("\n");
@@ -1803,7 +1893,7 @@ describe("reliability and learning", () => {
       { path: "src/a.ts", status: "added", patch: big("a") },
       { path: "src/b.ts", status: "added", patch: big("b") },
     ];
-    h.rounds = [
+    const rounds: typeof h.rounds = [
       [
         {
           type: "text",
@@ -1825,12 +1915,33 @@ describe("reliability and learning", () => {
         },
       ],
     ];
+    h.rounds = rounds;
     const run = await h.service.reviewNow("r1", "https://github.com/acme/api/pull/7");
     expect(h.requests).toHaveLength(2);
     expect(h.requests[0]!.messages[0]!.content).toContain("part 1 of 2");
     expect(h.requests[1]!.messages[0]!.content).toContain("+ b 0");
     expect(run.findings?.map((row) => row.path)).toEqual(["src/b.ts", "src/a.ts"]);
-    expect(run.summary).toBe("A part. B part.");
+    expect(run.summary).toBe("Part 1 of 2: A part.\nPart 2 of 2: B part.");
+
+    // In a Slack thread, each part is posted in the thread as it finishes, then the merged result lists both.
+    const slack = await harness({ splitLargePrs: true, maxDiffChars: 2_500, maxFileChars: 2_400 });
+    slack.pull.files = h.pull.files;
+    slack.rounds = rounds;
+    await prime(slack);
+    slack.history.push(post("101.0", "https://github.com/acme/api/pull/7"));
+    await slack.service.tick();
+    await slack.service.idle();
+    const texts = slack.posts.map((row) => row.text);
+    const p1 = texts.findIndex((text) =>
+      text.includes("part 1 of 2 done: 1 file, 1 comment. A part."),
+    );
+    const p2 = texts.findIndex((text) =>
+      text.includes("part 2 of 2 done: 1 file, 1 comment. B part."),
+    );
+    expect(p1).toBeGreaterThan(-1);
+    expect(p2).toBeGreaterThan(p1);
+    expect(texts.at(-1)).toContain("\nPart 1 of 2: A part.\nPart 2 of 2: B part.");
+    expect(texts.at(-1)).toContain("Left 2 comments");
 
     const plain = await harness({ maxDiffChars: 2_500, maxFileChars: 2_400 });
     plain.pull.files = h.pull.files;
@@ -2427,8 +2538,9 @@ describe("opt-outs, scoping and path prompts", () => {
     await h.service.idle();
     expect(h.requests).toHaveLength(1);
 
-    // A retry from someone else is ignored; a dismissal from them still works.
+    // Review requests from someone else are ignored; a dismissal from them still works.
     h.replies.push(post("600.0", "retry", { threadTs: "102.0", userId: "U0OTHER" }));
+    h.replies.push(post("600.1", "full re-review", { threadTs: "102.0", userId: "U0OTHER" }));
     await h.service.tick();
     await h.service.idle();
     expect(h.requests).toHaveLength(1);

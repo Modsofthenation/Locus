@@ -334,6 +334,41 @@ export interface SlackConversation {
   userId?: string;
 }
 
+/** A workspace member from `users.list`, for pickers (reviewer exclusions). */
+export interface SlackMember {
+  id: string;
+  /** Display name, else real name, else handle. */
+  name: string;
+  /** Real name when it differs from `name`. */
+  realName?: string;
+  avatarUrl?: string;
+  isBot?: boolean;
+}
+
+/** One `users.list` row → `SlackMember`. Deleted users and Slackbot are dropped. */
+export function parseSlackMember(raw: unknown): SlackMember | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Record<string, unknown>;
+  const text = (v: unknown) => (str(v) ?? "").trim();
+  const id = text(value.id);
+  if (!id || id === "USLACKBOT" || value.deleted === true) return undefined;
+  const profile =
+    value.profile && typeof value.profile === "object"
+      ? (value.profile as Record<string, unknown>)
+      : {};
+  const realName = text(profile.real_name) || text(value.real_name) || text(value.realName);
+  const name =
+    text(profile.display_name) || text(value.displayName) || realName || text(value.name) || id;
+  const avatarUrl = text(profile.image_72) || text(profile.image_48) || text(value.avatarUrl);
+  return {
+    id,
+    name,
+    ...(realName && realName !== name ? { realName } : {}),
+    ...(avatarUrl ? { avatarUrl } : {}),
+    ...(value.is_bot === true || value.isBot === true ? { isBot: true } : {}),
+  };
+}
+
 export interface SlackReaction {
   name: string;
   count: number;

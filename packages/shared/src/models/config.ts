@@ -55,10 +55,69 @@ export interface AdvancedSettings {
   guestBootTimeoutMs?: number;
   /** How long a Needs-you approval waits before auto-deny, in ms. Default 30 minutes. */
   approvalTimeoutMs?: number;
+  /**
+   * How long the "skip tests?" prompt before a slow git_push / git_pr test gate waits
+   * before running the tests anyway, in ms. Default 2 minutes.
+   */
+  testGatePromptMs?: number;
+  /**
+   * A test gate whose last run (or configured `verify.test` timeout) took at least this
+   * long asks the operator to run, skip, or defer it. 0 asks only when the agent requests
+   * a skip. Default 5 minutes.
+   */
+  testGateSlowMs?: number;
   /** Composer follow-up queue depth. Default 32. */
   maxPromptQueue?: number;
   /** Newest automation chats to keep per job. Default 60. */
   maxAutomationChats?: number;
+  /**
+   * Sandbox for CLI agents on Docker sessions and Slack reviewers. The matching
+   * `LOCUS_CLI_SANDBOX*` env vars, when set, take precedence. See docs/cli-agent-sandbox.md.
+   */
+  cliSandbox?: CliSandboxSettings;
+}
+
+/**
+ * - `on`: filesystem sandbox plus its own network namespace (default).
+ * - `filesystem`: filesystem only, shares the host network (`LOCUS_CLI_SANDBOX_NET=host`).
+ * - `off`: unsandboxed (`LOCUS_CLI_SANDBOX=off`).
+ */
+export const CLI_SANDBOX_MODES = ["on", "filesystem", "off"] as const;
+export type CliSandboxMode = (typeof CLI_SANDBOX_MODES)[number];
+
+export interface CliSandboxSettings {
+  mode?: CliSandboxMode;
+  /** Extra host loopback ports the CLI may reach, e.g. a local proxy. */
+  allowPorts?: number[];
+}
+
+export function parseCliSandboxMode(raw: unknown): CliSandboxMode {
+  return raw === "filesystem" || raw === "off" ? raw : "on";
+}
+
+/** Valid, de-duplicated TCP ports from a list or a `3128, 8080` string. */
+export function parseCliSandboxPorts(raw: unknown): number[] {
+  const parts = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/[\s,]+/) : [];
+  const out: number[] = [];
+  for (const part of parts) {
+    if (part === "" || part == null) continue;
+    const port = Number(part);
+    if (Number.isInteger(port) && port > 0 && port < 65536 && !out.includes(port)) out.push(port);
+  }
+  return out;
+}
+
+/** Normalized for saving: undefined when it is all defaults. */
+export function parseCliSandboxSettings(raw: unknown): CliSandboxSettings | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const row = raw as Record<string, unknown>;
+  const mode = parseCliSandboxMode(row.mode);
+  const allowPorts = parseCliSandboxPorts(row.allowPorts);
+  if (mode === "on" && !allowPorts.length) return undefined;
+  return {
+    ...(mode !== "on" ? { mode } : {}),
+    ...(allowPorts.length ? { allowPorts } : {}),
+  };
 }
 
 export const DEFAULT_GUEST_BOOT_TIMEOUT_MS = 15 * 60_000;
@@ -115,7 +174,7 @@ export interface LocusConfig {
    * Legacy config value `chatHub` is accepted and normalized to `swarm`.
    */
   productMode?: ProductMode;
-  /** Chat thread density. Default compact. */
+  /** App-wide density: spacing and type across every surface, plus chat. Default compact. Key keeps its old name so saved prefs carry over. */
   chatDensity?: ChatDensity;
   /** Files editor font size in px (10–20). Default 12. */
   editorFontSize?: number;

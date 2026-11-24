@@ -1178,11 +1178,11 @@ function MobileMore(props: {
           </span>
         </label>
         <label className="mobile-setting-row">
-          <span>Chat density</span>
+          <span>Density</span>
           <span className="mobile-setting-value">
             <Select
               compact
-              ariaLabel="Chat density"
+              ariaLabel="Density"
               value={density}
               options={[
                 { value: "comfortable", label: "Comfortable" },

@@ -1,6 +1,6 @@
 {
   "name": "@locus/desktop",
-  "version": "0.24.0",
+  "version": "0.29.0",
   "private": true,
   "author": "Locus contributors",
   "license": "MIT",
@@ -11,7 +11,7 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && node ./scripts/bundle-server.mjs",
+    "build": "tsc --noEmit && vite build && node ./scripts/bundle-server.mjs && node ./scripts/bundle-worker.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
@@ -71,6 +71,10 @@
       {
         "from": "build/server",
         "to": "server"
+      },
+      {
+        "from": "build/worker",
+        "to": "worker"
       },
       {
         "from": "build/server-typescript-ls",

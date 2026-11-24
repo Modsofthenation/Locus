@@ -4,6 +4,7 @@ import {
   incompleteBlocksLook,
   leftoverCanvasRepair,
   lookedOrLookBudgetSpent,
+  pickStudioContinue,
   wantsCanvasQuality,
   wantsStudioFollowUpMutate,
 } from "./studioContinue.js";
@@ -43,5 +44,51 @@ describe("studio continue predicates", () => {
     expect(wantsStudioFollowUpMutate({ isAsset: true, iterateUnchanged: true })).toBe(true);
     expect(wantsStudioFollowUpMutate({ isGame: true })).toBe(false);
     expect(wantsStudioFollowUpMutate({ followUpMissing: true })).toBe(false);
+  });
+});
+
+describe("studio continue policy", () => {
+  it("keeps incomplete ahead of look on every Turn adapter", () => {
+    const incomplete = {
+      isDesign: true,
+      guestReady: true,
+      canvasIncomplete: true,
+      canvasIncompleteNudges: 0,
+      canvasEmpty: false,
+    };
+    expect(pickStudioContinue({ source: "model", toolCallCount: 0, ...incomplete })).toBe(
+      "canvasIncompleteNudge",
+    );
+    expect(pickStudioContinue({ source: "tool", ...incomplete })).toBe("canvasIncompleteNudge");
+    expect(pickStudioContinue({ source: "cli", ...incomplete })).toBe("canvasIncompleteNudge");
+  });
+
+  it("asks for a look after a write, then quality after a look", () => {
+    expect(
+      pickStudioContinue({
+        source: "model",
+        isDesign: true,
+        guestReady: true,
+        toolCallCount: 0,
+        canvasEmpty: false,
+        canvasIncomplete: false,
+        canvasMutatedThisTurn: true,
+        calledPlaywrightThisTurn: false,
+        gamePlaywrightNudges: 0,
+      }),
+    ).toBe("designLookNudge");
+    expect(
+      pickStudioContinue({
+        source: "model",
+        isDesign: true,
+        guestReady: true,
+        toolCallCount: 0,
+        canvasEmpty: false,
+        canvasIncomplete: false,
+        genericDesign: true,
+        calledPlaywrightThisTurn: true,
+        designQualityNudges: 0,
+      }),
+    ).toBe("designQualityNudge");
   });
 });

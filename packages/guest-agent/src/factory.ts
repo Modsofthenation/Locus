@@ -1,4 +1,4 @@
-import type { VmInstance } from "@locus/shared";
+import type { GuestOs, VmInstance } from "@locus/shared";
 import { DOCKER_WORKSPACE, isWindows } from "@locus/shared";
 import type { ChromiumDriver } from "./chromium.js";
 import { DockerGuestRuntime } from "./docker.js";
@@ -21,6 +21,28 @@ export type GuestFactoryOpts = {
  * Guest runtime factory: Docker, Host, Windows (SSH+WinRM), SSH, or mock.
  * Control-plane GuestHub and worker WorkerGuestHub are adapters on this seam.
  */
+export function createHostGuestRuntime(
+  os: GuestOs,
+  hostRoot: string,
+  opts: Pick<GuestFactoryOpts, "hostChromeProfileDir" | "liveBrowser"> = {},
+): GuestRuntime {
+  return createGuestRuntime(
+    {
+      id: "host",
+      sessionId: "host",
+      templateId: "host",
+      os,
+      name: "host",
+      status: "ready",
+      runtime: "host",
+      diskPath: hostRoot,
+      createdAt: "",
+      updatedAt: "",
+    },
+    opts,
+  );
+}
+
 export function createGuestRuntime(vm: VmInstance, opts: GuestFactoryOpts = {}): GuestRuntime {
   if (vm.runtime === "host") {
     return new HostGuestRuntime(

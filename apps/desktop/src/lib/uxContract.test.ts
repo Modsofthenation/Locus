@@ -11,10 +11,11 @@ const ux = readFileSync(join(dir, "../styles/ux.css"), "utf8");
 
 describe("quiet shell contract", () => {
   it("keeps body type at 14px and never ships a token below 12px", () => {
-    expect(css).toMatch(/--type-2xs: 12px;/);
-    expect(css).toMatch(/--type-xs: 12px;/);
-    expect(css).toMatch(/--type-md: 14px;/);
-    expect(css).toMatch(/--type-body: 14px;/);
+    expect(css).toMatch(/--type-2xs: max\(12px, calc\(12px \* var\(--density-type\)\)\);/);
+    expect(css).toMatch(/--type-xs: max\(12px, calc\(12px \* var\(--density-type\)\)\);/);
+    expect(css).toMatch(/--type-md: calc\(14px \* var\(--density-type\)\);/);
+    expect(css).toMatch(/--type-body: calc\(14px \* var\(--density-type\)\);/);
+    expect(css).toMatch(/:root \{\n  --density-space: 1;\n  --density-type: 1;\n\}/);
     expect(css).toMatch(/--chat-font: 14px;/);
     expect(css).not.toMatch(/--type-2xs: 10px;/);
     expect(css).not.toMatch(/--chat-font: 13px;/);
@@ -22,7 +23,7 @@ describe("quiet shell contract", () => {
 
   it("pins a short featured theme set and keeps the rest as extras", () => {
     expect([...FEATURED_THEME_IDS]).toEqual(["ember", "midnight", "paper", "contrast"]);
-    expect(THEME_OPTIONS).toHaveLength(186);
+    expect(THEME_OPTIONS).toHaveLength(210);
   });
 
   it("ships the quiet-shell screenshot contract in ux.css", () => {

@@ -9,6 +9,9 @@ import {
   policyBannerLabel,
   policyForcedJail,
   policyRejectsCreate,
+  policyRejectsGateBypass,
+  effectiveBypassGates,
+  managedPolicyLockedControls,
   providerAllowedByPolicy,
 } from "./policy.js";
 import type { LocusConfig } from "./config.js";
@@ -257,5 +260,45 @@ describe("applyManagedPolicy", () => {
     expect(
       policyRejectsCreate({ runtime: "docker", network: "restricted", status }),
     ).toBeUndefined();
+  });
+});
+
+describe("managed gate bypass", () => {
+  const status = (allowed?: unknown) => ({
+    active: true,
+    locked: [],
+    policy: parseManagedPolicy({
+      version: 1,
+      sandbox: allowed === undefined ? {} : { allowedGateBypasses: allowed },
+    })!,
+  });
+
+  it("allows no bypass under an active profile unless listed, and drops unknown ids", () => {
+    expect(status().policy.sandbox?.allowedGateBypasses).toEqual([]);
+    expect(status(["test-gate", "bogus"]).policy.sandbox?.allowedGateBypasses).toEqual([
+      "test-gate",
+    ]);
+    expect(policyRejectsGateBypass(["test-gate"], status())).toMatch(
+      /does not allow bypassing harness gate test-gate/,
+    );
+    expect(policyRejectsGateBypass(["test-gate"], status(["test-gate"]))).toBeUndefined();
+    expect(policyRejectsGateBypass(["test-gate"], null)).toBeUndefined();
+    expect(
+      policyRejectsCreate({ bypassGates: ["force-push"], status: status(["test-gate"]) }),
+    ).toMatch(/force-push/);
+  });
+
+  it("filters a session's gates at tool time and reports the lock", () => {
+    expect(effectiveBypassGates(["test-gate", "force-push"], status(["test-gate"]))).toEqual([
+      "test-gate",
+    ]);
+    expect(effectiveBypassGates(["force-push"], status(["test-gate"]))).toBeUndefined();
+    expect(effectiveBypassGates(["force-push"], undefined)).toEqual(["force-push"]);
+    expect(managedPolicyLockedControls(status().policy)).toContain("gateBypass");
+    expect(
+      managedPolicyLockedControls(
+        status(["test-gate", "pre-tool-use-hooks", "force-push", "recursive-delete"]).policy,
+      ),
+    ).not.toContain("gateBypass");
   });
 });

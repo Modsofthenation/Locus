@@ -20,6 +20,7 @@ import {
   runtimeNeedsGuest,
   sessionComputeMs,
   sessionRuntime,
+  sandboxWorkerKind,
   workerDestroyOnStop,
   workerImageAllowed,
   workerMaxConcurrent,
@@ -86,6 +87,7 @@ export type MachineLifecyclePorts = {
   docker: () => DockerEngine;
   fetchFn: () => typeof fetch;
   compute: ComputeBackend;
+  assertComputeBudget: (session: AgentSession) => Promise<void>;
   workers: Pick<Map<string, WorkerClient>, "set">;
   boots: Pick<BootTracker, "begin" | "fail" | "isRunning" | "finish" | "step">;
   /** How long a freshly provisioned compute worker may take to answer `/v1/info`. */
@@ -104,6 +106,12 @@ function now(): string {
 }
 
 export class MachineLifecycle {
+  private readonly computeStarts = new Map<string, Promise<AgentSession>>();
+
+  isStartingCompute(sessionId: string): boolean {
+    return this.computeStarts.has(sessionId);
+  }
+
   constructor(private readonly ports: MachineLifecyclePorts) {}
 
   private get hypervisor(): Hypervisor {
@@ -216,7 +224,7 @@ export class MachineLifecycle {
       if (fargate) await this.assertComputeCapacity(session, backend);
     }
     if (fargate) {
-      session = await this.ensureFargateHandle(session, backend);
+      session = await this.ensureComputeHandle(session, backend);
     }
     const client = await this.ports.requireWorker(session);
     let vm = session.vmId ? client.get(session.vmId) : undefined;
@@ -281,8 +289,7 @@ export class MachineLifecycle {
       } catch (err) {
         if (vm) await client.destroy(vm.id).catch(() => undefined);
         if (fargate && session.remoteGuestId) {
-          await this.ports.compute.destroy(session.remoteGuestId, backend).catch(() => undefined);
-          await this.ports.patch(session.id, { remoteGuestId: undefined });
+          await this.ports.destroyWorkerGuest(session);
         }
         throw err;
       }
@@ -333,7 +340,7 @@ export class MachineLifecycle {
     const provisioned = workerProvisionsCompute(backend);
     if (provisioned) {
       if (!session.remoteGuestId) await this.assertComputeCapacity(session, backend);
-      session = await this.ensureFargateHandle(session, backend);
+      session = await this.ensureComputeHandle(session, backend);
     }
     const client = await this.ports.requireWorker(session);
     let vm = session.vmId ? client.get(session.vmId) : undefined;
@@ -357,8 +364,7 @@ export class MachineLifecycle {
         });
       } catch (err) {
         if (provisioned && session.remoteGuestId) {
-          await this.ports.compute.destroy(session.remoteGuestId, backend).catch(() => undefined);
-          await this.ports.patch(session.id, { remoteGuestId: undefined, vmId: undefined });
+          await this.ports.destroyWorkerGuest(session);
         }
         throw err;
       }
@@ -400,48 +406,75 @@ export class MachineLifecycle {
     return vm;
   }
 
-  private async ensureFargateHandle(
+  private ensureComputeHandle(
+    session: AgentSession,
+    backend: WorkerBackend,
+  ): Promise<AgentSession> {
+    const existing = this.computeStarts.get(session.id);
+    if (existing) return existing;
+    const pending = this.provisionComputeHandle(session, backend).finally(() =>
+      this.computeStarts.delete(session.id),
+    );
+    this.computeStarts.set(session.id, pending);
+    return pending;
+  }
+
+  private async provisionComputeHandle(
     session: AgentSession,
     backend: WorkerBackend,
   ): Promise<AgentSession> {
     if (session.remoteGuestId) {
       if (this.ports.compute.get(session.remoteGuestId)) return session;
-      await this.ports.compute.destroy(session.remoteGuestId, backend).catch(() => undefined);
-      session = await this.ports.patch(session.id, { remoteGuestId: undefined });
+      await this.ports.destroyWorkerGuest(session);
+      session = await this.ports.require(session.id);
     }
+    await this.ports.assertComputeBudget(session);
     const size = workerPickSize(backend, session.instanceSize);
     const quote = this.ports.compute.quote(backend, size);
-    const workerTls = workerRunsInTask(backend) ? createSelfSignedWorkerTls() : undefined;
+    const workerTls =
+      workerRunsInTask(backend) && !sandboxWorkerKind(backend.kind)
+        ? createSelfSignedWorkerTls()
+        : undefined;
     const handle = await this.ports.compute.provision({
       backend,
       sessionId: session.id,
       size,
       workerTls,
     });
+    const provisioned = {
+      remoteGuestId: handle.id,
+      quotedUsdPerHour: quote.usdPerHour,
+      ...(handle.requestedAt ? { computeStartedAt: handle.requestedAt } : {}),
+      instanceSize: size,
+    };
     this.ports.boots.step(session.id, "connect");
     const probe = new WorkerClient(
       {
         ...backend,
         url: handle.url,
         token: handle.token,
-        fingerprint: handle.fingerprint ?? backend.fingerprint,
+        fingerprint: handle.gateway ? undefined : (handle.fingerprint ?? backend.fingerprint),
       },
       this.fetchFn === fetch ? undefined : (input, init) => this.fetchFn(input, init),
+      undefined,
+      handle.gateway,
     );
     try {
       // A cold task still has to pull the worker image and start Node after the ENI is up.
       const health = await probe.waitReady({ timeoutMs: this.ports.computeReadyTimeoutMs() });
       if (health.fingerprint) handle.fingerprint = health.fingerprint;
     } catch (err) {
-      await this.ports.compute.destroy(handle.id, backend).catch(() => undefined);
+      try {
+        await this.ports.compute.destroy(handle.id, backend);
+      } catch {
+        const message = "Cloud compute cleanup pending after worker connection failed.";
+        await this.ports.patch(session.id, { ...provisioned, status: "error", error: message });
+        throw new Error(message, { cause: err });
+      }
       throw err;
     }
     this.ports.workers.set(`${backend.id}:${handle.id}`, probe);
-    return this.ports.patch(session.id, {
-      remoteGuestId: handle.id,
-      quotedUsdPerHour: quote.usdPerHour,
-      instanceSize: size,
-    });
+    return this.ports.patch(session.id, provisioned);
   }
 
   private async startWorkerVm(sessionId: string): Promise<VmInstance> {
@@ -472,7 +505,7 @@ export class MachineLifecycle {
     const template = config.templates.find((row) => row.id === session.templateId);
     if (!template) throw new Error("Template missing");
     if (workerProvisionsCompute(backend)) {
-      session = await this.ensureFargateHandle(session, backend);
+      session = await this.ensureComputeHandle(session, backend);
     }
     const client = await this.ports.requireWorker(session);
     let vm = session.vmId ? client.get(session.vmId) : undefined;
@@ -747,17 +780,17 @@ export class MachineLifecycle {
   }
 
   async stopVm(sessionId: string): Promise<void> {
+    await this.computeStarts.get(sessionId)?.catch(() => undefined);
     const session = await this.ports.require(sessionId);
     if (this.ports.isWorkerSession(session)) {
-      const client = await this.ports.requireWorker(session);
       const config = await this.ports.store.loadConfig();
-      const backend =
-        (config.workers ?? []).find((row) => row.id === session.backendId) ?? client.backend;
-      if (workerDestroyOnStop(backend)) {
+      const backend = (config.workers ?? []).find((row) => row.id === session.backendId);
+      if (session.remoteGuestId || (backend && workerDestroyOnStop(backend))) {
         await this.ports.destroyWorkerGuest(session);
         return;
       }
       if (!session.vmId) return;
+      const client = await this.ports.requireWorker(session);
       const vm = await client.stop(session.vmId);
       this.ports.closeProxy(sessionId);
       this.ports.closeIdeTunnel(sessionId);

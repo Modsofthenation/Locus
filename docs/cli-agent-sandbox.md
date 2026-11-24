@@ -81,7 +81,20 @@ If no sandbox works (bwrap or, on the control plane, pasta missing; unprivileged
 
 On the control plane, `LOCUS_CLI_SANDBOX_NET=host` keeps the filesystem sandbox but shares the host network, so the CLI can call the control plane on loopback again, including other sessions' transcripts.
 
-To run Docker-session CLIs unsandboxed anyway, start Locus with `LOCUS_CLI_SANDBOX=off`. That restores the old behaviour: the CLI can read everything the operator can, including other sessions and Locus config. The same variable on `locus-worker` turns off the worker sandbox; each process reads its own environment.
+### Settings
+
+**Settings → Advanced → CLI agent sandbox** sets the same options on the control plane without restarting, for both Docker-session CLIs and Slack reviewers (`advanced.cliSandbox` in `config.json`):
+
+| Setting | Same as |
+| --- | --- |
+| **Sandbox: Filesystem and network** (default) | nothing set |
+| **Sandbox: Filesystem only** | `LOCUS_CLI_SANDBOX_NET=host` |
+| **Sandbox: Off** | `LOCUS_CLI_SANDBOX=off` |
+| **Allowed loopback ports** (`3128, 8080`) | `LOCUS_CLI_SANDBOX_ALLOW_PORTS=3128,8080` |
+
+A `LOCUS_CLI_SANDBOX*` variable set when Locus starts overrides the matching setting. `locus-worker` does not read these settings; set its environment on the worker host.
+
+To run Docker-session CLIs unsandboxed anyway, choose **Off** in Settings or start Locus with `LOCUS_CLI_SANDBOX=off`. That restores the old behaviour: the CLI can read everything the operator can, including other sessions and Locus config. The same variable on `locus-worker` turns off the worker sandbox; each process reads its own environment.
 
 ## Gaps
 

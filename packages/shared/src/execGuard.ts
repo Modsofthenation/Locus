@@ -183,18 +183,22 @@ export function refuseHostExecCommand(command: string, hostRoot: string): string
 
 export function refuseExecCommand(
   command: string,
-  opts?: { allowHosts?: string[] },
+  opts?: { allowHosts?: string[]; bypass?: readonly string[] },
 ): string | undefined {
   if (commandLooksLikeLocusDesktopLaunch(command)) {
     return "Refusing to launch the Locus desktop app from exec. This binary is the GUI, not a CLI. Use the HTTP API on 127.0.0.1:7420 or npm run locus.";
   }
-  if (commandLooksLikeForcePush(command)) {
+  if (commandLooksLikeForcePush(command) && !opts?.bypass?.includes("force-push")) {
     return "Refusing git push --force. Force-push is denied by the harness; push a new branch instead.";
   }
   if (commandLooksLikeProtectedBranchPush(command)) {
     return "Refusing git push to a protected branch (main/master/trunk). Push a feature branch instead.";
   }
-  if (commandLooksLikeDangerousRm(command) && !recursiveRmTargetAllowed(command)) {
+  if (
+    commandLooksLikeDangerousRm(command) &&
+    !recursiveRmTargetAllowed(command) &&
+    !opts?.bypass?.includes("recursive-delete")
+  ) {
     return "Refusing recursive delete (rm -rf). Remove specific files inside /workspace, not a tree wipe.";
   }
   if (commandLooksLikeEnvDump(command)) {
