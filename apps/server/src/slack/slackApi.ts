@@ -26,6 +26,7 @@ import {
   withSlackReactionMine,
   type IntegrationAccount,
   type SlackPostAs,
+  type SlackPostMetadata,
   type SlackConversation,
   type SlackMember,
   type SlackEmojiMap,
@@ -400,6 +401,14 @@ export function isMockSlackToken(token: string | undefined): boolean {
   );
 }
 
+/**
+ * A `chat.postMessage` error that may be about its `metadata` argument (`invalid_metadata_format`,
+ * `metadata_too_large`, `metadata_must_be_sent_from_app`, or a generic `invalid_arguments`).
+ */
+export function isSlackMetadataError(error: string | undefined): boolean {
+  return Boolean(error && /metadata|^invalid_arguments$/i.test(error));
+}
+
 export function formatSlackApiError(
   body: { error?: string; needed?: string },
   fallback: string,
@@ -538,7 +547,11 @@ export class SlackApi {
         .map((row) => this.hydrate({ ...row }, profiles, viewerId))
         .filter((row): row is SlackMessage => Boolean(row));
     }
-    const params = new URLSearchParams({ channel: channelId, limit: String(limit) });
+    const params = new URLSearchParams({
+      channel: channelId,
+      limit: String(limit),
+      include_all_metadata: "true",
+    });
     if (opts.oldest) params.set("oldest", opts.oldest);
     if (opts.latest) params.set("latest", opts.latest);
     const body = (await this.get(
@@ -645,7 +658,7 @@ export class SlackApi {
         .map((row) => this.hydrate({ ...row }, profiles, viewerId))
         .filter((row): row is SlackMessage => Boolean(row));
     }
-    const params = new URLSearchParams({ channel: channelId, ts });
+    const params = new URLSearchParams({ channel: channelId, ts, include_all_metadata: "true" });
     const body = (await this.get(
       `${joinUrl(slackApiBase(account), "/conversations.replies")}?${params}`,
       token,
@@ -668,6 +681,8 @@ export class SlackApi {
       as?: SlackPostAs;
       replyBroadcast?: boolean;
       blocks?: unknown[];
+      /** Message metadata; dropped and the post retried once if Slack refuses it. */
+      metadata?: SlackPostMetadata;
     },
   ): Promise<SlackMessage> {
     const as = parseSlackPostAs(input.as);
@@ -695,6 +710,7 @@ export class SlackApi {
         ...(input.threadTs && input.replyBroadcast
           ? { replyBroadcast: true, subtype: "thread_broadcast" }
           : {}),
+        ...(input.metadata ? { eventType: input.metadata.event_type } : {}),
       };
       store.messages.push(message);
       if (input.threadTs) {
@@ -724,17 +740,21 @@ export class SlackApi {
         },
       ];
     }
-    const body = (await this.postJson(
-      joinUrl(slackApiBase(account), "/chat.postMessage"),
-      token,
-      payload,
-    )) as {
+    type PostBody = {
       ok?: boolean;
       error?: string;
       ts?: string;
       channel?: string;
       message?: Record<string, unknown>;
     };
+    const url = joinUrl(slackApiBase(account), "/chat.postMessage");
+    if (input.metadata) payload.metadata = input.metadata;
+    let body = (await this.postJson(url, token, payload)) as PostBody;
+    if (body.ok === false && payload.metadata && isSlackMetadataError(body.error)) {
+      // Metadata only marks the post; never lose the message over it.
+      delete payload.metadata;
+      body = (await this.postJson(url, token, payload)) as PostBody;
+    }
     if (body.ok === false) throw formatSlackApiError(body, "Slack post failed");
     const parsed = parseSlackMessage(
       body.message ?? {

@@ -335,24 +335,31 @@ describe("paletteItems", () => {
     ]);
   });
 
+  it("finds Reviews as a workspace from reviewer-related searches", () => {
+    const items = paletteItems({ sessions: [] });
+    expect(filterPaletteItems(items, "reviewers").map((item) => item.id)).toContain(
+      "section:reviews",
+    );
+    expect(items.some((item) => item.id === "settings:reviewers")).toBe(false);
+  });
+
   it("lists every settings tab from SETTINGS_NAV_GROUPS", () => {
     const items = paletteItems({ sessions: [] });
     const tabs = SETTINGS_NAV_GROUPS.flatMap((group) => group.items);
     expect(tabs).toEqual([
+      "appearance",
+      "notifications",
       "providers",
       "mcp",
       "skills",
-      "benchmark",
       "machines",
       "workers",
       "environments",
       "git",
       "integrations",
-      "reviewers",
-      "appearance",
-      "notifications",
-      "phone",
       "chrome",
+      "phone",
+      "benchmark",
       "advanced",
       "about",
     ]);

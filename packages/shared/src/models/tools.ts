@@ -99,6 +99,7 @@ export type ComputerUseToolName =
   | "slack_channels"
   | "slack_history"
   | "slack_replies"
+  | "slack_emojis"
   | "grafana_search"
   | "grafana_get"
   | "grafana_query"
@@ -629,6 +630,12 @@ export const COMPUTER_USE_TOOLS: ToolSpec[] = [
   {
     name: "slack_replies",
     description: "Read a Slack thread. Pass channel and thread_ts. Host-side.",
+    os: [...ALL_TOOL_OS],
+  },
+  {
+    name: "slack_emojis",
+    description:
+      "List the workspace's custom Slack emoji (name and image URL; aliases resolved). Pass query to filter by name, or name to look up one emoji, custom or standard. Host-side.",
     os: [...ALL_TOOL_OS],
   },
   {
@@ -1266,6 +1273,7 @@ export const SHARED_RUNTIME_TOOLS: ComputerUseToolName[] = [
   "slack_channels",
   "slack_history",
   "slack_replies",
+  "slack_emojis",
   "grafana_search",
   "grafana_get",
   "grafana_query",
@@ -1392,6 +1400,7 @@ const BOARD_CHAT_INTEGRATION_TOOLS = new Set<ComputerUseToolName>([
   "slack_channels",
   "slack_history",
   "slack_replies",
+  "slack_emojis",
   "grafana_search",
   "grafana_get",
   "grafana_query",
@@ -1453,6 +1462,7 @@ const PROJECT_CHAT_SHARED_TOOLS = new Set<ComputerUseToolName>([
   "slack_channels",
   "slack_history",
   "slack_replies",
+  "slack_emojis",
   "incidentio_search",
   "incidentio_get",
   "gmail_search",
@@ -1635,6 +1645,7 @@ const PARALLEL_SAFE_TOOLS = new Set<string>([
   "slack_channels",
   "slack_history",
   "slack_replies",
+  "slack_emojis",
   "websearch",
   "window_list",
   "clipboard_get",

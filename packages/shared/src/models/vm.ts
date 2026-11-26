@@ -21,7 +21,7 @@ export function runtimeNeedsGuest(runtime: AgentRuntime): boolean {
 /** Compat tag. `npm run images` also tags `locus/agent:<app version>`. */
 export const LOCUS_AGENT_IMAGE_TAG = "0.1";
 export const LOCUS_AGENT_IMAGE = `locus/agent:${LOCUS_AGENT_IMAGE_TAG}`;
-export const LOCUS_AGENT_IMAGE_VERSION = "0.29.0";
+export const LOCUS_AGENT_IMAGE_VERSION = "0.30.0";
 /**
  * Bump with any images/agent/Dockerfile change the runtime depends on (it must match the
  * Dockerfile's `dev.locus.agent.revision` label). A cached `locus/agent:0.1` with an older

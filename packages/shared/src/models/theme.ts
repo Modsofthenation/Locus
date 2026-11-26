@@ -1,3 +1,33 @@
+/**
+ * Built-in themes defined as engine specs (see craftedThemes.ts) rather than
+ * hand-written CSS. Their CSS is compiled from the spec at runtime, and each
+ * can be remixed into an editable generated theme.
+ */
+export const CRAFTED_THEME_IDS = [
+  "zenith",
+  "tartan",
+  "riptide",
+  "halftone",
+  "jubilee",
+  "spectra",
+  "tally",
+  "terracotta",
+  "frostline",
+  "velvet",
+  "nightshift",
+  "orchard",
+  "kunsthalle",
+  "overdrive",
+  "picnic",
+  "mossgarden",
+] as const;
+
+export type CraftedThemeId = (typeof CRAFTED_THEME_IDS)[number];
+
+export function isCraftedThemeId(value: unknown): value is CraftedThemeId {
+  return typeof value === "string" && (CRAFTED_THEME_IDS as readonly string[]).includes(value);
+}
+
 export const THEME_IDS = [
   "ember",
   "midnight",
@@ -209,6 +239,19 @@ export const THEME_IDS = [
   "lavalamp",
   "flowerpower",
   "kaleido",
+  "platform",
+  "nightbus",
+  "interchange",
+  "ridgeline",
+  "bathymetry",
+  "saltflat",
+  "selvedge",
+  "herringbone",
+  "tapestry",
+  "delft",
+  "celadon",
+  "obsidian",
+  ...CRAFTED_THEME_IDS,
 ] as const;
 
 export type ThemeId = (typeof THEME_IDS)[number];
@@ -234,6 +277,10 @@ export interface ThemeOption {
   terminal?: boolean;
   /** A structural look (borders, shadows, type, surfaces), grouped by style. */
   style?: ThemeStyle;
+  /** Compiled from an engine spec (craftedThemes.ts); grouped as Crafted and remixable. */
+  crafted?: boolean;
+  /** Follows the system light/dark setting; `scheme` is the one it was designed in. */
+  adaptive?: boolean;
 }
 
 /** Theme groups that change the UI's structure, not only its colours. */
@@ -270,6 +317,10 @@ export const THEME_STYLES = [
   "circus",
   "disco",
   "psychedelic",
+  "wayfinding",
+  "cartography",
+  "textile",
+  "porcelain",
 ] as const;
 
 export type ThemeStyle = (typeof THEME_STYLES)[number];
@@ -307,10 +358,14 @@ const THEME_STYLE_LABELS: Record<ThemeStyle, string> = {
   circus: "Circus",
   disco: "Disco",
   psychedelic: "Psychedelic",
+  wayfinding: "Wayfinding",
+  cartography: "Cartography",
+  textile: "Textile",
+  porcelain: "Porcelain",
 };
 
 export type ThemeFamily =
-  "dark" | "light" | "contrast" | "gradient" | "terminal" | ThemeStyle | "generated";
+  "dark" | "light" | "contrast" | "gradient" | "terminal" | "crafted" | ThemeStyle | "generated";
 export type ThemeFilter = "all" | ThemeFamily;
 
 /** Display order for family groups and filter chips. */
@@ -320,11 +375,13 @@ export const THEME_FAMILY_ORDER: readonly ThemeFamily[] = [
   "contrast",
   "gradient",
   "terminal",
+  "crafted",
   ...THEME_STYLES,
   "generated",
 ];
 
 export function themeFamily(opt: ThemeOption): ThemeFamily {
+  if (opt.crafted) return "crafted";
   if (opt.style) return opt.style;
   if (opt.terminal) return "terminal";
   if (opt.contrast) return "contrast";
@@ -337,6 +394,7 @@ export function themeFamilyLabel(family: ThemeFamily): string {
   if (family === "gradient") return "Gradient";
   if (family === "terminal") return "Terminal";
   if (family === "generated") return "Generated";
+  if (family === "crafted") return "Crafted";
   if (family in THEME_STYLE_LABELS) return THEME_STYLE_LABELS[family as ThemeStyle];
   return family === "light" ? "Light" : "Dark";
 }
@@ -1967,6 +2025,240 @@ export const THEME_OPTIONS: ThemeOption[] = [
     scheme: "dark",
     style: "psychedelic",
     swatches: ["#0a1a17", "#15332e", "#b8ff3c", "#ff5fd2"],
+  },
+  {
+    id: "platform",
+    name: "Platform",
+    summary: "Cobalt-and-amber station signs with route stripes and squared controls.",
+    scheme: "light",
+    style: "wayfinding",
+    swatches: ["#f4f7fa", "#e2ebf5", "#164d9c", "#8a4c00"],
+  },
+  {
+    id: "nightbus",
+    name: "Night Bus",
+    summary: "Reflective yellow route markings and aqua stops on asphalt.",
+    scheme: "dark",
+    style: "wayfinding",
+    swatches: ["#111619", "#242d33", "#f8dd58", "#69d9d4"],
+  },
+  {
+    id: "interchange",
+    name: "Interchange",
+    summary: "Crimson route bars and jade stop markers on off-white signage.",
+    scheme: "light",
+    style: "wayfinding",
+    swatches: ["#f9f7f0", "#ece7db", "#9b2743", "#176a55"],
+  },
+  {
+    id: "ridgeline",
+    name: "Ridgeline",
+    summary: "Pine-green contour lines and ochre markers on a pale trail map.",
+    scheme: "light",
+    style: "cartography",
+    swatches: ["#f3f2e6", "#e5e8d2", "#315c37", "#8b4e21"],
+  },
+  {
+    id: "bathymetry",
+    name: "Bathymetry",
+    summary: "Sea-green depth contours and coral markers on deep blue.",
+    scheme: "dark",
+    style: "cartography",
+    swatches: ["#081b2a", "#183648", "#80e9d8", "#ffa387"],
+  },
+  {
+    id: "saltflat",
+    name: "Salt Flat",
+    summary: "Sandstone contours and lilac survey marks on a pale desert map.",
+    scheme: "light",
+    style: "cartography",
+    swatches: ["#fcf1e6", "#f1e0d3", "#8a3c35", "#614496"],
+  },
+  {
+    id: "selvedge",
+    name: "Selvedge",
+    summary: "Indigo weave with rust stitching and rounded lettering.",
+    scheme: "dark",
+    style: "textile",
+    swatches: ["#151e2b", "#2a394c", "#f3ac78", "#9dbbf3"],
+  },
+  {
+    id: "herringbone",
+    name: "Herringbone",
+    summary: "Oat-colored cloth, burgundy thread and stitched seams.",
+    scheme: "light",
+    style: "textile",
+    swatches: ["#f5eee3", "#e9dece", "#843957", "#3b6351"],
+  },
+  {
+    id: "tapestry",
+    name: "Tapestry",
+    summary: "Plum fabric with gold thread and dusty rose trim.",
+    scheme: "dark",
+    style: "textile",
+    swatches: ["#241522", "#402a3d", "#f0c471", "#f0a7bf"],
+  },
+  {
+    id: "delft",
+    name: "Delft",
+    summary: "Cobalt brushwork and double rims on cool white porcelain.",
+    scheme: "light",
+    style: "porcelain",
+    swatches: ["#f1f6fd", "#e2ecfa", "#214a93", "#5a3a86"],
+  },
+  {
+    id: "celadon",
+    name: "Celadon",
+    summary: "A pale jade glaze with rounded rims and deep green ink.",
+    scheme: "light",
+    style: "porcelain",
+    swatches: ["#edf6ef", "#dfede3", "#22614c", "#794662"],
+  },
+  {
+    id: "obsidian",
+    name: "Obsidian",
+    summary: "Black glaze with copper rims and pale blue highlights.",
+    scheme: "dark",
+    style: "porcelain",
+    swatches: ["#181416", "#32282d", "#f3ae90", "#a9d5e5"],
+  },
+  {
+    id: "zenith",
+    name: "Zenith",
+    summary: "Sunburst rays over a molten horizon, with depth-pressed buttons.",
+    scheme: "dark",
+    crafted: true,
+    adaptive: true,
+    swatches: ["#171210", "#2a211d", "#ff7a3d", "#4cbdf0"],
+  },
+  {
+    id: "tartan",
+    name: "Tartan",
+    summary: "Woven plaid, oxblood and bottle green, set in a library serif.",
+    scheme: "light",
+    crafted: true,
+    swatches: ["#f4efe2", "#ebe3cf", "#9e2a2b", "#1f5c3a"],
+  },
+  {
+    id: "riptide",
+    name: "Riptide",
+    summary: "Rolling waves under frosted glass that sways with the tide.",
+    scheme: "dark",
+    crafted: true,
+    adaptive: true,
+    swatches: ["#101617", "#1d292a", "#4fd3e3", "#5a88d8"],
+  },
+  {
+    id: "halftone",
+    name: "Halftone",
+    summary: "Pop-art dots, boxed headlines and hard-edged brutal buttons.",
+    scheme: "light",
+    crafted: true,
+    swatches: ["#fff9e8", "#f0eada", "#d62839", "#1d4ed8"],
+  },
+  {
+    id: "jubilee",
+    name: "Jubilee",
+    summary: "Party zigzags, candy triadic colours and bouncy rounded pills.",
+    scheme: "light",
+    crafted: true,
+    adaptive: true,
+    swatches: ["#f8f4f5", "#f0e8eb", "#c9225c", "#4d9725"],
+  },
+  {
+    id: "spectra",
+    name: "Spectra",
+    summary: "Chromatic-split headings and a glowing frame over a colour-cycling grid.",
+    scheme: "dark",
+    crafted: true,
+    adaptive: true,
+    swatches: ["#121017", "#211d2a", "#9164f6", "#ead168"],
+  },
+  {
+    id: "tally",
+    name: "Tally",
+    summary: "An accountant's green ledger: ruled lines, tabular figures, square controls.",
+    scheme: "light",
+    crafted: true,
+    swatches: ["#f3f6ef", "#e6ecdf", "#1f6b45", "#a4472a"],
+  },
+  {
+    id: "terracotta",
+    name: "Terracotta",
+    summary: "Sun-baked brick courses, slab headings and warm clay buttons.",
+    scheme: "light",
+    crafted: true,
+    swatches: ["#f8f5f4", "#f0eae8", "#be542d", "#a18c32"],
+  },
+  {
+    id: "frostline",
+    name: "Frostline",
+    summary: "Icy glass panes, a pale aurora and a cold morning sheen.",
+    scheme: "light",
+    crafted: true,
+    adaptive: true,
+    swatches: ["#f4f6f8", "#e8ebf0", "#2e6dbc", "#6e8eb5"],
+  },
+  {
+    id: "velvet",
+    name: "Velvet",
+    summary: "Plush wine velvet, gold leaf headings and a cabaret spotlight.",
+    scheme: "dark",
+    crafted: true,
+    swatches: ["#170a12", "#2b1322", "#d9a441", "#c2335f"],
+  },
+  {
+    id: "nightshift",
+    name: "Night Shift",
+    summary: "Amber monospace on graphite with a faint halftone hum.",
+    scheme: "dark",
+    crafted: true,
+    swatches: ["#171510", "#2a271d", "#f2c94c", "#bb9c3b"],
+  },
+  {
+    id: "orchard",
+    name: "Orchard",
+    summary: "Rolling green hills, plum accents and soft rounded buttons.",
+    scheme: "light",
+    crafted: true,
+    adaptive: true,
+    swatches: ["#f5f8f4", "#eaf0e8", "#4f9a3a", "#814193"],
+  },
+  {
+    id: "kunsthalle",
+    name: "Kunsthalle",
+    summary: "Bauhaus primaries with boxed headlines, brutal buttons and a sunburst.",
+    scheme: "light",
+    style: "bauhaus",
+    crafted: true,
+    swatches: ["#f2efe6", "#e3e1d8", "#c8211a", "#1f4fbf"],
+  },
+  {
+    id: "overdrive",
+    name: "Overdrive",
+    summary: "Neon racing grid, chromatic headlines and a glowing window frame.",
+    scheme: "dark",
+    style: "neon",
+    crafted: true,
+    swatches: ["#171015", "#2a1d28", "#ff33d8", "#77f042"],
+  },
+  {
+    id: "picnic",
+    name: "Picnic",
+    summary: "A gingham blanket under paper panes, with handwritten headings.",
+    scheme: "light",
+    style: "paper",
+    crafted: true,
+    swatches: ["#fbf6ee", "#ece7e0", "#c8323c", "#3a7d44"],
+  },
+  {
+    id: "mossgarden",
+    name: "Moss Garden",
+    summary: "Raked-gravel rings around deep moss, breathing slowly.",
+    scheme: "dark",
+    style: "zen",
+    crafted: true,
+    swatches: ["#0f1510", "#1b251c", "#9cc98a", "#d8c39a"],
   },
 ];
 

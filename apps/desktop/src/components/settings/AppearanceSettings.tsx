@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import {
   DEFAULT_THEME,
+  MAX_CUSTOM_THEMES,
   THEME_FAMILY_ORDER,
   THEME_OPTIONS,
   THEME_STYLES,
@@ -11,7 +12,11 @@ import {
   editorFontSize,
   filterThemeOptions,
   findCustomTheme,
+  isExtendableTheme,
+  materializeTheme,
   newCustomThemeId,
+  relinkTheme,
+  remixTheme,
   parseChatDensity,
   parseProductMode,
   resolveThemeRef,
@@ -26,11 +31,16 @@ import {
   type ThemeFamily,
   type ThemeFilter,
   type ThemeOption,
+  type ThemePack,
+  type ThemePreferences as ThemePreferencesValue,
   type ThemeRef,
 } from "@locus/shared";
 import { ThemePreview } from "./ThemePreview";
+import type { RenderedContrastIssue } from "@/lib/themeAudit";
 import { SettingsToggleRow } from "./SettingsBits";
-import { CustomThemeEditor, importThemeJson, readThemeColors } from "./CustomThemeEditor";
+import { CustomThemeEditor, readThemeColors } from "./CustomThemeEditor";
+import { ThemePackSettings } from "./ThemePackSettings";
+import { ThemePreferences, type ThemeWorkspace } from "./ThemePreferences";
 import { ThemeComposer } from "./ThemeComposer";
 import { ModelPicker } from "./ModelPicker";
 import { PRODUCT_MODE_LABELS } from "@/lib/productMode";
@@ -71,6 +81,7 @@ const COLOUR_FILTERS: { id: ThemeFilter; label: string }[] = [
 
 /** Style filters: groups that change the UI's structure. */
 const STYLE_FILTERS: { id: ThemeFilter; label: string }[] = [
+  { id: "crafted", label: "Crafted" },
   { id: "terminal", label: "Terminal" },
   ...THEME_STYLES.map((style) => ({ id: style, label: themeFamilyLabel(style) })),
 ];
@@ -173,6 +184,9 @@ export function AppearanceSettings(props: {
   customThemes?: CustomTheme[];
   /** Providers for the theme composer's model picker. */
   providers?: AiProvider[];
+  themePreferences?: ThemePreferencesValue;
+  workspaces?: ThemeWorkspace[];
+  onThemePreferences?: (preferences: ThemePreferencesValue) => void;
   productMode?: ProductMode;
   chatDensity?: ChatDensity;
   editorFontSize: number;
@@ -201,9 +215,9 @@ export function AppearanceSettings(props: {
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
-  const [importText, setImportText] = useState("");
-  const [importError, setImportError] = useState<string | null>(null);
+  const [pack, setPack] = useState<ThemePack | null>(null);
+  const [variant, setVariant] = useState(0);
+  const [renderedIssues, setRenderedIssues] = useState<RenderedContrastIssue[]>([]);
 
   // Model for Generate / Refine: remembered per machine, falls back to the first usable provider.
   const capable = useMemo(() => themeCapableProviders(props.providers), [props.providers]);
@@ -237,24 +251,26 @@ export function AppearanceSettings(props: {
     />
   ) : null;
 
-  // While editing, the draft replaces its saved copy everywhere on this page.
-  const pageThemes = editing
-    ? [...customThemes.filter((row) => row.id !== editing.theme.id), editing.theme]
+  const draft = editing?.theme ?? pack?.variants[variant] ?? null;
+  const pageThemes = draft
+    ? [...customThemes.filter((row) => row.id !== draft.id), draft]
     : customThemes;
-  useEffect(() => {
-    setDraftThemeCss(editing?.theme ?? null);
-  }, [editing]);
-  useEffect(() => () => setDraftThemeCss(null), []);
+  useLayoutEffect(() => {
+    setDraftThemeCss(draft);
+    return () => setDraftThemeCss(null);
+  }, [draft]);
 
-  const previewId = editing ? editing.theme.id : (hoverId ?? selected);
+  const previewId = draft?.id ?? hoverId ?? selected;
   const searching = query.trim().length > 0;
   const builtins = filter === "generated" ? [] : filterThemeOptions(filter);
   const generatedItems =
-    filter === "all" || filter === "generated" ? pageThemes.map(customItem) : [];
+    filter === "all" || filter === "generated"
+      ? (editing ? pageThemes : customThemes).map(customItem)
+      : [];
   const items = [...builtins.map(builtinItem), ...generatedItems].filter((row) =>
     matchesQuery(row, query),
   );
-  const totalThemes = THEME_OPTIONS.length + pageThemes.length;
+  const totalThemes = THEME_OPTIONS.length + customThemes.length + Number(Boolean(editing?.isNew));
   const recents = loadThemeRecents()
     .filter((id) => id !== selected)
     .slice(0, 3);
@@ -299,7 +315,21 @@ export function AppearanceSettings(props: {
     return customThemes.map((row) => row.id);
   }
 
+  /** Opens a crafted built-in's full engine spec as an editable generated theme. */
+  function remixSelected() {
+    const theme = remixTheme(selected, customThemes);
+    if (!theme) return;
+    setPack(null);
+    setEditing({ theme, isNew: true });
+    setFilter("generated");
+  }
+
   function startNew() {
+    if (isExtendableTheme(selected, [])) {
+      remixSelected();
+      return;
+    }
+    setPack(null);
     const current = findCustomTheme(selected, customThemes);
     const builtin = THEME_OPTIONS.find((row) => row.id === selected);
     const scheme = current?.scheme ?? builtin?.scheme ?? "dark";
@@ -315,6 +345,10 @@ export function AppearanceSettings(props: {
         layout: current?.layout,
         type: current?.type,
         effects: current?.effects,
+        extraColors: current?.extraColors,
+        motion: current?.motion,
+        quietEffects: current?.quietEffects,
+        backdrop: current?.backdrop,
       },
       { taken: takenIds(), origin: "user", fixContrast: false },
     );
@@ -323,6 +357,7 @@ export function AppearanceSettings(props: {
   }
 
   function edit(theme: CustomTheme) {
+    setPack(null);
     setEditing({ theme, isNew: false });
     setFilter("generated");
   }
@@ -331,22 +366,33 @@ export function AppearanceSettings(props: {
     if (!editing || !props.onCustomThemes) return;
     const theme = { ...editing.theme, name: editing.theme.name.trim() || "Untitled theme" };
     theme.updatedAt = new Date().toISOString();
-    const exists = customThemes.some((row) => row.id === theme.id);
-    const next = exists
-      ? customThemes.map((row) => (row.id === theme.id ? theme : row))
-      : [...customThemes, theme];
-    props.onCustomThemes(next, editing.isNew || selected === theme.id ? theme.id : undefined);
+    const exists = !editing.isNew && customThemes.some((row) => row.id === theme.id);
+    if (!exists && customThemes.length >= MAX_CUSTOM_THEMES) return;
+    if (!exists && customThemes.some((row) => row.id === theme.id)) {
+      theme.id = newCustomThemeId(theme.name, takenIds());
+    }
+    const linked = relinkTheme(theme, customThemes);
+    const saved = exists
+      ? customThemes.map((row) => (row.id === linked.id ? linked : row))
+      : [...customThemes, linked];
+    // Themes built on this one pick up the change straight away.
+    const next = saved.map((row) => materializeTheme(row, saved));
+    props.onCustomThemes(next, editing.isNew ? linked.id : undefined);
     setEditing(null);
   }
 
   function deleteTheme(id: string) {
     if (!props.onCustomThemes) return;
     const next = customThemes.filter((row) => row.id !== id);
-    props.onCustomThemes(next, selected === id ? DEFAULT_THEME : undefined);
+    props.onCustomThemes(
+      next,
+      selected === id && !props.themePreferences?.followSystem ? DEFAULT_THEME : undefined,
+    );
     setEditing(null);
   }
 
   function duplicate(theme: CustomTheme) {
+    setPack(null);
     const id = newCustomThemeId(`${theme.name} copy`, takenIds());
     const now = new Date().toISOString();
     setEditing({
@@ -368,6 +414,7 @@ export function AppearanceSettings(props: {
     try {
       const { theme } = await api.generateTheme(prompt.trim(), generateWith);
       const id = newCustomThemeId(theme.name, takenIds());
+      setPack(null);
       setEditing({ theme: { ...theme, id }, isNew: true });
       setFilter("generated");
       setPrompt("");
@@ -378,16 +425,21 @@ export function AppearanceSettings(props: {
     }
   }
 
-  function importTheme() {
-    try {
-      const theme = importThemeJson(importText, takenIds());
-      setEditing({ theme, isNew: true });
-      setImportOpen(false);
-      setImportText("");
-      setImportError(null);
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : "Could not import that theme");
-    }
+  function installPack() {
+    if (
+      !pack ||
+      !props.onCustomThemes ||
+      customThemes.length + pack.variants.length > MAX_CUSTOM_THEMES
+    )
+      return;
+    const used = new Set(takenIds());
+    const variants = pack.variants.map((theme) => {
+      const id = used.has(theme.id) ? newCustomThemeId(theme.name, used) : theme.id;
+      used.add(id);
+      return { ...theme, id };
+    });
+    props.onCustomThemes([...customThemes, ...variants]);
+    setPack(null);
   }
 
   const card = (row: ThemeCardItem) => (
@@ -395,6 +447,7 @@ export function AppearanceSettings(props: {
       key={row.id}
       item={row}
       customThemes={pageThemes}
+      draft={editing?.theme.id === row.id}
       selected={selected === row.id}
       onSelect={() => selectTheme(row.id)}
       onPreview={() => setHoverId(row.id)}
@@ -515,6 +568,15 @@ export function AppearanceSettings(props: {
             </div>
           </div>
 
+          {props.onThemePreferences ? (
+            <ThemePreferences
+              preferences={props.themePreferences}
+              themes={customThemes}
+              workspaces={props.workspaces ?? []}
+              onChange={props.onThemePreferences}
+            />
+          ) : null}
+
           {/* The describe / build composer belongs to the Generated tab only. */}
           {props.onCustomThemes && filter === "generated" ? (
             <section className="theme-generate" aria-labelledby="theme-generate-label">
@@ -542,14 +604,18 @@ export function AppearanceSettings(props: {
                 >
                   Build your own
                 </button>
-                <button
-                  type="button"
-                  className={`btn chip${importOpen ? " on" : ""}`}
-                  aria-expanded={importOpen}
-                  onClick={() => setImportOpen((open) => !open)}
-                >
-                  Import JSON
-                </button>
+                {isExtendableTheme(selected, customThemes) ? (
+                  <button
+                    type="button"
+                    className="btn chip"
+                    onClick={remixSelected}
+                    data-testid="theme-remix"
+                  >
+                    Remix{" "}
+                    {findCustomTheme(selected, customThemes)?.name ??
+                      THEME_OPTIONS.find((row) => row.id === selected)?.name}
+                  </button>
+                ) : null}
               </ThemeComposer>
               {noProviderReason ? (
                 <p className="theme-composer-note" data-testid="theme-no-provider">
@@ -561,34 +627,66 @@ export function AppearanceSettings(props: {
                   {generateError}
                 </p>
               ) : null}
-              {importOpen ? (
-                <div className="theme-import">
-                  <textarea
-                    aria-label="Theme JSON"
-                    placeholder='{"name":"…","scheme":"dark","colors":{"bg":"#101014","text":"#f2f2f2","accent":"#ff5c8a"}}'
-                    value={importText}
-                    onChange={(event) => setImportText(event.target.value)}
-                  />
-                  <button type="button" className="btn small" onClick={importTheme}>
-                    Import theme
-                  </button>
-                  {importError ? (
-                    <p className="theme-editor-error" role="alert">
-                      {importError}
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
+              <ThemePackSettings
+                themes={customThemes}
+                onPreview={(next) => {
+                  setEditing(null);
+                  setVariant(0);
+                  setPack(next);
+                }}
+              />
+            </section>
+          ) : null}
+          {pack ? (
+            <section className="theme-editor" aria-label="Review theme pack">
+              <h3>{pack.name}</h3>
+              <div className="field">
+                <label htmlFor="theme-pack-variant">Preview variant</label>
+                <select
+                  id="theme-pack-variant"
+                  value={variant}
+                  onChange={(event) => setVariant(Number(event.target.value))}
+                >
+                  {pack.variants.map((theme, index) => (
+                    <option value={index} key={theme.id}>
+                      {theme.name} ({theme.adaptive ? "light & dark" : theme.scheme})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="theme-editor-actions">
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={customThemes.length + pack.variants.length > MAX_CUSTOM_THEMES}
+                  onClick={installPack}
+                >
+                  Install{" "}
+                  {pack.variants.length === 1 ? "theme" : `${pack.variants.length} variants`}
+                </button>
+                <button type="button" className="btn ghost" onClick={() => setPack(null)}>
+                  Cancel import
+                </button>
+              </div>
             </section>
           ) : null}
           {editing ? (
             <CustomThemeEditor
+              key={editing.theme.id}
               theme={editing.theme}
               customThemes={customThemes}
               isNew={editing.isNew}
+              atCapacity={editing.isNew && customThemes.length >= MAX_CUSTOM_THEMES}
+              renderedIssues={renderedIssues}
               generateWith={generateWith}
               modelPicker={modelPicker}
-              onChange={(theme) => setEditing((prev) => (prev ? { ...prev, theme } : prev))}
+              onChange={(next) =>
+                setEditing((prev) =>
+                  prev?.theme.id === editing.theme.id
+                    ? { ...prev, theme: typeof next === "function" ? next(prev.theme) : next }
+                    : prev,
+                )
+              }
               onSave={saveEditing}
               onCancel={() => setEditing(null)}
               onDelete={editing.isNew ? undefined : () => deleteTheme(editing.theme.id)}
@@ -735,8 +833,10 @@ export function AppearanceSettings(props: {
           theme={previewId}
           customThemes={pageThemes}
           selected={previewId === selected}
-          hovering={!editing && hoverId != null && hoverId !== selected}
-          label={editing ? "editing" : undefined}
+          hovering={!draft && hoverId != null && hoverId !== selected}
+          draft={draft ?? undefined}
+          label={editing ? "editing" : pack ? "import preview" : undefined}
+          onContrast={editing ? setRenderedIssues : undefined}
         />
         <ThemeDetails id={previewId} customThemes={pageThemes} />
       </aside>
@@ -750,9 +850,10 @@ function detailsKind(
   opt: ThemeOption | undefined,
 ): string {
   const kind = custom?.origin === "ai" ? "Made by Locus" : themeFamilyLabel(family);
-  const scheme = custom?.scheme ?? opt?.scheme ?? "";
+  const adaptive = custom?.adaptive ?? opt?.adaptive;
+  const scheme = adaptive ? "light & dark" : (custom?.scheme ?? opt?.scheme ?? "");
   // "Dark · dark" says nothing twice; only add the scheme when the family hides it.
-  return family === "dark" || family === "light" ? kind : `${kind} · ${scheme}`;
+  return (family === "dark" || family === "light") && !adaptive ? kind : `${kind} · ${scheme}`;
 }
 
 /** What each of a theme's four swatches shows (see customThemeSwatches). */
@@ -803,6 +904,7 @@ function groupedThemeFamilies(
 function ThemeCard(props: {
   item: ThemeCardItem;
   customThemes: readonly CustomTheme[];
+  draft?: boolean;
   selected: boolean;
   onSelect: () => void;
   onPreview: () => void;
@@ -827,6 +929,7 @@ function ThemeCard(props: {
         <div
           className="theme-thumb"
           {...themeSurfaceAttrs(props.item.id, props.customThemes)}
+          data-theme-draft={props.draft ? "" : undefined}
           aria-hidden="true"
         >
           <div className="theme-thumb-chrome">

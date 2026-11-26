@@ -6,6 +6,7 @@ import {
   isMoreRailSection,
   MORE_RAIL_SECTIONS,
   PRIMARY_RAIL_SECTIONS,
+  RAIL_MENU_GROUPS,
   moveRailSection,
   pinRailSection,
   primaryRailSections,
@@ -17,8 +18,8 @@ import {
 } from "./railNav";
 
 describe("railNav", () => {
-  it("pins Agents and Codebase by default and puts the rest behind More", () => {
-    expect([...PRIMARY_RAIL_SECTIONS]).toEqual(["agents", "codebase"]);
+  it("pins Agents, Codebase, and Reviews by default and puts the rest behind More", () => {
+    expect([...PRIMARY_RAIL_SECTIONS]).toEqual(["agents", "codebase", "reviews"]);
     expect([...MORE_RAIL_SECTIONS]).toEqual([
       "design",
       "games",
@@ -41,6 +42,11 @@ describe("railNav", () => {
     expect(isMoreRailSection("settings")).toBe(false);
   });
 
+  it("assigns every available surface to exactly one More group", () => {
+    const grouped = RAIL_MENU_GROUPS.flatMap((group) => group.sections);
+    expect([...grouped].sort()).toEqual([...PRIMARY_RAIL_SECTIONS, ...MORE_RAIL_SECTIONS].sort());
+  });
+
   it("keeps the old five-icon rail for legacy installs with no saved pins", () => {
     expect(effectiveRailPins("developer", undefined, "current")).toBeUndefined();
     expect(effectiveRailPins("developer", undefined, "legacy")).toEqual([
@@ -55,6 +61,7 @@ describe("railNav", () => {
       "automations",
     ]);
     expect(resolveRailSections("developer", legacy).more).toEqual([
+      "reviews",
       "games",
       "assets",
       "android",
@@ -101,7 +108,7 @@ describe("railNav", () => {
     expect(resolveRailSections("developer", withGames).more).not.toContain("games");
     const withoutDesign = unpinRailSection("developer", LEGACY_PRIMARY_RAIL_SECTIONS, "design");
     expect(withoutDesign).not.toContain("design");
-    expect(resolveRailSections("developer", withoutDesign).more[0]).toBe("design");
+    expect(resolveRailSections("developer", withoutDesign).more).toContain("design");
     expect(unpinRailSection("developer", withoutDesign, "agents")).toContain("agents");
     expect(resolveRailSections("swarm").primary).toEqual(["agents", "project"]);
     expect(unpinRailSection("swarm", undefined, "project")).toContain("project");
@@ -124,10 +131,11 @@ describe("railNav", () => {
     expect(moveRailSection("developer", pinned, "agents", 1)).toEqual(
       resolveRailSections("developer", pinned).primary,
     );
-    expect(railShortcutTargets("developer")).toEqual(["inbox", "agents", "codebase"]);
+    expect(railShortcutTargets("developer")).toEqual(["inbox", "agents", "codebase", "reviews"]);
     expect(pinRailSection("developer", undefined, "design")).toEqual([
       "agents",
       "codebase",
+      "reviews",
       "design",
     ]);
   });

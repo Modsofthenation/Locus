@@ -10,6 +10,7 @@ import { PRODUCT_MODE_LABELS } from "@/lib/productMode";
 import { Select } from "@/components/layout/Select";
 import { QemuInstallStatus } from "./SettingsCards";
 import { SampleTaskButton } from "./SampleTaskButton";
+import { sampleTaskReady } from "@/lib/sampleTask";
 
 export function SetupWizard() {
   const { state, dispatch } = useStore();
@@ -214,7 +215,7 @@ export function SetupWizard() {
     }
   }
 
-  const hostLabel = setup.hostOs?.label ?? "this computer";
+  const hostLabel = setup.hostOs?.label;
   const keyOptional = hasUsableKey("", provider?.baseUrl, provider?.kind);
   const enabledProvider = current.providers.find((p) => p.enabled);
   // Order: free tier, then no-key local servers and CLIs, then cloud keys; the
@@ -236,7 +237,7 @@ export function SetupWizard() {
         <div>
           <h2 id="setup-wizard-title">Set up Locus</h2>
           <p className="scrim-note setup-hero-lead">
-            Detected {hostLabel}.{" "}
+            {hostLabel ? `Detected ${hostLabel}. ` : null}
             {setup.hasProvider
               ? "A provider is ready, so you can start chatting on this machine."
               : "Pick a model provider, then start chatting on this machine."}{" "}
@@ -247,14 +248,14 @@ export function SetupWizard() {
       </div>
       <ol className="setup-list">
         <li className={setup.hasProvider ? "ok" : "todo"}>
-          <strong>Provider</strong>
+          <strong>Model provider</strong>
           <span className={verified && !verified.ok ? "hint warn-text" : undefined}>
             {setup.hasProvider
               ? (verified?.text ??
                 (enabledProvider
                   ? `${enabledProvider.name} · ${enabledProvider.defaultModel} is enabled.`
                   : "An enabled provider can answer chat."))
-              : "Paste an OpenCode Zen key for the free tier, or another provider key. Local servers such as Ollama, and CLI providers (Cursor CLI, Claude Code, Codex CLI, Kiro CLI, Custom CLI agents), do not need a key."}
+              : "Choose a cloud provider with an API key, a local model server, or a coding CLI you’re signed in to."}
           </span>
           {!setup.hasProvider && (
             <div className="setup-provider">
@@ -269,6 +270,7 @@ export function SetupWizard() {
               />
               <input
                 type="password"
+                aria-label={keyOptional ? "Optional API key" : "API key"}
                 placeholder={
                   provider?.kind === "cursor-cli"
                     ? "optional — uses agent login"
@@ -302,8 +304,44 @@ export function SetupWizard() {
           )}
         </li>
       </ol>
+      <ol className="setup-list">
+        <li>
+          <strong>Choose a workspace</strong>
+          <span>
+            Choose {PRODUCT_MODE_LABELS.swarm} for Teammates, Teams, and Routines or{" "}
+            {PRODUCT_MODE_LABELS.developer} for Agents, Codebase, and Reviews. You can switch in
+            Settings.
+          </span>
+          <div
+            className="runtime-toggle setup-mode-toggle"
+            role="radiogroup"
+            aria-label="Product mode"
+          >
+            <button
+              type="button"
+              className={productMode === "swarm" ? "active" : ""}
+              role="radio"
+              aria-checked={productMode === "swarm"}
+              data-testid="setup-mode-swarm"
+              onClick={() => setProductMode("swarm")}
+            >
+              {PRODUCT_MODE_LABELS.swarm}
+            </button>
+            <button
+              type="button"
+              className={productMode === "developer" ? "active" : ""}
+              role="radio"
+              aria-checked={productMode === "developer"}
+              data-testid="setup-mode-developer"
+              onClick={() => setProductMode("developer")}
+            >
+              {PRODUCT_MODE_LABELS.developer}
+            </button>
+          </div>
+        </li>
+      </ol>
       <details className="setup-later">
-        <summary>Set up Docker or a VM later</summary>
+        <summary>Optional runtime setup</summary>
         <ol className="setup-list">
           <li className={setup.dockerFound ? "ok" : "todo"}>
             <strong>Docker (recommended)</strong>
@@ -369,41 +407,6 @@ export function SetupWizard() {
           </li>
         </ol>
       </details>
-      <ol className="setup-list">
-        <li className="ok">
-          <strong>How do you want to start?</strong>
-          <span>
-            {PRODUCT_MODE_LABELS.swarm} is teammate-first (avatars, Teams, Routines).{" "}
-            {PRODUCT_MODE_LABELS.developer} is the full control plane. You can switch anytime.
-          </span>
-          <div
-            className="runtime-toggle setup-mode-toggle"
-            role="radiogroup"
-            aria-label="Product mode"
-          >
-            <button
-              type="button"
-              className={productMode === "swarm" ? "active" : ""}
-              role="radio"
-              aria-checked={productMode === "swarm"}
-              data-testid="setup-mode-swarm"
-              onClick={() => setProductMode("swarm")}
-            >
-              {PRODUCT_MODE_LABELS.swarm}
-            </button>
-            <button
-              type="button"
-              className={productMode === "developer" ? "active" : ""}
-              role="radio"
-              aria-checked={productMode === "developer"}
-              data-testid="setup-mode-developer"
-              onClick={() => setProductMode("developer")}
-            >
-              {PRODUCT_MODE_LABELS.developer}
-            </button>
-          </div>
-        </li>
-      </ol>
       {restartNote && <p className="scrim-note">{restartNote}</p>}
       {error && (
         <p className="scrim-note" style={{ color: "var(--danger)" }}>
@@ -414,12 +417,14 @@ export function SetupWizard() {
         <button className="btn ghost" disabled={busy !== null} onClick={() => void finish(false)}>
           Skip for now
         </button>
-        <SampleTaskButton
-          className="btn"
-          disabled={busy !== null}
-          productMode={productMode}
-          beforeStart={finishForSample}
-        />
+        {sampleTaskReady(setup, current) ? (
+          <SampleTaskButton
+            className="btn"
+            disabled={busy !== null}
+            productMode={productMode}
+            beforeStart={finishForSample}
+          />
+        ) : null}
         {setup.dockerFound ? (
           <button
             className="btn primary"

@@ -1,6 +1,6 @@
 {
   "name": "@locus/compute",
-  "version": "0.29.0",
+  "version": "0.30.0",
   "private": true,
   "description": "Cloud compute placement, sandbox leases, and recovery",
   "type": "module",

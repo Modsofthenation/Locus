@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { workspaceTerminalWsUrl } from "@/lib/api";
 import { fitPty } from "@/lib/ptyFit";
+import { CUSTOM_THEME_ANSI_KEYS, ansiToken } from "@locus/shared";
+import { THEME_CHANGED_EVENT } from "@/lib/theme";
 
 export const WORKSPACE_TERMINAL_EVENT = "locus:workspace-terminal";
 export const WORKSPACE_TERMINAL_RUN_EVENT = "locus:workspace-terminal-run";
@@ -89,6 +91,7 @@ export function WorkspaceTerminal({
     let ws: WebSocket | undefined;
     let dataSub: { dispose(): void } | undefined;
     let ro: ResizeObserver | undefined;
+    let themeChanged: (() => void) | undefined;
 
     void (async () => {
       const [{ Terminal }, { FitAddon }] = await Promise.all([
@@ -97,21 +100,32 @@ export function WorkspaceTerminal({
         import("@xterm/xterm/css/xterm.css"),
       ]);
       if (cancelled || host.current !== node) return;
-      const css = getComputedStyle(document.documentElement);
       const session = new Terminal({
         convertEol: true,
         cursorBlink: true,
         fontSize: 12,
         lineHeight: 1,
-        fontFamily:
-          css.getPropertyValue("--mono").trim() || '"IBM Plex Mono", ui-monospace, monospace',
         disableStdin: !activeRef.current,
-        theme: {
+      });
+      const refreshTheme = () => {
+        const css = getComputedStyle(document.documentElement);
+        session.options.fontFamily =
+          css.getPropertyValue("--mono").trim() || '"IBM Plex Mono", ui-monospace, monospace';
+        // Themes built by the engine also set the 16 ANSI colours; others keep xterm's.
+        const ansi = Object.fromEntries(
+          CUSTOM_THEME_ANSI_KEYS.map((key) => [
+            key,
+            css.getPropertyValue(ansiToken(key)).trim(),
+          ]).filter(([, value]) => value),
+        );
+        session.options.theme = {
           background: css.getPropertyValue("--term").trim() || "#08090c",
           foreground: css.getPropertyValue("--term-fg").trim() || "#c6d0c9",
-          cursor: css.getPropertyValue("--accent").trim() || "#e7b07a",
-        },
-      });
+          cursor: css.getPropertyValue("--terminal-cursor").trim() || "#e7b07a",
+          ...ansi,
+        };
+      };
+      refreshTheme();
       if (cancelled) {
         session.dispose();
         return;
@@ -130,6 +144,11 @@ export function WorkspaceTerminal({
       const scheduleSize = () => {
         requestAnimationFrame(() => requestAnimationFrame(sendSize));
       };
+      themeChanged = () => {
+        refreshTheme();
+        scheduleSize();
+      };
+      window.addEventListener(THEME_CHANGED_EVENT, themeChanged);
       scheduleSize();
       if (activeRef.current) focusWorkspaceTerminal(session);
       else releaseTerminalFocus(node, session);
@@ -170,6 +189,7 @@ export function WorkspaceTerminal({
       cancelled = true;
       dataSub?.dispose();
       ro?.disconnect();
+      if (themeChanged) window.removeEventListener(THEME_CHANGED_EVENT, themeChanged);
       ws?.close();
       releaseTerminalFocus(node, term);
       termRef.current = undefined;

@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+import { auditThemePreview, type RenderedContrastIssue } from "@/lib/themeAudit";
 import type { CustomTheme } from "@locus/shared";
 import { themeDisplayName, themeSurfaceAttrs } from "@/lib/theme";
 import { EmptyHero } from "@/components/layout/EmptyHero";
@@ -10,6 +12,8 @@ export function ThemePreview({
   hovering = false,
   customThemes,
   label,
+  draft,
+  onContrast,
 }: {
   theme: string;
   selected?: boolean;
@@ -18,7 +22,14 @@ export function ThemePreview({
   customThemes?: readonly CustomTheme[];
   /** Overrides the status chip (e.g. "editing"). */
   label?: string;
+  draft?: CustomTheme;
+  onContrast?: (issues: RenderedContrastIssue[]) => void;
 }) {
+  const preview = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!draft || !onContrast || !preview.current) return;
+    onContrast(auditThemePreview(preview.current, draft));
+  }, [draft, onContrast]);
   const name = themeDisplayName(theme, customThemes);
   const status = label ?? (hovering ? "preview" : selected ? "selected" : "applied");
   return (
@@ -29,7 +40,9 @@ export function ThemePreview({
       </p>
       <div
         className="theme-preview"
+        ref={preview}
         data-testid="theme-preview"
+        data-theme-draft={draft ? "" : undefined}
         {...themeSurfaceAttrs(theme, customThemes)}
         inert
       >
@@ -68,6 +81,39 @@ export function ThemePreview({
             </div>
           </div>
         </div>
+        {draft ? (
+          <div className="theme-audit">
+            <div className="theme-audit-buttons">
+              <span className="btn primary small" data-audit-primary>
+                Button
+              </span>
+              <span className="btn primary small" data-theme-audit-hover>
+                Hover
+              </span>
+              <span className="btn small" data-theme-audit-focus>
+                Focus
+              </span>
+            </div>
+            <div className="sidebar">Sidebar</div>
+            <div className="msg user">
+              <div className="bubble">Your message</div>
+            </div>
+            <div className="msg assistant">
+              <div className="bubble">Agent reply</div>
+            </div>
+            <pre className="md-code" data-testid="theme-preview-code">
+              <span className="tok-cm">{"// code block"}</span>
+              {"\n"}
+              <span className="tok-kw">const</span> <span className="tok-fn">greet</span> ={" "}
+              <span className="tok-str">&quot;hi&quot;</span>;
+            </pre>
+            <div className="patch-line add">+ added line</div>
+            <div className="patch-line del">− removed line</div>
+            <div className="theme-audit-terminal">
+              Terminal <span className="theme-audit-cursor">▍</span>
+            </div>
+          </div>
+        ) : null}
       </div>
     </section>
   );

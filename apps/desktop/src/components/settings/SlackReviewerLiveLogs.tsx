@@ -20,7 +20,7 @@ const PHASE_LABEL: Record<SlackReviewerApiPhase, string> = {
 type PhaseFilter = SlackReviewerApiPhase | "all" | "polls";
 
 /**
- * Settings → Reviewers → Live logs: every Slack and forge call the reviewers make (channel
+ * Reviews → Diagnostics → Live logs: every Slack and forge call the reviewers make (channel
  * polls, thread polls, `autoReview` PR listing, and the calls a review makes), newest first, with
  * the redacted request and response. Fetches only while open.
  */

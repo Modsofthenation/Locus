@@ -73,27 +73,9 @@ export function AndroidStart() {
         }}
       >
         <header className="android-start-intro">
-          <span className="android-badge">Native app workspace</span>
-          <h1>From an idea to an Android app.</h1>
-          <p>
-            Build with your coding agent, explore your app on a real virtual device, and test every
-            change in one workspace.
-          </p>
+          <h1>Set up an Android project</h1>
+          <p>Create or open an app, then build and test it on an emulator with your agent.</p>
         </header>
-        <ol className="android-capabilities" aria-label="How it works">
-          <li>
-            <strong>Create</strong>
-            <span>The agent writes Kotlin / Compose or React Native code</span>
-          </li>
-          <li>
-            <strong>Emulate</strong>
-            <span>Tap through it on a live emulator</span>
-          </li>
-          <li>
-            <strong>Test & build</strong>
-            <span>Run tests, lint and get a debug APK</span>
-          </li>
-        </ol>
         <fieldset className="android-segmented">
           <legend>Project type</legend>
           <div className="android-segmented-options">
@@ -139,8 +121,8 @@ export function AndroidStart() {
           </div>
           <small id="android-folder-hint">
             {existing
-              ? "Absolute path to the folder with settings.gradle(.kts), or a React Native project root with an android/ folder."
-              : "Absolute path on this computer. Existing files are never overwritten."}
+              ? "Choose a project you trust. Gradle runs on this computer."
+              : "Choose an empty folder on this computer."}
           </small>
           <HostFolderPicker
             open={browsing}
@@ -183,19 +165,20 @@ export function AndroidStart() {
             showCosts={false}
           />
         </div>
-        <div className="android-requirements">
-          <strong>Before you start</strong>
+        <details className="android-requirements">
+          <summary>Android build requirements</summary>
           <ul>
             <li>Android SDK from Android Studio and a compatible JDK</li>
-            <li>Node.js for React Native projects (Metro starts automatically on Build & run)</li>
+            {kind !== "native" ? <li>Node.js for React Native projects</li> : null}
             <li>A virtual device created in Android Studio’s Device Manager</li>
-            <li>
-              Gradle runs on this computer, so only open projects you trust. The standard{" "}
-              <code>app</code> module and debug APK are supported, at the project root or in{" "}
-              <code>android/</code> for React Native.
-            </li>
+            {existing ? (
+              <li>
+                A project with a standard <code>app</code> module and debug APK. For React Native,
+                choose the project root containing <code>android/</code>.
+              </li>
+            ) : null}
           </ul>
-        </div>
+        </details>
         {!allowed ? (
           <p role="alert" className="android-form-error">
             Your organization’s policy blocks Host agents.

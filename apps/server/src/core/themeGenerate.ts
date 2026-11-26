@@ -55,8 +55,13 @@ export async function generateCustomTheme(input: {
       status: 503,
     };
   }
-  const user = input.current
-    ? `Revise this theme. Keep what the request does not mention.\nCurrent theme:\n${JSON.stringify(input.current).slice(0, 6_000)}\n\nRequest: ${prompt}`
+  let current = input.current;
+  if (current && typeof current === "object" && !Array.isArray(current)) {
+    const { backdrop: _localAsset, ...spec } = current as Record<string, unknown>;
+    current = spec;
+  }
+  const user = current
+    ? `Revise this theme. Keep what the request does not mention.\nCurrent theme:\n${JSON.stringify(current).slice(0, 6_000)}\n\nRequest: ${prompt}`
     : `Request: ${prompt}`;
   let text: string;
   try {

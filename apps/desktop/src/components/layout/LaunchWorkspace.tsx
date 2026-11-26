@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AgentRuntime, NamedEnvironment } from "@locus/shared";
 import { folderName, loadIdeRecents, rememberIdeRecent } from "@/lib/ideRecents";
 import { HostFolderPicker } from "@/components/workspace/HostFolderField";
@@ -72,6 +72,8 @@ export function LaunchWorkspace(props: {
   const [open, setOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [recentsTick, setRecentsTick] = useState(0);
+  const pickerId = useId();
+  const toggle = useRef<HTMLButtonElement>(null);
   const copy = runtimeCopy(props.runtime);
   const canOpenFolder = props.runtime === "host" && !props.remote;
   const showRemotePath = Boolean(props.remote);
@@ -182,7 +184,17 @@ export function LaunchWorkspace(props: {
   const showRuntimeToggle = typeof props.onRuntimeChange === "function";
 
   return (
-    <div className="launch-workspace" data-testid="launch-workspace">
+    <div
+      className="launch-workspace"
+      data-testid="launch-workspace"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !open || pickerOpen) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(false);
+        toggle.current?.focus();
+      }}
+    >
       <div className="launch-workspace-head">
         <div className="launch-workspace-head-start">
           <div className="launch-kicker">{copy.kicker}</div>
@@ -209,10 +221,11 @@ export function LaunchWorkspace(props: {
       </div>
       <div className={`launch-ws-row${open ? " is-open" : ""}`}>
         <button
+          ref={toggle}
           type="button"
           className="launch-ws-main"
           aria-expanded={open}
-          aria-controls="launch-ws-picker"
+          aria-controls={open ? pickerId : undefined}
           data-testid="launch-workspace-toggle"
           onClick={() => setOpen((value) => !value)}
         >
@@ -270,12 +283,7 @@ export function LaunchWorkspace(props: {
       ) : null}
 
       {open ? (
-        <div
-          className="launch-picker"
-          id="launch-ws-picker"
-          role="listbox"
-          aria-label="Choose workspace"
-        >
+        <div className="launch-picker" id={pickerId} role="group" aria-label="Choose workspace">
           <div className="launch-picker-head">
             <p className="launch-kicker">{copy.browseLabel}</p>
             <p className="hint">{copy.help}</p>
@@ -287,8 +295,7 @@ export function LaunchWorkspace(props: {
                 <button
                   key={item.id}
                   type="button"
-                  role="option"
-                  aria-selected={on}
+                  aria-pressed={on}
                   className={`launch-picker-row${on ? " on" : ""}`}
                   data-testid={`launch-workspace-option-${item.id}`}
                   onClick={() => {
@@ -301,6 +308,7 @@ export function LaunchWorkspace(props: {
                       props.onHostDir("");
                     }
                     setOpen(false);
+                    toggle.current?.focus();
                   }}
                 >
                   <span className="launch-tile" aria-hidden="true">

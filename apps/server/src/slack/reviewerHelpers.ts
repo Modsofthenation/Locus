@@ -6,6 +6,7 @@
 import { readFile } from "node:fs/promises";
 import {
   buildSlackReviewLinkedIssues,
+  isLocusReviewerPost,
   formatCiFailures,
   mergeSlackReviewResults,
   SLACK_REVIEW_CI_LOG_JOBS,
@@ -167,7 +168,10 @@ export function isFinishedPullState(state: string | undefined): boolean {
 
 /** A reply written by a person. Bot posts, joins and Locus's own posts never count. */
 export function isHumanReply(message: SlackMessage): boolean {
-  if (message.agent) return false;
+  // Another Locus's reviewer (as the app, or as its user with the reviewer marker) is not a person:
+  // its "Dismissed #1" or "Nothing to dismiss" lines must not read as commands, or two reviewers
+  // in one channel answer each other forever.
+  if (message.agent || message.bot || isLocusReviewerPost(message)) return false;
   if (message.subtype && message.subtype !== "thread_broadcast") return false;
   return Boolean(message.text?.trim());
 }
@@ -179,7 +183,7 @@ export function isRereviewReply(message: SlackMessage): boolean {
 
 /** Top-level human posts only. Thread replies, bot posts, joins, and Locus's own posts are not review requests. */
 export function isReviewablePost(message: SlackMessage): boolean {
-  if (message.agent) return false;
+  if (message.agent || isLocusReviewerPost(message)) return false;
   if (message.threadTs && message.threadTs !== message.ts) return false;
   if (message.subtype && message.subtype !== "thread_broadcast") return false;
   return Boolean(message.text?.trim());

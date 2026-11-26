@@ -24,6 +24,7 @@ import {
   findCustomTheme,
   isThemeId,
   normalizeCustomThemes,
+  normalizeThemePreferences,
   normalizePlugins,
   normalizeSkills,
   parseAllowHosts,
@@ -87,6 +88,9 @@ export function normalizeSavedConfig(
   dataDir: string,
 ): ConfigSaveResult {
   merged.customThemes = normalizeCustomThemes(merged.customThemes);
+  const themePreferences = normalizeThemePreferences(merged.themePreferences, merged.customThemes);
+  if (themePreferences) merged.themePreferences = themePreferences;
+  else delete merged.themePreferences;
   if (
     incomingTheme !== undefined &&
     !isThemeId(incomingTheme) &&

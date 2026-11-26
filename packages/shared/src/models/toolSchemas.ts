@@ -809,6 +809,17 @@ export const TOOL_SCHEMAS: Record<ComputerUseToolName, JsonSchema> = {
     },
     required: ["channel"],
   },
+  slack_emojis: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Optional substring to filter emoji names" },
+      name: {
+        type: "string",
+        description: "Exact emoji name (with or without colons) to look up, custom or standard",
+      },
+      limit: { type: "number", description: "Max emoji to list (default 200)" },
+    },
+  },
   grafana_search: {
     type: "object",
     properties: {

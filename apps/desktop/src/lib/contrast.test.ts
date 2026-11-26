@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { THEME_IDS } from "@locus/shared";
+import { THEME_IDS, craftedThemesCss, tokenThemesCss } from "@locus/shared";
 import { describe, expect, it } from "vitest";
 import { contrastRatio, parseThemePalettes, themeReadabilityFailures } from "./contrast";
 
@@ -9,6 +9,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const css = [
   readFileSync(join(here, "../index.css"), "utf8"),
   readFileSync(join(here, "../styles/themeStyles.css"), "utf8"),
+  tokenThemesCss(),
+  craftedThemesCss(),
 ].join("\n");
 
 describe("theme contrast", () => {

@@ -159,11 +159,11 @@ import {
 import {
   DEFAULT_SWARM_SETTINGS_TAB,
   settingsNavCount,
-  settingsNavGroupsForMode,
   settingsNavLabel,
-  settingsNavTabs,
+  visibleSettingsNavGroups,
 } from "@/lib/settingsNav";
-import { confirmLeaveSettings } from "@/lib/settingsLeave";
+import { saveInterfaceMode } from "@/lib/interfaceMode";
+import { confirmLeaveSettings, flushSettings } from "@/lib/settingsLeave";
 import { showErrorNotice, showNotice } from "@/lib/notice";
 import { askConfirm } from "@/lib/dialog";
 import { archiveSessions } from "@/lib/sessionUndo";
@@ -203,6 +203,7 @@ const JOB_FILTER_OPTIONS: { value: AutomationJobFilter; label: string }[] = [
 
 export function Sidebar() {
   const { state, dispatch } = useStore();
+  const lite = state.interfaceMode === "lite";
   const sideRef = useRef<HTMLElement>(null);
   const [showArchived, setShowArchived] = useState(() => loadSidebarPrefs().showArchived);
   const [showHiddenTeammates, setShowHiddenTeammates] = useState(
@@ -218,10 +219,12 @@ export function Sidebar() {
   const [railDefaults] = useState(() => loadSidebarPrefs().railDefaults);
   const [railHintsDone, setRailHintsDone] = useState(() => loadSidebarPrefs().railHintsDone);
   const [railEvents, setRailEvents] = useState<UiSection[]>([]);
-  const [listFilter, setListFilter] = useState<SidebarListFilter>(
+  const [savedListFilter, setListFilter] = useState<SidebarListFilter>(
     () => loadSidebarPrefs().listFilter,
   );
-  const [groupBy, setGroupBy] = useState<SidebarGroupBy>(() => loadSidebarPrefs().groupBy);
+  const [savedGroupBy, setGroupBy] = useState<SidebarGroupBy>(() => loadSidebarPrefs().groupBy);
+  const listFilter = lite ? "all" : savedListFilter;
+  const groupBy = lite ? "day" : savedGroupBy;
   const inboxOpen = state.inboxOpen;
   const [resizing, setResizing] = useState(false);
   const [hideAutomationChats, setHideAutomationChats] = useState(loadHideAutomationChats);
@@ -240,7 +243,7 @@ export function Sidebar() {
     if (prefs.fleetOpen === false) return false;
     return false;
   });
-  const query = sectionQuery(state);
+  const query = inboxOpen ? state.inboxQuery : sectionQuery(state);
   useEffect(() => {
     saveSidebarPrefs({
       showArchived,
@@ -251,8 +254,8 @@ export function Sidebar() {
       pinnedSections,
       railDefaults,
       railHintsDone,
-      listFilter,
-      groupBy,
+      listFilter: savedListFilter,
+      groupBy: savedGroupBy,
     });
   }, [
     showArchived,
@@ -263,8 +266,8 @@ export function Sidebar() {
     pinnedSections,
     railDefaults,
     railHintsDone,
-    listFilter,
-    groupBy,
+    savedListFilter,
+    savedGroupBy,
   ]);
   useEffect(
     () => onRailSignal((section) => setRailEvents((rows) => addRailSignal(rows, section))),
@@ -464,32 +467,34 @@ export function Sidebar() {
   const boardWaiting = boardNeedsYouItems(state.boards);
   const brainWaiting = state.brain?.inboxCount ?? 0;
   const sectionMeta = sectionMetaFor(productMode);
-  const railSections = resolveRailSections(productMode, railPins);
+  const railSections = resolveRailSections(productMode, lite ? undefined : railPins);
   const primarySections = railSections.primary.map((id) => ({
     id,
     ...sectionMeta[id as Exclude<UiSection, "settings">],
   }));
-  const secondarySections = railSections.more.map((id) => ({
+  const secondarySections = (lite ? [] : railSections.more).map((id) => ({
     id,
     ...sectionMeta[id as Exclude<UiSection, "settings">],
   }));
-  const railSuggestion = railPinSuggestion({
-    mode: productMode,
-    pinned: railSections.primary,
-    done: railHintsDone,
-    signals: [
-      ...railEvents,
-      ...railUsageSignals({
-        designs: state.sessions.some((s) => !s.archived && isDesignSession(s)),
-        automations: state.automations.length > 0,
-        grafanaToken: (state.config?.integrations ?? []).some(
-          (row) => row.kind === "grafana" && Boolean(row.token?.trim()),
-        ),
-        dockerFound: Boolean(state.setup?.dockerFound),
-        dockerAgents: state.sessions.some((s) => !s.archived && s.runtime === "docker"),
-      }),
-    ],
-  });
+  const railSuggestion =
+    !lite &&
+    railPinSuggestion({
+      mode: productMode,
+      pinned: railSections.primary,
+      done: railHintsDone,
+      signals: [
+        ...railEvents,
+        ...railUsageSignals({
+          designs: state.sessions.some((s) => !s.archived && isDesignSession(s)),
+          automations: state.automations.length > 0,
+          grafanaToken: (state.config?.integrations ?? []).some(
+            (row) => row.kind === "grafana" && Boolean(row.token?.trim()),
+          ),
+          dockerFound: Boolean(state.setup?.dockerFound),
+          dockerAgents: state.sessions.some((s) => !s.archived && s.runtime === "docker"),
+        }),
+      ],
+    });
   const inboxAll = buildInboxRows({
     sessions: state.sessions.filter((s) => sessionMatchesSurface(s, productMode)),
     boards: state.boards,
@@ -518,7 +523,7 @@ export function Sidebar() {
             ? ideCatalog
             : agentCatalog;
   // Chips only once there is something to filter.
-  const showSessionFilters = !inboxOpen && sessionListSection && sectionCatalog.length > 0;
+  const showSessionFilters = !lite && !inboxOpen && sessionListSection && sectionCatalog.length > 0;
   const slackBooting = slackWorkspaceBooting({
     slackStatus: state.slackStatus,
     slackConversations: state.slackConversations,
@@ -602,20 +607,26 @@ export function Sidebar() {
     setPinnedSections(reorderRailSections(productMode, railPins, section, target));
   }
 
-  function goToSection(section: UiSection) {
-    if (state.section === "settings" && !confirmLeaveSettings()) return;
+  async function goToSection(section: UiSection, onNavigate?: () => void) {
+    const betweenEditors = state.section === "settings" && section === "reviews";
+    if (betweenEditors || (state.section === "reviews" && section !== "reviews")) {
+      if (!(await flushSettings())) return;
+    } else if (state.section === "settings" && !confirmLeaveSettings()) return;
     dispatch({ type: "inbox", open: false });
     if (productMode === "swarm" && section === "project") {
       const selected = state.projects.find((item) => item.id === state.selectedProjectId);
       if (!selected || selected.surface !== "swarm") {
         dispatch({ type: "selectProject", id: null });
+        onNavigate?.();
         return;
       }
     }
     dispatch({ type: "section", section });
+    onNavigate?.();
   }
 
-  function openInbox() {
+  async function openInbox() {
+    if (state.section === "reviews" && !(await flushSettings())) return;
     if (state.section === "settings") {
       if (!confirmLeaveSettings()) return;
       dispatch({ type: "settings", open: false });
@@ -688,7 +699,7 @@ export function Sidebar() {
   }
 
   const pinMenuItem =
-    state.section !== "settings" && !isLockedRailSection(state.section, productMode) ? (
+    !lite && state.section !== "settings" && !isLockedRailSection(state.section, productMode) ? (
       <MenuItem onClick={() => togglePinnedSection(state.section)}>
         {railSections.primary.includes(state.section) ? "Unpin from rail" : "Pin to rail"}
       </MenuItem>
@@ -696,7 +707,7 @@ export function Sidebar() {
   const pinIndex = railSections.primary.indexOf(state.section);
   const pinFloor = lockedRailSections(productMode).length;
   const pinOrderMenu =
-    pinIndex >= 0 && !isLockedRailSection(state.section, productMode) ? (
+    !lite && pinIndex >= 0 && !isLockedRailSection(state.section, productMode) ? (
       <>
         <MenuItem
           disabled={pinIndex <= pinFloor}
@@ -817,8 +828,9 @@ export function Sidebar() {
   useEffect(() => {
     const prev = lastPick.current;
     lastPick.current = { key: pickKey, section: state.section };
-    // A rail switch also moves the selection; keep the drawer open for that.
-    if (prev.key === pickKey || prev.section !== state.section) return;
+    // Keep the list open across rail switches. Settings has its own section picker.
+    if (prev.key === pickKey) return;
+    if (prev.section !== state.section && state.section !== "settings") return;
     if (drawer && !state.collapsed) dispatch({ type: "sidebarCollapsed", collapsed: true });
   }, [pickKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -827,6 +839,8 @@ export function Sidebar() {
     if (prefs.fleetOpen !== undefined) return;
     if (fleetShouldAutoOpen(state.runs)) setFleetOpen(true);
   }, [state.runs]);
+
+  const shortcutTargets = railShortcutTargets(productMode, lite ? undefined : railPins);
 
   useEffect(() => {
     function onKey(event: globalThis.KeyboardEvent) {
@@ -839,7 +853,7 @@ export function Sidebar() {
           return;
         }
       }
-      const dest = railShortcutTargets(productMode, railPins)[Number(digit) - 1];
+      const dest = shortcutTargets[Number(digit) - 1];
       if (!dest) return;
       event.preventDefault();
       if (dest === "inbox") openInbox();
@@ -848,7 +862,7 @@ export function Sidebar() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // goToSection / openInbox close over the latest section; listing them retriggers every render.
-  }, [productMode, railPins, state.section]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [productMode, railPins, state.interfaceMode, state.section]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function returnToSwarmTeammates() {
     if (!confirmLeaveSettings()) return;
@@ -863,7 +877,6 @@ export function Sidebar() {
     }
   }
 
-  const shortcutTargets = railShortcutTargets(productMode, railPins);
   function shortcutHint(target: "inbox" | UiSection) {
     return shortcutCaption(shortcutTargets.indexOf(target));
   }
@@ -934,10 +947,7 @@ export function Sidebar() {
   // Create actions for the collapsed-rail flyout, mirroring each section's primary button.
   function peekActions(target: "inbox" | UiSection): RailPeekAction[] {
     if (target === "inbox") return [];
-    const go = (run: () => void) => () => {
-      goToSection(target);
-      run();
-    };
+    const go = (run: () => void) => () => void goToSection(target, run);
     const fresh = go(() => dispatch({ type: "select", id: null }));
     switch (target) {
       case "agents":
@@ -1001,7 +1011,8 @@ export function Sidebar() {
     }
   }
 
-  function onPeekOpen(target: "inbox" | UiSection, row: RailPeekRow) {
+  async function onPeekOpen(target: "inbox" | UiSection, row: RailPeekRow) {
+    if (state.section === "reviews" && !(await flushSettings())) return;
     if (target === "inbox") {
       const found = inboxAll.find((item) => item.key === row.key);
       if (found) openInboxRow(found);
@@ -1045,6 +1056,7 @@ export function Sidebar() {
     goToSection(target);
   }
 
+  const reviewsRailOnly = state.section === "reviews" && !inboxOpen;
   const headerShown = state.section !== "settings" && !inboxOpen;
   const layoutMenu = pinMenuItem ? (
     <OverflowMenu title="Sidebar layout" toggleClassName="btn icon ghost">
@@ -1052,11 +1064,18 @@ export function Sidebar() {
       {pinOrderMenu}
     </OverflowMenu>
   ) : null;
-  const headerMenu = sessionListSection
-    ? swarmMode && state.section === "agents"
-      ? null
-      : sessionListMenu
-    : layoutMenu;
+  const headerMenu = lite
+    ? null
+    : sessionListSection
+      ? swarmMode && state.section === "agents"
+        ? null
+        : sessionListMenu
+      : layoutMenu;
+  const settingsGroups = visibleSettingsNavGroups(
+    productMode,
+    state.interfaceMode,
+    state.settingsTab,
+  );
   const pickedLive = liveListed.filter((row) => picked.has(row.id));
 
   function primaryButton(label: string, onClick: () => void, icon = <IconPlus />) {
@@ -1219,12 +1238,19 @@ export function Sidebar() {
   return (
     <aside
       ref={sideRef}
-      className={`sidebar${swarmMode ? " swarm-sidebar" : ""}${resizing ? " resizing" : ""}`}
-      style={state.collapsed && !swarmMode ? undefined : { width: sidebarWidth }}
+      className={`sidebar${reviewsRailOnly ? " reviews-rail-only" : ""}${swarmMode ? " swarm-sidebar" : ""}${resizing ? " resizing" : ""}`}
+      style={
+        reviewsRailOnly || (state.collapsed && !swarmMode) ? undefined : { width: sidebarWidth }
+      }
     >
       <SideRail
         collapsed={state.collapsed}
         swarmMode={swarmMode}
+        lite={lite}
+        onInterfaceMode={(mode) => {
+          saveInterfaceMode(mode);
+          dispatch({ type: "interfaceMode", mode });
+        }}
         connected={state.connected}
         connTitle={connTitle}
         connDetail={connDetail}
@@ -1250,7 +1276,10 @@ export function Sidebar() {
         onSuggestion={answerRailSuggestion}
         onReorder={reorderPinnedSection}
         onMove={movePinnedSection}
-        onSettings={() => dispatch({ type: "settings", open: true })}
+        onSettings={async () => {
+          if (state.section === "reviews" && !(await flushSettings())) return;
+          dispatch({ type: "settings", open: true });
+        }}
         onToggleCollapse={() => dispatch({ type: "toggleSidebar" })}
         onSetup={() => dispatch({ type: "setupOpen", open: true })}
         peekRows={peekRows}
@@ -1259,12 +1288,13 @@ export function Sidebar() {
       />
       <div
         className="side-main"
-        inert={state.collapsed || undefined}
+        hidden={reviewsRailOnly}
+        inert={state.collapsed || reviewsRailOnly || undefined}
         aria-hidden={state.collapsed || undefined}
       >
         <div className="brand">
           <div className="brand-copy">
-            <h1>{inboxOpen ? "Home" : sectionLabel(state.section, productMode)}</h1>
+            {inboxOpen ? <h2>Home</h2> : <h1>{sectionLabel(state.section, productMode)}</h1>}
             {brandSubtitle ? <p>{brandSubtitle}</p> : null}
           </div>
           {headerShown && !primaryAction && headerMenu ? (
@@ -1279,7 +1309,14 @@ export function Sidebar() {
             </div>
           </div>
         ) : null}
-        {state.section !== "settings" ? (
+        {(
+          inboxOpen
+            ? inboxAll.length > 0 || Boolean(query)
+            : state.section !== "settings" &&
+              state.section !== "reviews" &&
+              state.section !== "brain" &&
+              (state.section !== "grafana" || grafanaConnected)
+        ) ? (
           <SearchField
             className="search"
             placeholder={
@@ -1315,7 +1352,7 @@ export function Sidebar() {
             onChange={setListFilter}
           />
         ) : null}
-        {state.section === "docker" ? (
+        {!inboxOpen && state.section === "docker" ? (
           <>
             <div className="docker-view-toggle" role="tablist" aria-label="Docker view">
               <button
@@ -1351,7 +1388,7 @@ export function Sidebar() {
             ) : null}
           </>
         ) : null}
-        {state.section === "automations" && state.automations.length ? (
+        {!inboxOpen && state.section === "automations" && state.automations.length ? (
           <>
             <div className="auto-side-filters">
               <Select
@@ -1505,7 +1542,7 @@ export function Sidebar() {
             {bulkError ? <p className="error auto-bulk-error">{bulkError}</p> : null}
           </>
         ) : null}
-        {state.section === "automations" && state.automations.length ? (
+        {!inboxOpen && state.section === "automations" && state.automations.length ? (
           <div className="auto-health" data-testid="auto-health">
             <p>{formatAutomationHealth(automationHealthCounts(state.automations, state.runs))}</p>
             {fleetExtras ? <p data-testid="auto-fleet-extras">{fleetExtras}</p> : null}
@@ -1534,7 +1571,7 @@ export function Sidebar() {
                 className="settings-nav"
                 aria-label="Settings"
                 onKeyDown={(event: KeyboardEvent<HTMLElement>) => {
-                  const tabs = settingsNavTabs(productMode);
+                  const tabs = settingsGroups.flatMap((group) => group.items);
                   const index = tabs.indexOf(state.settingsTab);
                   const down = event.key === "ArrowDown" || event.key === "j";
                   const up = event.key === "ArrowUp" || event.key === "k";
@@ -1548,7 +1585,7 @@ export function Sidebar() {
                   if (btn instanceof HTMLElement) btn.focus();
                 }}
               >
-                {settingsNavGroupsForMode(productMode).map((group) => (
+                {settingsGroups.map((group) => (
                   <div className="settings-nav-block" key={group.label}>
                     <p className="settings-nav-group">{group.label}</p>
                     {group.items.map((item) => {
@@ -1559,7 +1596,11 @@ export function Sidebar() {
                           type="button"
                           data-tab={item}
                           className={state.settingsTab === item ? "active" : ""}
-                          onClick={() => dispatch({ type: "settingsTab", tab: item })}
+                          aria-current={state.settingsTab === item ? "page" : undefined}
+                          onClick={() => {
+                            dispatch({ type: "settingsTab", tab: item });
+                            if (drawer) dispatch({ type: "sidebarCollapsed", collapsed: true });
+                          }}
                         >
                           <span className="settings-nav-label">{settingsNavLabel(item)}</span>
                           {count != null ? (
@@ -2038,11 +2079,8 @@ export function Sidebar() {
                 onSelect={(id) => dispatch({ type: "select", id })}
                 groupBy={groupBy}
               />
-            ) : state.section === "brain" ? (
-              <EmptyListNote>{q ? "No matching claims" : "No claims yet"}</EmptyListNote>
-            ) : state.section === "grafana" ? (
-              <EmptyListNote>{q ? "No matching queries" : "No saved queries yet"}</EmptyListNote>
-            ) : state.section === "slack" ? (
+            ) : state.section === "brain" || state.section === "grafana" ? null : state.section ===
+              "slack" ? (
               slackBooting ? (
                 <SlackChannelListSkeleton />
               ) : slackConversations.length === 0 && !state.slackStatus?.connected ? (
@@ -2599,7 +2637,7 @@ export function Sidebar() {
               <span>{state.section === "settings" ? "Teammates" : "Settings"}</span>
             </button>
           ) : null}
-          {swarmMode && state.section === "agents" && hiddenTeammateCount > 0 ? (
+          {!inboxOpen && swarmMode && state.section === "agents" && hiddenTeammateCount > 0 ? (
             <label className="hint archive-toggle" data-testid="swarm-show-hidden">
               <input
                 type="checkbox"
@@ -2610,7 +2648,7 @@ export function Sidebar() {
             </label>
           ) : null}
           {/* The header already shows the total; the footer only counts search matches. */}
-          {state.section === "codebase" ? (
+          {inboxOpen ? null : state.section === "codebase" ? (
             query.trim() ? (
               <span className="hint">
                 {repos.length} of {state.repos.length} {state.repos.length === 1 ? "repo" : "repos"}
@@ -2685,7 +2723,7 @@ export function Sidebar() {
                 </span>
               )}
             </span>
-          ) : inboxOpen ? null : (state.section === "agents" && archivedCount > 0) ||
+          ) : (state.section === "agents" && archivedCount > 0) ||
             (state.section === "ide" && archivedIdeCount > 0) ||
             (state.section === "design" && archivedDesignCount > 0) ||
             (state.section === "games" && archivedGameCount > 0) ||
@@ -2711,7 +2749,7 @@ export function Sidebar() {
           ) : null}
         </div>
       </div>
-      {drawer && !state.collapsed && !swarmMode ? (
+      {drawer && !state.collapsed && !swarmMode && !reviewsRailOnly ? (
         <div
           className="side-scrim"
           data-testid="side-scrim"
@@ -2719,7 +2757,7 @@ export function Sidebar() {
           onClick={() => dispatch({ type: "sidebarCollapsed", collapsed: true })}
         />
       ) : null}
-      {state.collapsed && !swarmMode ? null : (
+      {reviewsRailOnly || (state.collapsed && !swarmMode) ? null : (
         <Splitter
           className="sidebar-gutter"
           orientation="vertical"

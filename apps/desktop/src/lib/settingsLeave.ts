@@ -21,6 +21,11 @@ export function confirmLeaveSettings(): boolean {
   return true;
 }
 
+/** Wait for the current editor before opening another workspace or config editor. */
+export async function flushSettings(): Promise<boolean> {
+  return (await persistPending?.()) ?? true;
+}
+
 export function paletteActionLeavesSettings(id: string): boolean {
   if (id.startsWith("settings:")) return false;
   if (id.startsWith("theme:")) return false;

@@ -11,6 +11,7 @@ import type { McpServerConfig } from "./mcp.js";
 import type { AiProvider } from "./provider.js";
 import type { AgentSkill } from "./skill.js";
 import type { CustomTheme, ThemeRef } from "./customTheme.js";
+import type { ThemePreferences } from "./themePreferences.js";
 import type { RepoHardwareProfile, VmTemplate } from "./vm.js";
 import type { WorkerBackend } from "./worker.js";
 import type { NamedEnvironment } from "./namedEnv.js";
@@ -168,6 +169,7 @@ export interface LocusConfig {
   theme: ThemeRef;
   /** Generated themes: built in Appearance or by Locus (manage_theme). */
   customThemes?: CustomTheme[];
+  themePreferences?: ThemePreferences;
   /**
    * Product shell: Agents (full control plane) or Swarm (teammate-first).
    * Default developer so existing installs keep today’s UI.

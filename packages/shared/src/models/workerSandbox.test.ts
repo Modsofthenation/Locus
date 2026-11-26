@@ -13,10 +13,10 @@ describe("Settings-built sandbox templates", () => {
         maxMinutes: 15,
         maxUsd: 1,
         rateDate: "2026-11-22",
-        builtFor: " 0.29.0 ",
+        builtFor: " 0.30.0 ",
       },
     });
-    expect(parsed?.sandbox?.builtFor).toBe("0.29.0");
+    expect(parsed?.sandbox?.builtFor).toBe("0.30.0");
     const pasted = parseWorkerBackend({
       id: "e2",
       name: "E2B",
@@ -28,10 +28,10 @@ describe("Settings-built sandbox templates", () => {
 
   it("flags a template built for another version only when Settings built it", () => {
     const base = { template: "tpl", maxMinutes: 15, maxUsd: 1, rateDate: "2026-11-22" };
-    expect(sandboxTemplateStale({ ...base, builtFor: "0.23.0" }, "0.29.0")).toBe(true);
-    expect(sandboxTemplateStale({ ...base, builtFor: "0.29.0" }, "0.29.0")).toBe(false);
-    expect(sandboxTemplateStale(base, "0.29.0")).toBe(false);
-    expect(sandboxTemplateStale(undefined, "0.29.0")).toBe(false);
+    expect(sandboxTemplateStale({ ...base, builtFor: "0.23.0" }, "0.30.0")).toBe(true);
+    expect(sandboxTemplateStale({ ...base, builtFor: "0.30.0" }, "0.30.0")).toBe(false);
+    expect(sandboxTemplateStale(base, "0.30.0")).toBe(false);
+    expect(sandboxTemplateStale(undefined, "0.30.0")).toBe(false);
   });
 
   it("falls back to the smallest template size", () => {

@@ -1,5 +1,7 @@
+import { RAIL_MENU_GROUPS } from "@/lib/railNav";
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type DragEvent,
@@ -7,7 +9,20 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { AgentSession } from "@locus/shared";
-import { IconGear, IconHome, IconMore, IconPanel, IconPin, IconPlus, IconWrench } from "../Icons";
+import {
+  IconExpand,
+  IconGear,
+  IconHome,
+  IconMore,
+  IconPanel,
+  IconPin,
+  IconPlus,
+  IconSearch,
+  IconWrench,
+} from "../Icons";
+import type { InterfaceMode } from "@/lib/interfaceMode";
+import { openPalette } from "@/lib/palette";
+import { shortcutDisplay } from "@/lib/shortcuts";
 import { MenuItem, OverflowMenu } from "../OverflowMenu";
 import { sessionFitsSection } from "@/state/store";
 import type { UiSection } from "@/state/store";
@@ -25,6 +40,8 @@ export type RailSectionItem = { id: UiSection } & SectionMeta;
 export function SideRail(props: {
   collapsed: boolean;
   swarmMode: boolean;
+  lite: boolean;
+  onInterfaceMode: (mode: InterfaceMode) => void;
   connected: boolean;
   connTitle: string;
   connDetail: string;
@@ -59,8 +76,25 @@ export function SideRail(props: {
   const dragging = useRef<UiSection | null>(null);
   const [pinMenu, setPinMenu] = useState<null | { section: UiSection; x: number; y: number }>(null);
 
+  const railRef = useRef<HTMLDivElement>(null);
+  const restoreModeFocus = useRef(false);
+
+  function changeInterfaceMode(mode: InterfaceMode) {
+    restoreModeFocus.current = true;
+    setPeek(null);
+    setPinMenu(null);
+    props.onInterfaceMode(mode);
+  }
+
+  useLayoutEffect(() => {
+    if (!restoreModeFocus.current) return;
+    restoreModeFocus.current = false;
+    const selector = props.lite ? ".rail-full-toggle" : ".rail-more-toggle";
+    railRef.current?.querySelector<HTMLElement>(selector)?.focus();
+  }, [props.lite]);
+
   function openPinMenu(section: UiSection, event: ReactMouseEvent<HTMLElement>) {
-    if (isLockedRailSection(section, props.swarmMode ? "swarm" : "developer")) return;
+    if (props.lite || isLockedRailSection(section, props.swarmMode ? "swarm" : "developer")) return;
     event.preventDefault();
     event.stopPropagation();
     // Keyboard context-menu keys report 0,0; anchor to the button instead.
@@ -91,7 +125,7 @@ export function SideRail(props: {
   }
 
   function showPeek(target: "inbox" | UiSection, el: HTMLElement) {
-    if (!props.collapsed || props.swarmMode) return;
+    if (props.lite || !props.collapsed || props.swarmMode || target === "reviews") return;
     // Hover previews only: on touch a tap fires mouseenter and the flyout would cover the page.
     if (!canHover()) return;
     clearHide();
@@ -118,6 +152,7 @@ export function SideRail(props: {
   }
 
   function dropOn(target: UiSection, event: DragEvent<HTMLButtonElement>) {
+    if (props.lite) return;
     event.preventDefault();
     const from = dragging.current ?? (event.dataTransfer.getData("text/plain") as UiSection);
     dragging.current = null;
@@ -134,13 +169,15 @@ export function SideRail(props: {
   }
   const peekItems = peek ? props.peekRows(peek.target) : [];
   const peekCreate = peek ? (props.peekActions?.(peek.target) ?? []) : [];
+  const secondaryById = new Map(props.secondary.map((row) => [row.id, row]));
+  const activeSecondary = props.inboxOpen ? undefined : secondaryById.get(props.activeSection);
   const peekLabel =
     peek?.target === "inbox"
       ? "Home"
       : (props.primary.find((row) => row.id === peek?.target)?.label ?? "Section");
 
   return (
-    <div className="side-rail">
+    <div className="side-rail" ref={railRef}>
       <div className="brand-mark rail-brand" aria-hidden="true" />
       <nav className="side-rail-nav" aria-label="Sections">
         <button
@@ -150,7 +187,10 @@ export function SideRail(props: {
           aria-current={props.inboxOpen ? "page" : undefined}
           data-testid="sidebar-inbox"
           title={props.shortcutHint("inbox") ? `Home · ${props.shortcutHint("inbox")}` : "Home"}
-          onClick={props.onInbox}
+          onClick={() => {
+            setPeek(null);
+            props.onInbox();
+          }}
           onMouseEnter={(event) => showPeek("inbox", event.currentTarget)}
           onMouseLeave={scheduleHide}
           onFocus={(event) => showPeek("inbox", event.currentTarget)}
@@ -177,7 +217,7 @@ export function SideRail(props: {
               : autoUnread
                 ? `${row.label}, unread`
                 : row.label;
-          const locked = isLockedRailSection(row.id, mode);
+          const locked = props.lite || isLockedRailSection(row.id, mode);
           const shortcut = props.shortcutHint(row.id);
           const titleParts = [
             row.label,
@@ -187,6 +227,7 @@ export function SideRail(props: {
           return (
             <button
               key={row.id}
+              type="button"
               className={!props.inboxOpen && props.activeSection === row.id ? "active" : ""}
               aria-label={label}
               aria-current={!props.inboxOpen && props.activeSection === row.id ? "page" : undefined}
@@ -199,7 +240,10 @@ export function SideRail(props: {
               }
               draggable={!locked}
               title={titleParts.length ? titleParts.join(" · ") : undefined}
-              onClick={() => props.onSection(row.id)}
+              onClick={() => {
+                setPeek(null);
+                props.onSection(row.id);
+              }}
               onDragStart={(event) => dragStart(row.id, event)}
               onDragOver={(event) => {
                 if (locked) return;
@@ -217,23 +261,23 @@ export function SideRail(props: {
                 {row.icon}
               </span>
               {unread ? <span className="unread-dot" aria-hidden="true" /> : null}
-              <span className="rail-label">{row.railLabel ?? row.label}</span>
+              <span className="rail-label">{row.label}</span>
             </button>
           );
         })}
-        {props.secondary.length ? <div className="rail-sep" role="separator" /> : null}
-        {props.secondary.length ? (
+        {!props.lite ? <div className="rail-sep" role="separator" /> : null}
+        {!props.lite ? (
           <OverflowMenu
-            className={`rail-more${!props.inboxOpen && props.secondary.some((row) => row.id === props.activeSection) ? " active" : ""}`}
-            title="More"
+            className={`rail-more${activeSecondary ? " active" : ""}`}
+            ariaLabel={activeSecondary ? `More, current section ${activeSecondary.label}` : "More"}
+            title={activeSecondary ? `More · ${activeSecondary.label}` : "More"}
             align="after"
             label={
               <>
                 <span className="rail-icon" aria-hidden="true">
                   <IconMore />
                 </span>
-                {suggestion ||
-                props.secondary.some(
+                {props.secondary.some(
                   (row) =>
                     (row.id === "slack" && props.slackUnread) ||
                     (row.id === "board" && props.boardWaiting > 0),
@@ -245,44 +289,65 @@ export function SideRail(props: {
             }
             toggleClassName="rail-more-toggle"
           >
+            <div className="rail-more-group">
+              <MenuItem onClick={() => changeInterfaceMode("lite")}>Switch to Lite UI</MenuItem>
+            </div>
+            {RAIL_MENU_GROUPS.map(({ label, sections }) => {
+              const rows = sections.map((id) => secondaryById.get(id)).filter((row) => row != null);
+              if (!rows.length) return null;
+              return (
+                <div key={label} role="group" aria-label={label} className="rail-more-group">
+                  <p className="menu-label" aria-hidden="true">
+                    {label}
+                  </p>
+                  {rows.map((row) => {
+                    const unread =
+                      (row.id === "slack" && props.slackUnread) ||
+                      (row.id === "board" && props.boardWaiting > 0);
+                    return (
+                      <div key={row.id} className="menu-row rail-more-row">
+                        <MenuItem
+                          active={!props.inboxOpen && props.activeSection === row.id}
+                          onClick={() => props.onSection(row.id)}
+                        >
+                          <span className="rail-more-icon" aria-hidden="true">
+                            {row.icon}
+                          </span>
+                          <span className="rail-more-copy">
+                            <span className="rail-more-name">
+                              {row.label}
+                              {unread ? " · unread" : ""}
+                            </span>
+                            <span className="rail-more-description">{row.description}</span>
+                          </span>
+                        </MenuItem>
+                        <button
+                          type="button"
+                          className="menu-row-pin"
+                          data-menu-pin
+                          tabIndex={-1}
+                          aria-pressed={false}
+                          aria-label={`Pin ${row.label} to rail`}
+                          title={`Pin ${row.label} to rail`}
+                          onClick={() => props.onPin(row.id)}
+                        >
+                          <IconPin />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
             {suggestion ? (
-              <div data-testid="rail-suggestion">
+              <div className="rail-more-group" data-testid="rail-suggestion">
                 <p className="menu-label">Pin {suggestion.label}?</p>
                 <MenuItem onClick={() => props.onSuggestion?.(suggestion.id, true)}>Pin</MenuItem>
                 <MenuItem onClick={() => props.onSuggestion?.(suggestion.id, false)}>
                   Not now
                 </MenuItem>
-                <div className="menu-sep" role="separator" />
               </div>
             ) : null}
-            {props.secondary.map((row) => {
-              const unread =
-                (row.id === "slack" && props.slackUnread) ||
-                (row.id === "board" && props.boardWaiting > 0);
-              return (
-                <div key={row.id} className="menu-row rail-more-row">
-                  <MenuItem
-                    active={!props.inboxOpen && props.activeSection === row.id}
-                    onClick={() => props.onSection(row.id)}
-                  >
-                    {row.label}
-                    {unread ? " · unread" : ""}
-                  </MenuItem>
-                  <button
-                    type="button"
-                    className="menu-row-pin"
-                    data-menu-pin
-                    tabIndex={-1}
-                    aria-pressed={false}
-                    aria-label={`Pin ${row.label} to rail`}
-                    title={`Pin ${row.label} to rail`}
-                    onClick={() => props.onPin(row.id)}
-                  >
-                    <IconPin />
-                  </button>
-                </div>
-              );
-            })}
           </OverflowMenu>
         ) : null}
       </nav>
@@ -297,6 +362,18 @@ export function SideRail(props: {
         >
           <span className="conn-dot" />
         </span>
+        <button
+          type="button"
+          aria-label="Search workspace"
+          aria-haspopup="dialog"
+          title={`Search workspace · ${shortcutDisplay("Ctrl/Cmd+K")}`}
+          onClick={openPalette}
+        >
+          <span className="rail-icon" aria-hidden="true">
+            <IconSearch />
+          </span>
+          <span className="rail-label">Search</span>
+        </button>
         {props.setupOpen ? (
           <button type="button" className="setup-btn" aria-label="Setup" onClick={props.onSetup}>
             <span className="rail-icon" aria-hidden="true">
@@ -318,19 +395,35 @@ export function SideRail(props: {
           </span>
           <span className="rail-label">Settings</span>
         </button>
-        <button
-          type="button"
-          aria-label={props.collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={props.collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          onClick={props.onToggleCollapse}
-        >
-          <span className="rail-icon" aria-hidden="true">
-            <IconPanel />
-          </span>
-          <span className="rail-label">{props.collapsed ? "Expand" : "Collapse"}</span>
-        </button>
+        {props.lite ? (
+          <button
+            type="button"
+            className="rail-full-toggle"
+            aria-label="Switch to Full UI"
+            title="Switch to Full UI"
+            onClick={() => changeInterfaceMode("full")}
+          >
+            <span className="rail-icon" aria-hidden="true">
+              <IconExpand />
+            </span>
+            <span className="rail-label">Full UI</span>
+          </button>
+        ) : null}
+        {props.activeSection !== "reviews" || props.inboxOpen ? (
+          <button
+            type="button"
+            aria-label={props.collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={props.collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick={props.onToggleCollapse}
+          >
+            <span className="rail-icon" aria-hidden="true">
+              <IconPanel />
+            </span>
+            <span className="rail-label">{props.collapsed ? "Expand" : "Collapse"}</span>
+          </button>
+        ) : null}
       </div>
-      {pinMenu
+      {!props.lite && pinMenu
         ? createPortal(
             <>
               <button
@@ -395,7 +488,7 @@ export function SideRail(props: {
             document.body,
           )
         : null}
-      {peek ? (
+      {!props.lite && peek ? (
         <div
           className="rail-peek"
           data-testid="rail-peek"

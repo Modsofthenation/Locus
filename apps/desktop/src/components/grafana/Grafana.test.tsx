@@ -66,7 +66,7 @@ describe("GrafanaPane", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(host.textContent).toMatch(/Grafana explorer/);
+    expect(host.textContent).toMatch(/Connect Grafana/);
     expect(host.textContent).toMatch(/Add Grafana/);
     const add = [...host.querySelectorAll("button")].find((el) => el.textContent === "Add Grafana");
     act(() => add?.dispatchEvent(new MouseEvent("click", { bubbles: true })));

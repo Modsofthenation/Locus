@@ -1,9 +1,21 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { THEME_IDS, THEME_OPTIONS, THEME_STYLES, customThemeFromInput } from "@locus/shared";
-import { describe, expect, it } from "vitest";
 import {
+  THEME_IDS,
+  THEME_OPTIONS,
+  THEME_STYLES,
+  craftedThemesCss,
+  customThemeFromInput,
+  tokenThemesCss,
+} from "@locus/shared";
+import { describe, expect, it } from "vitest";
+import type { AgentSession } from "@locus/shared";
+import {
+  activeWorkspaceAccent,
+  activeWorkspaceThemeKey,
+  configuredTheme,
+  applyWorkspaceAccent,
   applyChatDensity,
   applyEditorPrefs,
   applyTheme,
@@ -17,7 +29,8 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const indexCss = readFileSync(join(here, "../index.css"), "utf8");
 const styleCss = readFileSync(join(here, "../styles/themeStyles.css"), "utf8");
-const css = `${indexCss}\n${styleCss}`;
+/** Crafted built-ins are compiled from engine specs at runtime. */
+const css = `${indexCss}\n${styleCss}\n${tokenThemesCss()}\n${craftedThemesCss()}`;
 
 describe("applyTheme", () => {
   it("sets the document palette and color-scheme", () => {
@@ -185,7 +198,7 @@ describe("applyTheme", () => {
       );
       expect(styleCss).toContain(`.theme-thumb[data-theme-style="${style}"]`);
     }
-    for (const opt of THEME_OPTIONS.filter((t) => t.style)) {
+    for (const opt of THEME_OPTIONS.filter((t) => t.style && !t.crafted)) {
       expect(styleCss).toContain(`[data-theme="${opt.id}"] {`);
     }
     expect(styleCss).toMatch(
@@ -281,6 +294,95 @@ describe("applyTheme", () => {
   });
 });
 
+describe("workspace accents", () => {
+  it("uses a project accent before a repository accent and clears it outside the workspace", () => {
+    const config = {
+      themePreferences: {
+        workspaceAccents: {
+          "project:one": "#123456",
+          "repo:two": "#abcdef",
+        },
+      },
+    };
+    const sessions = [{ id: "chat", projectId: "one", repoId: "two" }] as AgentSession[];
+    const state = {
+      config,
+      sessions,
+      selectedId: "chat",
+      selectedRepoId: "two",
+      selectedProjectId: "one",
+    };
+    const root = document.documentElement;
+    applyWorkspaceAccent(activeWorkspaceAccent({ ...state, section: "agents" }));
+    expect(root.style.getPropertyValue("--workspace-accent")).toBe("#123456");
+    applyWorkspaceAccent(activeWorkspaceAccent({ ...state, section: "codebase" }));
+    expect(root.style.getPropertyValue("--workspace-accent")).toBe("#abcdef");
+    applyWorkspaceAccent(activeWorkspaceAccent({ ...state, section: "settings" }));
+    expect(root.hasAttribute("data-workspace-accent")).toBe(false);
+    expect(root.style.getPropertyValue("--workspace-accent")).toBe("");
+  });
+});
+
+describe("workspace themes, schedules and adaptive themes", () => {
+  it("picks the project's own theme, then the schedule", () => {
+    const config = {
+      theme: "nord" as const,
+      themePreferences: {
+        workspaceThemes: { "project:one": "velvet" as const },
+        scheduleOn: true,
+        schedule: [
+          { at: "07:00", theme: "paper" as const },
+          { at: "20:00", theme: "midnight" as const },
+        ],
+      },
+    };
+    const sessions = [{ id: "chat", projectId: "one", repoId: "two" }] as AgentSession[];
+    const state = {
+      config,
+      sessions,
+      selectedId: "chat",
+      selectedRepoId: "two",
+      selectedProjectId: "one",
+      section: "agents" as const,
+    };
+    const key = activeWorkspaceThemeKey(state);
+    expect(key).toBe("project:one");
+    expect(configuredTheme(config, true, { minute: 600, workspaceKey: key })).toBe("velvet");
+    expect(configuredTheme(config, true, { minute: 600 })).toBe("paper");
+    expect(configuredTheme(config, true, { minute: 21 * 60 })).toBe("midnight");
+    expect(activeWorkspaceThemeKey({ ...state, section: "settings" })).toBeUndefined();
+  });
+
+  it("lets CSS choose the colour scheme for adaptive themes", () => {
+    applyTheme("riptide");
+    expect(document.documentElement.style.colorScheme).toBe("");
+    applyTheme("tally");
+    expect(document.documentElement.style.colorScheme).toBe("light");
+  });
+
+  it("installs data and spec built-ins before generated themes", () => {
+    applyTheme("nord", []);
+    const builtins = document.getElementById("locus-crafted-themes")!;
+    expect(builtins.textContent).toContain('[data-theme="nord"] {');
+    expect(builtins.textContent).toContain('[data-theme="zenith"] {');
+    expect(builtins.textContent).toContain("@media (prefers-color-scheme: light)");
+    const custom = document.getElementById("locus-custom-themes");
+    if (custom) {
+      expect(
+        builtins.compareDocumentPosition(custom) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  it("feeds syntax, diff and terminal colours through tokens with fallbacks", () => {
+    expect(indexCss).toMatch(
+      /\.tok-kw,\n\.md-kw \{\n {2}color: var\(--syn-kw, var\(--accent-2\)\)/,
+    );
+    expect(indexCss).toContain("var(--diff-add, var(--ok))");
+    expect(indexCss).not.toContain('\n[data-theme="nord"] {');
+  });
+});
+
 describe("applyEditorPrefs", () => {
   it("sets editor CSS vars and format-on-save", () => {
     expect(applyEditorPrefs(16, false, false)).toBe(16);
@@ -315,10 +417,10 @@ describe("applyChatDensity", () => {
   it("scales the app-wide space and type tokens", () => {
     expect(css).toMatch(/--space-4: calc\(16px \* var\(--density-space\)\);/);
     expect(css).toMatch(
-      /\[data-chat-density="comfortable"\] \{\n  --density-space: 1\.2;\n  --density-type: 1\.07;/,
+      /\[data-chat-density="comfortable"\] \{\n {2}--density-space: 1\.2;\n {2}--density-type: 1\.07;/,
     );
     expect(css).toMatch(
-      /\[data-chat-density="dense"\] \{\n  --density-space: 0\.75;\n  --density-type: 0\.93;/,
+      /\[data-chat-density="dense"\] \{\n {2}--density-space: 0\.75;\n {2}--density-type: 0\.93;/,
     );
   });
 });

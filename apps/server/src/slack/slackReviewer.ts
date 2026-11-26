@@ -62,6 +62,7 @@ import {
   type SlackReviewerApiLogResponse,
   type SlackReviewThread,
   type TokenUsage,
+  LOCUS_REVIEWER_METADATA,
 } from "@locus/shared";
 import {
   formatSlackVerifyNote,
@@ -212,7 +213,7 @@ const EVENT_FALLBACK_THREAD_POLL_MS = 10 * 60_000;
  */
 export class SlackReviewerService {
   private timer: ReturnType<typeof setInterval> | undefined;
-  private ticking = false;
+  private currentPoll: Promise<void> | undefined;
   private state: StateFile | undefined;
   /** Run slots per reviewer id. */
   private readonly lanes = new Map<string, ReviewLane>();
@@ -694,28 +695,52 @@ export class SlackReviewerService {
 
   /** One poll of every enabled reviewer. Safe to call concurrently (later calls no-op). */
   async tick(): Promise<void> {
-    if (this.ticking) return;
+    if (this.currentPoll) return;
     if (this.now() < this.backoffUntil) return;
-    this.ticking = true;
+    await this.startPoll();
+  }
+
+  /** Check one reviewer's configured sources immediately, using the usual review queue. */
+  async runNow(reviewerId: string): Promise<void> {
+    while (this.currentPoll) await this.currentPoll.catch(() => undefined);
+    if (this.now() < this.backoffUntil) {
+      throw new Error("Slack is rate limiting reviewers. Try again shortly.");
+    }
+    await this.startPoll(reviewerId);
+  }
+
+  private startPoll(reviewerId?: string): Promise<void> {
+    this.currentPoll = this.poll(reviewerId).finally(() => {
+      this.currentPoll = undefined;
+    });
+    return this.currentPoll;
+  }
+
+  private async poll(reviewerId?: string): Promise<void> {
+    const manual = reviewerId !== undefined;
+    let dirty = false;
     try {
       const config = await this.store.loadConfig();
-      const reviewers = activeSlackReviewers(config.slackReviewers);
+      let reviewers = activeSlackReviewers(config.slackReviewers);
+      if (manual) {
+        reviewers = reviewers.filter((reviewer) => reviewer.id === reviewerId);
+        if (!reviewers.length) throw new Error("Choose an enabled reviewer with a Slack channel");
+      }
       if (!reviewers.length) return;
       const state = await this.loadState();
-      let dirty = false;
       let limited = false;
       const live = this.eventsLive();
       const polling = this.polling(config);
       // With events arriving, a channel is read when an event says so, plus a slow sweep in case
       // one was missed. Without them, each reviewer on its own cadence (Settings → Polling).
       const eventSweep =
-        live && this.now() - this.lastChannelPoll >= EVENT_FALLBACK_CHANNEL_POLL_MS;
+        !manual && live && this.now() - this.lastChannelPoll >= EVENT_FALLBACK_CHANNEL_POLL_MS;
       if (eventSweep) this.lastChannelPoll = this.now();
-      const poked = new Set(this.channelsPoked);
-      this.channelsPoked.clear();
+      const poked = manual ? undefined : new Set(this.channelsPoked);
+      if (poked) this.channelsPoked.clear();
       for (const reviewer of reviewers) {
-        const due = live ? eventSweep : this.pollDue(polling, reviewer, "channel");
-        if (!due && !poked.has(reviewer.channelId)) continue;
+        const due = manual || (live ? eventSweep : this.pollDue(polling, reviewer, "channel"));
+        if (!due && !poked?.has(reviewer.channelId)) continue;
         const before = reviewerStateFor(state, reviewer).cursor;
         try {
           dirty =
@@ -723,25 +748,25 @@ export class SlackReviewerService {
             dirty;
         } catch (err) {
           // Slack signed out, channel not allowed, or a network blip: try again next tick.
-          if (this.noteSlackError(err)) {
-            limited = true;
-            break;
-          }
+          limited = this.noteSlackError(err);
+          if (manual) throw err;
+          if (limited) break;
         }
         // A new message (not the first look that primes the cursor) means people are around.
         const after = reviewerStateFor(state, reviewer).cursor;
         this.pollRan(polling, reviewer, "channel", before !== undefined && after !== before);
       }
       // Threads are polled less often than the channel: one API call per watched thread.
-      const threadSweep = live && this.now() - this.lastThreadPoll >= EVENT_FALLBACK_THREAD_POLL_MS;
-      const threadsPoked = new Set(this.threadsPoked);
-      this.threadsPoked.clear();
+      const threadSweep =
+        !manual && live && this.now() - this.lastThreadPoll >= EVENT_FALLBACK_THREAD_POLL_MS;
+      const threadsPoked = manual ? undefined : new Set(this.threadsPoked);
+      if (threadsPoked) this.threadsPoked.clear();
       if (!limited) {
         if (threadSweep) this.lastThreadPoll = this.now();
         for (const reviewer of reviewers) {
           if (!slackReviewerWatchesThreads(reviewer)) continue;
-          const sweep = live ? threadSweep : this.pollDue(polling, reviewer, "threads");
-          if (!sweep && !threadsPoked.size) continue;
+          const sweep = manual || (live ? threadSweep : this.pollDue(polling, reviewer, "threads"));
+          if (!sweep && !threadsPoked?.size) continue;
           const before = threadFingerprint(state.reviewers[reviewer.id] ?? {});
           try {
             dirty =
@@ -750,10 +775,9 @@ export class SlackReviewerService {
               )) || dirty;
           } catch (err) {
             // Slack signed out or a blip: try again next poll.
-            if (this.noteSlackError(err)) {
-              limited = true;
-              break;
-            }
+            limited = this.noteSlackError(err);
+            if (manual) throw err;
+            if (limited) break;
           }
           if (sweep && !live) {
             const after = threadFingerprint(state.reviewers[reviewer.id] ?? {});
@@ -761,8 +785,8 @@ export class SlackReviewerService {
           }
         }
       }
-      const mentions = [...this.mentionsPoked.values()];
-      this.mentionsPoked.clear();
+      const mentions = manual ? [] : [...this.mentionsPoked.values()];
+      if (!manual) this.mentionsPoked.clear();
       if (!limited && mentions.length) {
         for (const reviewer of reviewers) {
           try {
@@ -780,17 +804,14 @@ export class SlackReviewerService {
       }
       if (!limited) {
         for (const reviewer of reviewers) {
-          // Forge polling doesn't get Socket Mode events: it always follows Settings → Polling.
-          const pollMs = this.pollWait(polling, reviewer, "autoReview");
+          const pollMs = manual ? 0 : this.pollWait(polling, reviewer, "autoReview");
           const lastBefore = this.lastAutoPoll.get(reviewer.id);
           const before = autoReviewFingerprint(state.reviewers[reviewer.id] ?? {});
           // Forge errors are per repo inside; anything else waits for the next poll.
-          dirty =
-            (await this.apiLog
-              .scope("autoReview", reviewer.id, () =>
-                pollAutoReview(this.ctx, reviewer, state, config, pollMs),
-              )
-              .catch(() => false)) || dirty;
+          const forgePoll = this.apiLog.scope("autoReview", reviewer.id, () =>
+            pollAutoReview(this.ctx, reviewer, state, config, pollMs),
+          );
+          dirty = (await (manual ? forgePoll : forgePoll.catch(() => false))) || dirty;
           if (this.lastAutoPoll.get(reviewer.id) !== lastBefore) {
             const after = autoReviewFingerprint(state.reviewers[reviewer.id] ?? {});
             this.pollRan(polling, reviewer, "autoReview", after !== before);
@@ -798,9 +819,11 @@ export class SlackReviewerService {
         }
       }
       if (!limited) this.backoffMs = 0;
-      if (dirty) await this.saveState().catch(() => undefined);
     } finally {
-      this.ticking = false;
+      if (dirty) {
+        const save = this.saveState();
+        await (manual ? save : save.catch(() => undefined));
+      }
     }
   }
 
@@ -1218,6 +1241,9 @@ export class SlackReviewerService {
         undefined,
         undefined,
         reviewer.postAs,
+        undefined,
+        undefined,
+        LOCUS_REVIEWER_METADATA,
       );
       if (!posted?.ts) return undefined;
       this.ownPosts.add(posted.ts);
@@ -1321,6 +1347,9 @@ export class SlackReviewerService {
         job.messageTs,
         undefined,
         job.reviewer.postAs,
+        undefined,
+        undefined,
+        LOCUS_REVIEWER_METADATA,
       );
       if (posted?.ts) {
         this.ownPosts.add(posted.ts);

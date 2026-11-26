@@ -13,12 +13,14 @@ import {
   parseSlackPostAs,
   slackChannelAllowed,
   slackWriteToken,
+  standardSlackEmoji,
   summarizeFigmaDocument,
   SLACK_UPLOAD_MAX_BYTES,
   type BoardObject,
   type IntegrationAccount,
   type IntegrationKind,
   type IntegrationToolName,
+  type SlackMessage,
 } from "@locus/shared";
 import { SlackApi } from "../slack/slackApi.js";
 import { callGoogleTool, type PersistIntegration } from "./google.js";
@@ -28,6 +30,14 @@ import { callAwsIam } from "./awsIam.js";
 import { callLinear } from "./linear.js";
 
 export type IntegrationFetcher = typeof fetch;
+
+/** One agent-facing line per Slack message, with reactions appended as `[:name: count, …]`. */
+function slackMessageLine(row: SlackMessage): string {
+  const line = `${row.ts} ${row.userName || row.userId || "?"}: ${row.text}`;
+  const reactions = (row.reactions ?? []).filter((reaction) => reaction.name && reaction.count > 0);
+  if (!reactions.length) return line;
+  return `${line}  [${reactions.map((reaction) => `:${reaction.name}: ${reaction.count}`).join(", ")}]`;
+}
 
 function str(args: Record<string, unknown>, key: string): string {
   const value = args[key];
@@ -582,10 +592,42 @@ export class IntegrationsClient {
             limit,
           },
         );
-        const lines = rows.map(
-          (row) => `${row.ts} ${row.userName || row.userId || "?"}: ${row.text}`,
-        );
+        const lines = rows.map(slackMessageLine);
         return { ok: true, output: lines.join("\n") || "No messages" };
+      }
+      if (name === "slack_emojis") {
+        const custom = await this.slackApi.listEmoji(
+          asUser.userToken ? asUser : { ...account, token },
+        );
+        const one = str(args, "name")
+          .trim()
+          .toLowerCase()
+          .replace(/^:+|:+$/g, "");
+        if (one) {
+          if (custom[one]) return { ok: true, output: `:${one}: custom ${custom[one]}` };
+          const unicode = standardSlackEmoji(one);
+          if (unicode) return { ok: true, output: `:${one}: standard ${unicode}` };
+          return { ok: false, output: `No emoji named :${one}:` };
+        }
+        const needle = str(args, "query")
+          .trim()
+          .toLowerCase()
+          .replace(/^:+|:+$/g, "");
+        const limit =
+          typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : 200;
+        const names = Object.keys(custom)
+          .filter((key) => !needle || key.includes(needle))
+          .sort();
+        const lines = names.slice(0, limit).map((key) => `:${key}: ${custom[key]}`);
+        if (names.length > limit) lines.push(`… ${names.length - limit} more (narrow with query)`);
+        return {
+          ok: true,
+          output:
+            lines.join("\n") ||
+            (needle
+              ? `No custom emoji match "${needle}"`
+              : "No custom emoji (or missing emoji:read scope)"),
+        };
       }
       if (name === "slack_replies") {
         const channel = str(args, "channel");
@@ -599,9 +641,7 @@ export class IntegrationsClient {
           channel,
           ts,
         );
-        const lines = rows.map(
-          (row) => `${row.ts} ${row.userName || row.userId || "?"}: ${row.text}`,
-        );
+        const lines = rows.map(slackMessageLine);
         return { ok: true, output: lines.join("\n") || "No replies" };
       }
       const channel = str(args, "channel");

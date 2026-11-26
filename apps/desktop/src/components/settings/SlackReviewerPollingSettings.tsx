@@ -36,7 +36,7 @@ const HOUR_OPTIONS: SelectOption[] = Array.from({ length: 25 }, (_, hour) => ({
   label: `${String(hour).padStart(2, "0")}:00`,
 }));
 
-/** Settings → Reviewers → Polling: one policy for every reviewer. */
+/** Reviews → Diagnostics → Polling: one policy for every reviewer. */
 export function SlackReviewerPollingSettings(props: {
   polling: SlackReviewerPolling | undefined;
   /** What each enabled reviewer polls at now, from the server. */

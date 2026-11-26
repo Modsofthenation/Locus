@@ -426,10 +426,8 @@ describe("CodebasePane", () => {
   it("shows link and import when no repo is selected", () => {
     render();
     expect(host.textContent).toContain("Link a repository");
-    expect(host.textContent).toContain("Import from Git");
-    expect(host.textContent).toContain(
-      "Catalog a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps repo",
-    );
+    expect(host.textContent).toContain("Connect a Git account");
+    expect(host.textContent).toContain("browse its files, pull requests, and issues");
     expect(host.textContent).not.toContain("no repository linked");
     expect(host.querySelector(".codebase-pane > .codebase-head")).toBeNull();
     expect(host.querySelector(".codebase-empty")).toBeTruthy();
@@ -541,13 +539,13 @@ describe("CodebasePane", () => {
     expect(host.querySelector(".codebase-empty.has-import")).toBeTruthy();
   });
 
-  it("deep-links Add a GitHub token to Settings → Git when no forge is connected", () => {
+  it("deep-links Open Git settings to Settings → Git when no forge is connected", () => {
     const actions: Action[] = [];
     render({ ...initialState, section: "codebase" }, (action) => {
       actions.push(action);
     });
     const add = [...host.querySelectorAll("button")].find(
-      (btn) => btn.textContent === "Add a GitHub token",
+      (btn) => btn.textContent === "Open Git settings",
     );
     expect(add).toBeTruthy();
     act(() => {
@@ -557,7 +555,7 @@ describe("CodebasePane", () => {
     expect(actions).toContainEqual({ type: "settingsTab", tab: "git" });
   });
 
-  it("hides Add a GitHub token on the empty codebase once a forge token is present", () => {
+  it("hides Open Git settings on the empty codebase once a forge token is present", () => {
     render({
       ...initialState,
       section: "codebase",
@@ -592,14 +590,16 @@ describe("CodebasePane", () => {
       },
     });
     expect(host.textContent).toContain("Link a repository");
-    expect(host.textContent).not.toContain("Add a GitHub token");
+    expect(host.textContent).not.toContain("Open Git settings");
   });
 
   it("leads with the URL field when no forge is connected and Import once one is", () => {
     render();
     const cards = [...host.querySelectorAll(".codebase-start-card h3")].map((h) => h.textContent);
-    expect(cards).toEqual(["Paste a URL", "Import from Git"]);
-    expect(host.querySelector(".codebase-start-card .btn.primary")?.textContent).toBe("Link");
+    expect(cards).toEqual(["Paste a URL", "Connect a Git account"]);
+    expect(host.querySelector(".codebase-start-card .btn.primary")?.textContent).toBe(
+      "Link repository",
+    );
     expect(
       [...host.querySelectorAll("button")].some((btn) => btn.textContent === "Import from Git"),
     ).toBe(false);
@@ -609,7 +609,7 @@ describe("CodebasePane", () => {
     const tokenedCards = [...host.querySelectorAll(".codebase-start-card h3")].map(
       (h) => h.textContent,
     );
-    expect(tokenedCards).toEqual(["Import from Git", "Paste a URL"]);
+    expect(tokenedCards).toEqual(["Choose from Git accounts", "Paste a URL"]);
     expect(host.querySelectorAll(".codebase-start-card .btn.primary")).toHaveLength(1);
     expect(host.querySelector(".codebase-start-card .btn.primary")?.textContent).toBe(
       "Import from Git",

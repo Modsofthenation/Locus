@@ -327,9 +327,8 @@ describe("SlackPane", () => {
       selectedSlackChannelId: null,
       slackMessages: [],
     });
-    expect(host.textContent).toContain("Sign in as yourself");
-    expect(host.textContent).toContain("or as the Locus bot");
-    expect(host.textContent).toContain("Settings → Integrations");
+    expect(host.textContent).toContain("Connect Slack");
+    expect(host.textContent).toContain("Read channels and reply to threads from Locus.");
     expect(host.querySelector(".slack-title")).toBeNull();
     expect(host.querySelector(".empty-hero .eyebrow")).toBeNull();
     expect(host.querySelectorAll(".slack-pane h2")).toHaveLength(1);
@@ -1675,8 +1674,8 @@ describe("SlackPane", () => {
     expect(host.querySelector("[data-testid='slack-history-skeleton']")).toBeTruthy();
     expect(host.querySelector(".slack-loading")?.textContent).toBe("Loading workspace…");
     expect(host.querySelector(".slack-composer--pending")).toBeTruthy();
-    expect(host.textContent).not.toContain("Sign in as yourself");
-    expect(host.textContent).not.toContain("Pick a channel");
+    expect(host.textContent).not.toContain("Connect Slack");
+    expect(host.textContent).not.toContain("No conversations yet");
     expect(host.querySelector("textarea")).toBeNull();
     expect(css).toMatch(/\.slack-composer--pending \{[\s\S]*?pointer-events:\s*none/);
   });
@@ -1709,8 +1708,8 @@ describe("SlackPane", () => {
     expect(host.querySelector("[data-testid='slack-booting']")).toBeTruthy();
     expect(host.querySelector("[data-testid='slack-history-skeleton']")).toBeTruthy();
     expect(host.querySelector(".slack-loading")?.textContent).toBe("Loading workspace…");
-    expect(host.textContent).not.toContain("Sign in as yourself");
-    expect(host.textContent).not.toContain("Pick a channel");
+    expect(host.textContent).not.toContain("Connect Slack");
+    expect(host.textContent).not.toContain("No conversations yet");
     expect(host.querySelector(".slack-empty")).toBeNull();
   });
 
@@ -1725,8 +1724,8 @@ describe("SlackPane", () => {
       slackMessages: [],
     });
     expect(host.querySelector("[data-testid='slack-booting']")).toBeTruthy();
-    expect(host.textContent).not.toContain("Pick a channel");
-    expect(host.textContent).not.toContain("Sign in as yourself");
+    expect(host.textContent).not.toContain("No conversations yet");
+    expect(host.textContent).not.toContain("Connect Slack");
   });
 
   it("waits for the channel catalog before leaving the Slack loading state", async () => {
@@ -2095,7 +2094,7 @@ describe("SlackPane", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "selectSlackChannel", id: "D_BOB" });
   });
 
-  it("asks the operator to pick a channel when none are listed", () => {
+  it("explains why no conversations are listed", () => {
     render({
       ...initialState,
       section: "slack",
@@ -2106,10 +2105,10 @@ describe("SlackPane", () => {
       selectedSlackChannelId: null,
       slackMessages: [],
     });
-    expect(host.textContent).toContain("Pick a channel");
-    expect(host.textContent).toContain("sidebar");
+    expect(host.textContent).toContain("No conversations yet");
+    expect(host.textContent).toContain("Join a channel or start a direct message in Slack");
     expect(host.querySelector("textarea")).toBeNull();
-    expect(host.querySelector(".empty-hero h2")?.textContent).toBe("Pick a channel");
+    expect(host.querySelector(".empty-hero h2")?.textContent).toBe("No conversations yet");
   });
 
   it("pins the timeline when you scroll up and jumps back to latest", async () => {

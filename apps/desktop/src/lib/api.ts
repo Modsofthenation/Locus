@@ -2005,6 +2005,8 @@ export const api = {
    * queued or running now, and the review chats still watched.
    */
   slackReviewerRuns: () => json<SlackReviewRunsResponse>("/api/slack/reviewers/runs"),
+  slackReviewerRun: (id: string) =>
+    json<{ ok: true }>(`/api/slack/reviewers/${encodeURIComponent(id)}/run`, { method: "POST" }),
   /**
    * Review one PR now with a saved reviewer. `threadTs` posts progress into that Slack thread.
    * `dryRun` posts nothing anywhere and returns the findings. `fullRereview` reviews the full PR

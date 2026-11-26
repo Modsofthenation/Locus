@@ -64,6 +64,7 @@ import {
 
 export function Topbar() {
   const { state, dispatch } = useStore();
+  const lite = state.interfaceMode === "lite" && state.section === "agents";
   const [workers, setWorkers] = useState(false);
   const [trace, setTrace] = useState(false);
   const [dockerBusy, setDockerBusy] = useState<string | null>(null);
@@ -948,7 +949,7 @@ export function Topbar() {
           </Tooltip>
         ) : state.section === "ide" ? null : (
           <>
-            <ViewModeToggle session={session} />
+            {!lite ? <ViewModeToggle session={session} /> : null}
             <PanelToggle label={hostChat ? "Files" : docker ? "Container" : "Desktop"} />
           </>
         )}
@@ -1047,7 +1048,7 @@ export function Topbar() {
             <IconPlay /> Start
           </button>
         )}
-        {canReplay(session.messages) ? (
+        {!lite && canReplay(session.messages) ? (
           <button
             type="button"
             className="btn small"
@@ -1058,7 +1059,7 @@ export function Topbar() {
             Replay
           </button>
         ) : null}
-        {lastUserPrompt(session.messages) && !comparePeer(session, state.sessions) ? (
+        {!lite && lastUserPrompt(session.messages) && !comparePeer(session, state.sessions) ? (
           <button
             type="button"
             className="btn small topbar-compare"

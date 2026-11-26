@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.30.0 — 2026-11-26
+
+A more powerful theme engine, 16 crafted themes plus 12 more across four style families, Lite UI by default with a Reviews workspace, Slack reviewers that no longer loop, and a turn-tick chat scrollbar. Settings → About is **0.30.0**.
+
+**Appearance.** Themes now colour syntax highlighting, diffs and the terminal, can follow the system light/dark setting, and can remix another theme so only your changes are stored. Grow a whole palette from one seed colour, give dialogs, the composer, menus and the rail their own corners and fills, pick colours from a backdrop image, switch themes by time of day or per project, and import or export theme packs. Sixteen Crafted themes sit under a Crafted filter, and four new style families (Wayfinding, Cartography, Textile, Porcelain) bring the catalog to 238 palettes. Contrast checks cover more surfaces, and Fix contrast repairs them.
+
+**Desktop.** The app opens in Lite UI with Home, Agents, Codebase and Reviews on the rail; switch to Full UI when you want every workspace. Reviews is its own place to track review activity and manage Slack reviewers. New sessions leave branch lock off so the agent can switch or create branches. In longer chats the scrollbar shows one tick per prompt, with hover previews.
+
+**Slack reviewers.** Two reviewers in one channel no longer treat each other's dismissals as commands. Run now on a reviewer card checks for eligible pull requests immediately. Agents can list workspace emoji and see reactions on history and replies. Reply stop watching this thread to stop a reviewer reading a thread.
+
 ## 0.29.0 — 2026-11-24
 
 Choose how slow tests run before a push, more reliable git tools on host clones, managed cloud sandboxes, a CLI sandbox setting, extra themes, and Slack reviewers that finish large PRs in parts. Settings → About is **0.29.0**.

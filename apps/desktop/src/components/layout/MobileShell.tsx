@@ -22,7 +22,7 @@ import {
   isHiddenChatMessage,
   isSpawnAgentToolName,
   isTaskListToolName,
-  isThemeId,
+  resolveThemeRef,
   parseChatDensity,
   latestCloneStartMessageId,
   latestImageBuildStartMessageId,
@@ -115,12 +115,20 @@ const VncPane = lazy(async () => ({
   default: (await import("@/components/guest/VncPane")).VncPane,
 }));
 import { batchableApprovals, needsYouHumanItems, type NeedsYouItem } from "@/lib/needsYou";
-import { applyChatDensity, applyTheme, themeDisplayName } from "@/lib/theme";
-import { useStore } from "@/state/store";
+import {
+  applyChatDensity,
+  applyTheme,
+  selectFixedTheme,
+  themeDisplayName,
+  useConfiguredTheme,
+} from "@/lib/theme";
+import { openSettings, useStore } from "@/state/store";
+import { flushSettings } from "@/lib/settingsLeave";
 import { screenshotSrc } from "@/components/chat/GuestTimeline";
 import { BrowserPane } from "@/components/guest/BrowserPane";
 import {
   IconAgents,
+  IconClock,
   IconGear,
   IconGlobe,
   IconHash,
@@ -164,7 +172,7 @@ function tabTitle(tab: MobileTab, repoName?: string): string {
   if (tab === "code") return repoName ?? "Code";
   if (tab === "slack") return "Slack";
   if (tab === "inbox") return "Needs you";
-  return "This phone";
+  return "More";
 }
 
 function MobileToolLine(props: {
@@ -653,7 +661,10 @@ export function MobileShell(props: { onShell: (shell: UiShell) => void }) {
                 onOpenCanvas={(id) => setDesignId(id)}
                 onNewGame={() => setCompose("game")}
                 onNewAsset={() => setCompose("assets")}
-                onSettings={() => setOverlay("settings")}
+                onSettings={() => {
+                  openSettings(dispatch);
+                  setOverlay("settings");
+                }}
                 onNewAutomation={() => dispatch({ type: "newAutomation", open: true })}
                 onPalette={() => setOverlay("palette")}
               />
@@ -707,7 +718,11 @@ export function MobileShell(props: { onShell: (shell: UiShell) => void }) {
             <button
               type="button"
               className="mobile-icon-btn mobile-back"
-              onClick={() => setOverlay(null)}
+              onClick={async () => {
+                if (!(await flushSettings())) return;
+                if (state.section === "settings") dispatch({ type: "settings", open: false });
+                setOverlay(null);
+              }}
             >
               Back
             </button>
@@ -717,7 +732,7 @@ export function MobileShell(props: { onShell: (shell: UiShell) => void }) {
           </header>
           <div className="mobile-overlay-body">
             <Suspense fallback={<p className="hint">Loading…</p>}>
-              <SettingsPane />
+              <SettingsPane phoneLayout onClose={() => setOverlay(null)} />
             </Suspense>
           </div>
         </div>
@@ -1056,7 +1071,7 @@ function MobileMore(props: {
   onPalette?: () => void;
 }) {
   const { state, dispatch } = useStore();
-  const theme = state.config?.theme ?? "ember";
+  const theme = useConfiguredTheme(state.config);
   const themeName = themeDisplayName(theme, state.config?.customThemes ?? []);
   const density = parseChatDensity(state.config?.chatDensity);
   const workspaces = mobileIdeWorkspaces(state.sessions);
@@ -1116,9 +1131,11 @@ function MobileMore(props: {
   }
 
   async function pickTheme(id: string) {
-    if (!state.config || !isThemeId(id)) return;
-    applyTheme(id);
-    const saved = await api.saveConfig({ ...state.config, theme: id });
+    if (!state.config) return;
+    const theme = resolveThemeRef(id, state.config.customThemes);
+    if (theme !== id) return;
+    applyTheme(theme, state.config.customThemes);
+    const saved = await api.saveConfig(selectFixedTheme(state.config, theme));
     dispatch({ type: "config", config: saved });
   }
 
@@ -1136,7 +1153,8 @@ function MobileMore(props: {
     dispatch({ type: "config", config: saved });
   }
 
-  function goDesktop() {
+  function goDesktop(section?: "brain" | "docker") {
+    if (section) dispatch({ type: "section", section });
     setUiShell("desktop");
     props.onShell("desktop");
   }
@@ -1154,17 +1172,30 @@ function MobileMore(props: {
           <p className="mobile-status">
             {state.connected ? "Linked to this computer" : "Reconnecting to the computer"}
           </p>
-          <p className="mobile-row-mono">
-            {state.connected ? "synced just now / local network" : "waiting / local network"}
-          </p>
         </div>
-        <button type="button" className="mobile-text-btn" onClick={goDesktop}>
-          Unlink
-        </button>
       </section>
 
-      <section className="mobile-settings-block">
-        <h2>Phone</h2>
+      <nav
+        className="mobile-quick-actions"
+        aria-label="Workspace actions"
+        data-testid="mobile-phone-parity"
+      >
+        <button type="button" onClick={props.onSettings}>
+          <IconGear />
+          {t("phone.more.settings")}
+        </button>
+        <button type="button" onClick={props.onNewAutomation}>
+          <IconClock />
+          {t("phone.more.automation")}
+        </button>
+        <button type="button" onClick={props.onPalette}>
+          <IconSearch />
+          {t("phone.more.palette")}
+        </button>
+      </nav>
+
+      <details className="mobile-settings-block mobile-preferences">
+        <summary>Phone preferences</summary>
         <label className="mobile-setting-row">
           <span>Theme</span>
           <span className="mobile-setting-value">
@@ -1172,7 +1203,13 @@ function MobileMore(props: {
               compact
               ariaLabel="Theme"
               value={theme}
-              options={THEME_OPTIONS.map((opt) => ({ value: opt.id, label: opt.name }))}
+              options={[
+                ...THEME_OPTIONS.map((opt) => ({ value: opt.id, label: opt.name })),
+                ...(state.config?.customThemes ?? []).map((opt) => ({
+                  value: opt.id,
+                  label: opt.name,
+                })),
+              ]}
               onChange={(id) => void pickTheme(id)}
             />
           </span>
@@ -1199,6 +1236,7 @@ function MobileMore(props: {
             type="button"
             className={`settings-switch ${state.config?.notifyNeedsYou !== false ? "on" : ""}`}
             role="switch"
+            aria-label="Needs you notifications"
             aria-checked={state.config?.notifyNeedsYou !== false}
             data-testid="mobile-notify-needs-you"
             onClick={() =>
@@ -1212,6 +1250,7 @@ function MobileMore(props: {
             type="button"
             className={`settings-switch ${state.config?.notifyAgents !== false ? "on" : ""}`}
             role="switch"
+            aria-label="Agent turn notifications"
             aria-checked={state.config?.notifyAgents !== false}
             data-testid="mobile-notify-agents"
             onClick={() => void patchNotify({ notifyAgents: state.config?.notifyAgents === false })}
@@ -1223,6 +1262,7 @@ function MobileMore(props: {
             type="button"
             className={`settings-switch ${state.config?.notifySlack !== false ? "on" : ""}`}
             role="switch"
+            aria-label="Slack notifications"
             aria-checked={state.config?.notifySlack !== false}
             onClick={() => void patchNotify({ notifySlack: state.config?.notifySlack === false })}
           />
@@ -1233,6 +1273,7 @@ function MobileMore(props: {
             type="button"
             className={`settings-switch ${state.config?.notifyAutomations !== false ? "on" : ""}`}
             role="switch"
+            aria-label="Job notifications"
             aria-checked={state.config?.notifyAutomations !== false}
             onClick={() =>
               void patchNotify({ notifyAutomations: state.config?.notifyAutomations === false })
@@ -1246,6 +1287,7 @@ function MobileMore(props: {
               type="button"
               className={`settings-switch ${state.config?.notifyAutomationsFailedOnly ? "on" : ""}`}
               role="switch"
+              aria-label="Job failures only"
               aria-checked={Boolean(state.config?.notifyAutomationsFailedOnly)}
               data-testid="mobile-notify-automations-failed-only"
               onClick={() =>
@@ -1262,6 +1304,7 @@ function MobileMore(props: {
             type="button"
             className={`settings-switch ${quietOn ? "on" : ""}`}
             role="switch"
+            aria-label="Quiet hours"
             aria-checked={quietOn}
             data-testid="mobile-notify-quiet"
             onClick={() =>
@@ -1312,12 +1355,12 @@ function MobileMore(props: {
             <button type="button" className="on" aria-pressed="true">
               Phone
             </button>
-            <button type="button" aria-pressed="false" onClick={goDesktop}>
+            <button type="button" aria-pressed="false" onClick={() => goDesktop()}>
               Desktop
             </button>
           </div>
         </div>
-      </section>
+      </details>
 
       <section className="mobile-settings-block" data-testid="mobile-games">
         <h2>Games</h2>
@@ -1325,21 +1368,17 @@ function MobileMore(props: {
           <span>New game</span>
           <span className="mobile-setting-value">Playable canvas</span>
         </button>
-        {games.length ? (
-          games.map((row) => (
-            <button
-              key={row.id}
-              type="button"
-              className="mobile-setting-row"
-              onClick={() => props.onOpenCanvas(row.id)}
-            >
-              <span>{row.title}</span>
-              <span className="mobile-setting-value">Play canvas</span>
-            </button>
-          ))
-        ) : (
-          <p className="mobile-row-mono">No games yet. New game starts a playable canvas.</p>
-        )}
+        {games.map((row) => (
+          <button
+            key={row.id}
+            type="button"
+            className="mobile-setting-row"
+            onClick={() => props.onOpenCanvas(row.id)}
+          >
+            <span>{row.title}</span>
+            <span className="mobile-setting-value">Play canvas</span>
+          </button>
+        ))}
       </section>
 
       <section className="mobile-settings-block" data-testid="mobile-assets">
@@ -1348,23 +1387,17 @@ function MobileMore(props: {
           <span>New asset</span>
           <span className="mobile-setting-value">2D / 3D studio</span>
         </button>
-        {assets.length ? (
-          assets.map((row) => (
-            <button
-              key={row.id}
-              type="button"
-              className="mobile-setting-row"
-              onClick={() => props.onOpenCanvas(row.id)}
-            >
-              <span>{row.title}</span>
-              <span className="mobile-setting-value">Open studio</span>
-            </button>
-          ))
-        ) : (
-          <p className="mobile-row-mono">
-            No assets yet. New asset starts a 2D/3D studio from a photo or prompt.
-          </p>
-        )}
+        {assets.map((row) => (
+          <button
+            key={row.id}
+            type="button"
+            className="mobile-setting-row"
+            onClick={() => props.onOpenCanvas(row.id)}
+          >
+            <span>{row.title}</span>
+            <span className="mobile-setting-value">Open studio</span>
+          </button>
+        ))}
       </section>
 
       <section className="mobile-settings-block" data-testid="mobile-boards">
@@ -1391,7 +1424,7 @@ function MobileMore(props: {
 
       <section className="mobile-settings-block" data-testid="mobile-brain">
         <h2>Brain</h2>
-        <button type="button" className="mobile-setting-row" onClick={goDesktop}>
+        <button type="button" className="mobile-setting-row" onClick={() => goDesktop("brain")}>
           <span>Open on desktop</span>
           <span className="mobile-setting-value">Index · remember · orient</span>
         </button>
@@ -1407,7 +1440,7 @@ function MobileMore(props: {
 
       <section className="mobile-settings-block" data-testid="mobile-docker">
         <h2>Docker</h2>
-        <button type="button" className="mobile-setting-row" onClick={goDesktop}>
+        <button type="button" className="mobile-setting-row" onClick={() => goDesktop("docker")}>
           <span>Open on desktop</span>
           <span className="mobile-setting-value">Containers · compose</span>
         </button>
@@ -1459,8 +1492,8 @@ function MobileMore(props: {
         )}
       </section>
 
-      <section className="mobile-cap-block">
-        <h2>What this phone does</h2>
+      <details className="mobile-cap-block">
+        <summary>What this phone can do</summary>
         <ul className="mobile-tags">
           {[
             "Chat",
@@ -1481,32 +1514,10 @@ function MobileMore(props: {
             <li key={label}>{label}</li>
           ))}
         </ul>
-      </section>
-      <section className="mobile-settings-block" data-testid="mobile-phone-parity">
-        <h2>On this phone</h2>
-        <button type="button" className="mobile-setting-row" onClick={() => props.onSettings?.()}>
-          <span>{t("phone.more.settings")}</span>
-          <span className="mobile-setting-value">Providers · workers · about</span>
-        </button>
-        <button
-          type="button"
-          className="mobile-setting-row"
-          onClick={() => props.onNewAutomation?.()}
-        >
-          <span>{t("phone.more.automation")}</span>
-          <span className="mobile-setting-value">Schedule a job</span>
-        </button>
-        <button type="button" className="mobile-setting-row" onClick={() => props.onPalette?.()}>
-          <span>{t("phone.more.palette")}</span>
-          <span className="mobile-setting-value">Jump anywhere</span>
-        </button>
-      </section>
-      <section className="mobile-cap-block">
-        <h2>Stays on the desktop</h2>
         <ul className="mobile-tags is-muted">
           <li>{t("phone.desktopOnly")}</li>
         </ul>
-      </section>
+      </details>
 
       <button type="button" className="mobile-text-btn mobile-signout" onClick={signOut}>
         Sign out

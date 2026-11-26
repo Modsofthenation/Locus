@@ -4,9 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 for (const theme of ["ember", "paper"]) {
   test(`Android start has accessible project controls in ${theme}`, async ({ page }) => {
     await page.goto(`/visual.html?screen=android-start&theme=${theme}`);
-    await expect(
-      page.getByRole("heading", { name: "From an idea to an Android app." }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Set up an Android project" })).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Create Android app", exact: true }),
     ).toBeDisabled();

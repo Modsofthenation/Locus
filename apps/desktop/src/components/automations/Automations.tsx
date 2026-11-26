@@ -26,6 +26,7 @@ import {
   normalizeBlackoutDates,
   normalizeTimeZone,
   newMemoryId,
+  parseProductMode,
   replaceMemoryText,
   runHistoryStatusLabel,
   runStatusText,
@@ -264,14 +265,22 @@ export function AutomationsPane() {
   }
 
   if (!state.automations.length) {
+    const swarmMode = parseProductMode(state.config?.productMode) === "swarm";
     return (
       <div className="empty auto-start">
         <div className="empty-card">
           <EmptyHero
             pose="rest"
-            title="When should an agent run?"
-            lead="Pick a trigger — clock, git push, pull request, or webhook — then a prompt. Each run executes on Docker, VM, or host and keeps a thread you can open."
+            title={swarmMode ? "Run a teammate automatically" : "Run an agent automatically"}
+            lead="Choose when it should run and what it should do. Each run keeps a chat you can open."
           />
+          <button
+            type="button"
+            className="btn primary"
+            onClick={() => dispatch({ type: "newAutomation", open: true })}
+          >
+            {swarmMode ? "New routine" : "New job"}
+          </button>
           <div className="design-start-from">
             <p className="design-start-from-label">Start from a template</p>
             <div

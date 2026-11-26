@@ -5,6 +5,7 @@ import type { AgentSession, LocusConfig } from "@locus/shared";
 import { App } from "./App";
 import { api } from "@/lib/api";
 import { clearPhoneAuth, initPhoneAuth } from "@/lib/phoneAuth";
+import { saveInterfaceMode } from "@/lib/interfaceMode";
 import { setUiShell } from "@/lib/mobileShell";
 
 vi.mock("@/lib/net", async (importOriginal) => {
@@ -48,7 +49,7 @@ vi.mock("@/lib/api", () => ({
       connected: false,
       tabs: [],
     })),
-    checkUpdates: vi.fn(async () => ({ status: "unavailable", current: "0.29.0" })),
+    checkUpdates: vi.fn(async () => ({ status: "unavailable", current: "0.30.0" })),
     workersStatus: vi.fn(async () => []),
     tailscale: vi.fn(async () => ({
       installed: false,
@@ -165,6 +166,7 @@ describe("App boot screen", () => {
 
     await vi.waitFor(() => {
       expect(host.querySelector(".app")).toBeTruthy();
+      expect(host.querySelector(".rail-full-toggle")).toBeTruthy();
       expect(host.textContent).toContain("Nightly review");
     });
     await vi.waitFor(() => {
@@ -239,6 +241,7 @@ describe("App mobile shell", () => {
     host.remove();
     clearPhoneAuth();
     sessionStorage.clear();
+    localStorage.removeItem("locus.interfaceMode");
     document.documentElement.removeAttribute("data-theme");
     document.documentElement.removeAttribute("data-shell");
     vi.restoreAllMocks();
@@ -308,8 +311,9 @@ describe("App mobile shell", () => {
     expect(host.querySelector(".app")).toBeNull();
   });
 
-  it("hides skip links on Docker and Settings", async () => {
+  it("keeps the workspace skip target on Docker and Settings", async () => {
     setUiShell("desktop");
+    saveInterfaceMode("full");
     vi.mocked(api.config).mockResolvedValue(config);
     vi.mocked(api.sessions).mockResolvedValue([session]);
     host = document.createElement("div");
@@ -338,11 +342,11 @@ describe("App mobile shell", () => {
       ) as HTMLButtonElement;
       docker.click();
     });
-    expect(host.querySelector(".skip-links")).toBeNull();
+    expect(host.querySelector('.skip-links a[href="#main-workspace"]')).toBeTruthy();
     await act(async () => {
       (host.querySelector("button[aria-label='Settings']") as HTMLButtonElement).click();
     });
-    expect(host.querySelector(".skip-links")).toBeNull();
+    expect(host.querySelector('.skip-links a[href="#main-workspace"]')).toBeTruthy();
     await vi.waitFor(() => {
       expect(host.querySelector(".app-settings")).toBeTruthy();
     });

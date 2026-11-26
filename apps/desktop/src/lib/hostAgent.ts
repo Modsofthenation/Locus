@@ -30,7 +30,7 @@ export async function startHostRepoAgent(input: {
     startVm: false,
     vision: "off",
     ...(input.prompt?.trim() ? { prompt: input.prompt.trim() } : {}),
-    ...(input.repo ? { repoId: input.repo.id, repo: input.repo.checkout, branchLock: true } : {}),
+    ...(input.repo ? { repoId: input.repo.id, repo: input.repo.checkout } : {}),
   });
   saveLastAgent({ os: "ubuntu", runtime: "host", providerId, model });
   return session;

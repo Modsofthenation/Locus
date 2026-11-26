@@ -19,6 +19,7 @@ import {
   slackThreadTs,
   type IntegrationAccount,
   type SlackPostAs,
+  type SlackPostMetadata,
   type SlackConversation,
   type SlackMember,
   type SlackEmojiMap,
@@ -296,6 +297,7 @@ export class SlackGateway {
     as?: SlackPostAs,
     replyBroadcast?: boolean,
     blocks?: unknown[],
+    metadata?: SlackPostMetadata,
   ): Promise<SlackMessage> {
     const account = await this.requireClient();
     this.assertChannelAllowed(account, channelId);
@@ -307,6 +309,7 @@ export class SlackGateway {
       as,
       replyBroadcast: Boolean(threadTs && replyBroadcast),
       blocks,
+      metadata,
     });
     const teamId = account.teamId || "default";
     const cached = await this.cache.loadMessages(teamId, channelId);

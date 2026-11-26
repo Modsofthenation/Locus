@@ -53,6 +53,7 @@ import { WorkspaceStage } from "@/components/workspace/WorkspaceStage";
 import { SwarmComputerPanel } from "@/components/layout/SwarmComputerPanel";
 import { api, connectEvents, retryEvents } from "@/lib/api";
 import { matchModKey } from "@/lib/shortcuts";
+import { flushSettings } from "@/lib/settingsLeave";
 import { locusWindowTitle } from "@/lib/windowTitle";
 import { sleep } from "@/lib/net";
 import {
@@ -64,7 +65,16 @@ import {
   shouldNotifyNeedsYou,
   isFinishedAutomationRun,
 } from "@/lib/notify";
-import { applyChatDensity, applyEditorPrefs, applyTheme } from "@/lib/theme";
+import {
+  activeWorkspaceAccent,
+  activeWorkspaceThemeKey,
+  applyChatDensity,
+  applyEditorPrefs,
+  applyTheme,
+  applyWorkspaceAccent,
+  configuredTheme,
+  useConfiguredTheme,
+} from "@/lib/theme";
 import { resolveUiShell, setUiShell, type UiShell } from "@/lib/mobileShell";
 import { needsYouCount, needsYouKeys } from "@/lib/needsYou";
 import { ambientCounts, needsYouNotice, runAmbientAction, showNeedsYouNotice } from "@/lib/ambient";
@@ -72,6 +82,7 @@ import { desktopBridge } from "@/lib/closeGuard";
 import { showErrorNotice } from "@/lib/notice";
 import { phoneToken } from "@/lib/phoneAuth";
 import { useBackgroundUpdateCheck } from "@/lib/appUpdate";
+import { loadInterfaceMode } from "@/lib/interfaceMode";
 import { Store, initialState, isIdeSession, reducer, sectionEnter } from "@/state/store";
 
 const AutomationsPane = lazy(async () => ({
@@ -148,7 +159,10 @@ const MobileShell = lazy(async () => ({
 }));
 
 export function App() {
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [state, dispatch] = useReducer(reducer, initialState, (initial) => ({
+    ...initial,
+    interfaceMode: loadInterfaceMode(),
+  }));
   const [shell, setShell] = useState<UiShell>(() => resolveUiShell());
   useBackgroundUpdateCheck({
     enabled: Boolean(state.config) && shell !== "mobile" && !phoneToken(),
@@ -274,7 +288,7 @@ export function App() {
         api.setup().catch(() => null),
       ]);
       if (cancelled) return;
-      applyTheme(config.theme, config.customThemes ?? []);
+      applyTheme(configuredTheme(config), config.customThemes ?? []);
       applyChatDensity(config.chatDensity);
       dispatch({
         type: "hydrate",
@@ -552,6 +566,7 @@ export function App() {
               type: "themeUpdated",
               theme: event.theme,
               customThemes: event.customThemes,
+              themePreferences: event.themePreferences,
             });
             break;
           case "board.updated":
@@ -760,7 +775,7 @@ export function App() {
     function onKey(e: KeyboardEvent) {
       if (matchModKey(e, "n")) {
         e.preventDefault();
-        if (state.section === "settings") return;
+        if (state.section === "settings" || state.section === "reviews") return;
         if (state.section === "automations") dispatch({ type: "newAutomation", open: true });
         else if (state.section === "board") dispatch({ type: "selectBoard", id: null });
         else if (state.section === "project") dispatch({ type: "selectProject", id: null });
@@ -788,12 +803,20 @@ export function App() {
       }
       if (matchModKey(e, ",")) {
         e.preventDefault();
-        dispatch({ type: "settings", open: true });
+        if (state.section === "reviews") {
+          void flushSettings().then((ok) => {
+            if (ok) dispatch({ type: "settings", open: true });
+          });
+        } else dispatch({ type: "settings", open: true });
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [state.section, state.selectedRepoId, state.repos]);
+
+  const appliedTheme = useConfiguredTheme(state.config, activeWorkspaceThemeKey(state));
+  const workspaceAccent = activeWorkspaceAccent(state);
+  useEffect(() => applyWorkspaceAccent(workspaceAccent), [workspaceAccent]);
 
   useEffect(() => {
     if (state.section === "settings") {
@@ -804,7 +827,7 @@ export function App() {
       );
       return;
     }
-    applyTheme(state.config?.theme, state.config?.customThemes ?? []);
+    applyTheme(appliedTheme, state.config?.customThemes ?? []);
     applyChatDensity(state.config?.chatDensity);
     applyEditorPrefs(
       state.config?.editorFontSize,
@@ -812,7 +835,8 @@ export function App() {
       state.config?.showMinimap !== false,
     );
   }, [
-    state.config?.theme,
+    appliedTheme,
+    state.config?.customThemes,
     state.config?.chatDensity,
     state.config?.editorFontSize,
     state.config?.formatOnSave,
@@ -927,32 +951,43 @@ export function App() {
               </button>
             </div>
           ) : null}
-          {(state.section === "design" && designSelected) ||
-          (state.section === "games" && gameSelected) ||
-          (state.section === "assets" && assetSelected) ||
-          (state.section === "board" && state.selectedBoardId) ||
-          (state.section === "project" && state.selectedProjectId) ||
-          (state.section === "ide" && ideSelected) ||
-          (state.section === "agents" && agentSelected) ? (
-            <nav className="skip-links" aria-label="Skip">
-              <a href="#chat-pane">Skip to chat</a>
-              <a href="#files-pane">Skip to files</a>
-            </nav>
-          ) : null}
+          <nav className="skip-links" aria-label="Skip">
+            <a href="#main-workspace">Skip to workspace</a>
+            <a href="#chat-pane">Skip to chat</a>
+            <a href="#files-pane">
+              {state.section === "ide" ||
+              (state.section === "agents" &&
+                agentSelected &&
+                productMode === "developer" &&
+                sessionRuntime(agentSelected) === "host")
+                ? "Skip to files"
+                : "Skip to companion pane"}
+            </a>
+          </nav>
           <div className={`app ${state.collapsed ? "collapsed" : ""}`}>
             <Sidebar />
-            <main className="workspace">
+            <main className="workspace" id="main-workspace" tabIndex={-1}>
               <WorkspaceStage
                 key={state.inboxOpen ? "inbox" : state.section}
                 section={state.section}
                 enter={workspaceEnterRef.current}
               >
-                {state.section === "settings" || state.inboxOpen ? null : <Topbar />}
-                <Suspense fallback={null}>
+                {state.section === "settings" ||
+                state.section === "reviews" ||
+                state.inboxOpen ? null : (
+                  <Topbar />
+                )}
+                <Suspense
+                  fallback={
+                    <p className="workspace-loading" role="status">
+                      Loading workspace…
+                    </p>
+                  }
+                >
                   <BootReveal onReady={markShellReady}>
                     {state.inboxOpen ? (
                       <InboxPane />
-                    ) : state.section === "settings" ? (
+                    ) : state.section === "settings" || state.section === "reviews" ? (
                       <Settings />
                     ) : state.section === "automations" ? (
                       <AutomationsPane />
@@ -1103,7 +1138,8 @@ export function App() {
             <SlackAlertToasts
               items={slackToasts}
               mentionNames={slackActivityMentionNames(state.slackStatus)}
-              onOpen={(item) => {
+              onOpen={async (item) => {
+                if (state.section === "reviews" && !(await flushSettings())) return;
                 setSlackToasts((rows) => rows.filter((row) => row.id !== item.id));
                 dispatch({ type: "selectSlackChannel", id: item.channelId });
                 if (item.kind === "mention" || item.kind === "thread") {

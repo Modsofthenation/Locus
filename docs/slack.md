@@ -229,6 +229,7 @@ Keep `slack_post` / `slack_upload` / `slack_channels`. Reads use the **user** to
 | `slack_upload` | files | yes (mutating) | user token by default; bot token when `as="bot"` |
 | `slack_history` | PR 3 | no (hostile output, wrap) | user token |
 | `slack_replies` | PR 3 | no (hostile output, wrap) | user token |
+| `slack_emojis` | emoji | no (hostile output, wrap) | user token (`emoji.list`, needs `emoji:read`) |
 
 `slack_post` description: post as the signed-in operator by default; pass `as="bot"` for the Locus app. Interactive sessions wait for Approve / Deny. Automations keep today’s allowlist opt-in. Offer Slack tools when a Slack account has a **user** token (`integrationReady`); a bot-only leftover token does not unlock the client. After OAuth, user-identity `slack_post` must still prefer the user token.
 
@@ -242,6 +243,10 @@ Use `slack_upload` with a conversation ID from `slack_channels`, a `filename`, a
   "comment": "Notes from today"
 }
 ```
+
+`slack_emojis` lists the workspace's custom emoji as `:name: url`, with aliases resolved. Pass `query` to filter by name and `limit` to cap the list (default 200). Pass `name` to look up one emoji; it falls back to the standard set, so `name="tada"` returns 🎉.
+
+`slack_history` and `slack_replies` add a message's reactions to the end of its line, for example `1732.0001 alice: shipping today  [:eyes: 2, :shipit: 1]`.
 
 Mark `slack_history` / `slack_replies` hostile in `packages/shared/src/untrusted.ts` next to `slack_channels`. Add `UntrustedKind` `"slack-message"` (same fence family as `pr-text`).
 

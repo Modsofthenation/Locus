@@ -4,12 +4,17 @@ import type { ReactNode } from "react";
  * One plain lead sentence, with the longer explanation behind a native
  * "How this works" disclosure. Used at the top of dense Settings pages.
  */
-export function HowItWorks(props: { lead: ReactNode; children: ReactNode; testId?: string }) {
+export function HowItWorks(props: {
+  lead?: ReactNode;
+  summary?: string;
+  children: ReactNode;
+  testId?: string;
+}) {
   return (
     <div className="settings-how" data-testid={props.testId}>
-      <p className="settings-how-lead">{props.lead}</p>
+      {props.lead ? <p className="settings-how-lead">{props.lead}</p> : null}
       <details className="settings-how-details">
-        <summary>How this works</summary>
+        <summary>{props.summary ?? "How this works"}</summary>
         <div className="settings-how-body">{props.children}</div>
       </details>
     </div>

@@ -2,7 +2,7 @@ import type { ProductMode } from "@locus/shared";
 import type { UiSection } from "@/state/store";
 
 /** Default pinned rail for new installs. Everything else waits in More until pinned. */
-export const PRIMARY_RAIL_SECTIONS = ["agents", "codebase"] as const;
+export const PRIMARY_RAIL_SECTIONS = ["agents", "codebase", "reviews"] as const;
 /** Pinned rail before the slimmer default. Kept for installs that never customized pins. */
 export const LEGACY_PRIMARY_RAIL_SECTIONS = [
   "agents",
@@ -62,6 +62,14 @@ export const SWARM_MORE_RAIL_SECTIONS = [
   "grafana",
   "docker",
 ] as const;
+
+/** Keep categories stable when a tool moves between More and the rail. */
+export const RAIL_MENU_GROUPS: { label: string; sections: readonly UiSection[] }[] = [
+  { label: "Code", sections: ["agents", "codebase", "reviews", "ide"] },
+  { label: "Design & build", sections: ["design", "games", "assets", "android"] },
+  { label: "Organize & collaborate", sections: ["project", "board", "slack", "brain"] },
+  { label: "Run & monitor", sections: ["automations", "grafana", "docker"] },
+];
 
 export type PrimaryRailSection = (typeof PRIMARY_RAIL_SECTIONS)[number];
 export type MoreRailSection = (typeof MORE_RAIL_SECTIONS)[number];

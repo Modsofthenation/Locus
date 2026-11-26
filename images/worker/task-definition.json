@@ -9,7 +9,7 @@
   "containerDefinitions": [
     {
       "name": "worker",
-      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/locus-worker:0.29.0",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/locus-worker:0.30.0",
       "essential": true,
       "portMappings": [{ "containerPort": 7421, "protocol": "tcp" }],
       "logConfiguration": {

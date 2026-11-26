@@ -39,8 +39,8 @@ export function BoardEmpty() {
     <div className="empty design-start board-start">
       <div className="empty-card">
         <EmptyHero
-          title="Board"
-          lead="A local planning canvas. Stickies, frames, diagrams, live cards, and Locus on the canvas — no guest."
+          title="Create a board"
+          lead="Map ideas and tasks on a canvas with sticky notes, diagrams, and cards."
         />
         <div className="design-start-layout">
           <form
@@ -54,7 +54,8 @@ export function BoardEmpty() {
               <textarea
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
-                placeholder="Describe what to map, or start from a template below…"
+                aria-label="What would you like to map?"
+                placeholder="Describe what you want to map, or choose a template…"
                 rows={3}
               />
               <div className="empty-composer-bar">

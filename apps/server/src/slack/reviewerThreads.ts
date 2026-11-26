@@ -14,6 +14,7 @@ import {
   formatSlackDismissed,
   isSlackMentionReviewRequest,
   isSlackRereviewRequest,
+  isSlackStopWatchingRequest,
   parseSlackDismissRequest,
   parsePullUrl,
   resolveForgeAccount,
@@ -53,7 +54,8 @@ export const DEFAULT_PULL_STATE_POLL_MS = 10 * 60_000;
 
 /**
  * Check each watched review thread for new human replies: a re-review request, a retry after a
- * failure, a dismissal ("won't fix #2"), or a question that @-mentions the reviewer. Only replies
+ * failure, a dismissal ("won't fix #2"), "stop watching this thread", or a question that
+ * @-mentions the reviewer. Only replies
  * after the last scan count, never the reviewer's own posts. Also refreshes the 👍 / 👎 count on
  * its final message, and every `pullStatePollMs` reads the PR: merged or closed stops the watch,
  * and "won't fix" comments on the PR dismiss findings. `only` limits the scan to threads
@@ -143,6 +145,7 @@ export async function scanThreads(
     let retry = false;
     let fullRereview = false;
     let question: { text: string; asker?: string } | undefined;
+    let stop = false;
     const dismissals: Array<{
       request: NonNullable<ReturnType<typeof parseSlackDismissRequest>>;
       text: string;
@@ -151,11 +154,15 @@ export async function scanThreads(
       if (message.ts === thread.ts || Number(message.ts) <= Number(thread.cursor)) continue;
       if (Number(message.ts) > Number(newest)) newest = message.ts;
       if (!isHumanReply(message) || ctx.ownPosts.has(message.ts)) continue;
-      const dismiss = reviewer.dismissInThread ? parseSlackDismissRequest(message.text) : undefined;
-      if (dismiss) dismissals.push({ request: dismiss, text: message.text });
       // Re-review, retry and questions spend tokens: only listed people may ask. Dismissals
       // cost nothing and stay open to anyone in the thread.
       const mayAsk = slackReviewerRequesterAllowed(reviewer, message.userId);
+      if (mayAsk && isSlackStopWatchingRequest(message.text, mentionIds)) {
+        stop = true;
+        continue;
+      }
+      const dismiss = reviewer.dismissInThread ? parseSlackDismissRequest(message.text) : undefined;
+      if (dismiss) dismissals.push({ request: dismiss, text: message.text });
       const mayRereview = mayAsk && reviewer.rereviewOnThreadReply;
       const full = mayRereview && isSlackFullRereviewRequest(message.text, mentionIds);
       if (full) fullRereview = true;
@@ -179,6 +186,17 @@ export async function scanThreads(
     }
     for (const { request, text } of dismissals) {
       if (await dismiss(ctx, rs, job, request, text)) dirty = true;
+    }
+    if (stop) {
+      // "stop watching this thread": drop it now, ahead of any re-review or question in the
+      // same batch. A new review request (the PR posted again, or a mention) watches it again.
+      delete threads[key];
+      dirty = true;
+      await ctx.postText(
+        job,
+        ":wave: Stopped watching this thread. Post the PR again, or mention me with a review request, to pick it back up.",
+      );
+      continue;
     }
     if (asked || retry) {
       // After a skip, asking again means "review it anyway".
@@ -247,8 +265,8 @@ async function dismiss(
     await ctx.postText(
       job,
       findings.length
-        ? `:thinking_face: The last review of <${job.url}|${label}> has ${reviewPlural(findings.length, "finding")} (#1–#${findings.length}). Nothing to dismiss there.`
-        : `:thinking_face: The last review of <${job.url}|${label}> left no findings to dismiss.`,
+        ? `:thinking_face: The last review of <${job.url}|${label}> has ${reviewPlural(findings.length, "finding")} (#1–#${findings.length}). None of them matched.`
+        : `:thinking_face: The last review of <${job.url}|${label}> left no findings.`,
     );
     return false;
   }

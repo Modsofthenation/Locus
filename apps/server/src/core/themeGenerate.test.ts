@@ -51,15 +51,17 @@ describe("generateCustomTheme", () => {
     expect(req.messages[0]!.content).toContain("rainy cyberpunk night");
   });
 
-  it("sends the current theme when refining", async () => {
+  it("sends the current theme without its local image when refining", async () => {
     const complete = reply('{"name":"Warmer","colors":{"bg":"#201010"}}');
     await generateCustomTheme({
       config: configWithKey(),
       prompt: "warmer",
-      current: { name: "Cold", colors: { bg: "#001020" } },
+      current: { name: "Cold", colors: { bg: "#001020" }, backdrop: "data:image/png;base64,local" },
       complete,
     });
-    expect(complete.mock.calls[0]![0].messages[0]!.content).toContain('"Cold"');
+    const request = complete.mock.calls[0]![0].messages[0]!.content;
+    expect(request).toContain('"Cold"');
+    expect(request).not.toContain("data:image/png");
   });
 
   it("explains missing providers, empty prompts and junk replies", async () => {

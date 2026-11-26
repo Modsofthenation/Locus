@@ -43,6 +43,7 @@ export const PLAN_READ_TOOLS = new Set([
   "slack_channels",
   "slack_history",
   "slack_replies",
+  "slack_emojis",
   "grafana_search",
   "grafana_get",
   "grafana_query",

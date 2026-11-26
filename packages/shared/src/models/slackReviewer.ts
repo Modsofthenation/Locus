@@ -805,17 +805,33 @@ export function isSlackFullRereviewRequest(
   );
 }
 
+// "dismiss", not "dismissed": the past tense is how a reviewer reports a dismissal, and reading
+// another reviewer's ":ok_hand: Dismissed #1" as a request made two of them loop.
 const SLACK_DISMISS_WORDS =
-  /(?:^|[^a-z0-9])(?:won[’']?t[- ]?fix|wontfix|false[- ]positives?|not (?:an? )?(?:issue|bug|problem)s?|by design|intended|dismiss(?:ed)?|ignore)(?:$|[^a-z0-9])/i;
+  /(?:^|[^a-z0-9])(?:won[’']?t[- ]?fix|wontfix|false[- ]positives?|not (?:an? )?(?:issue|bug|problem)s?|by design|intended|dismiss|ignore)(?:$|[^a-z0-9])/i;
+
+/**
+ * Text a dismissal is read from: Slack links (`<url|acme/api#12>`), mentions and inline code
+ * dropped, and en-dash finding ranges ("has 3 findings (#1–#3)", as the reviewer writes them) removed, so none of
+ * their `#n` count as finding ids.
+ */
+function slackDismissText(text: string): string {
+  return text
+    .replace(/<[^<>\n]*>/g, " ")
+    .replace(/`[^`\n]*`/g, " ")
+    .replace(/#\d{1,2}\s*[–—]\s*#?\d{1,2}(?!\d)/g, " ");
+}
 
 /**
  * Findings a thread reply dismisses: "won't fix #2", "#1 and #3 are false positives", "dismiss
  * all". Needs a dismiss word and either `#n` ids or "all". Matched with a regex, not a model.
  */
 export function parseSlackDismissRequest(
-  text: string | undefined,
+  raw: string | undefined,
 ): { ids: number[] } | { all: true } | undefined {
-  if (!text || !SLACK_DISMISS_WORDS.test(text)) return undefined;
+  if (!raw) return undefined;
+  const text = slackDismissText(raw);
+  if (!SLACK_DISMISS_WORDS.test(text)) return undefined;
   const ids = [...text.matchAll(/(?:^|[^\w&/])#(\d{1,2})(?!\d)/g)]
     .map((match) => Number(match[1]))
     .filter((n) => n >= 1);
@@ -827,6 +843,31 @@ export function parseSlackDismissRequest(
   )
     return { all: true };
   return undefined;
+}
+
+/**
+ * "stop watching this thread", "@Locus unwatch", "stop reviewing this PR": stop reading the thread
+ * for re-reviews, dismissals and questions. A reply that @-mentions someone counts only when one
+ * of the mentions is this reviewer (`mentionIds`), so one of two reviewers in a channel can be
+ * told to stop on its own; without a mention every reviewer watching the thread stops.
+ */
+export function isSlackStopWatchingRequest(
+  text: string | undefined,
+  mentionIds: string[],
+): boolean {
+  if (!text) return false;
+  const ids = mentionIds.filter(Boolean);
+  let mentions = 0;
+  let ours = false;
+  const rest = text.replace(/<@([A-Z0-9]+)(?:\|[^>]*)?>/g, (_whole, id: string) => {
+    mentions += 1;
+    if (ids.includes(id)) ours = true;
+    return " ";
+  });
+  if (mentions && !ours) return false;
+  return /^(?:(?:hey|hi|ok|okay)[\s,!]+)?(?:please[\s,]+)?(?:(?:can|could|would|will) you[\s,]+(?:please[\s,]+)?)?(?:(?:stop|quit) (?:watching|following|monitoring|reviewing)|unwatch|unfollow)(?: (?:this|the) (?:thread|pr|pull request))?(?:[\s,]+please)?[\s.!?]*$/i.test(
+    rest.replace(/^[\s,:]+/, "").trim(),
+  );
 }
 
 /**

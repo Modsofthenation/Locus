@@ -75,9 +75,18 @@ describe("InboxPane", () => {
   }
 
   it("says all caught up when nothing waits", () => {
-    render({ ...initialState, inboxOpen: true });
+    const dispatch = render({ ...initialState, inboxOpen: true });
     expect(host.querySelector(".empty-hero h2")?.textContent).toBe("All caught up");
     expect(host.querySelector("[data-testid='inbox-next']")).toBeNull();
+    expect(host.querySelector("[data-testid='dash-stats']")).toBeNull();
+    expect(host.querySelector("[data-testid='dash-reviewers']")).toBeNull();
+    expect(host.querySelector("[data-testid='dash-jobs']")).toBeNull();
+    expect(host.querySelector(".dash-usage")?.hasAttribute("open")).toBe(false);
+    const start = host.querySelector<HTMLButtonElement>(".dash-heading .primary");
+    expect(start?.textContent).toBe("Start an agent");
+    act(() => start?.click());
+    expect(dispatch).toHaveBeenCalledWith({ type: "section", section: "agents" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "select", id: null });
   });
 
   it("previews the next item and opens its target", () => {
@@ -184,6 +193,14 @@ describe("InboxPane", () => {
       "Review #12",
     );
     act(() => {
+      const reviews = host.querySelector<HTMLButtonElement>(
+        "[data-testid='dash-reviewers'] .dash-panel-head button",
+      );
+      expect(reviews?.textContent).toBe("Open Reviews");
+      reviews?.click();
+    });
+    expect(dispatch).toHaveBeenCalledWith({ type: "section", section: "reviews" });
+    act(() => {
       (active?.querySelector("button.dash-line") as HTMLButtonElement).click();
     });
     expect(dispatch).toHaveBeenCalledWith({ type: "select", id: "s3" });
@@ -203,7 +220,11 @@ describe("InboxPane", () => {
   });
 
   it("jumps to a panel from its stat tile", () => {
-    render({ ...initialState, inboxOpen: true, sessions: [waiting] });
+    render({
+      ...initialState,
+      inboxOpen: true,
+      sessions: [{ ...waiting, status: "running", needsHuman: undefined }],
+    });
     const tile = host.querySelector("[aria-controls='dash-active']") as HTMLButtonElement;
     expect(tile.tagName).toBe("BUTTON");
     act(() => tile.click());

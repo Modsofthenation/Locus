@@ -15,7 +15,7 @@ describe("quiet shell contract", () => {
     expect(css).toMatch(/--type-xs: max\(12px, calc\(12px \* var\(--density-type\)\)\);/);
     expect(css).toMatch(/--type-md: calc\(14px \* var\(--density-type\)\);/);
     expect(css).toMatch(/--type-body: calc\(14px \* var\(--density-type\)\);/);
-    expect(css).toMatch(/:root \{\n  --density-space: 1;\n  --density-type: 1;\n\}/);
+    expect(css).toMatch(/:root \{\n {2}--density-space: 1;\n {2}--density-type: 1;\n\}/);
     expect(css).toMatch(/--chat-font: 14px;/);
     expect(css).not.toMatch(/--type-2xs: 10px;/);
     expect(css).not.toMatch(/--chat-font: 13px;/);
@@ -23,7 +23,7 @@ describe("quiet shell contract", () => {
 
   it("pins a short featured theme set and keeps the rest as extras", () => {
     expect([...FEATURED_THEME_IDS]).toEqual(["ember", "midnight", "paper", "contrast"]);
-    expect(THEME_OPTIONS).toHaveLength(210);
+    expect(THEME_OPTIONS).toHaveLength(238);
   });
 
   it("ships the quiet-shell screenshot contract in ux.css", () => {
@@ -50,7 +50,7 @@ describe("quiet shell contract", () => {
   });
 
   it("keeps a slim primary rail and hides the rest behind More", () => {
-    expect([...PRIMARY_RAIL_SECTIONS]).toEqual(["agents", "codebase"]);
+    expect([...PRIMARY_RAIL_SECTIONS]).toEqual(["agents", "codebase", "reviews"]);
     expect([...MORE_RAIL_SECTIONS]).toContain("games");
     expect([...MORE_RAIL_SECTIONS]).toContain("slack");
     expect([...MORE_RAIL_SECTIONS]).not.toContain("codebase");

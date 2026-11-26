@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  CUSTOM_THEME_HARMONIES,
   CUSTOM_THEME_SYSTEM_PROMPT,
   MANAGE_THEME_TOOL,
-  applyThemeManageAction,
+  deriveThemePalette,
+  inkAcross,
+  themeSpecCss,
   customAccentText,
   customThemeContrastIssues,
   customThemeCss,
@@ -15,12 +18,12 @@ import {
   hexContrast,
   isCustomThemeId,
   newCustomThemeId,
-  normalizeCustomThemes,
   parseCustomThemeJson,
   resolveThemeRef,
   type CustomTheme,
 } from "./customTheme.js";
 import { THEME_FAMILY_ORDER, themeFamilyLabel } from "./theme.js";
+import { applyThemeManageAction, normalizeCustomThemes } from "./themeInheritance.js";
 
 const NOW = "2026-01-01T00:00:00.000Z";
 
@@ -422,5 +425,115 @@ describe("generated family", () => {
   it("is a labelled family after the style groups", () => {
     expect(THEME_FAMILY_ORDER.at(-1)).toBe("generated");
     expect(themeFamilyLabel("generated")).toBe("Generated");
+  });
+});
+
+describe("engine extensions", () => {
+  it("grows a readable palette from one seed for every harmony", () => {
+    for (const harmony of CUSTOM_THEME_HARMONIES) {
+      for (const scheme of ["light", "dark"] as const) {
+        const colors = deriveThemePalette("#3a86ff", scheme, harmony);
+        expect(customThemeContrastIssues(colors)).toEqual([]);
+        expect(scheme === "light" ? colors.bg > "#e0" : colors.bg < "#30").toBe(true);
+      }
+    }
+    const comp = deriveThemePalette("#ff0000", "dark", "complementary");
+    // Complementary sends the second accent across the wheel (red → cyan).
+    expect(Number.parseInt(comp.accent2.slice(5, 7), 16)).toBeGreaterThan(
+      Number.parseInt(comp.accent2.slice(1, 3), 16),
+    );
+    // Grey seeds stay neutral instead of inventing a hue.
+    const grey = deriveThemePalette("#808080", "light", "mono");
+    expect(grey.bg.slice(1, 3)).toBe(grey.bg.slice(3, 5));
+  });
+
+  it("builds colours from palette.seed and lets explicit colours win", () => {
+    const seeded = customThemeFromInput(
+      { name: "Seeded", scheme: "light", palette: { seed: "#2a9d8f", harmony: "triadic" } },
+      { now: NOW },
+    );
+    expect(seeded.palette).toEqual({ seed: "#2a9d8f", harmony: "triadic" });
+    expect(seeded.colors).toEqual(deriveThemePalette("#2a9d8f", "light", "triadic"));
+    const pinned = customThemeFromInput(
+      { name: "Pinned", scheme: "dark", seed: "#2a9d8f", colors: { accent2: "#ffcc00" } },
+      { now: NOW },
+    );
+    expect(pinned.colors.accent2).toBe("#ffcc00");
+    expect(pinned.colors.bg).toBe(deriveThemePalette("#2a9d8f", "dark").bg);
+    expect(customThemeFromInput({ name: "x", palette: { seed: "nope" } }).palette).toBeUndefined();
+  });
+
+  it("normalizes the new layout, type, effect and colour fields", () => {
+    const theme = sample({
+      layout: { paneAccent: "gradient", background: "bricks", sidebar: "glass" },
+      type: { numerals: "tabular", headingStyle: "boxed" },
+      effects: { chromatic: true, frame: true, sheen: true },
+      extraColors: { caret: "#ff5c8a", scrollbar: "#333333" },
+      motion: { enter: "unfold", backdrop: "breathe" },
+    });
+    expect(theme.layout).toMatchObject({ paneAccent: "gradient", background: "bricks" });
+    expect(theme.type.numerals).toBe("tabular");
+    expect(theme.effects).toMatchObject({ chromatic: true, frame: true, sheen: true });
+    expect(theme.extraColors).toMatchObject({ caret: "#ff5c8a", scrollbar: "#333333" });
+    expect(sample({ layout: { paneAccent: "zigzag" } }).layout.paneAccent).toBeUndefined();
+  });
+
+  it("emits CSS for every new option value", () => {
+    const backgrounds = ["sunburst", "plaid", "zigzag", "waves", "halftone", "bricks"] as const;
+    for (const background of backgrounds) {
+      const css = customThemeCss(sample({ layout: { background } }));
+      expect(css).toMatch(
+        /html\[data-theme="custom-sample"\],\s*html\[data-theme="custom-sample"\] body \{\s*background: /,
+      );
+      expect(css.split("(").length).toBe(css.split(")").length);
+    }
+    const css = customThemeCss(
+      sample({
+        layout: {
+          background: "waves",
+          paneAccent: "gradient",
+          sidebar: "gradient",
+          topbar: "underline",
+          bubble: "gradient",
+          button: "brutal",
+          shadow: "layered",
+        },
+        type: { numerals: "slashed", headingStyle: "shadow" },
+        effects: { chromatic: true, frame: true, sheen: true, glow: true },
+        extraColors: { caret: "#ff5c8a" },
+        motion: { enter: "flip", backdrop: "sway" },
+      }),
+    );
+    expect(css).toContain("font-variant-numeric: slashed-zero;");
+    expect(css).toContain("caret-color: #ff5c8a;");
+    expect(css).toContain('html[data-theme="custom-sample"] #root::after');
+    expect(css).toMatch(/background-size: 100% 3px, 100% 100%/);
+    expect(css).toContain("border-bottom: 2px solid #ff5c8a");
+    // Offset echo, chromatic split and glow stack into one text-shadow.
+    expect(css).toMatch(/text-shadow: 0\.06em 0\.06em 0 [^;]*rgba\(255, 0, 90[^;]*0 0 10px/);
+    expect(css).toContain("rotateX(-22deg)");
+    expect(css).toContain("rotate(1.5deg)");
+    expect(css).toContain("outline: 2px solid #ff5c8a;");
+    expect(css.split("{").length).toBe(css.split("}").length);
+  });
+
+  it("keeps ink readable on gradient fills", () => {
+    expect(inkAcross(["#111111", "#222244"])).toBe("#ffffff");
+    expect(inkAcross(["#ffee88", "#ccffee"])).toBe("#111111");
+  });
+
+  it("compiles specs under any safe selector id and refuses unsafe ones", () => {
+    const theme = sample({ layout: { radius: 8 } });
+    expect(themeSpecCss(theme, "zenith")).toContain('[data-theme="zenith"] {');
+    expect(themeSpecCss(theme, 'x"] body{}')).toBe("");
+    expect(themeSpecCss(theme, "UPPER")).toBe("");
+  });
+
+  it("documents the new fields for the generator", () => {
+    expect(CUSTOM_THEME_SYSTEM_PROMPT).toContain('"palette"');
+    expect(CUSTOM_THEME_SYSTEM_PROMPT).toContain('"paneAccent"');
+    expect(CUSTOM_THEME_SYSTEM_PROMPT).toContain('"numerals"');
+    expect(CUSTOM_THEME_SYSTEM_PROMPT).toContain('"chromatic"');
+    expect(CUSTOM_THEME_SYSTEM_PROMPT).toContain('"sunburst"');
   });
 });

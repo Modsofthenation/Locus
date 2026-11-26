@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  LOCUS_REVIEWER_EVENT_TYPE,
+  LOCUS_REVIEWER_METADATA,
   SLACK_MOCK_BOT_TOKEN,
   SLACK_MOCK_USER_TOKEN,
   slackAuthorizeUrl,
@@ -256,6 +258,66 @@ describe("Slack client", () => {
     expect(rows[2]?.isBot).toBe(true);
     expect(urls).toHaveLength(2);
     expect(urls[0]).toContain("/users.list?");
+  });
+
+  it("marks a post with metadata, retries without it if Slack refuses, and reads it back", async () => {
+    const posts: Array<Record<string, unknown>> = [];
+    const urls: string[] = [];
+    const fetchFn: typeof fetch = async (url, init) => {
+      const href = String(url);
+      urls.push(href);
+      const json = (body: unknown) =>
+        new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+      if (href.includes("chat.postMessage")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        posts.push(body);
+        if (body.metadata) return json({ ok: false, error: "metadata_must_be_sent_from_app" });
+        return json({ ok: true, ts: "9.1", channel: "C1", message: { ts: "9.1", text: "hi" } });
+      }
+      if (href.includes("conversations.replies")) {
+        return json({
+          ok: true,
+          messages: [
+            {
+              ts: "9.2",
+              text: ":ok_hand: Dismissed #1",
+              user: "U2",
+              metadata: { event_type: LOCUS_REVIEWER_EVENT_TYPE, event_payload: { v: 1 } },
+            },
+            { ts: "9.3", text: "Dismissed #1", bot_id: "B1", user: "U3" },
+          ],
+        });
+      }
+      return json({ ok: true, user: { id: "U2", name: "u" } });
+    };
+    const api = new SlackApi(fetchFn);
+    const account = {
+      id: "s1",
+      kind: "slack" as const,
+      name: "Slack",
+      enabled: true,
+      baseUrl: "https://slack.com/api",
+      token: "xoxb-bot",
+      userToken: "xoxp-user",
+    };
+    const posted = await api.postMessage(account, {
+      channel: "C1",
+      text: "hi",
+      as: "user",
+      metadata: LOCUS_REVIEWER_METADATA,
+    });
+    expect(posted.ts).toBe("9.1");
+    expect(posts).toHaveLength(2);
+    expect(posts[0]!.metadata).toEqual(LOCUS_REVIEWER_METADATA);
+    expect(posts[1]!.metadata).toBeUndefined();
+
+    const rows = await api.replies(account, "C1", "9.0");
+    expect(urls.find((row) => row.includes("conversations.replies"))).toContain(
+      "include_all_metadata=true",
+    );
+    expect(rows[0]!.eventType).toBe(LOCUS_REVIEWER_EVENT_TYPE);
+    expect(rows[0]!.bot).toBeUndefined();
+    expect(rows[1]!.bot).toBe(true);
   });
 
   it("keeps thread_ts on a user-token reply when Slack omits it from chat.postMessage", async () => {
