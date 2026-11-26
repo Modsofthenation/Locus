@@ -5,6 +5,13 @@ import {
   chatScrollGrabOffset,
   chatScrollOverflow,
   chatScrollThumb,
+  CHAT_TICK_MIN_GAP,
+  chatActiveTurn,
+  chatNearestTick,
+  chatTickMagnify,
+  chatTickPositions,
+  chatTurnMarks,
+  chatTurnSnippet,
 } from "./chatScrollIndicator";
 
 describe("chat scroll indicator", () => {
@@ -87,5 +94,54 @@ describe("chat scroll indicator", () => {
         grabOffset: 24,
       }),
     ).toBe(0);
+  });
+});
+
+describe("chat turn ticks", () => {
+  const rows = [
+    { message: { id: "u1", role: "user", content: "Fix the **header** popover" } },
+    { message: { id: "a1", role: "assistant", content: "Looking.\n\nmore" } },
+    { message: { id: "t1", role: "tool", content: "ok" } },
+    { message: { id: "a2", role: "assistant", content: "Header now matches the mock." } },
+    { message: { id: "u2", role: "user", content: "Rebase onto develop" } },
+    { message: { id: "a3", role: "assistant", content: "" } },
+  ];
+  const offsets = [0, 40, 200, 260, 400, 460, 520];
+
+  it("makes one mark per prompt with the turn's last reply", () => {
+    expect(chatTurnMarks(rows, offsets)).toEqual([
+      { id: "u1", top: 0, prompt: "Fix the header popover", reply: "Header now matches the mock." },
+      { id: "u2", top: 400, prompt: "Rebase onto develop", reply: "" },
+    ]);
+    expect(chatTurnMarks(rows, offsets, { skip: (id) => id === "u2" })).toHaveLength(1);
+  });
+
+  it("trims snippets to the first paragraph", () => {
+    expect(chatTurnSnippet("first   line\nwrapped\n\nsecond")).toBe("first line wrapped");
+    expect(chatTurnSnippet("x".repeat(300), 10)).toBe(`${"x".repeat(9)}…`);
+  });
+
+  it("spaces ticks evenly and compresses long chats", () => {
+    expect(chatTickPositions(3, 100)).toEqual([40, 50, 60]);
+    const many = chatTickPositions(51, 100);
+    expect(many[1]! - many[0]!).toBe(CHAT_TICK_MIN_GAP);
+    expect(chatTickPositions(0, 100)).toEqual([]);
+  });
+
+  it("magnifies near the pointer and picks the nearest tick", () => {
+    expect(chatTickMagnify(0)).toBe(1);
+    expect(chatTickMagnify(10)).toBeGreaterThan(chatTickMagnify(20));
+    expect(chatTickMagnify(30)).toBeGreaterThan(0);
+    expect(chatTickMagnify(42)).toBe(0);
+    expect(chatNearestTick([10, 20, 30], 24)).toBe(1);
+  });
+
+  it("tracks the active turn from the viewport", () => {
+    const tops = [0, 400, 900];
+    expect(chatActiveTurn(tops, { scrollTop: 0, clientHeight: 300, scrollHeight: 2000 })).toBe(0);
+    expect(chatActiveTurn(tops, { scrollTop: 350, clientHeight: 300, scrollHeight: 2000 })).toBe(1);
+    expect(chatActiveTurn(tops, { scrollTop: 1700, clientHeight: 300, scrollHeight: 2000 })).toBe(
+      2,
+    );
   });
 });

@@ -49,8 +49,9 @@ import {
   sessionOutcome,
 } from "@/lib/dashboard";
 import { formatAgo } from "@/lib/timeAgo";
-import { openSettings, useStore, type Action } from "@/state/store";
+import { useStore, type Action } from "@/state/store";
 import { EmptyHero } from "./EmptyHero";
+import { IconPlus } from "./Icons";
 import { ModelUsagePanel } from "./ModelUsagePanel";
 import { JobRunNotice, startJobRun } from "@/components/automations/jobRun";
 
@@ -321,8 +322,10 @@ function DashPanel(props: {
   id: string;
   empty: string;
   action?: ReactNode;
+  show?: boolean;
   children: ReactNode;
 }) {
+  if (props.show === false) return null;
   const items = (Array.isArray(props.children) ? props.children.flat() : [props.children]).filter(
     Boolean,
   );
@@ -599,6 +602,13 @@ export function InboxPane() {
     reviews.filter((row) => isActiveSession(row) && !waitingIds.has(row.id)).length +
     slack.active.filter((row) => row.status === "running").length;
   const subagents = active.reduce((sum, row) => sum + row.subagents, 0);
+  const showReviews = Boolean(
+    reviews.length || reviewers.length || slack.active.length || slack.recent.length,
+  );
+  const showJobs = Boolean(
+    jobs.live.length || jobs.recent.length || nextJobs.length || failingJobs || blockedJobs,
+  );
+  const showActivity = active.length > 0 || showReviews || showJobs;
   const jobWord = mode === "swarm" ? "Routines" : "Jobs";
   const agentWord = mode === "swarm" ? "teammates" : "agents";
   const openSession = (id: string) => {
@@ -694,46 +704,75 @@ export function InboxPane() {
 
   return (
     <div className="inbox-pane inbox-dashboard" data-testid="inbox-pane">
-      <div className="dash-stats" data-testid="dash-stats">
-        <StatTile
-          label="Needs you"
-          value={rows.length}
-          tone={rows.length ? "attention" : undefined}
-          target="dash-needs"
-          onJump={jump}
-        />
-        <StatTile
-          label={`Active ${agentWord}`}
-          value={active.length}
-          hint={subagents ? `+${subagents} subagent${subagents === 1 ? "" : "s"}` : undefined}
-          tone={active.length ? "live" : undefined}
-          target="dash-active"
-          onJump={jump}
-        />
-        <StatTile
-          label="Reviews running"
-          value={runningReviews}
-          hint={
-            slack.error
-              ? "Slack status unavailable"
-              : queuedReviews
-                ? `${queuedReviews} queued`
-                : undefined
-          }
-          tone={runningReviews ? "live" : undefined}
-          target="dash-reviewers"
-          onJump={jump}
-        />
-        <StatTile
-          label={`${jobWord} running`}
-          value={runningJobs}
-          hint={jobHint || undefined}
-          tone={failingJobs ? "danger" : runningJobs ? "live" : undefined}
-          target="dash-jobs"
-          onJump={jump}
-        />
-      </div>
-      <div className="dash-grid">
+      <header className="dash-heading">
+        <div>
+          <h1>Home</h1>
+          <p>
+            {showActivity
+              ? "Decisions and recent activity across your workspace."
+              : "Review work that needs your attention."}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={() => {
+            dispatch({ type: "section", section: "agents" });
+            dispatch({ type: "select", id: null });
+          }}
+        >
+          <IconPlus />
+          {mode === "swarm" ? "Create a teammate" : "Start an agent"}
+        </button>
+      </header>
+      {showActivity ? (
+        <div className="dash-stats" data-testid="dash-stats">
+          <StatTile
+            label="Needs you"
+            value={rows.length}
+            tone={rows.length ? "attention" : undefined}
+            target="dash-needs"
+            onJump={jump}
+          />
+          {active.length > 0 ? (
+            <StatTile
+              label={`Active ${agentWord}`}
+              value={active.length}
+              hint={subagents ? `+${subagents} subagent${subagents === 1 ? "" : "s"}` : undefined}
+              tone={active.length ? "live" : undefined}
+              target="dash-active"
+              onJump={jump}
+            />
+          ) : null}
+          {showReviews ? (
+            <StatTile
+              label="Reviews running"
+              value={runningReviews}
+              hint={
+                slack.error
+                  ? "Slack status unavailable"
+                  : queuedReviews
+                    ? `${queuedReviews} queued`
+                    : undefined
+              }
+              tone={runningReviews ? "live" : undefined}
+              target="dash-reviewers"
+              onJump={jump}
+            />
+          ) : null}
+          {showJobs ? (
+            <StatTile
+              label={`${jobWord} running`}
+              value={runningJobs}
+              hint={jobHint || undefined}
+              tone={failingJobs ? "danger" : runningJobs ? "live" : undefined}
+              target="dash-jobs"
+              onJump={jump}
+            />
+          ) : null}
+        </div>
+      ) : null}
+      <div className={`dash-grid${showActivity ? "" : " dash-grid-single"}`}>
         <div className="dash-main">
           <section className="dash-needs" id="dash-needs" tabIndex={-1} aria-label="Needs you">
             <div className="empty-card inbox-decision-card">
@@ -896,13 +935,14 @@ export function InboxPane() {
                 <EmptyHero
                   pose="rest"
                   title="All caught up"
-                  lead={`Approvals, questions, and failing ${mode === "swarm" ? "routines" : "jobs"} show up here.`}
+                  lead={`Approvals, questions, and failing ${jobWord.toLowerCase()} show up here.`}
                 />
               )}
             </div>
           </section>
           <DashPanel
             title="Recent"
+            show={Boolean(outcomes.length || recent.length || sinceVisit)}
             testId="dash-recent"
             id="dash-recent"
             empty="Finished work and recent chats show up here."
@@ -965,8 +1005,9 @@ export function InboxPane() {
           </DashPanel>
           <ModelUsagePanel providers={state.config?.providers} />
         </div>
-        <div className="dash-side">
+        <div className="dash-side" hidden={!showActivity}>
           <DashPanel
+            show={active.length > 0}
             title={`Active ${agentWord}`}
             count={active.length ? String(active.length) : undefined}
             testId="dash-active"
@@ -1008,19 +1049,22 @@ export function InboxPane() {
             ) : null}
           </DashPanel>
           <DashPanel
-            title="Reviewers"
+            title="Reviews"
+            show={showReviews}
             count={runningReviews ? `${runningReviews} running` : undefined}
             testId="dash-reviewers"
             id="dash-reviewers"
             empty="No review chats or Slack reviewers yet."
             action={
-              <button
-                type="button"
-                className="btn small ghost"
-                onClick={() => openSettings(dispatch, "reviewers")}
-              >
-                Manage
-              </button>
+              mode === "developer" ? (
+                <button
+                  type="button"
+                  className="btn small ghost"
+                  onClick={() => dispatch({ type: "section", section: "reviews" })}
+                >
+                  Open Reviews
+                </button>
+              ) : undefined
             }
           >
             {slack.error ? (
@@ -1086,6 +1130,7 @@ export function InboxPane() {
           </DashPanel>
           <DashPanel
             title={jobWord}
+            show={showJobs}
             count={
               [
                 runningJobs ? `${runningJobs} running` : "",

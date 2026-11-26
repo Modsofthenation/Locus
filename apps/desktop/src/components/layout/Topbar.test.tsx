@@ -3,9 +3,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Topbar } from "./Topbar";
 import { JobRunNotice, setJobNotice } from "@/components/automations/jobRun";
-import { Store, initialState } from "@/state/store";
+import { Store, initialState as appInitialState } from "@/state/store";
 import { api } from "@/lib/api";
 import { exportSessionChat } from "@/lib/chatExport";
+
+const initialState = { ...appInitialState, interfaceMode: "full" as const };
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -909,53 +911,60 @@ describe("Topbar", () => {
     expect(exportSessionChat).toHaveBeenCalledWith(row, "pdf");
   });
 
-  it("opens the terminal from the agent menu so phones can switch without the toggle", () => {
-    host = document.createElement("div");
-    document.body.appendChild(host);
-    root = createRoot(host);
-    const row = {
-      id: "s1",
-      title: "Host chat",
-      os: "ubuntu" as const,
-      templateId: "host",
-      runtime: "host" as const,
-      providerId: "p",
-      model: "grok-4",
-      status: "idle" as const,
-      messages: [],
-      createdAt: "2020-01-01T00:00:00.000Z",
-      updatedAt: "2020-01-01T00:00:00.000Z",
-    };
-    const dispatch = vi.fn();
-    act(() => {
-      root.render(
-        <Store.Provider
-          value={{ state: { ...initialState, selectedId: "s1", sessions: [row] }, dispatch }}
-        >
-          <Topbar />
-        </Store.Provider>,
+  it.each(["full", "lite"] as const)(
+    "opens the terminal from the agent menu in %s mode",
+    (interfaceMode) => {
+      host = document.createElement("div");
+      document.body.appendChild(host);
+      root = createRoot(host);
+      const row = {
+        id: "s1",
+        title: "Host chat",
+        os: "ubuntu" as const,
+        templateId: "host",
+        runtime: "host" as const,
+        providerId: "p",
+        model: "grok-4",
+        status: "idle" as const,
+        messages: [],
+        createdAt: "2020-01-01T00:00:00.000Z",
+        updatedAt: "2020-01-01T00:00:00.000Z",
+      };
+      const dispatch = vi.fn();
+      act(() => {
+        root.render(
+          <Store.Provider
+            value={{
+              state: { ...initialState, interfaceMode, selectedId: "s1", sessions: [row] },
+              dispatch,
+            }}
+          >
+            <Topbar />
+          </Store.Provider>,
+        );
+      });
+      expect(Boolean(host.querySelector("[data-testid='view-mode-toggle']"))).toBe(
+        interfaceMode === "full",
       );
-    });
-    // The top-bar toggle is still there for wide windows; CSS hides it on phones.
-    expect(host.querySelector("[data-testid='view-mode-toggle']")).not.toBeNull();
-    const trigger = host.querySelector('[title="Agent menu"]') as HTMLElement;
-    act(() => {
-      trigger.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-      trigger.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-      trigger.click();
-    });
-    const open = [...host.querySelectorAll(".menu-item")].find(
-      (btn) => btn.textContent === "Open terminal",
-    ) as HTMLButtonElement;
-    act(() => {
-      open.click();
-    });
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "session",
-      session: expect.objectContaining({ id: "s1", viewMode: "terminal" }),
-    });
-    expect(api.patchSession).toHaveBeenCalledWith("s1", { viewMode: "terminal" });
-  });
+      const trigger = host.querySelector('[title="Agent menu"]') as HTMLElement;
+      act(() => {
+        trigger.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+        trigger.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+        trigger.click();
+      });
+      const open = [...host.querySelectorAll(".menu-item")].find(
+        (btn) => btn.textContent === "Open terminal",
+      ) as HTMLButtonElement;
+      act(() => {
+        open.click();
+      });
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "session",
+        session: expect.objectContaining({ id: "s1", viewMode: "terminal" }),
+      });
+      expect(api.patchSession).toHaveBeenCalledWith("s1", { viewMode: "terminal" });
+    },
+  );
 
   it("saves a named golden image from the agent menu", async () => {
     vi.spyOn(window, "prompt").mockReturnValue("nightly-node");

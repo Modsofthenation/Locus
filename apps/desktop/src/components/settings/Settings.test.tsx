@@ -18,13 +18,17 @@ import { Settings, SETTINGS_AUTOSAVE_MS } from "./Settings";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { api } from "@/lib/api";
 import { setSettingsDirty } from "@/lib/settingsLeave";
-import { Store, initialState, reducer, type Action } from "@/state/store";
+import { Store, initialState as appInitialState, reducer, type Action } from "@/state/store";
+
+const initialState = { ...appInitialState, interfaceMode: "full" as const };
 
 vi.mock("@/lib/api", () => ({
   api: {
     hypervisor: vi.fn(async () => ({ kind: "mock", capabilities: {} })),
     images: vi.fn(async () => []),
     providerUsage: vi.fn(async () => ({ usage: [] })),
+    slackStatus: vi.fn(async () => ({ connected: false, socket: "down" })),
+    slackReviewerRuns: vi.fn(async () => ({ runs: [] })),
     browseDiskImages: vi.fn(async () => ({
       path: "/media",
       parent: "/",
@@ -79,7 +83,7 @@ vi.mock("@/lib/api", () => ({
     rotateChromeExtension: vi.fn(),
     checkUpdates: vi.fn(async () => ({
       status: "unavailable",
-      current: "0.29.0",
+      current: "0.30.0",
       message: "No GitHub release found yet. Check for updates works after a v* tag is published.",
     })),
     refreshCursorCli: vi.fn(async () => ({ changed: false, models: [] })),
@@ -175,6 +179,7 @@ describe("Settings", () => {
     next = config,
     dispatchSpy?: (action: Action) => void,
     extras?: {
+      section?: "settings" | "reviews";
       repos?: typeof initialState.repos;
       vms?: typeof initialState.vms;
       sessions?: typeof initialState.sessions;
@@ -187,7 +192,7 @@ describe("Settings", () => {
     function Harness() {
       const [state, dispatch] = useReducer(reducer, {
         ...initialState,
-        section: "settings" as const,
+        section: extras?.section ?? "settings",
         config: next,
         repos: extras?.repos ?? [],
         vms: extras?.vms ?? [],
@@ -231,6 +236,30 @@ describe("Settings", () => {
       (el) => el.querySelector(".settings-nav-label")?.textContent === label,
     );
   }
+
+  it("saves a new reviewer before opening Slack integrations", async () => {
+    await render(config, undefined, { section: "reviews" });
+    const reviewersTab = [
+      ...host!.querySelectorAll<HTMLButtonElement>(".review-workspace-nav button"),
+    ].find((button) => button.textContent === "Reviewers");
+    await act(async () => reviewersTab!.click());
+    await act(async () =>
+      host!.querySelector<HTMLButtonElement>("[data-testid='slack-reviewer-add']")!.click(),
+    );
+    expect(api.saveConfig).not.toHaveBeenCalled();
+    await act(async () =>
+      host!
+        .querySelector<HTMLButtonElement>("[data-testid='slack-reviewers-signin'] button")!
+        .click(),
+    );
+
+    expect(api.saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slackReviewers: [expect.objectContaining({ id: expect.any(String) })],
+      }),
+    );
+    expect(host!.querySelector(".settings-head h2")?.textContent).toBe("Integrations");
+  });
 
   it("fills the workspace so tab switches cannot resize the pane", () => {
     expect(css).toMatch(/\.settings-page \{[\s\S]*?overflow:\s*hidden/);
@@ -347,29 +376,30 @@ describe("Settings", () => {
     expect(host!.textContent).not.toContain("Base URL");
     await expandFirstProvider();
     expect(host!.textContent).toContain("Base URL");
-    expect(host!.querySelector(".settings-nav-group")?.textContent).toBe("Models");
+    expect(host!.querySelector(".settings-nav-group")?.textContent).toBe("Preferences");
     expect([...host!.querySelectorAll(".settings-nav-group")].map((el) => el.textContent)).toEqual([
-      "Models",
-      "Workspace",
+      "Preferences",
+      "Agent setup",
+      "Runtimes",
+      "Connections",
       "System",
     ]);
 
     const buttons = [...host!.querySelectorAll(".settings-nav button")];
     expect(buttons.map((el) => el.querySelector(".settings-nav-label")?.textContent)).toEqual([
+      "Appearance",
+      "Notifications",
       "Providers",
       "MCP",
       "Skills",
-      "Benchmark",
       "Machines",
       "Workers",
       "Environments",
       "Git",
       "Integrations",
-      "Reviewers",
-      "Appearance",
-      "Notifications",
-      "Phone",
       "Chrome",
+      "Phone",
+      "Benchmark",
       "Advanced",
       "About",
     ]);
@@ -2250,6 +2280,9 @@ describe("Settings", () => {
     });
     expect(host!.querySelector("h2")?.textContent).toBe("Providers");
     expect(host!.querySelector(".provider-card.open")?.textContent).toMatch(/OpenAI/);
+    expect(document.activeElement).toBe(
+      host!.querySelector(".provider-card.open .provider-card-summary"),
+    );
   });
 
   it("saves pending Settings changes on Close instead of asking to discard", async () => {

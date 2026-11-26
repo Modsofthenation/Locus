@@ -169,12 +169,8 @@ export function BrainPane() {
           {showEmptyHero ? (
             <div className="empty-card">
               <EmptyHero
-                title="Brain"
-                lead={
-                  state.repos.length
-                    ? "Index a linked repo, or a folder below, so coding agents can orient on its services and APIs."
-                    : "Index a repo folder below so coding agents can orient on its services and APIs."
-                }
+                title="Index a repository"
+                lead="Give agents a shared map of a repository’s services and APIs."
               />
               {state.repos.length ? (
                 <div className="empty-actions brain-linked-repos">

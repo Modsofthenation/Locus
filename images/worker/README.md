@@ -3,7 +3,7 @@
 `locus-worker` packaged for **provisioned compute** (ECS Fargate). Settings → Workers → **Fargate** points at a task definition that runs this image; every chat placed on that worker gets its own task. The task is the sandbox, so the agent runs as a Host guest inside it (Fargate has no Docker daemon or KVM). Stop and the idle reaper `StopTask` it.
 
 ```bash
-docker build -f images/worker/Dockerfile -t locus/worker:0.29.0 .   # from the repo root
+docker build -f images/worker/Dockerfile -t locus/worker:0.30.0 .   # from the repo root
 ```
 
 `--build-arg INSTALL_AGENT_CLIS=0` skips the Claude Code / Codex CLIs.
@@ -12,7 +12,7 @@ Daytona, E2B, Modal, and Runloop profiles use the same image with a provider-aut
 
 ## One-time AWS setup
 
-1. Push the image to ECR (`locus-worker:0.29.0`).
+1. Push the image to ECR (`locus-worker:0.30.0`).
 2. Fill in `ACCOUNT_ID` / `REGION` in [`task-definition.json`](task-definition.json) and register it: `aws ecs register-task-definition --cli-input-json file://images/worker/task-definition.json`. The container **must** be named `worker` — Locus overrides its environment by that name.
 3. Create the cluster (`aws ecs create-cluster --cluster-name locus`) and pick a subnet with a route to the internet (public subnet; Locus sets `assignPublicIp`). The security group must allow inbound **TCP 7421** from the machine running Locus.
 4. IAM for the access key Locus uses: `ecs:RunTask`, `ecs:DescribeTasks`, `ecs:ListTasks`, `ecs:StopTask`, `ecs:TagResource` on the cluster/task definition, plus `iam:PassRole` on the task execution role.

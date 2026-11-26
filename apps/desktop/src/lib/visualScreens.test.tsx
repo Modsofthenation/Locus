@@ -172,7 +172,7 @@ describe("visual screens contract", () => {
   });
 
   it("keeps a slim primary rail and Swarm Teammates + Teams", () => {
-    expect([...PRIMARY_RAIL_SECTIONS]).toEqual(["agents", "codebase"]);
+    expect([...PRIMARY_RAIL_SECTIONS]).toEqual(["agents", "codebase", "reviews"]);
     expect([...MORE_RAIL_SECTIONS]).toContain("brain");
     expect([...primaryRailSections("swarm")]).toEqual(["agents", "project"]);
   });

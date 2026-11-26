@@ -1,4 +1,5 @@
 import type { LocusConfig, ProductMode } from "@locus/shared";
+import type { InterfaceMode } from "./interfaceMode";
 
 export type SettingsTab =
   | "providers"
@@ -9,7 +10,6 @@ export type SettingsTab =
   | "environments"
   | "git"
   | "integrations"
-  | "reviewers"
   | "mcp"
   | "skills"
   | "benchmark"
@@ -19,15 +19,11 @@ export type SettingsTab =
   | "about";
 
 export const SETTINGS_NAV_GROUPS: { label: string; items: SettingsTab[] }[] = [
-  { label: "Models", items: ["providers", "mcp", "skills", "benchmark"] },
-  {
-    label: "Workspace",
-    items: ["machines", "workers", "environments", "git", "integrations", "reviewers"],
-  },
-  {
-    label: "System",
-    items: ["appearance", "notifications", "phone", "chrome", "advanced", "about"],
-  },
+  { label: "Preferences", items: ["appearance", "notifications"] },
+  { label: "Agent setup", items: ["providers", "mcp", "skills"] },
+  { label: "Runtimes", items: ["machines", "workers", "environments"] },
+  { label: "Connections", items: ["git", "integrations", "chrome", "phone"] },
+  { label: "System", items: ["benchmark", "advanced", "about"] },
 ];
 
 /** Swarm-facing settings — providers, light system prefs, and Advanced limits. */
@@ -47,6 +43,31 @@ export function isSwarmSettingsTab(tab: SettingsTab): boolean {
   return SWARM_SETTINGS_NAV_GROUPS.some((group) => group.items.includes(tab));
 }
 
+const LITE_SETTINGS_TABS: readonly SettingsTab[] = [
+  "providers",
+  "appearance",
+  "notifications",
+  "machines",
+  "git",
+  "about",
+];
+
+export function visibleSettingsNavGroups(
+  mode: ProductMode,
+  interfaceMode: InterfaceMode,
+  activeTab: SettingsTab,
+): { label: string; items: SettingsTab[] }[] {
+  const groups = settingsNavGroupsForMode(mode);
+  if (interfaceMode === "full") return groups;
+  return groups
+    .map(({ label, items }) => ({
+      label,
+      // Search and deep links can still open every settings page.
+      items: items.filter((item) => item === activeTab || LITE_SETTINGS_TABS.includes(item)),
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
 export function settingsNavLabel(tab: SettingsTab): string {
   if (tab === "mcp") return "MCP";
   if (tab === "chrome") return "Chrome";
@@ -63,7 +84,6 @@ export function settingsNavCount(
   if (tab === "skills") return (config.skills ?? []).length;
   if (tab === "workers") return (config.workers ?? []).length;
   if (tab === "environments") return (config.namedEnvironments ?? []).length;
-  if (tab === "reviewers") return (config.slackReviewers ?? []).length || undefined;
   return undefined;
 }
 
@@ -81,7 +101,25 @@ function matchesQuery(text: string, query: string): boolean {
   return text.toLowerCase().includes(query);
 }
 
-/** Tab names plus provider / MCP / skill / worker / environment / forge / integration titles. */
+const SETTINGS_SEARCH_TERMS: Partial<Record<SettingsTab, string[]>> = {
+  appearance: ["theme", "font", "chat density", "editor"],
+  notifications: ["alerts", "quiet hours"],
+  providers: ["AI models", "API keys", "CLI agents"],
+  mcp: ["agent tools", "Model Context Protocol"],
+  skills: ["agent instructions"],
+  machines: ["virtual machines", "QEMU", "ISO images"],
+  workers: ["remote workers"],
+  environments: ["runtime presets", "Docker images"],
+  git: ["GitHub", "GitLab", "Bitbucket", "repository accounts", "access tokens"],
+  integrations: ["Slack", "Grafana", "connected apps"],
+  chrome: ["browser extension"],
+  phone: ["pair a phone", "mobile"],
+  benchmark: ["performance tests"],
+  advanced: ["spending limits", "network", "debug logs"],
+  about: ["version", "updates"],
+};
+
+/** Setting names, common search terms, and names of configured items. */
 export function settingsSearchHits(
   config: LocusConfig | null | undefined,
   query: string,
@@ -100,7 +138,12 @@ export function settingsSearchHits(
   for (const group of settingsNavGroupsForMode(mode)) {
     for (const tab of group.items) {
       const label = settingsNavLabel(tab);
-      if (matchesQuery(label, q) || matchesQuery(tab, q) || matchesQuery(group.label, q)) {
+      if (
+        matchesQuery(label, q) ||
+        matchesQuery(tab, q) ||
+        matchesQuery(group.label, q) ||
+        (q.length > 1 && SETTINGS_SEARCH_TERMS[tab]?.some((term) => matchesQuery(term, q)))
+      ) {
         add({ tab, label });
       }
     }
@@ -149,11 +192,6 @@ export function settingsSearchHits(
   for (const row of config.integrations ?? []) {
     if (matchesQuery(row.name, q) || matchesQuery(row.kind, q)) {
       add({ tab: "integrations", id: row.id, label: row.name });
-    }
-  }
-  for (const row of config.slackReviewers ?? []) {
-    if (matchesQuery(row.name, q) || matchesQuery("slack pr review", q)) {
-      add({ tab: "reviewers", id: row.id, label: row.name });
     }
   }
   return hits;

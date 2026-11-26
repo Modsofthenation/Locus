@@ -32,6 +32,7 @@ import {
   type GitForgeAccount,
   type SlackReviewerPathPrompt,
   type AgentSkill,
+  type AgentSession,
   type AiProvider,
   type IntegrationAccount,
   type SlackConversation,
@@ -53,6 +54,8 @@ import {
   type SlackStatus,
 } from "@locus/shared";
 import { api } from "@/lib/api";
+import { isActiveSession } from "@/lib/dashboard";
+import { sessionHasNeedsYou } from "@/lib/needsYou";
 import { formatAgo } from "@/lib/timeAgo";
 import { IconChevron } from "@/components/layout/Icons";
 import { Select, type SelectOption } from "@/components/layout/Select";
@@ -192,6 +195,12 @@ export function previewReviewerModel(
   );
 }
 
+const REVIEW_VIEWS = [
+  ["activity", "Activity"],
+  ["reviewers", "Reviewers"],
+  ["diagnostics", "Diagnostics"],
+] as const;
+
 export function SlackReviewerSettings(props: {
   reviewers: SlackReviewer[];
   providers: AiProvider[];
@@ -203,9 +212,11 @@ export function SlackReviewerSettings(props: {
   onAdd: () => void;
   onPatch: (index: number, patch: Patch) => void;
   onRemove: (index: number) => void;
-  /** Flush the Settings draft so a test run uses what is on screen. */
+  /** Flush the Settings draft so a manual run uses what is on screen. */
   onPersist: () => Promise<boolean>;
   onOpenIntegrations: () => void;
+  reviewChats?: AgentSession[];
+  onOpenReviewChat?: (id: string) => void;
   /** Open a review's Slack thread in the Slack pane. */
   onOpenChat?: (channelId: string, threadTs: string) => void;
   /** Settings → Git accounts, to tell which repos can take a REVIEW.md proposal. */
@@ -214,6 +225,7 @@ export function SlackReviewerSettings(props: {
   polling?: SlackReviewerPolling;
   onPollingChange?: (next: SlackReviewerPolling) => void;
 }) {
+  const [view, setView] = useState<(typeof REVIEW_VIEWS)[number][0]>("activity");
   const slackAccount = props.integrations.find((row) => row.kind === "slack");
   const [status, setStatus] = useState<SlackStatus | null>(null);
   const [channels, setChannels] = useState<SlackConversation[]>([]);
@@ -290,197 +302,289 @@ export function SlackReviewerSettings(props: {
   }, [busy, loadRuns]);
 
   const reviewerName = (id: string) => props.reviewers.find((row) => row.id === id)?.name;
+  const showSlackActivity = Boolean(
+    props.reviewers.length || runs.length || active.length || threads.length,
+  );
 
   return (
-    <div className="slack-reviewers" data-testid="slack-reviewers">
-      <HowItWorks
-        testId="slack-reviewers-how"
-        lead="Watch a Slack channel and review every pull request link posted there, with progress in the post's thread."
-      >
-        <p>
-          A reviewer polls its channel every 20 seconds by default (see Polling below: fixed,
-          adaptive, or smart). Top-level posts with a GitHub, GitLab, or Bitbucket PR link start a
-          review. Thread replies and bot posts are ignored. On first start it skips the
-          channel&apos;s backlog.
-        </p>
-        <p>
-          Lockfiles, generated files, and binaries are dropped. Unchanged lines are trimmed, and the
-          diff is capped by the token budget below. By default the PR is cloned so the model can
-          check callers and tests, and it also sees CI status, the issues the PR closes, and the
-          repo&apos;s own AGENTS.md / CONTRIBUTING.md. A PR is reviewed once per commit: posting it
-          again without new commits gets &quot;already reviewed&quot;. Spend counts toward your
-          daily budget caps.
-        </p>
-        <p>
-          In the review thread people can say &quot;re-review&quot;, &quot;won&apos;t fix #2&quot;,
-          or @-mention the reviewer with a question. 👍 / 👎 on the final message are counted below.
-        </p>
-        <p>
-          Unlike Ask Locus, a reviewer posts status lines without Approve / Deny, and only in the
-          thread of the post that asked. PR descriptions and diffs are treated as untrusted data.
-        </p>
-      </HowItWorks>
-
-      {status && !status.connected ? (
-        <div className="slack-reviewer-callout" data-testid="slack-reviewers-signin">
-          <p>
-            Sign in with Slack first. Reviewers read the channel and reply as you or the Locus bot.
-          </p>
-          <button type="button" className="btn small" onClick={props.onOpenIntegrations}>
-            Open Integrations
+    <div className="slack-reviewers review-workspace-content" data-testid="slack-reviewers">
+      <nav className="review-workspace-nav" aria-label="Reviews">
+        {REVIEW_VIEWS.map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            className="review-view-button"
+            aria-current={id === view ? "page" : undefined}
+            aria-controls={`review-view-${id}`}
+            onClick={() => setView(id)}
+          >
+            {label}
           </button>
-        </div>
-      ) : null}
+        ))}
+      </nav>
 
-      {props.reviewers.length === 0 ? (
-        <EmptyHint
-          title="No reviewers yet."
-          lead="Add one, pick a channel, and write what it should look for."
-          testId="slack-reviewers-empty"
-        />
-      ) : (
-        props.reviewers.map((reviewer, i) => (
-          <SlackReviewerCard
-            key={reviewer.id}
-            reviewer={reviewer}
-            providers={props.providers}
-            skills={props.skills}
-            slackAccount={slackAccount}
-            canPostAsBot={status?.canPostAsBot}
-            me={
-              status?.connected ? { name: status.userName, avatarUrl: status.avatarUrl } : undefined
-            }
-            channels={channels}
-            members={members}
-            feedback={feedback[reviewer.id]}
-            stats={stats[reviewer.id]}
-            expanded={props.expanded === reviewer.id}
-            onToggleExpand={() => props.onToggleExpand(reviewer.id)}
-            onPatch={(patch) => props.onPatch(i, patch)}
-            onRemove={() => props.onRemove(i)}
-            onPersist={props.onPersist}
-            onRan={(run) => setRuns((rows) => [run, ...rows].slice(0, 50))}
-            forges={props.forges}
-          />
-        ))
-      )}
-      <button
-        type="button"
-        className="btn small"
-        data-testid="slack-reviewer-add"
-        onClick={props.onAdd}
+      <section
+        className="settings-body"
+        id="review-view-reviewers"
+        hidden={view !== "reviewers"}
+        aria-label="Slack reviewers"
       >
-        Add reviewer
-      </button>
+        <header className="review-panel-head">
+          <div>
+            <h3>Slack reviewers</h3>
+            <p className="hint">
+              Watch a Slack channel for pull requests and review them automatically.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn primary small"
+            data-testid="slack-reviewer-add"
+            onClick={props.onAdd}
+          >
+            Add reviewer
+          </button>
+        </header>
+        <HowItWorks testId="slack-reviewers-how" summary="How Slack reviews work">
+          <p>
+            A reviewer polls its channel every 20 seconds by default (see Polling in Diagnostics:
+            fixed, adaptive, or smart). Top-level posts with a GitHub, GitLab, or Bitbucket PR link
+            start a review. Thread replies and bot posts are ignored. On first start it skips the
+            channel&apos;s backlog.
+          </p>
+          <p>
+            Lockfiles, generated files, and binaries are dropped. Unchanged lines are trimmed, and
+            the diff is capped by the token budget below. By default the PR is cloned so the model
+            can check callers and tests, and it also sees CI status, the issues the PR closes, and
+            the repo&apos;s own AGENTS.md / CONTRIBUTING.md. A PR is reviewed once per commit:
+            posting it again without new commits gets &quot;already reviewed&quot;. Spend counts
+            toward your daily budget caps.
+          </p>
+          <p>
+            In the review thread people can say &quot;re-review&quot;, &quot;won&apos;t fix
+            #2&quot;, or @-mention the reviewer with a question. 👍 / 👎 on the final message count
+            towards the reviewer&apos;s accuracy stats.
+          </p>
+          <p>
+            Unlike Ask Locus, a reviewer posts status lines without Approve / Deny, and only in the
+            thread of the post that asked. PR descriptions and diffs are treated as untrusted data.
+          </p>
+        </HowItWorks>
 
-      {props.onPollingChange ? (
-        <SlackReviewerPollingSettings
-          polling={props.polling}
-          status={pollStatus}
-          reviewers={props.reviewers}
-          onChange={props.onPollingChange}
-        />
-      ) : null}
+        {status && !status.connected ? (
+          <div className="slack-reviewer-callout" data-testid="slack-reviewers-signin">
+            <p>
+              Sign in with Slack first. Reviewers read the channel and reply as you or the Locus
+              bot.
+            </p>
+            <button type="button" className="btn small" onClick={props.onOpenIntegrations}>
+              Open Integrations
+            </button>
+          </div>
+        ) : null}
 
-      <div className="slack-reviewer-runs-head">
-        <h3>In progress</h3>
-        <button type="button" className="btn small ghost" onClick={() => void loadRuns()}>
-          Refresh
-        </button>
-      </div>
-      {runsError ? <InlineError message={runsError} onRetry={() => void loadRuns()} /> : null}
-      {active.length === 0 ? (
-        <p className="hint" data-testid="slack-reviewer-active-empty">
-          Nothing queued or running.
-        </p>
-      ) : (
-        <ul className="slack-reviewer-runs" data-testid="slack-reviewer-active">
-          {active.map((row) => (
-            <li
-              key={`${row.reviewerId}-${row.kind}-${row.pr}-${row.since}`}
-              className={`slack-reviewer-run ${row.status}`}
-            >
-              <span className={`slack-reviewer-outcome ${row.status}`}>
-                {row.status === "running"
-                  ? row.kind === "answer"
-                    ? "Answering"
-                    : "Reviewing"
-                  : "Queued"}
-              </span>
-              <PrLink url={row.url} pr={row.pr} />
-              <MetaLine
-                parts={[
-                  reviewerName(row.reviewerId),
-                  row.dryRun ? "dry run" : undefined,
-                  <Ago key="at" iso={row.since} prefix="started " />,
-                ]}
-              />
-              <OpenChatButton
-                channelId={row.channelId}
-                threadTs={row.threadTs}
-                onOpenChat={props.onOpenChat}
-              />
-              <SlackReviewTraceToggle traceId={row.traceId} />
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="slack-reviewer-runs-head">
-        <h3>Open review chats</h3>
-      </div>
-      {threads.length === 0 ? (
-        <p className="hint" data-testid="slack-reviewer-threads-empty">
-          No review threads are being watched.
-        </p>
-      ) : (
-        <ul className="slack-reviewer-runs" data-testid="slack-reviewer-threads">
-          {threads.map((row) => (
-            <li
-              key={`${row.reviewerId}-${row.channelId}-${row.threadTs}`}
-              className="slack-reviewer-run"
-            >
-              <PrLink url={row.url} pr={row.pr} />
-              <MetaLine
-                parts={[
-                  reviewerName(row.reviewerId),
-                  row.answers
-                    ? `${row.answers} question${row.answers === 1 ? "" : "s"} answered`
-                    : undefined,
-                  <Ago key="at" iso={row.at} prefix="last review " />,
-                ]}
-              />
-              <OpenChatButton
-                channelId={row.channelId}
-                threadTs={row.threadTs}
-                onOpenChat={props.onOpenChat}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="slack-reviewer-runs-head">
-        <h3>Recent reviews</h3>
-      </div>
-      {runs.length === 0 && !runsError ? (
-        <p className="hint" data-testid="slack-reviewer-runs-empty">
-          No reviews yet.
-        </p>
-      ) : (
-        <ul className="slack-reviewer-runs" data-testid="slack-reviewer-runs">
-          {runs.map((run) => (
-            <SlackReviewRunRow
-              key={`${run.reviewerId}-${run.pr}-${run.at}`}
-              run={run}
-              reviewerName={reviewerName(run.reviewerId)}
-              onOpenChat={props.onOpenChat}
+        {props.reviewers.length === 0 ? (
+          <EmptyHint
+            title="No reviewers yet."
+            lead="Add one, pick a channel, and write what it should look for."
+            testId="slack-reviewers-empty"
+          />
+        ) : (
+          props.reviewers.map((reviewer, i) => (
+            <SlackReviewerCard
+              key={reviewer.id}
+              reviewer={reviewer}
+              providers={props.providers}
+              skills={props.skills}
+              slackAccount={slackAccount}
+              canPostAsBot={status?.canPostAsBot}
+              me={
+                status?.connected
+                  ? { name: status.userName, avatarUrl: status.avatarUrl }
+                  : undefined
+              }
+              channels={channels}
+              members={members}
+              feedback={feedback[reviewer.id]}
+              stats={stats[reviewer.id]}
+              expanded={props.expanded === reviewer.id}
+              onToggleExpand={() => props.onToggleExpand(reviewer.id)}
+              onPatch={(patch) => props.onPatch(i, patch)}
+              onRemove={() => props.onRemove(i)}
+              onPersist={props.onPersist}
+              onRunCheck={loadRuns}
+              onRan={(run) => setRuns((rows) => [run, ...rows].slice(0, 50))}
+              forges={props.forges}
             />
-          ))}
-        </ul>
-      )}
+          ))
+        )}
+      </section>
 
-      <SlackReviewerLiveLogs reviewerName={reviewerName} />
+      <section
+        className="settings-body review-activity"
+        id="review-view-activity"
+        hidden={view !== "activity"}
+        aria-label="Review activity"
+      >
+        {showSlackActivity || runsError ? (
+          <>
+            <div className="slack-reviewer-runs-head">
+              <h3>Slack reviews in progress</h3>
+              <button type="button" className="btn small ghost" onClick={() => void loadRuns()}>
+                Refresh
+              </button>
+            </div>
+            {runsError ? <InlineError message={runsError} onRetry={() => void loadRuns()} /> : null}
+            {active.length === 0 ? (
+              <p className="hint" data-testid="slack-reviewer-active-empty">
+                Nothing queued or running.
+              </p>
+            ) : (
+              <ul className="slack-reviewer-runs" data-testid="slack-reviewer-active">
+                {active.map((row) => (
+                  <li
+                    key={`${row.reviewerId}-${row.kind}-${row.pr}-${row.since}`}
+                    className={`slack-reviewer-run ${row.status}`}
+                  >
+                    <span className={`slack-reviewer-outcome ${row.status}`}>
+                      {row.status === "running"
+                        ? row.kind === "answer"
+                          ? "Answering"
+                          : "Reviewing"
+                        : "Queued"}
+                    </span>
+                    <PrLink url={row.url} pr={row.pr} />
+                    <MetaLine
+                      parts={[
+                        reviewerName(row.reviewerId),
+                        row.dryRun ? "dry run" : undefined,
+                        <Ago key="at" iso={row.since} prefix="started " />,
+                      ]}
+                    />
+                    <OpenChatButton
+                      channelId={row.channelId}
+                      threadTs={row.threadTs}
+                      onOpenChat={props.onOpenChat}
+                    />
+                    <SlackReviewTraceToggle traceId={row.traceId} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        ) : null}
+        {props.reviewChats?.length ? (
+          <>
+            <div className="slack-reviewer-runs-head">
+              <h3>Agent review chats</h3>
+            </div>
+            <ul className="slack-reviewer-runs">
+              {props.reviewChats.map((chat) => (
+                <li className="slack-reviewer-run" key={chat.id}>
+                  <span className="slack-reviewer-outcome">
+                    {sessionHasNeedsYou(chat)
+                      ? "Needs you"
+                      : isActiveSession(chat)
+                        ? "Running"
+                        : chat.status === "error"
+                          ? "Failed"
+                          : "Open"}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn small ghost review-chat-title"
+                    onClick={() => props.onOpenReviewChat?.(chat.id)}
+                  >
+                    {chat.title}
+                  </button>
+                  <Ago iso={chat.updatedAt} />
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+        {showSlackActivity ? (
+          <>
+            <div className="slack-reviewer-runs-head">
+              <h3>Recent Slack reviews</h3>
+            </div>
+            {runs.length === 0 && !runsError ? (
+              <p className="hint" data-testid="slack-reviewer-runs-empty">
+                No reviews yet.
+              </p>
+            ) : (
+              <ul className="slack-reviewer-runs" data-testid="slack-reviewer-runs">
+                {runs.map((run) => (
+                  <SlackReviewRunRow
+                    key={`${run.reviewerId}-${run.pr}-${run.at}`}
+                    run={run}
+                    reviewerName={reviewerName(run.reviewerId)}
+                    onOpenChat={props.onOpenChat}
+                  />
+                ))}
+              </ul>
+            )}
+          </>
+        ) : null}
+        {threads.length ? (
+          <details className="review-thread-disclosure">
+            <summary>Watched Slack threads ({threads.length})</summary>
+            <ul className="slack-reviewer-runs" data-testid="slack-reviewer-threads">
+              {threads.map((row) => (
+                <li
+                  key={`${row.reviewerId}-${row.channelId}-${row.threadTs}`}
+                  className="slack-reviewer-run"
+                >
+                  <PrLink url={row.url} pr={row.pr} />
+                  <MetaLine
+                    parts={[
+                      reviewerName(row.reviewerId),
+                      row.answers
+                        ? `${row.answers} question${row.answers === 1 ? "" : "s"} answered`
+                        : undefined,
+                      <Ago key="at" iso={row.at} prefix="last review " />,
+                    ]}
+                  />
+                  <OpenChatButton
+                    channelId={row.channelId}
+                    threadTs={row.threadTs}
+                    onOpenChat={props.onOpenChat}
+                  />
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+        {!showSlackActivity && !runsError ? (
+          <div className="review-activity-empty">
+            <p className="hint">
+              {props.reviewChats?.length
+                ? "Add a Slack reviewer to review pull requests posted in a channel."
+                : "Review chats opened from Codebase and reviews started in Slack appear here."}
+            </p>
+            <button type="button" className="btn small" onClick={() => setView("reviewers")}>
+              Set up a Slack reviewer
+            </button>
+          </div>
+        ) : null}
+      </section>
+
+      <section
+        className="settings-body"
+        id="review-view-diagnostics"
+        hidden={view !== "diagnostics"}
+        aria-label="Review diagnostics"
+      >
+        {props.onPollingChange ? (
+          <SlackReviewerPollingSettings
+            polling={props.polling}
+            status={pollStatus}
+            reviewers={props.reviewers}
+            onChange={props.onPollingChange}
+          />
+        ) : null}
+        {view === "diagnostics" ? <SlackReviewerLiveLogs reviewerName={reviewerName} /> : null}
+      </section>
     </div>
   );
 }
@@ -927,10 +1031,31 @@ function SlackReviewerCard(props: {
   onPatch: (patch: Patch) => void;
   onRemove: () => void;
   onPersist: () => Promise<boolean>;
+  onRunCheck: () => Promise<void>;
   onRan: (run: SlackReviewRun) => void;
   forges?: GitForgeAccount[];
 }) {
   const { reviewer, onPatch } = props;
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState<string | null>(null);
+  const [checked, setChecked] = useState(false);
+
+  async function runNow() {
+    setChecking(true);
+    setCheckError(null);
+    setChecked(false);
+    try {
+      if (!(await props.onPersist())) throw new Error("Save the reviewer settings before running");
+      await api.slackReviewerRun(reviewer.id);
+      setChecked(true);
+    } catch (err) {
+      setCheckError(err instanceof Error ? err.message : "Could not run the reviewer");
+    } finally {
+      await props.onRunCheck();
+      setChecking(false);
+    }
+  }
+
   const channel = props.channels.find((row) => row.id === reviewer.channelId);
   const channelLabel = reviewer.channelId
     ? channel
@@ -1018,6 +1143,17 @@ function SlackReviewerCard(props: {
                 ? "Watching"
                 : "Off"}
         </span>
+        <BusyButton
+          className="btn small"
+          busy={checking}
+          busyLabel="Checking…"
+          disabled={!on}
+          title="Check this reviewer's configured sources now"
+          data-testid={`slack-reviewer-run-now-${reviewer.id}`}
+          onClick={() => void runNow()}
+        >
+          Run now
+        </BusyButton>
         <button
           type="button"
           className="provider-card-chevron"
@@ -1027,6 +1163,17 @@ function SlackReviewerCard(props: {
           <IconChevron expanded={props.expanded} />
         </button>
       </div>
+      {checkError || checked ? (
+        <div className="provider-card-body">
+          {checkError ? (
+            <InlineError message={checkError} />
+          ) : (
+            <p className="hint" role="status">
+              Check complete. Any reviews will appear in Activity.
+            </p>
+          )}
+        </div>
+      ) : null}
       {props.expanded ? (
         <div className="provider-card-body">
           <div className="grid-2">
@@ -1163,342 +1310,352 @@ function SlackReviewerCard(props: {
             onPrompt={(prompt) => onPatch({ prompt })}
           />
 
-          <h4 className="slack-reviewer-section">Behaviour</h4>
-          <div className="grid-2">
-            <div className="field">
-              <label>Post thread replies as</label>
-              <Select
-                ariaLabel="Post thread replies as"
-                testId={`slack-reviewer-post-as-${reviewer.id}`}
-                value={reviewer.postAs}
-                options={[
-                  {
-                    value: "bot",
-                    label: "Locus bot",
-                    hint:
-                      props.canPostAsBot === false
-                        ? "No bot token: reinstall the Slack app with bot chat:write"
-                        : "Teammates see the Locus app",
-                  },
-                  { value: "user", label: "Me", hint: "Posts appear under your name" },
-                ]}
-                onChange={(postAs) => onPatch({ postAs })}
+          <TestReview reviewer={reviewer} onPersist={props.onPersist} onRan={props.onRan} />
+          <details className="slack-reviewer-details">
+            <summary>Posting and severity</summary>
+            <div className="grid-2">
+              <div className="field">
+                <label>Post thread replies as</label>
+                <Select
+                  ariaLabel="Post thread replies as"
+                  testId={`slack-reviewer-post-as-${reviewer.id}`}
+                  value={reviewer.postAs}
+                  options={[
+                    {
+                      value: "bot",
+                      label: "Locus bot",
+                      hint:
+                        props.canPostAsBot === false
+                          ? "No bot token: reinstall the Slack app with bot chat:write"
+                          : "Teammates see the Locus app",
+                    },
+                    { value: "user", label: "Me", hint: "Posts appear under your name" },
+                  ]}
+                  onChange={(postAs) => onPatch({ postAs })}
+                />
+              </div>
+              <div className="field">
+                <label>On the pull request</label>
+                <Select
+                  ariaLabel="On the pull request"
+                  testId={`slack-reviewer-forge-mode-${reviewer.id}`}
+                  value={reviewer.forgeMode}
+                  options={FORGE_MODE_OPTIONS}
+                  onChange={(forgeMode) => onPatch({ forgeMode })}
+                />
+              </div>
+              <div className="field">
+                <label>Report findings</label>
+                <Select
+                  ariaLabel="Report findings"
+                  value={reviewer.minSeverity}
+                  options={SEVERITY_OPTIONS}
+                  onChange={(minSeverity) => onPatch({ minSeverity })}
+                />
+              </div>
+              <NumberField
+                label="Max comments per review"
+                field="maxComments"
+                value={reviewer.maxComments}
+                onCommit={(maxComments) => onPatch({ maxComments })}
               />
             </div>
-            <div className="field">
-              <label>On the pull request</label>
-              <Select
-                ariaLabel="On the pull request"
-                testId={`slack-reviewer-forge-mode-${reviewer.id}`}
-                value={reviewer.forgeMode}
-                options={FORGE_MODE_OPTIONS}
-                onChange={(forgeMode) => onPatch({ forgeMode })}
-              />
-            </div>
-            <div className="field">
-              <label>Report findings</label>
-              <Select
-                ariaLabel="Report findings"
-                value={reviewer.minSeverity}
-                options={SEVERITY_OPTIONS}
-                onChange={(minSeverity) => onPatch({ minSeverity })}
-              />
-            </div>
-            <NumberField
-              label="Max comments per review"
-              field="maxComments"
-              value={reviewer.maxComments}
-              onCommit={(maxComments) => onPatch({ maxComments })}
+            {reviewer.forgeMode === "verdict" ? (
+              <p className="hint warn-text">
+                This reviewer can approve PRs. Keep branch protection that still needs a human
+                approval.
+              </p>
+            ) : null}
+            <SettingsToggleRow
+              label="React on the original post"
+              hint="Keeps the post's reaction stack in step with the review: picked up, comments, and per-round re-reviews. Uses your Slack account (reactions:write)."
+              on={reviewer.reactions}
+              onChange={(reactions) => onPatch({ reactions })}
             />
-          </div>
-          {reviewer.forgeMode === "verdict" ? (
-            <p className="hint warn-text">
-              This reviewer can approve PRs. Keep branch protection that still needs a human
-              approval.
-            </p>
-          ) : null}
-          <ListField
-            label="Repositories"
-            value={reviewer.repos}
-            placeholder={"acme/api\nacme/web-*"}
-            hint="owner/repo, one per line, * as a wildcard. Empty reviews any repo a Git account can read. Links to other repos are ignored silently."
-            testId={`slack-reviewer-repos-${reviewer.id}`}
-            onCommit={(repos) => onPatch({ repos })}
-          />
-          <ListField
-            label="Base branches"
-            value={reviewer.baseBranches}
-            placeholder={"main\nrelease/*"}
-            hint="Review only PRs into these branches, one per line, * as a wildcard. Empty reviews PRs into any branch. Others are ignored silently."
-            testId={`slack-reviewer-base-branches-${reviewer.id}`}
-            onCommit={(baseBranches) => onPatch({ baseBranches })}
-          />
-          <ListField
-            label="Skip PRs with these labels"
-            value={reviewer.skipLabels}
-            placeholder={"no-review\nskip-review"}
-            hint="A PR carrying one of these labels (any case) gets a short Skipped reply and no review. [skip review] or [no review] in the PR title works too. Labels are read on GitHub, Gitea, Forgejo, GitLab and Azure DevOps; Bitbucket PRs have none."
-            testId={`slack-reviewer-skip-labels-${reviewer.id}`}
-            onCommit={(skipLabels) => onPatch({ skipLabels })}
-          />
-          <ListField
-            label="Who can ask for a review"
-            value={reviewer.allowedRequesters}
-            placeholder={"U0123ABCD\nU0456EFGH"}
-            hint="Slack member IDs, one per line. Empty: anyone in the channel. Posts, re-review and retry requests, and questions from anyone else are ignored silently. Anyone can still dismiss a finding."
-            testId={`slack-reviewer-requesters-${reviewer.id}`}
-            onCommit={(ids) => onPatch({ allowedRequesters: parseSlackRequesters(ids) })}
-          />
-          <SlackUserMultiSelect
-            label="Don't review for these people"
-            value={reviewer.excludedUsers}
-            users={props.members?.rows ?? []}
-            loading={props.members?.loading}
-            error={props.members?.error}
-            placeholder="Search Slack members…"
-            hint="Their posts, @-mentions, and re-review, retry or question replies are ignored silently, even if they are listed above. With Review new PRs nobody posted on, PRs they author are skipped too, for authors mapped under PR authors in Slack (shown when Mention the PR author is on). Anyone can still dismiss a finding."
-            testId={`slack-reviewer-excluded-${reviewer.id}`}
-            onChange={(ids) => onPatch({ excludedUsers: parseSlackRequesters(ids) })}
-          />
-          <PathPromptsField
-            reviewerId={reviewer.id}
-            value={reviewer.pathPrompts}
-            onCommit={(pathPrompts) => onPatch({ pathPrompts })}
-          />
-          <SettingsToggleRow
-            label="Review new PRs nobody posted"
-            hint="Every 5 minutes by default (Polling, below the reviewers), lists the open PRs of the repositories above and reviews each one opened or marked ready since the reviewer started watching (no backlog). It posts the PR to the channel first and replies in that post's thread. Exact owner/repo entries are polled; a * in the repo name is matched against the repos your Git account can list, and a * in the owner is never polled."
-            on={reviewer.autoReview}
-            testId={`slack-reviewer-auto-${reviewer.id}`}
-            onChange={(autoReview) => onPatch({ autoReview })}
-          />
-          {reviewer.autoReview && !reviewer.repos.length ? (
-            <p className="hint warn-text">
-              Add at least one owner/repo above. With no repositories nothing is polled.
-            </p>
-          ) : null}
-          <NumberField
-            label="Reviews at once"
-            field="maxConcurrentReviews"
-            value={reviewer.maxConcurrentReviews}
-            hint="How many PRs this reviewer reviews in parallel (1–4). Two reviews of the same PR never overlap. More at once means more spend at once."
-            onCommit={(maxConcurrentReviews) => onPatch({ maxConcurrentReviews })}
-          />
-          <SettingsToggleRow
-            label="Clone the repo and check around the diff"
-            hint={
-              preview?.cli
-                ? "The PR head is cloned (shallow, read-only) and the CLI agent runs inside it, so it can read callers, types and tests the diff doesn't show. Nothing from the PR is run."
-                : "The PR head is cloned (shallow, read-only) and the model gets read_file, grep, find_files and list_dir over it, so it can check callers, types and tests the diff doesn't show before it answers. Nothing from the PR is run. Costs more tokens than a diff-only review. Off: one completion over the diff."
-            }
-            on={reviewer.cloneRepo}
-            testId={`slack-reviewer-clone-${reviewer.id}`}
-            onChange={(cloneRepo) => onPatch({ cloneRepo })}
-          />
-          {reviewer.cloneRepo && !preview?.cli ? (
-            <NumberField
-              label="Lookup rounds"
-              field="maxToolRounds"
-              value={reviewer.maxToolRounds}
-              hint="Rounds of reading and searching before the model must answer. Each round re-sends the conversation so far."
-              onCommit={(maxToolRounds) => onPatch({ maxToolRounds })}
+            {reviewer.reactions ? (
+              <ReactionProtocolFields
+                reviewerId={reviewer.id}
+                map={reviewer.reactionMap}
+                forgeMode={reviewer.forgeMode}
+                onChange={(reactionMap) => onPatch({ reactionMap })}
+              />
+            ) : null}
+          </details>
+          <details className="slack-reviewer-details">
+            <summary>Triggers and filters</summary>
+            <ListField
+              label="Repositories"
+              value={reviewer.repos}
+              placeholder={"acme/api\nacme/web-*"}
+              hint="owner/repo, one per line, * as a wildcard. Empty reviews any repo a Git account can read. Links to other repos are ignored silently."
+              testId={`slack-reviewer-repos-${reviewer.id}`}
+              onCommit={(repos) => onPatch({ repos })}
             />
-          ) : null}
-          <SlackReviewerVerifyFields
-            reviewer={reviewer}
-            providers={modelProviders}
-            cli={preview?.cli}
-            onPatch={onPatch}
-          />
-          <SettingsToggleRow
-            label="Skip draft PRs"
-            on={reviewer.skipDrafts}
-            onChange={(skipDrafts) => onPatch({ skipDrafts })}
-          />
-          <SettingsToggleRow
-            label="Review again after new commits"
-            hint="Off: a PR is reviewed once, ever."
-            on={reviewer.rereviewOnNewCommits}
-            onChange={(rereviewOnNewCommits) => onPatch({ rereviewOnNewCommits })}
-          />
-          <SettingsToggleRow
-            label="React on the original post"
-            hint="Keeps the post's reaction stack in step with the review: picked up, comments, and per-round re-reviews. Uses your Slack account (reactions:write)."
-            on={reviewer.reactions}
-            onChange={(reactions) => onPatch({ reactions })}
-          />
-          {reviewer.reactions ? (
-            <ReactionProtocolFields
+            <ListField
+              label="Base branches"
+              value={reviewer.baseBranches}
+              placeholder={"main\nrelease/*"}
+              hint="Review only PRs into these branches, one per line, * as a wildcard. Empty reviews PRs into any branch. Others are ignored silently."
+              testId={`slack-reviewer-base-branches-${reviewer.id}`}
+              onCommit={(baseBranches) => onPatch({ baseBranches })}
+            />
+            <ListField
+              label="Skip PRs with these labels"
+              value={reviewer.skipLabels}
+              placeholder={"no-review\nskip-review"}
+              hint="A PR carrying one of these labels (any case) gets a short Skipped reply and no review. [skip review] or [no review] in the PR title works too. Labels are read on GitHub, Gitea, Forgejo, GitLab and Azure DevOps; Bitbucket PRs have none."
+              testId={`slack-reviewer-skip-labels-${reviewer.id}`}
+              onCommit={(skipLabels) => onPatch({ skipLabels })}
+            />
+            <ListField
+              label="Who can ask for a review"
+              value={reviewer.allowedRequesters}
+              placeholder={"U0123ABCD\nU0456EFGH"}
+              hint="Slack member IDs, one per line. Empty: anyone in the channel. Posts, re-review and retry requests, and questions from anyone else are ignored silently. Anyone can still dismiss a finding."
+              testId={`slack-reviewer-requesters-${reviewer.id}`}
+              onCommit={(ids) => onPatch({ allowedRequesters: parseSlackRequesters(ids) })}
+            />
+            <SlackUserMultiSelect
+              label="Don't review for these people"
+              value={reviewer.excludedUsers}
+              users={props.members?.rows ?? []}
+              loading={props.members?.loading}
+              error={props.members?.error}
+              placeholder="Search Slack members…"
+              hint="Their posts, @-mentions, and re-review, retry or question replies are ignored silently, even if they are listed above. With Review new PRs nobody posted on, PRs they author are skipped too, for authors mapped under PR authors in Slack (shown when Mention the PR author is on). Anyone can still dismiss a finding."
+              testId={`slack-reviewer-excluded-${reviewer.id}`}
+              onChange={(ids) => onPatch({ excludedUsers: parseSlackRequesters(ids) })}
+            />
+            <PathPromptsField
               reviewerId={reviewer.id}
-              map={reviewer.reactionMap}
-              forgeMode={reviewer.forgeMode}
-              onChange={(reactionMap) => onPatch({ reactionMap })}
+              value={reviewer.pathPrompts}
+              onCommit={(pathPrompts) => onPatch({ pathPrompts })}
             />
-          ) : null}
-
-          <h4 className="slack-reviewer-section">Review context</h4>
-          <SettingsToggleRow
-            label="Follow the repo's own guidelines"
-            hint="Sends AGENTS.md, CLAUDE.md, REVIEW.md, CONTRIBUTING.md or .github/copilot-instructions.md from the base branch (up to 3 files, ~3,000 tokens), so the PR can't rewrite the rules it is held to."
-            on={reviewer.repoGuidelines}
-            testId={`slack-reviewer-guidelines-${reviewer.id}`}
-            onChange={(repoGuidelines) => onPatch({ repoGuidelines })}
-          />
-          <SettingsToggleRow
-            label="Read the issues the PR closes"
-            hint={
-              '"Fixes #123" in the PR description: the issue\'s title and description go with the review, so the model can check the change does what it asked. Same repo only, at most 2.'
-            }
-            on={reviewer.linkedIssues}
-            testId={`slack-reviewer-issues-${reviewer.id}`}
-            onChange={(linkedIssues) => onPatch({ linkedIssues })}
-          />
-          <SettingsToggleRow
-            label="Tell the model about CI"
-            hint="Which checks pass, fail or are still running at the head commit, so it doesn't repeat what CI already reports."
-            on={reviewer.ciContext}
-            testId={`slack-reviewer-ci-${reviewer.id}`}
-            onChange={(ciContext) => onPatch({ ciContext })}
-          />
-          {reviewer.ciContext ? (
             <SettingsToggleRow
-              label="Send failing CI logs"
-              hint="When a check fails, the condensed log of up to 2 failing jobs (~1,250 tokens) goes with the review, so the model can point at the line that breaks it."
-              on={reviewer.ciLogs}
-              testId={`slack-reviewer-ci-logs-${reviewer.id}`}
-              onChange={(ciLogs) => onPatch({ ciLogs })}
+              label="Review new PRs nobody posted"
+              hint="Every 5 minutes by default (Polling in Diagnostics), lists the open PRs of the repositories above and reviews each one opened or marked ready since the reviewer started watching (no backlog). It posts the PR to the channel first and replies in that post's thread. Exact owner/repo entries are polled; a * in the repo name is matched against the repos your Git account can list, and a * in the owner is never polled."
+              on={reviewer.autoReview}
+              testId={`slack-reviewer-auto-${reviewer.id}`}
+              onChange={(autoReview) => onPatch({ autoReview })}
             />
-          ) : null}
-          <SettingsToggleRow
-            label="Read the comments already on the PR"
-            hint="People's and other bots' comments (the newest 20, ~1,500 tokens at most) go with the review, so it doesn't repeat a point someone already made."
-            on={reviewer.prDiscussion}
-            testId={`slack-reviewer-discussion-${reviewer.id}`}
-            onChange={(prDiscussion) => onPatch({ prDiscussion })}
-          />
-          {reviewer.forgeMode === "verdict" ? (
+            {reviewer.autoReview && !reviewer.repos.length ? (
+              <p className="hint warn-text">
+                Add at least one owner/repo above. With no repositories nothing is polled.
+              </p>
+            ) : null}
             <SettingsToggleRow
-              label="Don't approve while CI is failing"
-              hint="A clean review with a failing check leaves a comment instead of an approval."
-              on={reviewer.holdApprovalOnFailingCi}
-              testId={`slack-reviewer-ci-hold-${reviewer.id}`}
-              onChange={(holdApprovalOnFailingCi) => onPatch({ holdApprovalOnFailingCi })}
+              label="Skip draft PRs"
+              on={reviewer.skipDrafts}
+              onChange={(skipDrafts) => onPatch({ skipDrafts })}
             />
-          ) : null}
-          <SettingsToggleRow
-            label="Suggest fixes"
-            hint="Small, certain fixes come as one-click suggestions on inline comments (GitHub and GitLab; other forges show a code block)."
-            on={reviewer.suggestions}
-            testId={`slack-reviewer-suggestions-${reviewer.id}`}
-            onChange={(suggestions) => onPatch({ suggestions })}
-          />
-          <SettingsToggleRow
-            label="Re-review only the new commits"
-            hint="A follow-up review sends what changed since the last review plus the earlier findings, not the whole PR again. Falls back to the whole PR after a force-push, and on Gitea, Forgejo and Azure DevOps."
-            on={reviewer.incrementalRereview}
-            testId={`slack-reviewer-incremental-${reviewer.id}`}
-            onChange={(incrementalRereview) => onPatch({ incrementalRereview })}
-          />
-          <SettingsToggleRow
-            label="Resolve fixed findings on the PR"
-            hint="When a follow-up review finds an earlier finding fixed, its comment thread on the PR is resolved (GitHub and GitLab)."
-            on={reviewer.resolveFixedThreads}
-            testId={`slack-reviewer-resolve-${reviewer.id}`}
-            onChange={(resolveFixedThreads) => onPatch({ resolveFixedThreads })}
-          />
-
-          <h4 className="slack-reviewer-section">In the thread</h4>
-          <SettingsToggleRow
-            label="Re-review when asked in the thread"
-            hint={
-              'A reply like "re-review", "review again" or "PTAL" in the review thread reviews again after new commits, and says which earlier findings were fixed. Checked about once a minute.'
-            }
-            on={reviewer.rereviewOnThreadReply}
-            testId={`slack-reviewer-thread-rereview-${reviewer.id}`}
-            onChange={(rereviewOnThreadReply) => onPatch({ rereviewOnThreadReply })}
-          />
-          {reviewer.rereviewOnThreadReply ? (
-            <p className="hint">
-              Reply <em>full re-review</em> to review the whole PR again, even on the same commit. A
-              review that fails on a rate limit, overload or timeout is retried once. Reply{" "}
-              <em>retry</em> to try again manually.
-            </p>
-          ) : null}
-          <SettingsToggleRow
-            label="Dismiss findings from the thread"
-            hint={
-              '"won\'t fix #2", "#1 is a false positive" or "dismiss all" in the thread: later reviews of the PR never raise those again. No model call.'
-            }
-            on={reviewer.dismissInThread}
-            testId={`slack-reviewer-dismiss-${reviewer.id}`}
-            onChange={(dismissInThread) => onPatch({ dismissInThread })}
-          />
-          <SettingsToggleRow
-            label="Dismiss findings from the PR"
-            hint={
-              '"won\'t fix #2" in a PR comment, or "won\'t fix" / "false positive" in a reply to one of the reviewer\'s inline comments, dismisses that finding too. The Slack thread is told.'
-            }
-            on={reviewer.dismissOnPr}
-            testId={`slack-reviewer-dismiss-pr-${reviewer.id}`}
-            onChange={(dismissOnPr) => onPatch({ dismissOnPr })}
-          />
-          <SettingsToggleRow
-            label="Review when asked on the PR"
-            hint={
-              'A PR comment starting "@locus review" or "@locus re-review" reviews the PR again in its review thread. On PRs with no thread it works only with "Review new PRs nobody posted" on, which posts the PR to the channel. Checked every 5–10 minutes; the reviewer\'s own and bots\' comments never count.'
-            }
-            on={reviewer.reviewOnPrComment}
-            testId={`slack-reviewer-pr-command-${reviewer.id}`}
-            onChange={(reviewOnPrComment) => onPatch({ reviewOnPrComment })}
-          />
-          <SettingsToggleRow
-            label="Review when tagged in a thread"
-            hint={
-              '"@Locus review this" (or "@Locus" with a PR link) in a thread of this channel that the reviewer isn\'t watching reviews the PR there. The link comes from the reply, else the thread\'s first post, else the latest earlier reply with one. Needs the Slack app\'s message events (Socket Mode).'
-            }
-            on={reviewer.reviewOnMention}
-            testId={`slack-reviewer-mention-${reviewer.id}`}
-            onChange={(reviewOnMention) => onPatch({ reviewOnMention })}
-          />
-          <SettingsToggleRow
-            label="Learn from dismissals"
-            hint="Dismissed findings are remembered for the whole repo, and the most recent go with later reviews of any PR there as the team's conventions."
-            on={reviewer.learnFromDismissals}
-            testId={`slack-reviewer-learn-${reviewer.id}`}
-            onChange={(learnFromDismissals) => onPatch({ learnFromDismissals })}
-          />
-          {reviewer.learnFromDismissals ? (
-            <RepoNotes reviewerId={reviewer.id} forges={props.forges} />
-          ) : null}
-          <SettingsToggleRow
-            label="Answer questions"
-            hint={`@-mention ${reviewer.postAs === "user" ? "you" : "the Locus bot"} in the review thread to ask about the review. One small model call per question (at most ${10} per thread), counted in Recent reviews and your budget.`}
-            on={reviewer.answerQuestions}
-            testId={`slack-reviewer-questions-${reviewer.id}`}
-            onChange={(answerQuestions) => onPatch({ answerQuestions })}
-          />
-          <SettingsToggleRow
-            label="Mention the PR author"
-            hint="Starts the final message with an @-mention of the author, for authors mapped below."
-            on={reviewer.mentionAuthor}
-            testId={`slack-reviewer-mention-${reviewer.id}`}
-            onChange={(mentionAuthor) => onPatch({ mentionAuthor })}
-          />
-          {reviewer.mentionAuthor ? (
-            <AuthorMapField
-              value={reviewer.authorSlackIds}
-              testId={`slack-reviewer-authors-${reviewer.id}`}
-              onCommit={(authorSlackIds) => onPatch({ authorSlackIds })}
+            <SettingsToggleRow
+              label="Review again after new commits"
+              hint="Off: a PR is reviewed once, ever."
+              on={reviewer.rereviewOnNewCommits}
+              onChange={(rereviewOnNewCommits) => onPatch({ rereviewOnNewCommits })}
             />
-          ) : null}
-          <NumberField
-            label="Threads to watch"
-            field="maxWatchedThreads"
-            value={reviewer.maxWatchedThreads}
-            hint="Most recent review threads checked for re-review requests, dismissals, questions and 👍 / 👎. Each costs one Slack call per thread poll (every minute by default, see Polling), or one every 10 minutes while Socket Mode delivers message events."
-            onCommit={(maxWatchedThreads) => onPatch({ maxWatchedThreads })}
-          />
-
+          </details>
+          <details className="slack-reviewer-details">
+            <summary>Execution and verification</summary>
+            <NumberField
+              label="Reviews at once"
+              field="maxConcurrentReviews"
+              value={reviewer.maxConcurrentReviews}
+              hint="How many PRs this reviewer reviews in parallel (1–4). Two reviews of the same PR never overlap. More at once means more spend at once."
+              onCommit={(maxConcurrentReviews) => onPatch({ maxConcurrentReviews })}
+            />
+            <SettingsToggleRow
+              label="Clone the repo and check around the diff"
+              hint={
+                preview?.cli
+                  ? "The PR head is cloned (shallow, read-only) and the CLI agent runs inside it, so it can read callers, types and tests the diff doesn't show. Nothing from the PR is run."
+                  : "The PR head is cloned (shallow, read-only) and the model gets read_file, grep, find_files and list_dir over it, so it can check callers, types and tests the diff doesn't show before it answers. Nothing from the PR is run. Costs more tokens than a diff-only review. Off: one completion over the diff."
+              }
+              on={reviewer.cloneRepo}
+              testId={`slack-reviewer-clone-${reviewer.id}`}
+              onChange={(cloneRepo) => onPatch({ cloneRepo })}
+            />
+            {reviewer.cloneRepo && !preview?.cli ? (
+              <NumberField
+                label="Lookup rounds"
+                field="maxToolRounds"
+                value={reviewer.maxToolRounds}
+                hint="Rounds of reading and searching before the model must answer. Each round re-sends the conversation so far."
+                onCommit={(maxToolRounds) => onPatch({ maxToolRounds })}
+              />
+            ) : null}
+            <SlackReviewerVerifyFields
+              reviewer={reviewer}
+              providers={modelProviders}
+              cli={preview?.cli}
+              onPatch={onPatch}
+            />
+          </details>
+          <details className="slack-reviewer-details">
+            <summary>Review context</summary>
+            <SettingsToggleRow
+              label="Follow the repo's own guidelines"
+              hint="Sends AGENTS.md, CLAUDE.md, REVIEW.md, CONTRIBUTING.md or .github/copilot-instructions.md from the base branch (up to 3 files, ~3,000 tokens), so the PR can't rewrite the rules it is held to."
+              on={reviewer.repoGuidelines}
+              testId={`slack-reviewer-guidelines-${reviewer.id}`}
+              onChange={(repoGuidelines) => onPatch({ repoGuidelines })}
+            />
+            <SettingsToggleRow
+              label="Read the issues the PR closes"
+              hint={
+                '"Fixes #123" in the PR description: the issue\'s title and description go with the review, so the model can check the change does what it asked. Same repo only, at most 2.'
+              }
+              on={reviewer.linkedIssues}
+              testId={`slack-reviewer-issues-${reviewer.id}`}
+              onChange={(linkedIssues) => onPatch({ linkedIssues })}
+            />
+            <SettingsToggleRow
+              label="Tell the model about CI"
+              hint="Which checks pass, fail or are still running at the head commit, so it doesn't repeat what CI already reports."
+              on={reviewer.ciContext}
+              testId={`slack-reviewer-ci-${reviewer.id}`}
+              onChange={(ciContext) => onPatch({ ciContext })}
+            />
+            {reviewer.ciContext ? (
+              <SettingsToggleRow
+                label="Send failing CI logs"
+                hint="When a check fails, the condensed log of up to 2 failing jobs (~1,250 tokens) goes with the review, so the model can point at the line that breaks it."
+                on={reviewer.ciLogs}
+                testId={`slack-reviewer-ci-logs-${reviewer.id}`}
+                onChange={(ciLogs) => onPatch({ ciLogs })}
+              />
+            ) : null}
+            <SettingsToggleRow
+              label="Read the comments already on the PR"
+              hint="People's and other bots' comments (the newest 20, ~1,500 tokens at most) go with the review, so it doesn't repeat a point someone already made."
+              on={reviewer.prDiscussion}
+              testId={`slack-reviewer-discussion-${reviewer.id}`}
+              onChange={(prDiscussion) => onPatch({ prDiscussion })}
+            />
+            {reviewer.forgeMode === "verdict" ? (
+              <SettingsToggleRow
+                label="Don't approve while CI is failing"
+                hint="A clean review with a failing check leaves a comment instead of an approval."
+                on={reviewer.holdApprovalOnFailingCi}
+                testId={`slack-reviewer-ci-hold-${reviewer.id}`}
+                onChange={(holdApprovalOnFailingCi) => onPatch({ holdApprovalOnFailingCi })}
+              />
+            ) : null}
+            <SettingsToggleRow
+              label="Suggest fixes"
+              hint="Small, certain fixes come as one-click suggestions on inline comments (GitHub and GitLab; other forges show a code block)."
+              on={reviewer.suggestions}
+              testId={`slack-reviewer-suggestions-${reviewer.id}`}
+              onChange={(suggestions) => onPatch({ suggestions })}
+            />
+            <SettingsToggleRow
+              label="Re-review only the new commits"
+              hint="A follow-up review sends what changed since the last review plus the earlier findings, not the whole PR again. Falls back to the whole PR after a force-push, and on Gitea, Forgejo and Azure DevOps."
+              on={reviewer.incrementalRereview}
+              testId={`slack-reviewer-incremental-${reviewer.id}`}
+              onChange={(incrementalRereview) => onPatch({ incrementalRereview })}
+            />
+            <SettingsToggleRow
+              label="Resolve fixed findings on the PR"
+              hint="When a follow-up review finds an earlier finding fixed, its comment thread on the PR is resolved (GitHub and GitLab)."
+              on={reviewer.resolveFixedThreads}
+              testId={`slack-reviewer-resolve-${reviewer.id}`}
+              onChange={(resolveFixedThreads) => onPatch({ resolveFixedThreads })}
+            />
+          </details>
+          <details className="slack-reviewer-details">
+            <summary>In the thread</summary>
+            <SettingsToggleRow
+              label="Re-review when asked in the thread"
+              hint={
+                'A reply like "re-review", "review again" or "PTAL" in the review thread reviews again after new commits, and says which earlier findings were fixed. Checked about once a minute.'
+              }
+              on={reviewer.rereviewOnThreadReply}
+              testId={`slack-reviewer-thread-rereview-${reviewer.id}`}
+              onChange={(rereviewOnThreadReply) => onPatch({ rereviewOnThreadReply })}
+            />
+            {reviewer.rereviewOnThreadReply ? (
+              <p className="hint">
+                Reply <em>full re-review</em> to review the whole PR again, even on the same commit.
+                A review that fails on a rate limit, overload or timeout is retried once. Reply{" "}
+                <em>retry</em> to try again manually.
+              </p>
+            ) : null}
+            <SettingsToggleRow
+              label="Dismiss findings from the thread"
+              hint={
+                '"won\'t fix #2", "#1 is a false positive" or "dismiss all" in the thread: later reviews of the PR never raise those again. No model call.'
+              }
+              on={reviewer.dismissInThread}
+              testId={`slack-reviewer-dismiss-${reviewer.id}`}
+              onChange={(dismissInThread) => onPatch({ dismissInThread })}
+            />
+            <SettingsToggleRow
+              label="Dismiss findings from the PR"
+              hint={
+                '"won\'t fix #2" in a PR comment, or "won\'t fix" / "false positive" in a reply to one of the reviewer\'s inline comments, dismisses that finding too. The Slack thread is told.'
+              }
+              on={reviewer.dismissOnPr}
+              testId={`slack-reviewer-dismiss-pr-${reviewer.id}`}
+              onChange={(dismissOnPr) => onPatch({ dismissOnPr })}
+            />
+            <SettingsToggleRow
+              label="Review when asked on the PR"
+              hint={
+                'A PR comment starting "@locus review" or "@locus re-review" reviews the PR again in its review thread. On PRs with no thread it works only with "Review new PRs nobody posted" on, which posts the PR to the channel. Checked every 5–10 minutes; the reviewer\'s own and bots\' comments never count.'
+              }
+              on={reviewer.reviewOnPrComment}
+              testId={`slack-reviewer-pr-command-${reviewer.id}`}
+              onChange={(reviewOnPrComment) => onPatch({ reviewOnPrComment })}
+            />
+            <SettingsToggleRow
+              label="Review when tagged in a thread"
+              hint={
+                '"@Locus review this" (or "@Locus" with a PR link) in a thread of this channel that the reviewer isn\'t watching reviews the PR there. The link comes from the reply, else the thread\'s first post, else the latest earlier reply with one. Needs the Slack app\'s message events (Socket Mode).'
+              }
+              on={reviewer.reviewOnMention}
+              testId={`slack-reviewer-mention-${reviewer.id}`}
+              onChange={(reviewOnMention) => onPatch({ reviewOnMention })}
+            />
+            <SettingsToggleRow
+              label="Learn from dismissals"
+              hint="Dismissed findings are remembered for the whole repo, and the most recent go with later reviews of any PR there as the team's conventions."
+              on={reviewer.learnFromDismissals}
+              testId={`slack-reviewer-learn-${reviewer.id}`}
+              onChange={(learnFromDismissals) => onPatch({ learnFromDismissals })}
+            />
+            {reviewer.learnFromDismissals ? (
+              <RepoNotes reviewerId={reviewer.id} forges={props.forges} />
+            ) : null}
+            <SettingsToggleRow
+              label="Answer questions"
+              hint={`@-mention ${reviewer.postAs === "user" ? "you" : "the Locus bot"} in the review thread to ask about the review. One small model call per question (at most ${10} per thread), counted in Recent reviews and your budget.`}
+              on={reviewer.answerQuestions}
+              testId={`slack-reviewer-questions-${reviewer.id}`}
+              onChange={(answerQuestions) => onPatch({ answerQuestions })}
+            />
+            <SettingsToggleRow
+              label="Mention the PR author"
+              hint="Starts the final message with an @-mention of the author, for authors mapped below."
+              on={reviewer.mentionAuthor}
+              testId={`slack-reviewer-mention-${reviewer.id}`}
+              onChange={(mentionAuthor) => onPatch({ mentionAuthor })}
+            />
+            {reviewer.mentionAuthor ? (
+              <AuthorMapField
+                value={reviewer.authorSlackIds}
+                testId={`slack-reviewer-authors-${reviewer.id}`}
+                onCommit={(authorSlackIds) => onPatch({ authorSlackIds })}
+              />
+            ) : null}
+            <NumberField
+              label="Threads to watch"
+              field="maxWatchedThreads"
+              value={reviewer.maxWatchedThreads}
+              hint="Most recent review threads checked for re-review requests, dismissals, questions and 👍 / 👎. Each costs one Slack call per thread poll (every minute by default, see Polling), or one every 10 minutes while Socket Mode delivers message events."
+              onCommit={(maxWatchedThreads) => onPatch({ maxWatchedThreads })}
+            />
+          </details>
           <details className="slack-reviewer-details">
             <summary>Token budget{reviewer.unlimitedTokens ? " · no limits" : ""}</summary>
             <SettingsToggleRow
@@ -1599,7 +1756,10 @@ function SlackReviewerCard(props: {
             />
           </details>
 
-          <SlackReviewerPreview reviewer={reviewer} model={sampleModel} me={props.me} />
+          <details className="slack-reviewer-details">
+            <summary>Slack preview</summary>
+            <SlackReviewerPreview reviewer={reviewer} model={sampleModel} me={props.me} />
+          </details>
 
           <details className="slack-reviewer-details">
             <summary>Status messages</summary>
@@ -1624,8 +1784,6 @@ function SlackReviewerCard(props: {
           </details>
 
           <SlackReviewerAccuracy reviewerId={reviewer.id} stats={props.stats} />
-
-          <TestReview reviewer={reviewer} onPersist={props.onPersist} onRan={props.onRan} />
 
           <div className="slack-reviewer-actions">
             <button type="button" className="btn small danger" onClick={props.onRemove}>
@@ -2000,7 +2158,8 @@ function TestReview(props: {
               setError(null);
               setRun(null);
               try {
-                if (!(await props.onPersist())) throw new Error("Fix the Settings error first");
+                if (!(await props.onPersist()))
+                  throw new Error("Save the reviewer settings before running a review");
                 const result = await api.slackReviewerReview(
                   props.reviewer.id,
                   url.trim(),

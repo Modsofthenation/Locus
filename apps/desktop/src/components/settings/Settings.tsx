@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   BUILTIN_SLASH_NAMES,
   CLI_AGENT_PRESETS,
@@ -39,6 +39,8 @@ import {
   type GuestOs,
   type IntegrationAccount,
   type IntegrationPlugin,
+  normalizeThemePreferences,
+  resolveThemeRef,
   type LocusConfig,
   type McpServerConfig,
   type VmTemplate,
@@ -55,11 +57,18 @@ import {
   APP_RELEASES_URL,
   APP_VERSION,
 } from "@/lib/appInfo";
-import { applyChatDensity, applyTheme } from "@/lib/theme";
+import {
+  applyChatDensity,
+  applyTheme,
+  configuredTheme,
+  selectFixedTheme,
+  useConfiguredTheme,
+} from "@/lib/theme";
 import {
   DEFAULT_SWARM_SETTINGS_TAB,
   isSwarmSettingsTab,
   settingsNavLabel,
+  visibleSettingsNavGroups,
   settingsSearchHits,
   type SettingsSearchHit,
 } from "@/lib/settingsNav";
@@ -69,7 +78,8 @@ import { Select } from "@/components/layout/Select";
 import { MenuItem, OverflowMenu } from "@/components/layout/OverflowMenu";
 import { AUTONOMY_SELECT_OPTIONS } from "@/lib/formOptions";
 import { blankSkill, configForSave } from "@/lib/configPersist";
-import { useStore } from "@/state/store";
+import { openSettings, useStore } from "@/state/store";
+import { reviewSessions } from "@/lib/dashboard";
 import { PairingQr } from "./PairingQr";
 import {
   ForgeAccountCard,
@@ -107,6 +117,7 @@ import { askConfirm } from "@/lib/dialog";
 import { showUndoNotice } from "@/lib/notice";
 import { HighlightQuery } from "@/lib/queryMark";
 import { takePendingSettingsQuery } from "@/lib/settingsQuery";
+import { useDrawerSidebar } from "@/lib/useDrawerSidebar";
 import {
   appendConfigList,
   insertConfigList,
@@ -122,8 +133,13 @@ function openExternal(url: string) {
 
 export const SETTINGS_AUTOSAVE_MS = 400;
 
-export function Settings() {
+export function Settings({
+  phoneLayout = false,
+  onClose,
+}: { phoneLayout?: boolean; onClose?: () => void } = {}) {
   const { state, dispatch } = useStore();
+  const drawer = useDrawerSidebar();
+  const reviewing = state.section === "reviews";
   const productMode = parseProductMode(state.config?.productMode);
   const tab =
     productMode === "swarm" && !isSwarmSettingsTab(state.settingsTab)
@@ -160,6 +176,17 @@ export function Settings() {
   const [expandedMcp, setExpandedMcp] = useState<string | null>(null);
   const [expandedEnv, setExpandedEnv] = useState<string | null>(null);
   const [expandedIntegration, setExpandedIntegration] = useState<string | null>(null);
+  const [searchTarget, setSearchTarget] = useState<SettingsSearchHit | null>(null);
+  const settingsBody = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const body = settingsBody.current;
+    if (!searchTarget || !body) return;
+    const card = Array.from(body.querySelectorAll<HTMLElement>("[data-setting-id]")).find(
+      (control) => control.dataset.settingId === searchTarget.id,
+    );
+    if (!card) body.scrollTop = 0;
+    (card ?? body).focus();
+  }, [searchTarget]);
   const [expandedReviewer, setExpandedReviewer] = useState<string | null>(null);
   const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null);
   const [hostPathsOpen, setHostPathsOpen] = useState(false);
@@ -240,8 +267,9 @@ export function Settings() {
   }, [productMode, state.settingsTab, dispatch]);
 
   useEffect(() => {
-    if (state.section === "settings" && state.config) {
-      setDraft((current) => current ?? state.config);
+    if (!state.config) return;
+    setDraft((current) => current ?? state.config);
+    if (state.section === "settings") {
       setExpandedForge((current) => current ?? state.config?.forges[0]?.id ?? null);
       setExpandedSkill((current) => current ?? state.config?.skills?.[0]?.id ?? null);
       setExpandedMachine((current) => current ?? state.config?.templates[0]?.id ?? null);
@@ -253,11 +281,12 @@ export function Settings() {
     }
   }, [state.section, state.config]);
 
+  const appearanceTheme = useConfiguredTheme(draft);
   useEffect(() => {
     if (state.section !== "settings") return;
-    applyTheme(draft?.theme, draft?.customThemes ?? []);
+    applyTheme(appearanceTheme, draft?.customThemes ?? []);
     applyChatDensity(draft?.chatDensity);
-  }, [state.section, draft?.theme, draft?.customThemes, draft?.chatDensity]);
+  }, [state.section, appearanceTheme, draft?.customThemes, draft?.chatDensity]);
 
   useEffect(() => {
     if (state.section !== "settings") return;
@@ -386,6 +415,7 @@ export function Settings() {
     const next = configForSave(current);
     const savedConfig = configRef.current;
     if (savedConfig && JSON.stringify(next) === JSON.stringify(savedConfig)) {
+      setError(null);
       setSaveStatus("saved");
       return true;
     }
@@ -489,9 +519,10 @@ export function Settings() {
       return;
     }
     dispatch({ type: "settings", open: false });
+    onClose?.();
   }
 
-  if (state.section !== "settings" || !draft) return null;
+  if (!draft || (state.section !== "settings" && !reviewing)) return null;
   const current = draft;
   const oauthCallback = forgeOauthCallbackUrl(current.advanced.bindPort);
   const connectedKinds = new Set(
@@ -795,7 +826,7 @@ export function Settings() {
         dockerKind: snapshot.docker,
         setup: snapshot.setup,
       });
-      applyTheme(snapshot.config.theme, snapshot.config.customThemes ?? []);
+      applyTheme(configuredTheme(snapshot.config), snapshot.config.customThemes ?? []);
       applyChatDensity(snapshot.config.chatDensity);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Reset failed");
@@ -1120,6 +1151,7 @@ export function Settings() {
   function focusSettingsHit(hit: SettingsSearchHit) {
     dispatch({ type: "settingsTab", tab: hit.tab });
     setFind("");
+    setSearchTarget({ ...hit });
     if (hit.tab === "providers" && hit.id) {
       setProviderFilter("");
       setExpandedProvider(hit.id);
@@ -1131,15 +1163,108 @@ export function Settings() {
     if (hit.tab === "environments" && hit.id) setExpandedEnv(hit.id);
     if (hit.tab === "git" && hit.id) setExpandedForge(hit.id);
     if (hit.tab === "integrations" && hit.id) setExpandedIntegration(hit.id);
-    if (hit.tab === "reviewers" && hit.id) setExpandedReviewer(hit.id);
+  }
+
+  if (reviewing) {
+    async function leaveReviews(navigate: () => void) {
+      if (await persistRef.current()) navigate();
+    }
+
+    return (
+      <div className="settings-page app-settings review-workspace">
+        <header className="settings-head review-workspace-head">
+          <div>
+            <h2>Reviews</h2>
+            <p className="hint">Pull request activity and Slack reviewers</p>
+          </div>
+          {draftDirty || saveStatus !== "saved" ? (
+            <p className="settings-save-hint" role="status" data-status={saveStatus}>
+              {saveStatus === "error" ? "Save failed" : "Saving…"}
+            </p>
+          ) : null}
+        </header>
+        {error ? (
+          <div className="review-workspace-error" role="alert">
+            <p>{error}</p>
+            <button type="button" className="btn small" onClick={() => void persistRef.current()}>
+              Retry save
+            </button>
+          </div>
+        ) : null}
+        <SlackReviewerSettings
+          reviewers={current.slackReviewers ?? []}
+          polling={current.slackReviewerPolling}
+          onPollingChange={(slackReviewerPolling) =>
+            setDraft((config) => config && { ...config, slackReviewerPolling })
+          }
+          forges={current.forges}
+          providers={current.providers}
+          integrations={current.integrations ?? []}
+          skills={current.skills ?? []}
+          expanded={expandedReviewer}
+          onToggleExpand={(id) => setExpandedReviewer((open) => (open === id ? null : id))}
+          onAdd={() => {
+            const rows = current.slackReviewers ?? [];
+            const next = newSlackReviewer(crypto.randomUUID(), rows.length);
+            appendList("slackReviewers", next);
+            setExpandedReviewer(next.id);
+          }}
+          onPatch={(i, patch) => patchList("slackReviewers", i, patch)}
+          onRemove={(i) => {
+            const row = (current.slackReviewers ?? [])[i];
+            removeListUndoable("slackReviewers", i, row?.name || "reviewer");
+            setExpandedReviewer((id) => (id === row?.id ? null : id));
+          }}
+          onPersist={() => persistRef.current()}
+          reviewChats={reviewSessions(state.sessions, state.sessions.length)}
+          onOpenReviewChat={(id) => void leaveReviews(() => dispatch({ type: "select", id }))}
+          onOpenIntegrations={() => void leaveReviews(() => openSettings(dispatch, "integrations"))}
+          onOpenChat={(channelId, threadTs) => {
+            void leaveReviews(() => {
+              dispatch({ type: "selectSlackChannel", id: channelId });
+              dispatch({ type: "slackThread", ts: threadTs });
+            });
+          }}
+        />
+      </div>
+    );
+  }
+
+  async function openReviews() {
+    if (await persistRef.current()) dispatch({ type: "section", section: "reviews" });
   }
 
   const findHits = settingsSearchHits(current, find, productMode);
+  const reviewQuery = find.trim().toLowerCase();
+  const showSectionPicker = phoneLayout || drawer || state.collapsed;
+  const findReviews =
+    productMode === "developer" &&
+    reviewQuery.length >= 3 &&
+    ["reviews", "reviewers", "pull request review", "slack reviewer"].some((term) =>
+      term.includes(reviewQuery),
+    );
 
   return (
     <div className="settings-page app-settings">
       <header className="settings-head">
-        <h2>{settingsNavLabel(tab)}</h2>
+        {phoneLayout ? null : <h2>{showSectionPicker ? "Settings" : settingsNavLabel(tab)}</h2>}
+        {showSectionPicker ? (
+          <Select
+            ariaLabel="Settings section"
+            className="settings-section-picker"
+            value={tab}
+            options={visibleSettingsNavGroups(
+              productMode,
+              phoneLayout ? "full" : state.interfaceMode,
+              tab,
+            )
+              .flatMap((group) => group.items)
+              .map((item) => ({ value: item, label: settingsNavLabel(item) }))}
+            onChange={(item) => {
+              dispatch({ type: "settingsTab", tab: item });
+            }}
+          />
+        ) : null}
         <div className="settings-find">
           <SearchField
             className="search"
@@ -1149,9 +1274,10 @@ export function Settings() {
             aria-label="Find a setting"
             onChange={(event) => setFind(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && findHits[0]) {
+              if (event.key === "Enter" && (findHits[0] || findReviews)) {
                 event.preventDefault();
-                focusSettingsHit(findHits[0]);
+                if (findHits[0]) focusSettingsHit(findHits[0]);
+                else void openReviews();
               }
               if (event.key === "Escape" && find) {
                 event.preventDefault();
@@ -1159,8 +1285,8 @@ export function Settings() {
               }
             }}
           />
-          {find.trim() && findHits.length ? (
-            <ul className="settings-find-hits" role="listbox" aria-label="Setting matches">
+          {find.trim() && (findHits.length || findReviews) ? (
+            <ul className="settings-find-hits" aria-label="Setting matches">
               {findHits.slice(0, 8).map((hit) => (
                 <li key={`${hit.tab}:${hit.id ?? ""}`}>
                   <button type="button" onClick={() => focusSettingsHit(hit)}>
@@ -1171,7 +1297,18 @@ export function Settings() {
                   </button>
                 </li>
               ))}
+              {findReviews ? (
+                <li>
+                  <button type="button" onClick={() => void openReviews()}>
+                    <HighlightQuery text="Reviews · Open workspace" query={find} />
+                  </button>
+                </li>
+              ) : null}
             </ul>
+          ) : find.trim() ? (
+            <p className="settings-find-hits settings-find-empty" role="status">
+              No matching settings.
+            </p>
           ) : null}
         </div>
         {tab === "skills" && (
@@ -1197,7 +1334,12 @@ export function Settings() {
         ) : null}
       </header>
       <PolicyBanner config={draft} />
-      <section className={`settings-body${tab === "appearance" ? " appearance-body" : ""}`}>
+      <section
+        ref={settingsBody}
+        tabIndex={-1}
+        aria-label={settingsNavLabel(tab)}
+        className={`settings-body${tab === "appearance" ? " appearance-body" : ""}`}
+      >
         {tab === "providers" && (
           <>
             <div className="settings-pane-head">
@@ -1292,7 +1434,7 @@ export function Settings() {
 
         {tab === "appearance" && (
           <AppearanceSettings
-            theme={draft.theme}
+            theme={appearanceTheme}
             savedTheme={state.config?.theme ?? draft.theme}
             productMode={draft.productMode}
             chatDensity={draft.chatDensity}
@@ -1301,11 +1443,32 @@ export function Settings() {
             showMinimap={draft.showMinimap !== false}
             customThemes={draft.customThemes ?? []}
             providers={draft.providers}
-            onSelect={(id) => setDraft({ ...draft, theme: id })}
+            themePreferences={draft.themePreferences}
+            workspaces={[
+              ...state.projects.map((project) => ({
+                key: `project:${project.id}`,
+                label: `Project · ${project.title}`,
+              })),
+              ...state.repos.map((repo) => ({
+                key: `repo:${repo.id}`,
+                label: `Repository · ${repo.name}`,
+              })),
+            ]}
+            onThemePreferences={(themePreferences) =>
+              setDraft((prev) => (prev ? { ...prev, themePreferences } : prev))
+            }
+            onSelect={(id) => setDraft((prev) => (prev ? selectFixedTheme(prev, id) : prev))}
             onCustomThemes={(customThemes, select) =>
-              setDraft((prev) =>
-                prev ? { ...prev, customThemes, ...(select ? { theme: select } : {}) } : prev,
-              )
+              setDraft((prev) => {
+                if (!prev) return prev;
+                const next = select ? selectFixedTheme(prev, select) : prev;
+                return {
+                  ...next,
+                  theme: resolveThemeRef(next.theme, customThemes),
+                  themePreferences: normalizeThemePreferences(next.themePreferences, customThemes),
+                  customThemes,
+                };
+              })
             }
             onEditor={(patch) => setDraft((prev) => (prev ? { ...prev, ...patch } : prev))}
           />
@@ -1810,7 +1973,14 @@ export function Settings() {
             >
               Open Git
             </button>
-            <h3>Work tools</h3>
+            <div className="settings-pane-head">
+              <h3>Work tools</h3>
+              {productMode === "developer" ? (
+                <button type="button" className="btn small" onClick={() => void openReviews()}>
+                  Open Reviews
+                </button>
+              ) : null}
+            </div>
             {draft.managedPolicy?.policy.tokenFreeMode ? (
               <p className="hint">
                 Token-free mode: integrations go through a managed MCP proxy. Personal tokens are
@@ -1925,44 +2095,6 @@ export function Settings() {
               ))
             )}
           </>
-        )}
-        {tab === "reviewers" && (
-          <SlackReviewerSettings
-            reviewers={current.slackReviewers ?? []}
-            polling={current.slackReviewerPolling}
-            onPollingChange={(slackReviewerPolling) =>
-              setDraft({ ...current, slackReviewerPolling })
-            }
-            forges={current.forges ?? []}
-            providers={current.providers}
-            integrations={current.integrations ?? []}
-            skills={current.skills ?? []}
-            expanded={expandedReviewer}
-            onToggleExpand={(id) => setExpandedReviewer((open) => (open === id ? null : id))}
-            onAdd={() => {
-              const rows = current.slackReviewers ?? [];
-              const next = newSlackReviewer(crypto.randomUUID(), rows.length);
-              appendList("slackReviewers", next);
-              setExpandedReviewer(next.id);
-            }}
-            onPatch={(i, patch) => patchList("slackReviewers", i, patch)}
-            onRemove={(i) => {
-              const row = (current.slackReviewers ?? [])[i];
-              removeListUndoable("slackReviewers", i, row?.name || "reviewer");
-              setExpandedReviewer((id) => (id === row?.id ? null : id));
-            }}
-            onPersist={() => persistRef.current()}
-            onOpenIntegrations={() => dispatch({ type: "settingsTab", tab: "integrations" })}
-            onOpenChat={(channelId, threadTs) => {
-              void (async () => {
-                window.clearTimeout(autosaveTimerRef.current);
-                autosaveTimerRef.current = 0;
-                if (!(await persistRef.current())) return;
-                dispatch({ type: "selectSlackChannel", id: channelId });
-                dispatch({ type: "slackThread", ts: threadTs });
-              })();
-            }}
-          />
         )}
         {tab === "mcp" && (
           <>

@@ -615,6 +615,34 @@ describe("review context, thread replies and feedback", () => {
     expect(sr.parseSlackDismissRequest("fixed #2, please look")).toBeUndefined();
     expect(sr.parseSlackDismissRequest("won't fix")).toBeUndefined();
     expect(sr.parseSlackDismissRequest("ignore acme/api#12 for now")).toBeUndefined();
+    expect(sr.parseSlackDismissRequest("please dismiss #1")).toEqual({ ids: [1] });
+  });
+
+  it("doesn't read a reviewer's own replies as dismissals", () => {
+    // Two reviewers in one channel took each other's confirmations as requests and looped.
+    expect(
+      sr.parseSlackDismissRequest(
+        ":ok_hand: Dismissed #1 (`siq8/automation/tasks.py:474`) on <https://github.com/acme/api/pull/11099|acme/api#11099>. Later reviews won't raise it again.",
+      ),
+    ).toBeUndefined();
+    expect(
+      sr.parseSlackDismissRequest(
+        ":thinking_face: The last review of <https://github.com/acme/api/pull/7|acme/api#7> has 3 findings (#1–#3). Nothing to dismiss there.",
+      ),
+    ).toBeUndefined();
+    expect(sr.parseSlackDismissRequest("won't fix <https://x/pull/1|#2>")).toBeUndefined();
+  });
+
+  it('reads "stop watching this thread", for this reviewer or every one', () => {
+    const stop = (text: string) => sr.isSlackStopWatchingRequest(text, ["UBOT"]);
+    expect(stop("stop watching this thread")).toBe(true);
+    expect(stop("<@UBOT> stop watching this thread")).toBe(true);
+    expect(stop("<@UBOT|Locus ( Deshan )> please stop watching")).toBe(true);
+    expect(stop("<@UBOT> unwatch")).toBe(true);
+    expect(stop("Can you stop reviewing this PR?")).toBe(true);
+    expect(stop("<@UOTHER> stop watching this thread")).toBe(false);
+    expect(stop("we should stop watching the logs so closely")).toBe(false);
+    expect(stop("won't fix #1")).toBe(false);
   });
 
   it("treats a mention of the reviewer's identity as a question", () => {

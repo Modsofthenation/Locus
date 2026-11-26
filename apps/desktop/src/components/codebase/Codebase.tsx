@@ -1270,7 +1270,7 @@ export function CodebasePane() {
   if (!repo) {
     const importCard = (
       <section className="codebase-start-card">
-        <h3>Import from Git</h3>
+        <h3>{tokened.length ? "Choose from Git accounts" : "Connect a Git account"}</h3>
         {tokened.length ? (
           <>
             <p className="meta">Pick from the accounts connected in Settings → Git.</p>
@@ -1289,10 +1289,10 @@ export function CodebasePane() {
         ) : (
           <>
             <p className="meta">
-              Connect GitHub, GitLab or Bitbucket to pick from your repos, including private ones.
+              Connect an account to browse its repositories, including private ones.
             </p>
             <button type="button" className="btn" onClick={() => openSettings(dispatch, "git")}>
-              Add a GitHub token
+              Open Git settings
             </button>
           </>
         )}
@@ -1301,10 +1301,11 @@ export function CodebasePane() {
     const urlCard = (
       <section className="codebase-start-card">
         <h3>Paste a URL</h3>
-        <p className="meta">Any repo URL. Public repos load without a token.</p>
+        <p className="meta">Public repositories can be linked without an account.</p>
         <div className="field">
-          <label>Repository URL</label>
+          <label htmlFor="codebase-repo-url">Repository URL</label>
           <input
+            id="codebase-repo-url"
             value={linkUrl}
             onChange={(e) => setLinkUrl(e.target.value)}
             placeholder="https://github.com/acme/app"
@@ -1332,7 +1333,7 @@ export function CodebasePane() {
           disabled={busy}
           onClick={() => void link()}
         >
-          Link
+          Link repository
         </button>
       </section>
     );
@@ -1343,7 +1344,7 @@ export function CodebasePane() {
             <EmptyHero
               pose="rest"
               title="Link a repository"
-              lead="Catalog a GitHub, GitLab, Bitbucket, Gitea, Forgejo, or Azure DevOps repo, then review pulls here."
+              lead="Link a repository to browse its files, pull requests, and issues."
             />
             <div className="codebase-start-cards">
               {tokened.length ? (

@@ -56,6 +56,7 @@ export type PaletteGroup =
   | "Needs you"
   | "Jobs"
   | "Codebase"
+  | "Reviews"
   | "Brain"
   | "Slack"
   | "Grafana"
@@ -592,6 +593,13 @@ export function paletteItems(input: {
         "plan usage quota limit remaining credits rate limit reset 5-hour weekly monthly codex claude cursor kiro subscription billing",
     });
   }
+  items.push({
+    id: "section:reviews",
+    title: "Reviews",
+    hint: "Pull request activity, Slack reviewers, and diagnostics",
+    group: "Reviews",
+    keywords: `pull request pr review reviews reviewer reviewers slack polling logs ${(input.config?.slackReviewers ?? []).map((row) => row.name).join(" ")}`,
+  });
   for (const group of SETTINGS_NAV_GROUPS) {
     for (const tab of group.items) {
       const label = settingsNavLabel(tab);
@@ -614,6 +622,15 @@ export function paletteItems(input: {
       hint: opt.summary,
       group: "Appearance",
       keywords: `theme ${opt.name} ${opt.id} appearance${opt.chatScene ? " space photo chat" : ""}${opt.gradient ? " gradient" : ""}${opt.contrast ? " contrast" : ""}${opt.terminal ? " terminal console tty crt" : ""}${opt.style ? ` ${opt.style} ${themeFamilyLabel(opt.style).toLowerCase()}` : ""}`,
+    });
+  }
+  for (const theme of input.config?.customThemes ?? []) {
+    items.push({
+      id: `theme:${theme.id}`,
+      title: `Theme · ${theme.name}`,
+      hint: theme.summary,
+      group: "Appearance",
+      keywords: `theme ${theme.name} ${theme.id} appearance ${theme.base ?? ""} ${theme.scheme}`,
     });
   }
   items.push({
@@ -725,6 +742,7 @@ const SWARM_HIDDEN_GROUPS = new Set<PaletteGroup>([
   "IDE",
   "Jobs",
   "Codebase",
+  "Reviews",
   "Brain",
   "Slack",
   "Grafana",
@@ -745,4 +763,9 @@ export function paletteItemsForMode(items: PaletteItem[], mode: ProductMode): Pa
   return items.filter(
     (item) => !SWARM_HIDDEN_GROUPS.has(item.group) && !SWARM_HIDDEN_IDS.has(item.id),
   );
+}
+export const OPEN_PALETTE_EVENT = "locus:open-palette";
+
+export function openPalette(): void {
+  window.dispatchEvent(new Event(OPEN_PALETTE_EVENT));
 }

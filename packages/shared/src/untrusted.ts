@@ -34,6 +34,7 @@ const HOSTILE_TOOLS = new Set([
   "slack_channels",
   "slack_history",
   "slack_replies",
+  "slack_emojis",
   "miro_list",
   "miro_get",
   "miro_import",

@@ -270,6 +270,8 @@ import {
   DEFAULT_THEME,
   isThemeId,
   applyThemeManageAction,
+  normalizeThemePreferences,
+  selectFixedTheme,
   applySlackPostApprovalText,
   applyBrainBriefApprovalBody,
   canvasHtmlFromToolCall,
@@ -7096,8 +7098,16 @@ export class SessionService {
       if (!result.theme && !isThemeId(theme) && !result.themes.some((t) => t.id === theme)) {
         theme = DEFAULT_THEME;
       }
-      await this.store.saveConfig({ ...config, customThemes: result.themes, theme });
-      this.hub.broadcast({ type: "theme.updated", theme, customThemes: result.themes });
+      const next = result.theme ? selectFixedTheme(config, theme) : { ...config, theme };
+      next.customThemes = result.themes;
+      next.themePreferences = normalizeThemePreferences(next.themePreferences, result.themes);
+      await this.store.saveConfig(next);
+      this.hub.broadcast({
+        type: "theme.updated",
+        theme,
+        customThemes: result.themes,
+        themePreferences: next.themePreferences ?? null,
+      });
     }
     return { ok: true, output: result.output };
   }

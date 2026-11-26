@@ -18,6 +18,7 @@ import {
   isPullListState,
   isSessionKind,
   isThemeId,
+  selectFixedTheme,
   parseSlackPostAs,
   recipeById,
   sessionKind,
@@ -3036,9 +3037,9 @@ async function cmdTheme(ctx: Ctx): Promise<void> {
   const custom = (config.customThemes ?? []).find(
     (row) => row.id === theme || row.name.toLowerCase() === theme.toLowerCase(),
   );
-  if (!isThemeId(theme) && !custom) throw new UsageError(`Unknown theme ${theme}`);
-  const id = custom?.id ?? theme;
-  const next = await ctx.client.put("/api/config", { ...config, theme: id });
+  const id = custom?.id ?? (isThemeId(theme) ? theme : undefined);
+  if (!id) throw new UsageError(`Unknown theme ${theme}`);
+  const next = await ctx.client.put("/api/config", selectFixedTheme(config, id));
   done(ctx, next, () => `Theme ${custom?.name ?? theme}`);
 }
 

@@ -200,6 +200,102 @@ describe("AppearanceSettings", () => {
     expect(select).toBe("custom-my-theme");
   });
 
+  it("groups crafted themes under their own filter and remixes the selected one", async () => {
+    const onCustomThemes = vi.fn();
+    await mount({ theme: "velvet", customThemes: [], onCustomThemes });
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>("[data-testid='theme-filter-crafted']")!.click();
+    });
+    expect(host.querySelector(".theme-thumb[data-theme='zenith']")).not.toBeNull();
+    expect(host.querySelector(".theme-thumb[data-theme='nord']")).toBeNull();
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>("[data-testid='theme-filter-generated']")!.click();
+    });
+    expect(button("Remix Velvet")).toBeTruthy();
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>("[data-testid='theme-remix']")!.click();
+    });
+    expect(host.querySelector("[data-testid='theme-editor']")).not.toBeNull();
+    expect(host.querySelector<HTMLInputElement>("#theme-editor-name")?.value).toBe("Velvet remix");
+    expect(host.querySelector<HTMLSelectElement>("#theme-editor-pane-accent")?.value).toBe(
+      "gradient",
+    );
+    // A seed regrows the whole palette.
+    const harmony = host.querySelector<HTMLSelectElement>("#theme-editor-harmony")!;
+    await act(async () => {
+      harmony.value = "triadic";
+      harmony.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>("[data-testid='theme-editor-save']")!.click();
+    });
+    const [themes, select] = onCustomThemes.mock.calls[0]!;
+    expect(themes[0]).toMatchObject({
+      id: "custom-velvet-remix",
+      palette: { seed: "#d9a441", harmony: "triadic" },
+      layout: { paneAccent: "gradient", bubble: "glass" },
+      extends: "velvet",
+    });
+    // Only what the remix changes is stored against its base.
+    expect(themes[0].overrides).toMatchObject({
+      name: "Velvet remix",
+      palette: { seed: "#d9a441", harmony: "triadic" },
+    });
+    expect(themes[0].overrides.layout).toBeUndefined();
+    expect(themes[0].colors.bg).not.toBe("#170a12");
+    expect(select).toBe("custom-velvet-remix");
+  });
+
+  it("remixes a colour-only built-in and edits code and component settings", async () => {
+    const onCustomThemes = vi.fn();
+    await mount({ theme: "nord", customThemes: [], onCustomThemes });
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>("[data-testid='theme-filter-generated']")!.click();
+    });
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>("[data-testid='theme-remix']")!.click();
+    });
+    expect(host.querySelector("[data-testid='theme-editor-extends']")?.textContent).toContain(
+      "Nord",
+    );
+    const change = async (selector: string, value: string, event = "change") => {
+      const el = host.querySelector<HTMLInputElement | HTMLSelectElement>(selector)!;
+      await act(async () => {
+        const proto = Object.getPrototypeOf(el) as object;
+        Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value);
+        el.dispatchEvent(new Event(event, { bubbles: true }));
+      });
+    };
+    await act(async () => {
+      host.querySelector<HTMLInputElement>("#theme-editor-code")!.click();
+    });
+    expect(host.querySelector("[data-testid='theme-editor-syntax']")).not.toBeNull();
+    await change("#theme-syntax-keyword", "#ff00aa", "input");
+    await change("#theme-editor-component", "button");
+    await act(async () => {
+      host.querySelector<HTMLInputElement>("#theme-editor-component-pill")!.click();
+    });
+    await act(async () => {
+      host.querySelector<HTMLInputElement>("#theme-editor-adaptive")!.click();
+    });
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>("[data-testid='theme-editor-save']")!.click();
+    });
+    const [themes] = onCustomThemes.mock.calls[0]!;
+    expect(themes[0]).toMatchObject({
+      extends: "nord",
+      adaptive: true,
+      components: { button: { radius: 999 } },
+      colors: { bg: "#2e3440" },
+    });
+    expect(themes[0].code.syntax.keyword).toMatch(/^#[0-9a-f]{6}$/);
+    expect(themes[0].overrides).toMatchObject({
+      adaptive: true,
+      components: { button: { radius: 999 } },
+    });
+    expect(themes[0].overrides.colors).toBeUndefined();
+  });
+
   it("deletes the applied generated theme and falls back to the default", async () => {
     const onCustomThemes = vi.fn();
     await mount({ customThemes: [neon], onCustomThemes, theme: neon.id });

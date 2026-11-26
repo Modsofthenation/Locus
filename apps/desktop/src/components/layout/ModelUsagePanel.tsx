@@ -46,11 +46,9 @@ export function ModelUsagePanel({ providers }: { providers?: LocusConfig["provid
   const since = usage?.since ? new Date(usage.since).toLocaleDateString() : undefined;
 
   return (
-    <section className="dash-panel dash-usage" aria-labelledby="dash-usage-title">
-      <header className="dash-panel-head">
-        <h3 id="dash-usage-title">Provider &amp; model usage</h3>
-        {since ? <span className="dash-stat-hint">Since {since}</span> : null}
-      </header>
+    <details className="dash-panel dash-usage">
+      <summary>Provider &amp; model usage</summary>
+      {since ? <p className="dash-note">Since {since}</p> : null}
       {failed ? (
         <p className="dash-note" role="status">
           {usage ? "Showing last available usage. Refresh failed." : "Usage is unavailable."}
@@ -103,6 +101,6 @@ export function ModelUsagePanel({ providers }: { providers?: LocusConfig["provid
           </p>
         </>
       ) : null}
-    </section>
+    </details>
   );
 }

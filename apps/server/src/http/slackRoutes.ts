@@ -47,6 +47,16 @@ export function registerSlackRoutes(
     return trace ? c.json(trace) : c.json({ error: "No trace for that run" }, 404);
   });
 
+  app.post("/api/slack/reviewers/:id/run", async (c) => {
+    if (!reviewers) return c.json({ error: "Slack reviewers are not running" }, 503);
+    try {
+      await reviewers.runNow(c.req.param("id"));
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: errorMessage(err) }, 400);
+    }
+  });
+
   /**
    * Run one reviewer on a PR now. `threadTs` posts progress into that Slack thread. `dryRun`
    * posts nothing anywhere and returns the findings. `fullRereview` reviews the full PR diff

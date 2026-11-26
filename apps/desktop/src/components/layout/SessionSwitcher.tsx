@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   resolveThemeRef,
   sessionRuntime,
@@ -6,7 +6,7 @@ import {
   CLEAR_CHAT_CONFIRM,
   parseProductMode,
 } from "@locus/shared";
-import { applyTheme } from "@/lib/theme";
+import { applyTheme, configuredTheme, selectFixedTheme } from "@/lib/theme";
 import { api } from "@/lib/api";
 import { showErrorNotice, showNotice } from "@/lib/notice";
 import { openProviderSettings, runSampleTask, sampleTaskReady } from "@/lib/sampleTask";
@@ -22,6 +22,7 @@ import {
   editorOwnsCommandK,
   filterPaletteItems,
   isPaletteShortcutsQuery,
+  OPEN_PALETTE_EVENT,
   paletteItems,
   paletteItemsForMode,
 } from "@/lib/palette";
@@ -33,9 +34,13 @@ import { noteRailSignal } from "@/lib/railSuggest";
 import { HighlightQuery } from "@/lib/queryMark";
 import { Modal } from "./Modal";
 import { orderPaletteForBrowse, tryNextContext } from "@/lib/discoverability";
-import { confirmLeaveSettings, paletteActionLeavesSettings } from "@/lib/settingsLeave";
+import {
+  confirmLeaveSettings,
+  flushSettings,
+  paletteActionLeavesSettings,
+} from "@/lib/settingsLeave";
 import type { SettingsTab } from "@/lib/settingsNav";
-import { sessionForDigit } from "@/lib/sessionSwitch";
+import { sessionForDigit, switchableSessions } from "@/lib/sessionSwitch";
 import { openSettings, useStore } from "@/state/store";
 import { setProductMode } from "@/components/layout/ProductModeToggle";
 import { SearchField } from "./SearchField";
@@ -65,7 +70,9 @@ export function SessionSwitcher({
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
+  const resultsId = useId();
   const input = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const session = state.sessions.find((s) => s.id === state.selectedId);
   const vm =
     state.vms.find((v) => v.id === session?.vmId) ??
@@ -121,17 +128,28 @@ export function SessionSwitcher({
     state.setup,
     state.brain,
     state.slackStatus,
-    state.config?.mcpServers,
-    state.config?.productMode,
     state.config,
     session,
     vm,
     query,
     showShortcuts,
   ]);
+  const activeIndex = Math.min(active, items.length - 1);
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
+    function showPalette() {
+      setShortcutsOpen(false);
+      setQuery("");
+      setActive(0);
+      setOpen(true);
+    }
+    window.addEventListener(OPEN_PALETTE_EVENT, showPalette);
+    return () => window.removeEventListener(OPEN_PALETTE_EVENT, showPalette);
+  }, []);
+
+  useEffect(() => {
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.defaultPrevented) return;
       if (matchModKey(e, "k")) {
         if (editorOwnsCommandK(document.activeElement)) return;
         e.preventDefault();
@@ -145,43 +163,23 @@ export function SessionSwitcher({
         e.preventDefault();
         const next = sessionForDigit(state.sessions, e.key);
         if (next) {
-          dispatch({ type: "select", id: next.id });
-          setOpen(false);
-          setShortcutsOpen(false);
+          const select = () => {
+            dispatch({ type: "select", id: next.id });
+            setOpen(false);
+            setShortcutsOpen(false);
+          };
+          if (state.section === "reviews") {
+            void flushSettings().then((ok) => {
+              if (ok) select();
+            });
+          } else select();
         }
         return;
-      }
-      if (shortcutsOpen) {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          setShortcutsOpen(false);
-        }
-        return;
-      }
-      if (!open) return;
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setOpen(false);
-      }
-      if (showShortcuts) return;
-      if (e.key === "ArrowDown" || e.key === "j") {
-        if (e.key === "j" && document.activeElement === input.current && query) return;
-        e.preventDefault();
-        setActive((i) => Math.min(items.length - 1, i + 1));
-      }
-      if (e.key === "ArrowUp" || e.key === "k") {
-        if (e.key === "k" && document.activeElement === input.current && query) return;
-        e.preventDefault();
-        setActive((i) => Math.max(0, i - 1));
-      }
-      if (e.key === "Enter" && items[active]) {
-        e.preventDefault();
-        void run(items[active]!.id);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, shortcutsOpen, showShortcuts, query, active, items, state.sessions, dispatch]);
+  }, [state.sessions, state.section, dispatch]);
 
   useEffect(() => {
     if (open) input.current?.focus();
@@ -191,8 +189,30 @@ export function SessionSwitcher({
     setActive(0);
   }, [query]);
 
+  function searchKey(event: KeyboardEvent<HTMLInputElement>) {
+    if (activeIndex < 0 || event.nativeEvent.isComposing) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void run(items[activeIndex]!.id);
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      const next = Math.min(items.length - 1, Math.max(0, activeIndex + step));
+      setActive(next);
+      const rows = list.current?.querySelectorAll(".switcher-item");
+      rows?.[next]?.scrollIntoView?.({ block: "nearest" });
+    }
+  }
+
   async function run(id: string) {
+    const openingReviews = id === "section:reviews";
     if (
+      (state.section === "reviews" && !openingReviews) ||
+      (state.section === "settings" && openingReviews)
+    ) {
+      if (!(await flushSettings())) return;
+    } else if (
       state.section === "settings" &&
       paletteActionLeavesSettings(id) &&
       !confirmLeaveSettings()
@@ -459,6 +479,10 @@ export function SessionSwitcher({
       dispatch({ type: "section", section: "brain" });
       return;
     }
+    if (id === "section:reviews") {
+      dispatch({ type: "section", section: "reviews" });
+      return;
+    }
     if (id === "section:slack") {
       dispatch({ type: "section", section: "slack" });
       return;
@@ -572,11 +596,11 @@ export function SessionSwitcher({
       const theme = resolveThemeRef(id.slice("theme:".length), state.config?.customThemes);
       applyTheme(theme);
       if (!state.config) return;
-      const next = { ...state.config, theme };
+      const next = selectFixedTheme(state.config, theme);
       try {
         const saved = await api.saveConfig(next);
         dispatch({ type: "config", config: saved });
-        applyTheme(saved.theme);
+        applyTheme(configuredTheme(saved), saved.customThemes);
       } catch {
         dispatch({ type: "config", config: next });
       }
@@ -586,6 +610,7 @@ export function SessionSwitcher({
   if (shortcutsOpen) {
     return (
       <Modal
+        key="shortcuts"
         label="Keyboard shortcuts"
         className="switcher"
         onClose={() => setShortcutsOpen(false)}
@@ -598,6 +623,7 @@ export function SessionSwitcher({
 
   if (!open) return null;
 
+  const digitSessions = query ? [] : switchableSessions(state.sessions).slice(0, 9);
   let lastGroup = "";
   return (
     <Modal
@@ -612,6 +638,12 @@ export function SessionSwitcher({
         ref={input}
         wrapClassName="switcher-search"
         className="switcher-input"
+        aria-label="Search workspace"
+        role={showShortcuts ? undefined : "combobox"}
+        aria-autocomplete={showShortcuts ? undefined : "list"}
+        aria-expanded={showShortcuts ? undefined : items.length > 0}
+        aria-controls={items.length ? resultsId : undefined}
+        aria-activedescendant={activeIndex >= 0 ? `${resultsId}-${activeIndex}` : undefined}
         placeholder={
           parseProductMode(state.config?.productMode) === "swarm"
             ? "Teammates, teams, configuration…"
@@ -619,27 +651,42 @@ export function SessionSwitcher({
         }
         value={query}
         onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={searchKey}
       />
-      <div className="switcher-list">
+      <div
+        className="switcher-list"
+        ref={list}
+        id={resultsId}
+        role={items.length ? "listbox" : undefined}
+        aria-label={items.length ? "Search results" : undefined}
+      >
         {showShortcuts ? (
           <KeyboardShortcutsSheet />
         ) : items.length === 0 ? (
-          <p className="hint">No matching agents or commands</p>
+          <p className="hint" role="status">
+            No matching results
+          </p>
         ) : (
           items.map((item, i) => {
             const heading = item.group !== lastGroup ? item.group : null;
             lastGroup = item.group;
             const sessionIndex = item.id.startsWith("session:")
-              ? items
-                  .filter((row) => row.id.startsWith("session:"))
-                  .findIndex((row) => row.id === item.id)
+              ? digitSessions.findIndex((session) => `session:${session.id}` === item.id)
               : -1;
             return (
-              <div key={item.id}>
-                {heading ? <div className="switcher-group">{heading}</div> : null}
+              <div key={item.id} role="presentation">
+                {heading ? (
+                  <div className="switcher-group" aria-hidden="true">
+                    {heading}
+                  </div>
+                ) : null}
                 <button
                   type="button"
-                  className={`switcher-item ${i === active ? "active" : ""}`}
+                  role="option"
+                  id={`${resultsId}-${i}`}
+                  aria-selected={i === activeIndex}
+                  tabIndex={-1}
+                  className={`switcher-item ${i === activeIndex ? "active" : ""}`}
                   onMouseEnter={() => setActive(i)}
                   onClick={() => void run(item.id)}
                 >
@@ -652,9 +699,7 @@ export function SessionSwitcher({
                     </div>
                     <div className="meta">{item.hint}</div>
                   </span>
-                  {!query && sessionIndex >= 0 && sessionIndex < 9 ? (
-                    <kbd>{sessionIndex + 1}</kbd>
-                  ) : null}
+                  {sessionIndex >= 0 ? <kbd aria-hidden="true">{sessionIndex + 1}</kbd> : null}
                 </button>
               </div>
             );

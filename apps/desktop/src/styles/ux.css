@@ -1,6 +1,11 @@
 /* Quiet-shell controls extracted from the main sheet so new UX can land
    without growing index.css. Tokens still live on :root in index.css. */
 
+.workspace-loading {
+  margin: var(--space-4) var(--space-5);
+  color: var(--muted);
+}
+
 .ui-select {
   display: inline-flex;
   min-width: 0;
@@ -51,6 +56,15 @@
   flex: none;
   opacity: 0.55;
   font-size: 10px;
+}
+.settings-section-picker .ui-select-toggle::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-inline-start: var(--space-1);
+  border-right: 1px solid var(--muted);
+  border-bottom: 1px solid var(--muted);
+  transform: translateY(-2px) rotate(45deg);
 }
 
 .ui-select.compact .ui-select-toggle {
@@ -172,7 +186,7 @@
 }
 
 .setup-later {
-  margin: var(--space-3) 0 0;
+  margin: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-pane);
   padding: var(--space-2) var(--space-3);
@@ -183,6 +197,14 @@
   color: var(--muted);
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
+}
+
+.setup-later[open] > summary {
+  margin-bottom: var(--space-3);
+}
+
+.setup-later .setup-list {
+  margin-bottom: 0;
 }
 
 .theme-featured-note {
@@ -345,6 +367,10 @@ details.advanced [hidden] {
 
 .app-notice-action {
   align-self: center;
+}
+
+.app-notice-dismiss {
+  grid-column: 3;
 }
 
 .ui-skeleton {
@@ -614,7 +640,12 @@ mark {
 .mobile-overlay-body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mobile-overlay .settings-head {
+  padding-top: var(--space-3);
 }
 .mobile-find-bar {
   display: flex;
@@ -688,6 +719,10 @@ mark {
   padding: var(--chat-composer-text-pad);
   font-size: var(--chat-composer-font);
   line-height: var(--chat-composer-line);
+}
+
+.empty.board-start .composer-send-label {
+  display: inline;
 }
 
 /* Team / group-chat name sits inside the composer as its title line, not as a

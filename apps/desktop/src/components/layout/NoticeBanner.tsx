@@ -7,7 +7,7 @@ export function NoticeBanner() {
   useEffect(() => {
     if (!items.length) return;
     function onKey(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       if (document.querySelector('[role="dialog"]')) return;
       event.preventDefault();
       const latest = items[items.length - 1];

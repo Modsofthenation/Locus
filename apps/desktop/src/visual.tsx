@@ -10,6 +10,8 @@ import {
   type ThemeId,
   customThemeFromInput,
   type CustomTheme,
+  type ThemePreferences,
+  type ThemeRef,
 } from "@locus/shared";
 import { NewAutomationModal } from "@/components/automations/NewAutomation";
 import { NewSessionModal } from "@/components/chat/NewSession";
@@ -36,15 +38,17 @@ import { WorkspaceBody } from "@/components/workspace/WorkspaceBody";
 import { WorkspaceStage } from "@/components/workspace/WorkspaceStage";
 import { api } from "@/lib/api";
 import { showUndoNotice } from "@/lib/notice";
-import { applyTheme } from "@/lib/theme";
+import { applyTheme, applyWorkspaceAccent, useConfiguredTheme } from "@/lib/theme";
 import { useDrawerSidebar } from "@/lib/useDrawerSidebar";
-import { Store, initialState, type Action, type UiState } from "@/state/store";
+import { Store, initialState as appInitialState, type Action, type UiState } from "@/state/store";
 import "./index.css";
 import "./styles/phone.css";
 import "./styles/swarm.css";
 import "./styles/ux.css";
 import "./styles/themeStyles.css";
 import "./styles/themeEditor.css";
+
+const initialState = { ...appInitialState, interfaceMode: "full" as const };
 
 const SCREENS = [
   "new-agent",
@@ -63,7 +67,7 @@ const SCREENS = [
   "android-canvas",
   "design-canvas",
   "settings-providers",
-  "settings-reviewers",
+  "reviews",
   "inbox",
   "feedback",
   "shortcuts",
@@ -134,6 +138,8 @@ function stubApi(): void {
     { id: "C1", name: "pr-reviews", kind: "channel" },
     { id: "C2", name: "web", kind: "channel" },
   ];
+  api.slackUsers = async () => [];
+  api.slackReviewerLogs = async () => ({ entries: [], lastSeq: 0 });
   api.slackReviewerTrace = async (id) => ({
     id,
     reviewerId: "r1",
@@ -276,7 +282,7 @@ function stubApi(): void {
   api.checkUpdates = async () =>
     ({
       status: "unavailable",
-      current: "0.29.0",
+      current: "0.30.0",
       message: "No GitHub release found yet.",
     }) as never;
 }
@@ -372,7 +378,7 @@ function visualState(screen: VisualScreen, theme: ThemeId): UiState {
   if (screen === "ide-empty") {
     return { ...initialState, config: themed, section: "ide" };
   }
-  if (screen === "settings-reviewers") {
+  if (screen === "reviews") {
     return {
       ...initialState,
       config: {
@@ -424,8 +430,7 @@ function visualState(screen: VisualScreen, theme: ThemeId): UiState {
           },
         ],
       },
-      section: "settings",
-      settingsTab: "reviewers",
+      section: "reviews",
     };
   }
   if (screen === "inbox") {
@@ -753,24 +758,44 @@ const SAMPLE_GENERATED: CustomTheme[] = [
 /** Appearance with working generated-theme state, for the Generated filter and editor. */
 function GeneratedAppearance() {
   const [themes, setThemes] = useState<CustomTheme[]>(SAMPLE_GENERATED);
-  const [selected, setSelected] = useState<string>(SAMPLE_GENERATED[0]!.id);
+  const [selected, setSelected] = useState<ThemeRef>(SAMPLE_GENERATED[0]!.id);
+  const [preferences, setPreferences] = useState<ThemePreferences>({});
+  const applied = useConfiguredTheme({
+    theme: selected,
+    themePreferences: preferences,
+    customThemes: themes,
+  });
+  const accent = preferences.workspaceAccents?.["project:example"];
   useEffect(() => {
-    applyTheme(selected, themes);
-  }, [selected, themes]);
+    applyTheme(applied, themes);
+  }, [applied, themes]);
+  useEffect(() => {
+    applyWorkspaceAccent(accent);
+    return () => applyWorkspaceAccent();
+  }, [accent]);
   return (
     <div className="settings-pane visual-appearance">
       <AppearanceSettings
-        theme={selected}
-        savedTheme={selected}
+        theme={applied}
+        savedTheme={applied}
         customThemes={themes}
+        themePreferences={preferences}
+        workspaces={[{ key: "project:example", label: "Project · Example" }]}
+        onThemePreferences={setPreferences}
         providers={config.providers}
         editorFontSize={13}
         formatOnSave
         showMinimap
-        onSelect={setSelected}
+        onSelect={(id) => {
+          setSelected(id);
+          setPreferences((prev) => ({ ...prev, followSystem: false }));
+        }}
         onCustomThemes={(next, select) => {
           setThemes(next);
-          if (select) setSelected(select);
+          if (select) {
+            setSelected(select);
+            setPreferences((prev) => ({ ...prev, followSystem: false }));
+          }
         }}
         onEditor={() => undefined}
       />
@@ -850,8 +875,17 @@ function Screen(props: { screen: VisualScreen; theme: ThemeId; drawer: boolean }
   if (props.screen === "appearance-generated") return <GeneratedAppearance />;
   if (props.screen === "design-empty") return <DesignEmpty />;
   if (props.screen === "ide-empty") return <IdeEmpty />;
-  if (props.screen === "settings-providers" || props.screen === "settings-reviewers")
-    return <Settings />;
+  if (props.screen === "settings-providers") return <Settings />;
+  if (props.screen === "reviews") {
+    return (
+      <div className="app">
+        <Sidebar />
+        <main className="workspace">
+          <Settings />
+        </main>
+      </div>
+    );
+  }
   if (props.screen === "feedback") return <FeedbackPreview />;
   if (props.screen === "shortcuts") return <ShortcutsPreview />;
   if (props.screen === "chat") return <ChatPreview />;

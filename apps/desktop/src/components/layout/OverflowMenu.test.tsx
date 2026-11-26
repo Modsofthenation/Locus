@@ -223,7 +223,7 @@ describe("OverflowMenu CSS", () => {
     expect(css).toMatch(
       /\.menu\.up \.menu-pop:not\(\.placed\) \{[\s\S]*?bottom:\s*calc\(100% \+ 6px\)/,
     );
-    expect(css).toMatch(/\.menu-pop:not\(\.placed\) \{\s*visibility:\s*hidden/);
+    expect(css).toMatch(/\.menu-pop:not\(\.placed\) \{\s*opacity:\s*0;\s*pointer-events:\s*none/);
     expect(css).toMatch(/\.menu\.right \.menu-pop:not\(\.placed\) \{[\s\S]*?right:\s*0/);
     expect(css).toMatch(/\.menu \.menu-pop\.placed \{[\s\S]*?position:\s*fixed/);
     expect(css).toMatch(/\.menu \.menu-pop\.placed \{[\s\S]*?inset:\s*auto/);

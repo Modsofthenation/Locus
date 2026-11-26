@@ -22,6 +22,7 @@ Operator guides for running Locus. Screenshots used by the README gallery are in
 | [quickstart-ollama.md](quickstart-ollama.md) | First Host agent with Ollama (no API key) |
 | [troubleshooting.md](troubleshooting.md) | Demo replies, FTS5/Node 22.22, git tests, boot waits |
 | [codebase.md](codebase.md) | Linked repos, PR review, Change Stack |
+| [themes.md](themes.md) | Theme specs: seed palettes, adaptive light/dark, code and terminal colours, components, inheritance, schedules |
 | [operator-tools.md](operator-tools.md) | Parallel verification, visual review, offline projects, worker recovery, webhook preview, and storage |
 | [verify.md](verify.md) | `.locus/environment.json` `verify` block, presets, test reports |
 | [code-intelligence.md](code-intelligence.md) | Agent `code_*` language-server tools |

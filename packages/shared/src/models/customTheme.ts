@@ -1,9 +1,8 @@
 /**
  * Generated themes: user-built or AI-built theme specs stored in config.
  *
- * A spec is data, never CSS. Every field is an enum, a clamped number, or a
- * validated hex colour, and customThemeCss() is the only place that turns a
- * spec into CSS. That keeps model output from injecting arbitrary rules.
+ * A spec contains structured settings, including validated colours and raster
+ * backdrops. customThemeCss() is the only place that turns a spec into CSS.
  */
 import type { ExtraToolDef } from "./mcp.js";
 import { THEME_STYLES, isThemeId, type ThemeId, type ThemeStyle } from "./theme.js";
@@ -137,13 +136,19 @@ export const CUSTOM_THEME_BACKGROUNDS = [
   "stripes",
   "crosshatch",
   "rings",
+  "sunburst",
+  "plaid",
+  "zigzag",
+  "waves",
+  "halftone",
+  "bricks",
 ] as const;
 export type CustomThemeBackground = (typeof CUSTOM_THEME_BACKGROUNDS)[number];
 
 export const CUSTOM_THEME_PANES = ["solid", "glass", "outline", "raised", "flat"] as const;
 export type CustomThemePane = (typeof CUSTOM_THEME_PANES)[number];
 
-export const CUSTOM_THEME_SHADOWS = ["none", "soft", "lifted", "hard", "glow"] as const;
+export const CUSTOM_THEME_SHADOWS = ["none", "soft", "lifted", "hard", "glow", "layered"] as const;
 export type CustomThemeShadow = (typeof CUSTOM_THEME_SHADOWS)[number];
 
 export const CUSTOM_THEME_BORDER_STYLES = ["solid", "dashed", "double"] as const;
@@ -155,19 +160,50 @@ export type CustomThemeControlShape = (typeof CUSTOM_THEME_CONTROL_SHAPES)[numbe
 export const CUSTOM_THEME_CASES = ["none", "upper", "lower"] as const;
 export type CustomThemeCase = (typeof CUSTOM_THEME_CASES)[number];
 
-export const CUSTOM_THEME_SIDEBARS = ["surface", "tinted", "accent", "inverted"] as const;
+export const CUSTOM_THEME_SIDEBARS = [
+  "surface",
+  "tinted",
+  "accent",
+  "inverted",
+  "glass",
+  "gradient",
+] as const;
 export type CustomThemeSidebar = (typeof CUSTOM_THEME_SIDEBARS)[number];
 
-export const CUSTOM_THEME_BUBBLES = ["filled", "outline", "accent", "quote", "plain"] as const;
+export const CUSTOM_THEME_BUBBLES = [
+  "filled",
+  "outline",
+  "accent",
+  "quote",
+  "plain",
+  "tail",
+  "gradient",
+  "glass",
+] as const;
 export type CustomThemeBubble = (typeof CUSTOM_THEME_BUBBLES)[number];
 
-export const CUSTOM_THEME_BUTTONS = ["filled", "outline", "gradient", "glow"] as const;
+export const CUSTOM_THEME_BUTTONS = [
+  "filled",
+  "outline",
+  "gradient",
+  "glow",
+  "soft",
+  "depth",
+  "brutal",
+] as const;
 export type CustomThemeButton = (typeof CUSTOM_THEME_BUTTONS)[number];
 
 export const CUSTOM_THEME_DENSITIES = ["compact", "cozy", "spacious"] as const;
 export type CustomThemeDensity = (typeof CUSTOM_THEME_DENSITIES)[number];
 
-export const CUSTOM_THEME_TOPBARS = ["surface", "transparent", "glass", "accent"] as const;
+export const CUSTOM_THEME_TOPBARS = [
+  "surface",
+  "transparent",
+  "glass",
+  "accent",
+  "gradient",
+  "underline",
+] as const;
 export type CustomThemeTopbar = (typeof CUSTOM_THEME_TOPBARS)[number];
 
 export const CUSTOM_THEME_BORDER_COLORS = ["line", "text", "accent", "accent2"] as const;
@@ -185,6 +221,8 @@ export const CUSTOM_THEME_HEADING_STYLES = [
   "underline",
   "highlight",
   "outline",
+  "shadow",
+  "boxed",
 ] as const;
 export type CustomThemeHeadingStyle = (typeof CUSTOM_THEME_HEADING_STYLES)[number];
 
@@ -198,15 +236,167 @@ export const CUSTOM_THEME_EASINGS = ["standard", "smooth", "snappy", "bouncy", "
 export type CustomThemeEasing = (typeof CUSTOM_THEME_EASINGS)[number];
 
 /** How a new chat message arrives. */
-export const CUSTOM_THEME_ENTRANCES = ["none", "fade", "rise", "slide", "pop", "blur"] as const;
+export const CUSTOM_THEME_ENTRANCES = [
+  "none",
+  "fade",
+  "rise",
+  "slide",
+  "pop",
+  "blur",
+  "drop",
+  "unfold",
+  "flip",
+] as const;
 export type CustomThemeEntrance = (typeof CUSTOM_THEME_ENTRANCES)[number];
 
 export const CUSTOM_THEME_HOVERS = ["none", "lift", "grow", "glow", "press", "shine"] as const;
 export type CustomThemeHover = (typeof CUSTOM_THEME_HOVERS)[number];
 
 /** Slow ambient motion on the backdrop pattern. */
-export const CUSTOM_THEME_BACKDROP_MOTIONS = ["none", "drift", "pulse", "hue", "pan"] as const;
+export const CUSTOM_THEME_BACKDROP_MOTIONS = [
+  "none",
+  "drift",
+  "pulse",
+  "hue",
+  "pan",
+  "breathe",
+  "sway",
+] as const;
 export type CustomThemeBackdropMotion = (typeof CUSTOM_THEME_BACKDROP_MOTIONS)[number];
+
+/** A coloured edge on panes (composer, modals, menus). */
+export const CUSTOM_THEME_PANE_ACCENTS = ["none", "top", "left", "gradient"] as const;
+export type CustomThemePaneAccent = (typeof CUSTOM_THEME_PANE_ACCENTS)[number];
+
+/** OpenType numeral style for the whole app. */
+export const CUSTOM_THEME_NUMERALS = ["default", "tabular", "oldstyle", "slashed"] as const;
+export type CustomThemeNumerals = (typeof CUSTOM_THEME_NUMERALS)[number];
+
+/** Colour-wheel relationships for deriving a whole palette from one seed colour. */
+export const CUSTOM_THEME_HARMONIES = [
+  "mono",
+  "analogous",
+  "complementary",
+  "split",
+  "triadic",
+] as const;
+export type CustomThemeHarmony = (typeof CUSTOM_THEME_HARMONIES)[number];
+
+export interface CustomThemePalette {
+  /** Seed hex the palette grows from; it becomes the accent. */
+  seed: string;
+  harmony?: CustomThemeHarmony;
+}
+
+/** Syntax roles the code highlighter paints (see `.tok-*` in index.css). */
+export const CUSTOM_THEME_SYNTAX_KEYS = [
+  "keyword",
+  "string",
+  "comment",
+  "number",
+  "function",
+  "type",
+  "decorator",
+  "builtin",
+  "attribute",
+] as const;
+export type CustomThemeSyntaxKey = (typeof CUSTOM_THEME_SYNTAX_KEYS)[number];
+
+/** The CSS token each syntax role sets: `--syn-<short>`. */
+export const SYNTAX_TOKEN: Record<CustomThemeSyntaxKey, string> = {
+  keyword: "kw",
+  string: "str",
+  comment: "cm",
+  number: "num",
+  function: "fn",
+  type: "type",
+  decorator: "dec",
+  builtin: "bi",
+  attribute: "attr",
+};
+
+/** The 16 terminal colours, named as xterm.js names them. */
+export const CUSTOM_THEME_ANSI_KEYS = [
+  "black",
+  "red",
+  "green",
+  "yellow",
+  "blue",
+  "magenta",
+  "cyan",
+  "white",
+  "brightBlack",
+  "brightRed",
+  "brightGreen",
+  "brightYellow",
+  "brightBlue",
+  "brightMagenta",
+  "brightCyan",
+  "brightWhite",
+] as const;
+export type CustomThemeAnsiKey = (typeof CUSTOM_THEME_ANSI_KEYS)[number];
+
+/** CSS token for an ANSI colour: brightBlack → --ansi-bright-black. */
+export function ansiToken(key: CustomThemeAnsiKey): string {
+  return `--ansi-${key.replace(/[A-Z]/g, (ch) => `-${ch.toLowerCase()}`)}`;
+}
+
+/** Colours for code, terminals and diffs. Anything left out is derived from the palette. */
+export interface CustomThemeCode {
+  syntax?: Partial<Record<CustomThemeSyntaxKey, string>>;
+  ansi?: Partial<Record<CustomThemeAnsiKey, string>>;
+  /** Added lines in diffs. */
+  diffAdd?: string;
+  /** Removed lines in diffs. */
+  diffDel?: string;
+}
+
+/** Per-component overrides; values are validated numbers, enums and hex colours. */
+export const CUSTOM_THEME_COMPONENTS = [
+  "modal",
+  "composer",
+  "menu",
+  "button",
+  "input",
+  "bubble",
+  "sidebar",
+  "topbar",
+  "rail",
+] as const;
+export type CustomThemeComponentKey = (typeof CUSTOM_THEME_COMPONENTS)[number];
+
+export const CUSTOM_THEME_COMPONENT_LABELS: Record<CustomThemeComponentKey, string> = {
+  modal: "Dialogs",
+  composer: "Composer",
+  menu: "Menus",
+  button: "Buttons",
+  input: "Text fields",
+  bubble: "Messages",
+  sidebar: "Sidebar",
+  topbar: "Top bar",
+  rail: "Icon rail",
+};
+
+export interface CustomThemeComponentStyle {
+  /** Corner radius in px (0–40); 999 for a full pill. */
+  radius?: number;
+  /** Border width in px (0–4). */
+  borderWidth?: number;
+  shadow?: CustomThemeShadow;
+  /** Fill colour; text on it is picked for contrast. */
+  fill?: string;
+}
+
+export type CustomThemeComponents = Partial<
+  Record<CustomThemeComponentKey, CustomThemeComponentStyle>
+>;
+
+/** Colour overrides for one scheme of an adaptive theme. */
+export interface CustomThemeVariant {
+  colors?: Partial<CustomThemeColors>;
+  extraColors?: CustomThemeExtraColors;
+  code?: CustomThemeCode;
+}
 
 export const CUSTOM_THEME_COLOR_KEYS = [
   "bg",
@@ -256,6 +446,17 @@ export const CUSTOM_THEME_EXTRA_COLOR_KEYS = [
   "sidebar",
   "topbar",
   "userBubble",
+  "userBubbleText",
+  "assistantBubble",
+  "assistantBubbleText",
+  "sidebarText",
+  "codeBlock",
+  "codeText",
+  "terminal",
+  "terminalText",
+  "terminalCursor",
+  "caret",
+  "scrollbar",
 ] as const;
 export type CustomThemeExtraColorKey = (typeof CUSTOM_THEME_EXTRA_COLOR_KEYS)[number];
 export type CustomThemeExtraColors = Partial<Record<CustomThemeExtraColorKey, string>>;
@@ -270,6 +471,17 @@ export const CUSTOM_THEME_EXTRA_COLOR_LABELS: Record<CustomThemeExtraColorKey, s
   sidebar: "Sidebar",
   topbar: "Top bar",
   userBubble: "Your messages",
+  userBubbleText: "Your message text",
+  assistantBubble: "Agent messages",
+  assistantBubbleText: "Agent message text",
+  sidebarText: "Sidebar text",
+  codeBlock: "Code block",
+  codeText: "Code text",
+  terminal: "Terminal background",
+  terminalText: "Terminal text",
+  terminalCursor: "Terminal cursor",
+  caret: "Text cursor",
+  scrollbar: "Scrollbar thumb",
 };
 
 export interface CustomThemeLayout {
@@ -304,6 +516,8 @@ export interface CustomThemeLayout {
   backgroundIntensity?: number;
   /** Pattern size multiplier (0.5–4). Default 1. */
   patternScale?: number;
+  /** Coloured edge on the composer, modals and menus. */
+  paneAccent?: CustomThemePaneAccent;
 }
 
 export interface CustomThemeType {
@@ -333,6 +547,8 @@ export interface CustomThemeType {
   lineHeight?: number;
   headingStyle?: CustomThemeHeadingStyle;
   links?: CustomThemeLinkStyle;
+  /** Numeral style (tabular figures for tables, oldstyle for prose, slashed zero). */
+  numerals?: CustomThemeNumerals;
 }
 
 export interface CustomThemeMotion {
@@ -356,6 +572,37 @@ export interface CustomThemeEffects {
   noise?: boolean;
   /** Neon glow on headings and the primary button. */
   glow?: boolean;
+  /** Red/cyan split on headings, like misregistered print or a CRT. */
+  chromatic?: boolean;
+  /** A thin accent frame around the whole window. */
+  frame?: boolean;
+  /** A soft diagonal light across panes. */
+  sheen?: boolean;
+}
+
+export const MAX_THEME_BACKDROP_BYTES = 128 * 1024;
+
+/** An embedded raster image. Restrict the data URL before writing it into CSS. */
+export function normalizeThemeBackdrop(value: unknown): string | undefined {
+  if (
+    typeof value !== "string" ||
+    value.length > Math.ceil(MAX_THEME_BACKDROP_BYTES / 3) * 4 + 32
+  ) {
+    return undefined;
+  }
+  const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match || match[0] !== value) return undefined;
+  const [, format, data = ""] = match;
+  const size = (data.length / 4) * 3 - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0);
+  if (data.length % 4 || size < 12 || size > MAX_THEME_BACKDROP_BYTES) return undefined;
+  const header = atob(data.slice(0, 16));
+  const valid =
+    format === "png"
+      ? header.startsWith("\x89PNG\r\n\x1a\n")
+      : format === "jpeg"
+        ? header.startsWith("\xff\xd8\xff")
+        : header.startsWith("RIFF") && header.slice(8, 12) === "WEBP";
+  return valid ? value : undefined;
 }
 
 export interface CustomTheme {
@@ -366,12 +613,34 @@ export interface CustomTheme {
   /** Optional structural group to build on (Brutalist, Comic, …). */
   base?: ThemeStyle;
   colors: CustomThemeColors;
+  /** The seed the colours were derived from, kept so the editor can re-derive. */
+  palette?: CustomThemePalette;
   /** Optional per-surface colours. */
   extraColors?: CustomThemeExtraColors;
   layout: CustomThemeLayout;
   type: CustomThemeType;
   effects: CustomThemeEffects;
+  /** Hides ambient decoration inherited from the selected component style. */
+  quietEffects?: boolean;
+  /** Optional embedded PNG, JPEG or WebP backdrop. */
+  backdrop?: string;
   motion?: CustomThemeMotion;
+  /** Syntax, terminal (ANSI) and diff colours. */
+  code?: CustomThemeCode;
+  /** Per-component radius, border, shadow and fill. */
+  components?: CustomThemeComponents;
+  /** Follows the system light/dark setting, deriving the other scheme's colours. */
+  adaptive?: boolean;
+  /** Hand-tuned colours for either scheme when adaptive. */
+  variants?: Partial<Record<"light" | "dark", CustomThemeVariant>>;
+  /**
+   * A theme this one builds on (crafted or token built-in id, or a generated
+   * theme id). The stored fields are the base merged with `overrides`, and
+   * are re-merged on load so base updates flow through.
+   */
+  extends?: string;
+  /** The partial spec layered over `extends`. */
+  overrides?: Record<string, unknown>;
   /** Who made it: built in the editor, or generated by Locus. */
   origin: "user" | "ai";
   createdAt: string;
@@ -561,6 +830,7 @@ export function fixExtraColorContrast(
   if (next.link) next.link = pushContrast(next.link, hardest, 4.5);
   if (next.heading) next.heading = pushContrast(next.heading, hardest, 4.5);
   if (next.focus) next.focus = pushContrast(next.focus, colors.bg, 3);
+  if (next.caret) next.caret = pushContrast(next.caret, colors.surface, 3);
   return next;
 }
 
@@ -568,6 +838,12 @@ export function fixExtraColorContrast(
 export function inkOn(fill: string, preferred: string): string {
   if (hexContrast(preferred, fill) >= 4.5) return preferred;
   return hexContrast("#ffffff", fill) >= hexContrast("#111111", fill) ? "#ffffff" : "#111111";
+}
+
+/** Black or white, whichever keeps the most contrast across every fill (for gradients). */
+export function inkAcross(fills: readonly string[]): string {
+  const worst = (ink: string) => Math.min(...fills.map((fill) => hexContrast(ink, fill)));
+  return worst("#ffffff") >= worst("#111111") ? "#ffffff" : "#111111";
 }
 
 /**
@@ -591,6 +867,440 @@ export function customAccentText(colors: CustomThemeColors): string {
       ? colors.bg
       : colors.surface;
   return pushContrast(colors.text, hardest, 4.5);
+}
+
+function hexToHsl(hex: string): [number, number, number] {
+  const [r, g, b] = hexToRgb(hex).map((v) => v / 255) as [number, number, number];
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  const h =
+    max === r
+      ? ((g - b) / d + (g < b ? 6 : 0)) * 60
+      : max === g
+        ? ((b - r) / d + 2) * 60
+        : ((r - g) / d + 4) * 60;
+  return [h, s, l];
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const hue = ((h % 360) + 360) % 360;
+  const sat = Math.min(1, Math.max(0, s));
+  const lig = Math.min(1, Math.max(0, l));
+  const k = (n: number) => (n + hue / 30) % 12;
+  const a = sat * Math.min(lig, 1 - lig);
+  const f = (n: number) => lig - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return rgbToHex([f(0) * 255, f(8) * 255, f(4) * 255]);
+}
+
+const HARMONY_SHIFT: Record<CustomThemeHarmony, number> = {
+  mono: 0,
+  analogous: 32,
+  complementary: 180,
+  split: 150,
+  triadic: 120,
+};
+
+/**
+ * A full, readable palette grown from one seed colour. The seed becomes the
+ * accent (lightened or deepened to suit the scheme); the second accent follows
+ * the colour-wheel harmony; page, panes and text carry a quiet tint of the seed
+ * hue so the whole UI reads as one family.
+ */
+export function deriveThemePalette(
+  seed: string,
+  scheme: "light" | "dark",
+  harmony: CustomThemeHarmony = "analogous",
+): CustomThemeColors {
+  const hex = normalizeThemeHex(seed) ?? (scheme === "light" ? "#c2410c" : "#f59e0b");
+  const [h, s, seedL] = hexToHsl(hex);
+  const light = scheme === "light";
+  const sat = Math.max(0.35, s);
+  // Grey seeds have no hue to carry; keep the neutrals neutral.
+  const tint = s < 0.08 ? 0 : light ? 0.22 : 0.18;
+  const accentL = light
+    ? Math.min(0.46, Math.max(0.32, seedL))
+    : Math.max(0.6, Math.min(0.72, seedL));
+  const accent = hslToHex(h, sat, accentL);
+  const shift = HARMONY_SHIFT[harmony];
+  const accent2 =
+    harmony === "mono"
+      ? hslToHex(h, sat * 0.6, light ? accentL + 0.14 : accentL - 0.14)
+      : hslToHex(h + shift, sat * 0.85, accentL);
+  const base = (l: number, satScale = 1) => hslToHex(h, tint * satScale, l);
+  const colors: CustomThemeColors = light
+    ? {
+        bg: base(0.965),
+        surface: base(0.985, 0.8),
+        raised: base(0.925),
+        overlay: "#ffffff",
+        text: base(0.12, 1.4),
+        muted: base(0.32, 1.2),
+        faint: base(0.42),
+        accent,
+        accent2,
+        accentInk: "#ffffff",
+        danger: "#b42318",
+        ok: "#2f7a45",
+        warn: "#8a5d06",
+      }
+    : {
+        bg: base(0.075),
+        surface: base(0.1),
+        raised: base(0.14),
+        overlay: base(0.18),
+        text: base(0.93, 0.6),
+        muted: base(0.74, 0.5),
+        faint: base(0.6, 0.4),
+        accent,
+        accent2,
+        accentInk: "#111111",
+        danger: "#ff6e6e",
+        ok: "#6ee7a0",
+        warn: "#f5c26b",
+      };
+  return fixCustomThemeContrast(colors);
+}
+
+/** Where code and terminals are painted, for contrast checks. */
+export function codeSurfaces(
+  colors: CustomThemeColors,
+  extra: CustomThemeExtraColors,
+  scheme: "light" | "dark",
+): { code: string; terminal: string; terminalText: string } {
+  const terminal =
+    extra.terminal ?? (scheme === "light" ? "#1d1f22" : mixHex(colors.bg, "#000000", 0.3));
+  const terminalText =
+    extra.terminalText ??
+    (extra.terminal ? inkOn(terminal, colors.text) : scheme === "light" ? "#e6e6e2" : colors.text);
+  return { code: extra.codeBlock ?? colors.raised, terminal, terminalText };
+}
+
+const ANSI_HUES: Array<[CustomThemeAnsiKey, CustomThemeAnsiKey, number]> = [
+  ["red", "brightRed", 2],
+  ["green", "brightGreen", 135],
+  ["yellow", "brightYellow", 45],
+  ["blue", "brightBlue", 215],
+  ["magenta", "brightMagenta", 300],
+  ["cyan", "brightCyan", 185],
+];
+
+/**
+ * Every syntax, ANSI and diff colour for a theme: the given ones (pushed until
+ * readable on their surface) plus the rest derived from the palette.
+ */
+export function resolveCodeColors(
+  colors: CustomThemeColors,
+  extra: CustomThemeExtraColors,
+  scheme: "light" | "dark",
+  code: CustomThemeCode = {},
+): {
+  syntax: Record<CustomThemeSyntaxKey, string>;
+  ansi: Record<CustomThemeAnsiKey, string>;
+  diffAdd: string;
+  diffDel: string;
+} {
+  const surf = codeSurfaces(colors, extra, scheme);
+  const derivedSyntax: Record<CustomThemeSyntaxKey, string> = {
+    keyword: colors.accent2,
+    string: colors.ok,
+    comment: colors.muted,
+    number: colors.accent,
+    function: colors.accent,
+    type: colors.warn,
+    decorator: colors.danger,
+    builtin: colors.accent2,
+    attribute: colors.muted,
+  };
+  const syntax = {} as Record<CustomThemeSyntaxKey, string>;
+  for (const key of CUSTOM_THEME_SYNTAX_KEYS) {
+    syntax[key] = pushContrast(code.syntax?.[key] ?? derivedSyntax[key], surf.code, 4.5);
+  }
+  const term = surf.terminal;
+  const fg = surf.terminalText;
+  const termLight = luminance(term) > 0.4;
+  const nearest: Partial<Record<CustomThemeAnsiKey, string>> = {
+    red: colors.danger,
+    green: colors.ok,
+    yellow: colors.warn,
+  };
+  const ansi = {} as Record<CustomThemeAnsiKey, string>;
+  for (const [base, bright, hue] of ANSI_HUES) {
+    let normal = hslToHex(hue, 0.62, termLight ? 0.38 : 0.6);
+    if (nearest[base]) normal = mixHex(normal, nearest[base]!, 0.5);
+    ansi[base] = normal;
+    ansi[bright] = mixHex(normal, termLight ? "#000000" : "#ffffff", 0.22);
+  }
+  ansi.black = termLight ? fg : mixHex(term, fg, 0.28);
+  ansi.brightBlack = mixHex(term, fg, 0.5);
+  ansi.white = termLight ? mixHex(term, fg, 0.3) : mixHex(fg, term, 0.15);
+  ansi.brightWhite = termLight ? mixHex(term, fg, 0.15) : fg;
+  for (const key of CUSTOM_THEME_ANSI_KEYS) {
+    const given = code.ansi?.[key];
+    if (given) ansi[key] = given;
+    // Black and white are expected to vanish into their own background.
+    const decorative = termLight ? key === "white" || key === "brightWhite" : key === "black";
+    if (!decorative) ansi[key] = pushContrast(ansi[key], term, 3);
+  }
+  return {
+    syntax,
+    ansi,
+    diffAdd: pushContrast(code.diffAdd ?? colors.ok, colors.bg, 3),
+    diffDel: pushContrast(code.diffDel ?? colors.danger, colors.bg, 3),
+  };
+}
+
+/** Mirrors a colour's lightness for the opposite scheme, keeping its hue. */
+function flipHex(hex: string): string {
+  const [h, s, l] = hexToHsl(hex);
+  return hslToHex(h, s, 1 - l);
+}
+
+/**
+ * Core colours for the scheme a theme was not designed in: a seeded palette
+ * is regrown; otherwise surfaces and text mirror their lightness and the
+ * accents are re-lit for the new background. Readability is re-checked.
+ */
+export function oppositeSchemeColors(
+  colors: CustomThemeColors,
+  scheme: "light" | "dark",
+  palette?: CustomThemePalette,
+): CustomThemeColors {
+  if (palette) return deriveThemePalette(palette.seed, scheme, palette.harmony);
+  const light = scheme === "light";
+  const relight = (hex: string) => {
+    const [h, s, l] = hexToHsl(hex);
+    return hslToHex(
+      h,
+      s,
+      light ? Math.min(0.46, Math.max(0.3, 1 - l)) : Math.max(0.6, Math.min(0.74, 1 - l)),
+    );
+  };
+  const status = defaultCustomThemeColors(scheme);
+  return fixCustomThemeContrast({
+    bg: flipHex(colors.bg),
+    surface: flipHex(colors.surface),
+    raised: flipHex(colors.raised),
+    overlay: light ? mixHex(flipHex(colors.overlay), "#ffffff", 0.6) : flipHex(colors.overlay),
+    text: flipHex(colors.text),
+    muted: flipHex(colors.muted),
+    faint: flipHex(colors.faint),
+    accent: relight(colors.accent),
+    accent2: relight(colors.accent2),
+    accentInk: light ? "#ffffff" : "#111111",
+    danger: status.danger,
+    ok: status.ok,
+    warn: status.warn,
+  });
+}
+
+/**
+ * The theme as it renders in `scheme`: itself for its own scheme, or its
+ * adaptive counterpart with mirrored colours and that scheme's variant applied.
+ */
+export function themeForScheme(theme: CustomTheme, scheme: "light" | "dark"): CustomTheme {
+  const variant = theme.variants?.[scheme];
+  if (scheme === theme.scheme && !variant) return theme;
+  const own = scheme === theme.scheme;
+  const base = own ? theme.colors : oppositeSchemeColors(theme.colors, scheme, theme.palette);
+  const colors = fixCustomThemeContrast({ ...base, ...variant?.colors });
+  // Fills tuned for one scheme would glare in the other, so they are mirrored too.
+  const extraBase: CustomThemeExtraColors = own
+    ? (theme.extraColors ?? {})
+    : (Object.fromEntries(
+        Object.entries(theme.extraColors ?? {}).map(([k, v]) => [k, flipHex(v!)]),
+      ) as CustomThemeExtraColors);
+  const extraColors = fixExtraColorContrast({ ...extraBase, ...variant?.extraColors }, colors);
+  const code = own
+    ? { ...theme.code, ...variant?.code }
+    : (variant?.code ?? (theme.code ? {} : undefined));
+  // Derived colours get the same full readability pass as hand-made ones.
+  return fixThemeReadability({
+    ...theme,
+    scheme,
+    colors,
+    extraColors,
+    ...(code ? { code } : {}),
+  });
+}
+
+export interface ThemeReadabilityIssue extends CustomThemeContrastIssue {
+  /** What the pair paints, e.g. "Your messages (gradient)". */
+  where: string;
+}
+
+/**
+ * Every readability promise a spec makes, beyond the core palette: per-surface
+ * fills and their text, gradient fills end to end, code, terminal and diffs,
+ * and the other scheme of an adaptive theme.
+ */
+export function themeReadabilityIssues(theme: CustomTheme): ThemeReadabilityIssue[] {
+  const out: ThemeReadabilityIssue[] = [];
+  const check = (where: string, fg: string, bg: string, minimum: number) => {
+    const ratio = hexContrast(fg, bg);
+    if (ratio + 1e-6 < minimum) out.push({ where, pair: `${fg} / ${bg}`, ratio, minimum });
+  };
+  const scan = (t: CustomTheme, prefix: string) => {
+    const c = t.colors;
+    const x = t.extraColors ?? {};
+    for (const row of customThemeContrastIssues(c))
+      out.push({ ...row, where: `${prefix}${row.pair}` });
+    const fills: Array<[string, string | undefined, string | undefined]> = [
+      ["Your messages", x.userBubble, x.userBubbleText],
+      ["Agent messages", x.assistantBubble, x.assistantBubbleText],
+      ["Sidebar", x.sidebar, x.sidebarText],
+      ["Code block", x.codeBlock, x.codeText],
+      ["Terminal", x.terminal, x.terminalText],
+    ];
+    for (const [where, fill, text] of fills) {
+      if (fill && text) check(`${prefix}${where}`, text, fill, 4.5);
+    }
+    const gradientEnds = [c.accent, c.accent2, mixHex(c.accent, c.accent2, 0.5)];
+    const ink = inkAcross(gradientEnds);
+    const gradients: string[] = [];
+    if (t.layout.bubble === "gradient") gradients.push("Your messages (gradient)");
+    if (t.layout.sidebar === "gradient") gradients.push("Icon rail (gradient)");
+    for (const where of gradients) {
+      const worst = gradientEnds.reduce((a, b) =>
+        hexContrast(ink, a) < hexContrast(ink, b) ? a : b,
+      );
+      check(`${prefix}${where}`, ink, worst, 4.5);
+    }
+    if (t.code) {
+      const surf = codeSurfaces(c, x, t.scheme);
+      for (const key of CUSTOM_THEME_SYNTAX_KEYS) {
+        const given = t.code.syntax?.[key];
+        if (given) check(`${prefix}Syntax ${key}`, given, surf.code, 4.5);
+      }
+      for (const key of CUSTOM_THEME_ANSI_KEYS) {
+        const given = t.code.ansi?.[key];
+        const decorative = luminance(surf.terminal) > 0.4 ? key.endsWith("hite") : key === "black";
+        if (given && !decorative) check(`${prefix}Terminal ${key}`, given, surf.terminal, 3);
+      }
+      if (t.code.diffAdd) check(`${prefix}Diff added`, t.code.diffAdd, c.bg, 3);
+      if (t.code.diffDel) check(`${prefix}Diff removed`, t.code.diffDel, c.bg, 3);
+    }
+  };
+  scan(theme, "");
+  if (theme.adaptive) {
+    const other = theme.scheme === "light" ? "dark" : "light";
+    scan(themeForScheme(theme, other), `${other === "light" ? "Light" : "Dark"}: `);
+  }
+  return out;
+}
+
+/** Repairs everything themeReadabilityIssues() can report. */
+export function fixThemeReadability(theme: CustomTheme): CustomTheme {
+  const colors = fixCustomThemeContrast(theme.colors);
+  const x = { ...(theme.extraColors ?? {}) };
+  const pairs: Array<[CustomThemeExtraColorKey, CustomThemeExtraColorKey]> = [
+    ["userBubble", "userBubbleText"],
+    ["assistantBubble", "assistantBubbleText"],
+    ["sidebar", "sidebarText"],
+    ["codeBlock", "codeText"],
+    ["terminal", "terminalText"],
+  ];
+  for (const [fill, text] of pairs) {
+    if (x[fill] && x[text]) x[text] = pushContrast(x[text]!, x[fill]!, 4.5);
+  }
+  if (theme.layout.bubble === "gradient" || theme.layout.sidebar === "gradient") {
+    // Pull the second accent toward the first until one ink reads on the whole sweep.
+    for (let step = 0; step <= 10; step += 1) {
+      const a2 = mixHex(colors.accent2, colors.accent, step / 10);
+      const ends = [colors.accent, a2, mixHex(colors.accent, a2, 0.5)];
+      const ink = inkAcross(ends);
+      if (Math.min(...ends.map((e) => hexContrast(ink, e))) >= 4.5 || step === 10) {
+        colors.accent2 = a2;
+        break;
+      }
+    }
+  }
+  const extraColors = fixExtraColorContrast(x, colors);
+  let code = theme.code;
+  if (code) {
+    const resolved = resolveCodeColors(colors, extraColors, theme.scheme, code);
+    code = {
+      ...(code.syntax
+        ? {
+            syntax: Object.fromEntries(
+              Object.keys(code.syntax).map((k) => [k, resolved.syntax[k as CustomThemeSyntaxKey]]),
+            ),
+          }
+        : {}),
+      ...(code.ansi
+        ? {
+            ansi: Object.fromEntries(
+              Object.keys(code.ansi).map((k) => [k, resolved.ansi[k as CustomThemeAnsiKey]]),
+            ),
+          }
+        : {}),
+      ...(code.diffAdd ? { diffAdd: resolved.diffAdd } : {}),
+      ...(code.diffDel ? { diffDel: resolved.diffDel } : {}),
+    };
+  }
+  // Variants are checked when themeForScheme() applies them.
+  return {
+    ...theme,
+    colors,
+    ...(Object.keys(extraColors).length ? { extraColors } : {}),
+    ...(code ? { code } : {}),
+  };
+}
+
+/**
+ * A seed and backdrop colours from an image's RGBA pixels: the most vivid,
+ * most common hues win; the overall lightness suggests a scheme.
+ */
+export function paletteFromPixels(rgba: ArrayLike<number>): {
+  seed: string;
+  colors: string[];
+  scheme: "light" | "dark";
+} {
+  const buckets = new Map<number, { weight: number; r: number; g: number; b: number }>();
+  let lum = 0;
+  let count = 0;
+  const stride = Math.max(4, Math.floor(rgba.length / 4 / 4096) * 4);
+  for (let i = 0; i + 3 < rgba.length; i += stride) {
+    if ((rgba[i + 3] ?? 255) < 128) continue;
+    const r = rgba[i]!;
+    const g = rgba[i + 1]!;
+    const b = rgba[i + 2]!;
+    const hex = rgbToHex([r, g, b]);
+    const [h, sat, l] = hexToHsl(hex);
+    lum += luminance(hex);
+    count += 1;
+    // Vivid mid-tones say the most about an image's colour.
+    const weight = sat * (1 - Math.abs(2 * l - 1));
+    if (weight < 0.12) continue;
+    const key = Math.round(h / 15) % 24;
+    const slot = buckets.get(key) ?? { weight: 0, r: 0, g: 0, b: 0 };
+    slot.weight += weight;
+    slot.r += r * weight;
+    slot.g += g * weight;
+    slot.b += b * weight;
+    buckets.set(key, slot);
+  }
+  const ranked = [...buckets.entries()]
+    .sort((a, b) => b[1].weight - a[1].weight)
+    .map(([key, v]) => ({ key, hex: rgbToHex([v.r / v.weight, v.g / v.weight, v.b / v.weight]) }));
+  // Keep hues at least two buckets (30°) apart so the colours are distinct.
+  const picked: typeof ranked = [];
+  for (const row of ranked) {
+    const far = picked.every((p) => {
+      const d = Math.abs(p.key - row.key);
+      return Math.min(d, 24 - d) >= 2;
+    });
+    if (far) picked.push(row);
+    if (picked.length === 3) break;
+  }
+  const scheme = count && lum / count > 0.45 ? "light" : "dark";
+  if (!picked.length) {
+    return { seed: scheme === "light" ? "#5b6472" : "#9aa3b2", colors: [], scheme };
+  }
+  return { seed: picked[0]!.hex, colors: picked.map((p) => p.hex), scheme };
 }
 
 // ─────────────────────────── Normalizing ───────────────────────────
@@ -668,6 +1378,97 @@ function definedOnly<T extends object>(obj: T): T {
   return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as T;
 }
 
+function plainObject(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function hexRecord<K extends string>(
+  value: unknown,
+  keys: readonly K[],
+): Partial<Record<K, string>> | undefined {
+  const row = plainObject(value);
+  if (!row) return undefined;
+  const out = definedOnly(
+    Object.fromEntries(keys.map((key) => [key, normalizeThemeHex(row[key])])) as Partial<
+      Record<K, string>
+    >,
+  );
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Validated `code` block (hex colours only). */
+export function normalizeThemeCode(value: unknown): CustomThemeCode | undefined {
+  const row = plainObject(value);
+  if (!row) return undefined;
+  const code: CustomThemeCode = definedOnly({
+    syntax: hexRecord(row.syntax, CUSTOM_THEME_SYNTAX_KEYS),
+    ansi: hexRecord(row.ansi, CUSTOM_THEME_ANSI_KEYS),
+    diffAdd: normalizeThemeHex(row.diffAdd ?? row.diff_add),
+    diffDel: normalizeThemeHex(row.diffDel ?? row.diff_del),
+  });
+  // An empty block still opts in to derived syntax and diff colours.
+  return code;
+}
+
+function normalizeComponents(value: unknown): CustomThemeComponents | undefined {
+  const row = plainObject(value);
+  if (!row) return undefined;
+  const out: CustomThemeComponents = {};
+  for (const key of CUSTOM_THEME_COMPONENTS) {
+    const part = plainObject(row[key]);
+    if (!part) continue;
+    const rawRadius = part.radius;
+    const style: CustomThemeComponentStyle = definedOnly({
+      radius: rawRadius === 999 || rawRadius === "pill" ? 999 : clampNum(rawRadius, 0, 40, 1),
+      borderWidth: clampNum(part.borderWidth ?? part.border_width, 0, 4, 1),
+      shadow: pick(part.shadow, CUSTOM_THEME_SHADOWS),
+      fill: normalizeThemeHex(part.fill),
+    });
+    if (Object.keys(style).length) out[key] = style;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function normalizeVariants(value: unknown): CustomTheme["variants"] {
+  const row = plainObject(value);
+  if (!row) return undefined;
+  const out: NonNullable<CustomTheme["variants"]> = {};
+  for (const scheme of ["light", "dark"] as const) {
+    const v = plainObject(row[scheme]);
+    if (!v) continue;
+    const variant: CustomThemeVariant = definedOnly({
+      colors: hexRecord(v.colors, CUSTOM_THEME_COLOR_KEYS),
+      extraColors: hexRecord(v.extraColors ?? v.extra_colors, CUSTOM_THEME_EXTRA_COLOR_KEYS),
+      code: v.code ? normalizeThemeCode(v.code) : undefined,
+    });
+    if (Object.keys(variant).length) out[scheme] = variant;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+const MAX_OVERRIDES_CHARS = 64 * 1024;
+
+/** A JSON-safe copy of a partial spec, or undefined when it is not one or is too big. */
+function normalizeOverrides(value: unknown): Record<string, unknown> | undefined {
+  const row = plainObject(value);
+  if (!row) return undefined;
+  try {
+    const text = JSON.stringify(row);
+    if (text.length > MAX_OVERRIDES_CHARS) return undefined;
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A built-in or generated theme id a spec may extend. */
+function normalizeExtends(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return isThemeId(value) || isCustomThemeId(value) ? value : undefined;
+}
+
 export interface CustomThemeInputOptions {
   /** Id to keep (update) — otherwise a fresh id is picked from the name. */
   id?: string;
@@ -710,7 +1511,15 @@ export function customThemeFromInput(
   if (schemeRaw !== "light" && schemeRaw !== "dark" && bgIn) {
     scheme = luminance(bgIn) > 0.4 ? "light" : "dark";
   }
-  const defaults = defaultCustomThemeColors(scheme);
+  const paletteIn = sub("palette");
+  const seed = normalizeThemeHex(get(paletteIn, "seed") ?? get(row, "seed"));
+  const harmony = pick(get(paletteIn, "harmony") ?? get(row, "harmony"), CUSTOM_THEME_HARMONIES);
+  const palette: CustomThemePalette | undefined = seed
+    ? { seed, ...(harmony ? { harmony } : {}) }
+    : undefined;
+  const defaults = palette
+    ? deriveThemePalette(palette.seed, scheme, palette.harmony)
+    : defaultCustomThemeColors(scheme);
   const aliases: Partial<Record<CustomThemeColorKey, string[]>> = {
     bg: ["background", "page"],
     surface: ["bg1", "pane", "panel"],
@@ -736,6 +1545,8 @@ export function customThemeFromInput(
   // Derive missing surfaces and text tones from what was given, so a
   // three-colour spec still looks deliberate.
   const away = scheme === "light" ? "#000000" : "#ffffff";
+  // A seeded palette already has a tuned ladder of surfaces and text tones.
+  if (palette) for (const key of CUSTOM_THEME_COLOR_KEYS) given.add(key);
   if (!given.has("surface")) colors.surface = mixHex(colors.bg, "#ffffff", 0.04);
   if (!given.has("raised")) colors.raised = mixHex(colors.bg, away, 0.06);
   if (!given.has("overlay")) colors.overlay = mixHex(colors.bg, away, 0.12);
@@ -767,6 +1578,7 @@ export function customThemeFromInput(
     backgroundAngle: clampNum(get(layoutIn, "backgroundAngle"), 0, 360, 1),
     backgroundIntensity: clampNum(get(layoutIn, "backgroundIntensity"), 0, 1, 0.05),
     patternScale: clampNum(get(layoutIn, "patternScale"), 0.5, 4, 0.25),
+    paneAccent: pick(get(layoutIn, "paneAccent"), CUSTOM_THEME_PANE_ACCENTS),
   });
   const type: CustomThemeType = definedOnly({
     font: pick(get(typeIn, "font"), CUSTOM_THEME_FONTS),
@@ -785,6 +1597,7 @@ export function customThemeFromInput(
     lineHeight: clampNum(get(typeIn, "lineHeight"), 1.2, 2, 0.05),
     headingStyle: pick(get(typeIn, "headingStyle"), CUSTOM_THEME_HEADING_STYLES),
     links: pick(get(typeIn, "links"), CUSTOM_THEME_LINK_STYLES),
+    numerals: pick(get(typeIn, "numerals"), CUSTOM_THEME_NUMERALS),
   });
   const effects: CustomThemeEffects = definedOnly({
     scanlines: bool(get(effectsIn, "scanlines")),
@@ -792,6 +1605,9 @@ export function customThemeFromInput(
     lift: bool(get(effectsIn, "lift")),
     noise: bool(get(effectsIn, "noise")),
     glow: bool(get(effectsIn, "glow")),
+    chromatic: bool(get(effectsIn, "chromatic")),
+    frame: bool(get(effectsIn, "frame")),
+    sheen: bool(get(effectsIn, "sheen")),
   });
   const motion: CustomThemeMotion = definedOnly({
     speed: pick(get(motionIn, "speed"), CUSTOM_THEME_SPEEDS),
@@ -810,34 +1626,66 @@ export function customThemeFromInput(
   const extraColors =
     options.fixContrast === false ? extraRaw : fixExtraColorContrast(extraRaw, fixed);
 
+  const codeRaw = get(row, "code");
+  let code = codeRaw ? normalizeThemeCode(codeRaw) : undefined;
+  if (code && options.fixContrast !== false) {
+    code = fixThemeReadability({
+      colors: fixed,
+      extraColors,
+      layout: {},
+      scheme,
+      code,
+    } as unknown as CustomTheme).code;
+  }
+  const components = normalizeComponents(get(row, "components"));
+  const variants = normalizeVariants(get(row, "variants"));
+  const extendsRef = normalizeExtends(get(row, "extends"));
+  const overrides = extendsRef ? normalizeOverrides(get(row, "overrides")) : undefined;
+
+  const backdrop = normalizeThemeBackdrop(get(row, "backdrop"));
   const name = cleanText(get(row, "name"), 40) || "Untitled theme";
   const now = options.now ?? new Date().toISOString();
   const keepId = options.id ?? get(row, "id");
   const id = isCustomThemeId(keepId) ? keepId : newCustomThemeId(name, options.taken ?? []);
   const originRaw = get(row, "origin");
   const createdAt = typeof get(row, "createdAt") === "string" ? String(get(row, "createdAt")) : now;
-  return {
+  const theme: CustomTheme = {
     id,
     name,
     summary: cleanText(get(row, "summary") ?? get(row, "description"), 160),
     scheme,
     ...(base ? { base } : {}),
     colors: fixed,
+    ...(palette ? { palette } : {}),
     ...(Object.keys(extraColors).length ? { extraColors } : {}),
     layout,
     type,
     effects,
+    ...(get(row, "quietEffects") === true ? { quietEffects: true } : {}),
+    ...(backdrop ? { backdrop } : {}),
     ...(Object.keys(motion).length ? { motion } : {}),
+    ...(code ? { code } : {}),
+    ...(components ? { components } : {}),
+    ...(get(row, "adaptive") === true ? { adaptive: true } : {}),
+    ...(variants ? { variants } : {}),
+    ...(extendsRef ? { extends: extendsRef } : {}),
+    ...(overrides ? { overrides } : {}),
     origin: options.origin ?? (originRaw === "ai" ? "ai" : "user"),
     createdAt,
     updatedAt:
       options.now ??
       (typeof get(row, "updatedAt") === "string" ? String(get(row, "updatedAt")) : now),
   };
+  // Gradient fills and surface text are checked against the finished layout.
+  return options.fixContrast === false ? theme : fixThemeReadability(theme);
 }
 
 /** Load-side normalizer for config.customThemes. Drops junk, de-dupes ids, caps the count. */
-export function normalizeCustomThemes(raw: unknown): CustomTheme[] {
+/**
+ * Row-level normalizer (no inheritance). normalizeCustomThemes() in
+ * themeInheritance.ts adds re-merging of `extends` on top.
+ */
+export function normalizeCustomThemeRows(raw: unknown): CustomTheme[] {
   if (!Array.isArray(raw)) return [];
   const out: CustomTheme[] = [];
   const seen = new Set<string>();
@@ -873,6 +1721,10 @@ const SHADOWS: Record<CustomThemeShadow, (c: CustomThemeColors) => [string, stri
   glow: (c) => [
     `0 0 8px rgba(${rgbList(c.accent)}, 0.35)`,
     `0 0 0 1px rgba(${rgbList(c.accent)}, 0.5), 0 0 22px rgba(${rgbList(c.accent)}, 0.35)`,
+  ],
+  layered: (c) => [
+    `0 1px 1px rgba(${rgbList(c.text)}, 0.06), 0 2px 4px rgba(0, 0, 0, 0.06)`,
+    `0 1px 1px rgba(0, 0, 0, 0.08), 0 4px 8px rgba(0, 0, 0, 0.08), 0 16px 32px -8px rgba(0, 0, 0, 0.24)`,
   ],
 };
 
@@ -927,6 +1779,33 @@ function backgroundLayers(
       return `repeating-radial-gradient(circle at 50% 40%, transparent 0 ${px(22)}, ${line} ${px(22)} ${px(23)})`;
     case "grain":
       return `radial-gradient(rgba(${rgbList(c.text)}, ${round(0.05 * strength, 3)}) 0.7px, transparent 1px) 0 0 / ${px(5)} ${px(5)}, radial-gradient(rgba(${rgbList(c.text)}, ${round(0.04 * strength, 3)}) 0.7px, transparent 1px) 2px 3px / ${px(7)} ${px(7)}`;
+    case "sunburst": {
+      const ray = `${round(6 * k, 1)}deg`;
+      return `repeating-conic-gradient(from ${angle ?? 0}deg at 50% 32%, ${tint(0, 0.05)} 0 ${ray}, transparent ${ray} calc(${ray} * 2)), radial-gradient(60% 50% at 50% 32%, ${tint(1, 0.14)}, transparent 70%)`;
+    }
+    case "plaid":
+      return `repeating-linear-gradient(0deg, ${tint(0, 0.09)} 0 ${px(14)}, transparent ${px(14)} ${px(44)}), repeating-linear-gradient(90deg, ${tint(1, 0.09)} 0 ${px(14)}, transparent ${px(14)} ${px(44)}), repeating-linear-gradient(${angle ?? 45}deg, ${line} 0 1px, transparent 1px ${px(6)})`;
+    case "zigzag": {
+      const tile = `${px(24)} ${px(24)}`;
+      return [135, 225, 315, 45]
+        .map(
+          (deg, i) =>
+            `linear-gradient(${deg}deg, ${line} 25%, transparent 25%) ${i < 2 ? `-${px(12)}` : "0"} 0 / ${tile}`,
+        )
+        .join(", ");
+    }
+    case "waves": {
+      const ring = (at: string) =>
+        `radial-gradient(circle at ${at}, transparent ${px(14)}, ${line} ${px(14)} ${px(15.5)}, transparent ${px(16)})`;
+      return `${ring("50% 0")} 0 0 / ${px(40)} ${px(20)}, ${ring("50% 100%")} ${px(20)} ${px(10)} / ${px(40)} ${px(20)}`;
+    }
+    case "halftone":
+      return `radial-gradient(${tint(0, 0.2)} 24%, transparent 26%) 0 0 / ${px(14)} ${px(14)}, radial-gradient(${tint(1, 0.14)} 24%, transparent 26%) ${px(7)} ${px(7)} / ${px(14)} ${px(14)}`;
+    case "bricks": {
+      // Courses every 24px; the vertical joints only fill half a 48px tile, offset per row.
+      const joint = `conic-gradient(at 1px 50%, transparent 75%, ${line} 0)`;
+      return `linear-gradient(${line} 1px, transparent 1px) 0 0 / ${px(48)} ${px(24)}, ${joint} 0 0 / ${px(48)} ${px(48)}, ${joint} ${px(24)} ${px(24)} / ${px(48)} ${px(48)}`;
+    }
   }
 }
 
@@ -987,6 +1866,9 @@ const ENTRANCE_FRAMES: Record<Exclude<CustomThemeEntrance, "none">, string> = {
   slide: "from { opacity: 0; transform: translateX(-14px); }",
   pop: "from { opacity: 0; transform: scale(0.94); }",
   blur: "from { opacity: 0; filter: blur(6px); }",
+  drop: "from { opacity: 0; transform: translateY(-12px); }",
+  unfold: "from { opacity: 0; clip-path: inset(0 0 100% 0); }",
+  flip: "from { opacity: 0; transform: perspective(700px) rotateX(-22deg); transform-origin: 50% 0; }",
 };
 
 /** Turbulence noise as a data URI (constant; no spec data in it). */
@@ -1013,16 +1895,57 @@ export function customThemeWebFonts(theme: CustomTheme): string[] {
  * rules sit in @scope so they only touch that theme's surface (the app, its
  * card, or its preview), like the built-in style groups.
  */
-export function customThemeCss(theme: CustomTheme): string {
+export function customThemeCss(theme: CustomTheme, draft = false): string {
   if (!isCustomThemeId(theme.id)) return "";
+  return themeSpecCss(theme, theme.id, draft);
+}
+
+const SPEC_SELECTOR_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/**
+ * The engine behind generated and crafted built-in themes: CSS for a spec,
+ * keyed to `[data-theme="<selectorId>"]`. Ids are restricted to lowercase
+ * letters, digits and dashes so they can never break out of the selector.
+ */
+export function themeSpecCss(theme: CustomTheme, selectorId: string, draft = false): string {
+  if (!SPEC_SELECTOR_ID_RE.test(selectorId)) return "";
+  const css = themeSchemeCss(theme, selectorId, draft);
+  if (!theme.adaptive) return css;
+  // The other scheme compiles from mirrored colours and takes over with the system setting.
+  const other = theme.scheme === "light" ? "dark" : "light";
+  const alt = themeSchemeCss(themeForScheme(theme, other), selectorId, draft)
+    .split("\n")
+    .map((line) => (line ? `  ${line}` : line))
+    .join("\n");
+  return `${css}\n@media (prefers-color-scheme: ${other}) {\n${alt}\n}`;
+}
+
+const COMPONENT_SELECTORS: Record<CustomThemeComponentKey, string> = {
+  modal: ".modal",
+  composer: ".composer,\n  .empty-composer",
+  menu: ".menu-pop",
+  button: ".btn:not(.icon):not(.chip)",
+  input:
+    'input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),\n  textarea,\n  select',
+  bubble: ".msg .bubble",
+  sidebar: ".sidebar",
+  topbar: ".topbar",
+  rail: ".side-rail",
+};
+
+function themeSchemeCss(theme: CustomTheme, selectorId: string, draft: boolean): string {
   const c = theme.colors;
   const x = theme.extraColors ?? {};
-  const m = theme.motion ?? {};
-  const sel = `[data-theme="${theme.id}"]`;
+  const m = theme.quietEffects ? {} : (theme.motion ?? {});
+  const sel = `[data-theme="${selectorId}"]${draft ? "[data-theme-draft]" : ""}`;
   const scope = `@scope (${sel}) to ([data-theme]:not(${sel}))`;
   const light = theme.scheme === "light";
   const ink = rgbList(c.text);
-  const { layout: l, type: t, effects: e } = theme;
+  const { layout: l, type: t } = theme;
+  const e = theme.quietEffects ? {} : theme.effects;
+  const terminal = x.terminal ?? (light ? "#1d1f22" : mixHex(c.bg, "#000000", 0.3));
+  const terminalText =
+    x.terminalText ?? (x.terminal ? inkOn(terminal, c.text) : light ? "#e6e6e2" : c.text);
   const lineColor = x.border ?? undefined;
   const vars: Array<[string, string]> = [
     ["color-scheme", theme.scheme],
@@ -1052,10 +1975,19 @@ export function customThemeCss(theme: CustomTheme): string {
     ["--brand-mid", c.accent],
     ["--brand-lo", c.accent2],
     ["--desktop", mixHex(c.bg, "#000000", 0.08)],
-    ["--term", light ? "#1d1f22" : mixHex(c.bg, "#000000", 0.3)],
-    ["--term-fg", light ? "#e6e6e2" : c.text],
+    ["--term", terminal],
+    ["--term-fg", terminalText],
+    ["--terminal-cursor", x.terminalCursor ?? "var(--accent)"],
     ["--chrome", `rgba(${rgbList(x.topbar ?? c.surface)}, 0.86)`],
   ];
+  // Terminals always get a palette that matches; syntax and diffs only when the spec asks.
+  const codeColors = resolveCodeColors(c, x, theme.scheme, theme.code);
+  for (const key of CUSTOM_THEME_ANSI_KEYS) vars.push([ansiToken(key), codeColors.ansi[key]]);
+  if (theme.code) {
+    for (const key of CUSTOM_THEME_SYNTAX_KEYS)
+      vars.push([`--syn-${SYNTAX_TOKEN[key]}`, codeColors.syntax[key]]);
+    vars.push(["--diff-add", codeColors.diffAdd], ["--diff-del", codeColors.diffDel]);
+  }
   if (t.font || t.fontFamily) vars.push(["--font", fontStack(t.fontFamily, t.font)]);
   if (t.monoFont || t.monoFontFamily) {
     vars.push(["--mono", fontStack(t.monoFontFamily, t.monoFont ?? "mono")]);
@@ -1103,6 +2035,7 @@ export function customThemeCss(theme: CustomTheme): string {
     vars.push(["--ease-standard", std], ["--ease-emphasized", emph]);
   }
   const focus = x.focus ?? c.accent;
+  if (x.focus || l.focusRing) vars.push(["--focus-color", focus]);
   switch (l.focusRing) {
     case "thick":
       vars.push(["--focus-ring", `3px solid ${focus}`], ["--focus-offset", "3px"]);
@@ -1133,20 +2066,32 @@ export function customThemeCss(theme: CustomTheme): string {
   const rootDecls = vars.map(([k, v]) => `  ${k}: ${v};`);
   rootDecls.push("  font-family: var(--font);");
   if (t.bodyWeight) rootDecls.push(`  font-weight: ${t.bodyWeight};`);
+  if (t.numerals && t.numerals !== "default") {
+    const variant = { tabular: "tabular-nums", oldstyle: "oldstyle-nums", slashed: "slashed-zero" };
+    rootDecls.push(`  font-variant-numeric: ${variant[t.numerals]};`);
+  }
+  if (x.caret) rootDecls.push(`  caret-color: ${x.caret};`);
   const out: string[] = [];
   out.push(`${sel} {\n${rootDecls.join("\n")}\n}`);
 
-  const bg = l.background ? backgroundLayers(l.background, c, l) : undefined;
+  const backdrop = normalizeThemeBackdrop(theme.backdrop);
+  const bg = theme.quietEffects
+    ? undefined
+    : backdrop
+      ? `linear-gradient(color-mix(in srgb, ${c.bg} 88%, transparent), color-mix(in srgb, ${c.bg} 88%, transparent)), url("${backdrop}") center / cover no-repeat`
+      : l.background
+        ? backgroundLayers(l.background, c, l)
+        : undefined;
   const reduce: string[] = [];
   const backdropMotion = bg && m.backdrop && m.backdrop !== "none" ? m.backdrop : undefined;
-  if (bg && !backdropMotion) {
+  if (bg && !backdropMotion && !draft) {
     out.push(
       `html${sel},\nhtml${sel} body {\n  background: ${bg}, ${c.bg};\n  background-attachment: fixed;\n}`,
     );
   }
-  if (bg && backdropMotion) {
+  if (bg && backdropMotion && !draft) {
     // The pattern lives on its own fixed layer so it can move on the compositor.
-    const anim = `locus-${theme.id}-backdrop`;
+    const anim = `locus-${selectorId}-backdrop`;
     const frames: Record<Exclude<CustomThemeBackdropMotion, "none">, [string, string]> = {
       drift: [
         "0% { transform: translate3d(0, 0, 0) rotate(0deg); } 50% { transform: translate3d(-3%, 2%, 0) rotate(2deg); } 100% { transform: translate3d(0, 0, 0) rotate(0deg); }",
@@ -1161,6 +2106,14 @@ export function customThemeCss(theme: CustomTheme): string {
         "from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-12%, -12%, 0); }",
         "60s linear infinite alternate",
       ],
+      breathe: [
+        "0%, 100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.06); opacity: 1; }",
+        "14s ease-in-out infinite",
+      ],
+      sway: [
+        "0%, 100% { transform: translate3d(0, 0, 0) rotate(-1.5deg); } 50% { transform: translate3d(2%, -1%, 0) rotate(1.5deg); }",
+        "26s ease-in-out infinite",
+      ],
     };
     const [kf, timing] = frames[backdropMotion];
     out.push(
@@ -1174,7 +2127,7 @@ export function customThemeCss(theme: CustomTheme): string {
   }
   if (e.vignette) {
     out.push(
-      `html${sel} body::before {\n  content: "";\n  position: fixed;\n  inset: 0;\n  z-index: var(--z-chrome);\n  pointer-events: none;\n  background: radial-gradient(120% 90% at 50% 45%, transparent 55%, rgba(0, 0, 0, ${light ? 0.18 : 0.5}));\n}`,
+      `${draft ? `.theme-preview${sel}::before` : `html${sel} body::before`} {\n  content: "";\n  position: ${draft ? "absolute" : "fixed"};\n  inset: 0;\n  z-index: var(--z-chrome);\n  pointer-events: none;\n  background: radial-gradient(120% 90% at 50% 45%, transparent 55%, rgba(0, 0, 0, ${light ? 0.18 : 0.5}));\n}`,
     );
   }
   if (e.scanlines || e.noise) {
@@ -1185,7 +2138,13 @@ export function customThemeCss(theme: CustomTheme): string {
       );
     if (e.noise) layers.push(`${NOISE_SVG} 0 0 / 160px 160px`);
     out.push(
-      `html${sel} body::after {\n  content: "";\n  position: fixed;\n  inset: 0;\n  z-index: var(--z-chrome);\n  pointer-events: none;\n  background: ${layers.join(", ")};${e.noise ? `\n  opacity: ${light ? 0.35 : 0.22};\n  mix-blend-mode: ${light ? "multiply" : "screen"};` : ""}\n}`,
+      `${draft ? `.theme-preview${sel}::after` : `html${sel} body::after`} {\n  content: "";\n  position: ${draft ? "absolute" : "fixed"};\n  inset: 0;\n  z-index: var(--z-chrome);\n  pointer-events: none;\n  background: ${layers.join(", ")};${e.noise ? `\n  opacity: ${light ? 0.35 : 0.22};\n  mix-blend-mode: ${light ? "multiply" : "screen"};` : ""}\n}`,
+    );
+  }
+
+  if (e.frame && !draft) {
+    out.push(
+      `html${sel} #root::after {\n  content: "";\n  position: fixed;\n  inset: 0;\n  z-index: var(--z-chrome);\n  pointer-events: none;\n  border: 3px solid ${c.accent};\n  box-shadow: inset 0 0 0 1px rgba(${rgbList(c.accent2)}, 0.6), inset 0 0 24px rgba(${rgbList(c.accent)}, 0.18);\n}`,
     );
   }
 
@@ -1198,6 +2157,20 @@ export function customThemeCss(theme: CustomTheme): string {
     rule(".empty,\n  .chat,\n  .settings-page,\n  .workspace-stage,\n  .theme-preview-stage", [
       "background: transparent",
     ]);
+  if (theme.quietEffects) {
+    rule(".empty,\n  .chat,\n  .theme-preview-stage,\n  .theme-thumb-stage", [
+      "background: var(--bg)",
+    ]);
+    rule(".empty,\n  .theme-preview-stage,\n  .msg,\n  .btn,\n  .btn::before,\n  .btn::after", [
+      "animation: none !important",
+    ]);
+    // Family chrome uses these layers for ambient decoration outside component scopes.
+    if (!draft) {
+      out.push(
+        `html${sel}, html${sel} body, html${sel} .mobile-shell { background-image: none; }\nhtml${sel}::before, html${sel}::after, html${sel} body::before, html${sel} body::after { display: none; }`,
+      );
+    }
+  }
 
   const blur = l.blur ?? 16;
   const panes = ".composer,\n  .empty-composer,\n  .modal,\n  .menu-pop";
@@ -1231,7 +2204,41 @@ export function customThemeCss(theme: CustomTheme): string {
   }
   if (l.shadow && l.pane !== "flat" && l.pane !== "raised")
     paneDecls.push("box-shadow: var(--elev-2)");
+  switch (l.paneAccent) {
+    case "top":
+      paneDecls.push(`border-top: 3px solid ${c.accent}`);
+      break;
+    case "left":
+      paneDecls.push(`border-left: 3px solid ${c.accent}`);
+      break;
+    default:
+      break;
+  }
+  // Painted layers sit over the pane colour, so they work with every pane style.
+  const paneLayers: Array<[string, string, string]> = [];
+  if (l.paneAccent === "gradient") {
+    paneLayers.push([`linear-gradient(90deg, ${c.accent}, ${c.accent2})`, "100% 3px", "0 0"]);
+  }
+  if (e.sheen) {
+    paneLayers.push([
+      `linear-gradient(135deg, rgba(255, 255, 255, ${light ? 0.55 : 0.07}), transparent 42%)`,
+      "100% 100%",
+      "0 0",
+    ]);
+  }
+  if (paneLayers.length) {
+    paneDecls.push(
+      `background-image: ${paneLayers.map(([img]) => img).join(", ")}`,
+      `background-size: ${paneLayers.map(([, size]) => size).join(", ")}`,
+      `background-position: ${paneLayers.map(([, , pos]) => pos).join(", ")}`,
+      "background-repeat: no-repeat",
+    );
+  }
   rule(panes, paneDecls);
+  if (l.pane === "glass") {
+    // Modals sit on a dark scrim, where a see-through pane turns muddy; keep them nearly solid.
+    rule(".modal", [`background-color: rgba(${rgbList(c.surface)}, ${light ? 0.94 : 0.86})`]);
+  }
   if (l.shadow === "hard" || l.shadow === "glow") {
     rule(".composer:has(textarea:focus-visible),\n  .empty-composer:has(textarea:focus-visible)", [
       l.shadow === "hard"
@@ -1247,13 +2254,14 @@ export function customThemeCss(theme: CustomTheme): string {
   }
 
   /** Scoped text tokens for a filled surface, so labels inside stay readable. */
-  const surfaceInk = (fill: string): string[] => {
-    const fg = inkOn(fill, c.text);
+  const surfaceInk = (fill: string, override?: string): string[] => {
+    const fg = override ?? inkOn(fill, c.text);
     return [
       `background: ${fill}`,
       `--text: ${fg}`,
       `--muted: ${pushContrast(mixHex(fg, fill, 0.25), fill, 4.5)}`,
       `--faint: ${pushContrast(mixHex(fg, fill, 0.4), fill, 4.5)}`,
+      `--text-muted: var(--muted)`,
       `color: ${fg}`,
     ];
   };
@@ -1278,6 +2286,28 @@ export function customThemeCss(theme: CustomTheme): string {
       rule(".sidebar", [`background: ${mixHex(c.surface, c.accent, 0.06)}`]);
       break;
     }
+    case "glass":
+      rule(".sidebar,\n  .side-rail", [
+        `background: rgba(${rgbList(c.surface)}, ${light ? 0.6 : 0.5})`,
+        `backdrop-filter: blur(${l.blur ?? 16}px) saturate(1.4)`,
+      ]);
+      break;
+    case "gradient": {
+      const railInk = inkAcross([c.accent, c.accent2, mixHex(c.accent, c.accent2, 0.5)]);
+      rule(".side-rail", [
+        `background: linear-gradient(180deg, ${c.accent}, ${c.accent2})`,
+        `color: ${railInk}`,
+      ]);
+      rule(".side-rail button", [`color: ${railInk}`]);
+      rule('.side-rail button.on,\n  .side-rail button[aria-current="page"]', [
+        `background: rgba(${rgbList(railInk)}, 0.2)`,
+        `color: ${railInk}`,
+      ]);
+      rule(".sidebar", [
+        `background: linear-gradient(180deg, ${mixHex(c.surface, c.accent, 0.07)}, ${mixHex(c.surface, c.accent2, 0.07)})`,
+      ]);
+      break;
+    }
     case "inverted": {
       const inv = c.text;
       const invInk = c.bg;
@@ -1292,7 +2322,9 @@ export function customThemeCss(theme: CustomTheme): string {
     default:
       break;
   }
-  if (x.sidebar) rule(".sidebar", surfaceInk(x.sidebar));
+  if (x.sidebar || x.sidebarText) {
+    rule(".sidebar", surfaceInk(x.sidebar ?? c.surface, x.sidebarText));
+  }
   if (x.rail) {
     const railInk = inkOn(x.rail, c.text);
     rule(".side-rail", [`background: ${x.rail}`, `color: ${railInk}`]);
@@ -1308,6 +2340,23 @@ export function customThemeCss(theme: CustomTheme): string {
       rule(".topbar", [
         `background: rgba(${rgbList(x.topbar ?? c.surface)}, ${light ? 0.6 : 0.5})`,
         `backdrop-filter: blur(${blur}px) saturate(1.4)`,
+      ]);
+      break;
+    case "gradient": {
+      // Kept close to the surface so every label in the bar stays readable.
+      const from = mixHex(x.topbar ?? c.surface, c.accent, 0.16);
+      const to = mixHex(x.topbar ?? c.surface, c.accent2, 0.16);
+      rule(".topbar", [
+        ...surfaceInk(mixHex(from, to, 0.5)),
+        `background: linear-gradient(90deg, ${from}, ${to})`,
+      ]);
+      break;
+    }
+    case "underline":
+      if (topbarFill) rule(".topbar", surfaceInk(topbarFill));
+      rule(".topbar", [
+        `border-bottom: 2px solid ${c.accent}`,
+        `box-shadow: 0 1px 0 rgba(${rgbList(c.accent)}, 0.25)`,
       ]);
       break;
     default:
@@ -1347,11 +2396,54 @@ export function customThemeCss(theme: CustomTheme): string {
     case "filled":
       rule(".msg.user .bubble", ["background: var(--bg-2)"]);
       break;
+    case "tail":
+      rule(".msg.user .bubble", [
+        "background: var(--bg-2)",
+        "border-bottom-right-radius: var(--radius-xs, 4px)",
+      ]);
+      rule(".msg.assistant .bubble", ["border-bottom-left-radius: var(--radius-xs, 4px)"]);
+      break;
+    case "gradient": {
+      const fg = inkAcross([c.accent, c.accent2, mixHex(c.accent, c.accent2, 0.5)]);
+      rule(".msg.user .bubble", [
+        `background: linear-gradient(135deg, ${c.accent}, ${c.accent2})`,
+        `--text: ${fg}`,
+        `--muted: ${mixHex(fg, c.accent, 0.2)}`,
+        `--faint: ${mixHex(fg, c.accent, 0.3)}`,
+        "--text-muted: var(--muted)",
+        `color: ${fg}`,
+        "border-color: transparent",
+      ]);
+      break;
+    }
+    case "glass":
+      rule(".msg.user .bubble", [
+        `background: rgba(${rgbList(c.raised)}, ${light ? 0.55 : 0.45})`,
+        `backdrop-filter: blur(${l.blur ?? 16}px) saturate(1.3)`,
+        `border: 1px solid rgba(${ink}, ${light ? 0.14 : 0.12})`,
+      ]);
+      break;
     default:
       break;
   }
-  if (x.userBubble && l.bubble !== "accent" && l.bubble !== "plain") {
-    rule(".msg.user .bubble", surfaceInk(x.userBubble));
+  if (
+    (x.userBubble && l.bubble !== "accent" && l.bubble !== "plain" && l.bubble !== "gradient") ||
+    x.userBubbleText
+  ) {
+    rule(
+      ".msg.user .bubble",
+      surfaceInk(x.userBubble ?? (l.bubble === "accent" ? c.accent : c.raised), x.userBubbleText),
+    );
+  }
+  if (x.assistantBubble || x.assistantBubbleText) {
+    rule(
+      ".msg.assistant .bubble",
+      surfaceInk(x.assistantBubble ?? c.surface, x.assistantBubbleText),
+    );
+  }
+  if (x.codeBlock || x.codeText) {
+    const fill = x.codeBlock ?? c.raised;
+    rule(".md-code", [`background: ${fill}`, `color: ${x.codeText ?? inkOn(fill, c.text)}`]);
   }
   if (edge && l.bubble !== "quote" && l.bubble !== "plain") {
     rule(".msg.user .bubble", [`border: ${edge} ${borderPaint}`]);
@@ -1432,7 +2524,7 @@ export function customThemeCss(theme: CustomTheme): string {
         "background-repeat: no-repeat",
         "transition: background-position var(--dur-slow) var(--ease-standard)",
       ]);
-      rule(".btn.primary:hover", ["background-position: -20% 0"]);
+      rule(".btn.primary:is(:hover, [data-theme-audit-hover])", ["background-position: -20% 0"]);
       break;
     default:
       break;
@@ -1444,7 +2536,9 @@ export function customThemeCss(theme: CustomTheme): string {
         `color: ${c.accent}`,
         `border: ${bw && bw > 1 ? bw : 1.5}px solid ${c.accent}`,
       ]);
-      rule(".btn.primary:hover", [`background-color: rgba(${rgbList(c.accent)}, 0.12)`]);
+      rule(".btn.primary:is(:hover, [data-theme-audit-hover])", [
+        `background-color: rgba(${rgbList(c.accent)}, 0.12)`,
+      ]);
       break;
     case "gradient":
       rule(".btn.primary", [
@@ -1460,6 +2554,43 @@ export function customThemeCss(theme: CustomTheme): string {
         `box-shadow: 0 0 16px rgba(${rgbList(c.accent)}, 0.55)`,
       ]);
       break;
+    case "soft": {
+      const fill = mixHex(c.bg, c.accent, light ? 0.14 : 0.2);
+      const fillHover = mixHex(c.bg, c.accent, light ? 0.22 : 0.3);
+      rule(".btn.primary", [
+        `background: ${fill}`,
+        `color: ${pushContrast(customAccentText(c), fillHover, 4.5)}`,
+        "border-color: transparent",
+        "box-shadow: none",
+      ]);
+      rule(".btn.primary:is(:hover, [data-theme-audit-hover])", [`background: ${fillHover}`]);
+      break;
+    }
+    case "depth": {
+      const ledge = mixHex(c.accent, "#000000", 0.38);
+      rule(".btn.primary", [
+        `background: ${c.accent}`,
+        `color: ${c.accentInk}`,
+        "border-color: transparent",
+        `box-shadow: 0 3px 0 ${ledge}`,
+      ]);
+      rule(".btn.primary:active", [`box-shadow: 0 1px 0 ${ledge}`, "transform: translateY(2px)"]);
+      reduce.push(`.btn.primary:active {\n      transform: none;\n    }`);
+      break;
+    }
+    case "brutal":
+      rule(".btn.primary", [
+        `background: ${c.accent}`,
+        `color: ${c.accentInk}`,
+        `border: 2px solid ${c.text}`,
+        `box-shadow: 3px 3px 0 ${c.text}`,
+      ]);
+      rule(".btn.primary:is(:hover, [data-theme-audit-hover])", [
+        `box-shadow: 1px 1px 0 ${c.text}`,
+        "transform: translate(2px, 2px)",
+      ]);
+      reduce.push(`.btn.primary:hover {\n      transform: none;\n    }`);
+      break;
     default:
       break;
   }
@@ -1473,12 +2604,16 @@ export function customThemeCss(theme: CustomTheme): string {
   }
   switch (l.scrollbar) {
     case "thin":
-      rule("*", ["scrollbar-width: thin", "scrollbar-color: var(--line-strong) transparent"]);
+      rule("*", [
+        "scrollbar-width: thin",
+        `scrollbar-color: ${x.scrollbar ?? "var(--line-strong)"} transparent`,
+      ]);
       break;
     case "accent":
-      rule("*", ["scrollbar-color: var(--accent) transparent"]);
+      rule("*", [`scrollbar-color: ${x.scrollbar ?? "var(--accent)"} transparent`]);
       break;
     default:
+      if (x.scrollbar) rule("*", [`scrollbar-color: ${x.scrollbar} transparent`]);
       break;
   }
 
@@ -1524,29 +2659,71 @@ export function customThemeCss(theme: CustomTheme): string {
         "-webkit-text-fill-color: transparent",
       );
       break;
+    case "boxed":
+      heading.push(
+        `background: ${c.accent}`,
+        `color: ${c.accentInk}`,
+        "padding: 0.04em 0.36em",
+        "border-radius: var(--radius-xs, 3px)",
+        "width: fit-content",
+        "max-width: 100%",
+        "box-decoration-break: clone",
+        "-webkit-box-decoration-break: clone",
+      );
+      break;
     default:
       break;
   }
-  if (e.glow) {
-    // text-shadow paints over clipped or stroked text, so those styles glow with a filter.
+  // Heading shadows stack: an offset echo, a chromatic split, then a glow.
+  const headingShadows: string[] = [];
+  if (t.headingStyle === "shadow") {
+    headingShadows.push(`0.06em 0.06em 0 rgba(${rgbList(c.accent)}, 0.6)`);
+  }
+  if (e.chromatic) {
+    headingShadows.push(
+      "-0.045em 0 0 rgba(255, 0, 90, 0.55)",
+      "0.045em 0 0 rgba(0, 210, 255, 0.55)",
+    );
+  }
+  if (e.glow) headingShadows.push(`0 0 10px rgba(${rgbList(c.accent)}, 0.65)`);
+  if (headingShadows.length) {
+    // text-shadow paints over clipped or stroked text, so those styles use a filter.
     const clipped = t.headingStyle === "gradient" || t.headingStyle === "outline";
     heading.push(
       clipped
-        ? `filter: drop-shadow(0 0 6px rgba(${rgbList(c.accent)}, 0.55))`
-        : `text-shadow: 0 0 10px rgba(${rgbList(c.accent)}, 0.65)`,
+        ? `filter: ${headingShadows.map((sh) => `drop-shadow(${sh})`).join(" ")}`
+        : `text-shadow: ${headingShadows.join(", ")}`,
     );
   }
-  rule("h1,\n  h2,\n  h3", heading);
+  rule("h1,\n  h2,\n  h3,\n  .empty-card h2,\n  .modal h2", heading);
   if (e.glow && l.button !== "glow") {
     rule(".btn.primary", [`box-shadow: 0 0 14px rgba(${rgbList(c.accent)}, 0.5)`]);
   }
 
   // Messages animate once when they mount; streaming updates keep the same node.
   if (m.enter && m.enter !== "none") {
-    const anim = `locus-${theme.id}-enter`;
+    const anim = `locus-${selectorId}-enter`;
     out.push(`@keyframes ${anim} {\n  ${ENTRANCE_FRAMES[m.enter]}\n}`);
     rule(".msg", [`animation: ${anim} var(--dur-slow) var(--ease-emphasized) backwards`]);
     reduce.push(`.msg {\n      animation: none;\n    }`);
+  }
+
+  // Per-component overrides come last so they win over the global layout.
+  for (const key of CUSTOM_THEME_COMPONENTS) {
+    const part = theme.components?.[key];
+    if (!part) continue;
+    const decls: string[] = [];
+    if (part.fill) decls.push(...surfaceInk(part.fill));
+    if (part.radius !== undefined) decls.push(`border-radius: ${part.radius}px`);
+    if (part.borderWidth !== undefined) {
+      decls.push(`border-width: ${part.borderWidth}px`);
+      if (part.borderWidth > 0) decls.push("border-style: solid");
+    }
+    if (part.shadow) {
+      const [small, large] = SHADOWS[part.shadow](c);
+      decls.push(`box-shadow: ${key === "button" || key === "input" ? small : large}`);
+    }
+    rule(COMPONENT_SELECTORS[key], decls);
   }
 
   if (rules.length) out.push(`${scope} {\n${rules.join("\n")}\n}`);
@@ -1565,6 +2742,7 @@ export function customThemeCss(theme: CustomTheme): string {
   ];
   if (edge) thumb.push(`  border: ${edge} ${borderPaint};`);
   if (l.radius !== undefined) thumb.push(`  border-radius: ${Math.min(16, l.radius)}px;`);
+  if (e.frame) thumb.push(`  outline: 2px solid ${c.accent};`, "  outline-offset: -2px;");
   thumb.push("}");
   out.push(thumb.join("\n"));
   out.push(`.theme-thumb${sel} .theme-thumb-stage {\n  background: transparent;\n}`);
@@ -1572,7 +2750,10 @@ export function customThemeCss(theme: CustomTheme): string {
 }
 
 export function customThemesCss(themes: readonly CustomTheme[] | undefined): string {
-  return (themes ?? []).map(customThemeCss).filter(Boolean).join("\n\n");
+  return (themes ?? [])
+    .map((theme) => customThemeCss(theme))
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 // ─────────────────────────── Generation prompt ───────────────────────────
@@ -1580,12 +2761,13 @@ export function customThemesCss(themes: readonly CustomTheme[] | undefined): str
 const q = (list: readonly string[]) => list.map((s) => `"${s}"`).join("|");
 
 /** JSON shape the model is asked for, shared by the Generate button and the agent tool. */
-export const CUSTOM_THEME_SPEC_GUIDE = `Theme JSON fields (all optional except name and colors.bg/text/accent):
+export const CUSTOM_THEME_SPEC_GUIDE = `Theme JSON fields (all optional except name, and colors.bg/text/accent or a palette.seed):
 {
   "name": "2-3 words",
   "summary": "one short sentence",
   "scheme": "light" | "dark",
   "base": null | ${THEME_STYLES.map((s) => `"${s}"`).join(" | ")}   // optional structural group to build on
+  "palette": { "seed": "#hex", "harmony": ${q(CUSTOM_THEME_HARMONIES)} },   // optional: grows a full readable palette from one colour; any "colors" you give override it
   "colors": { ${CUSTOM_THEME_COLOR_KEYS.map((k) => `"${k}"`).join(", ")} },   // 6-digit hex only
   "extraColors": { ${CUSTOM_THEME_EXTRA_COLOR_KEYS.map((k) => `"${k}"`).join(", ")} },   // optional per-surface hex; text on rail/sidebar/topbar/userBubble is picked for contrast
   "layout": {
@@ -1597,7 +2779,7 @@ export const CUSTOM_THEME_SPEC_GUIDE = `Theme JSON fields (all optional except n
     "backgroundColors": ["#hex", …up to 4], "backgroundAngle": 0-360, "backgroundIntensity": 0-1, "patternScale": 0.5-4,
     "sidebar": ${q(CUSTOM_THEME_SIDEBARS)}, "topbar": ${q(CUSTOM_THEME_TOPBARS)},
     "bubble": ${q(CUSTOM_THEME_BUBBLES)}, "messageWidth": 560-1200,
-    "button": ${q(CUSTOM_THEME_BUTTONS)},
+    "button": ${q(CUSTOM_THEME_BUTTONS)}, "paneAccent": ${q(CUSTOM_THEME_PANE_ACCENTS)},
     "density": ${q(CUSTOM_THEME_DENSITIES)}, "focusRing": ${q(CUSTOM_THEME_FOCUS_RINGS)}, "scrollbar": ${q(CUSTOM_THEME_SCROLLBARS)}
   },
   "type": {
@@ -1606,7 +2788,7 @@ export const CUSTOM_THEME_SPEC_GUIDE = `Theme JSON fields (all optional except n
     "fontFamily": "any Google Fonts family name, e.g. Space Grotesk", "headingFontFamily": "…", "monoFontFamily": "…",   // overrides the preset; the preset stays as fallback
     "scale": 0.85-1.3, "bodyWeight": 300-700, "bodyTracking": -0.03-0.1, "lineHeight": 1.2-2,
     "headingCase": ${q(CUSTOM_THEME_CASES)}, "headingWeight": 300-900, "headingTracking": -0.05-0.3, "headingItalic": boolean,
-    "headingStyle": ${q(CUSTOM_THEME_HEADING_STYLES)}, "links": ${q(CUSTOM_THEME_LINK_STYLES)}
+    "headingStyle": ${q(CUSTOM_THEME_HEADING_STYLES)}, "links": ${q(CUSTOM_THEME_LINK_STYLES)}, "numerals": ${q(CUSTOM_THEME_NUMERALS)}
   },
   "motion": {
     "speed": ${q(CUSTOM_THEME_SPEEDS)}, "easing": ${q(CUSTOM_THEME_EASINGS)},
@@ -1614,9 +2796,19 @@ export const CUSTOM_THEME_SPEC_GUIDE = `Theme JSON fields (all optional except n
     "hover": ${q(CUSTOM_THEME_HOVERS)},   // button hover feel
     "backdrop": ${q(CUSTOM_THEME_BACKDROP_MOTIONS)}   // slow ambient animation of a patterned background
   },
-  "effects": { "scanlines": boolean, "vignette": boolean, "noise": boolean, "glow": boolean, "lift": boolean }
+  "effects": { "scanlines": boolean, "vignette": boolean, "noise": boolean, "glow": boolean, "lift": boolean, "chromatic": boolean, "frame": boolean, "sheen": boolean },
+  "code": {   // optional; give it (even {}) to theme syntax and diffs. Missing colours are derived from the palette; terminals always get a matching 16-colour palette
+    "syntax": { ${CUSTOM_THEME_SYNTAX_KEYS.map((k) => `"${k}"`).join(", ")} },   // hex, readable on the code block
+    "ansi": { ${CUSTOM_THEME_ANSI_KEYS.map((k) => `"${k}"`).join(", ")} },   // hex terminal colours
+    "diffAdd": "#hex", "diffDel": "#hex"
+  },
+  "components": { ${CUSTOM_THEME_COMPONENTS.map((k) => `"${k}"`).join(", ")} },   // each optional: { "radius": 0-40 or 999 (pill), "borderWidth": 0-4, "shadow": ${q(CUSTOM_THEME_SHADOWS)}, "fill": "#hex" }; wins over layout
+  "adaptive": boolean,   // follow the system light/dark setting; the other scheme is derived (regrown from palette.seed when given)
+  "variants": { "light": { "colors": {…}, "extraColors": {…}, "code": {…} }, "dark": {…} },   // optional hand-tuned colours per scheme for adaptive themes
+  "extends": "theme id"   // optional: build on a built-in (e.g. velvet, nord) or generated theme; then give only the fields that change
 }
 All motion turns off for people who ask for reduced motion.
+Colours: give "colors" (bg, text, accent at least) or a "palette" seed — or both, to pin a few colours on top of a seeded palette.
 Body text must stay readable: text and muted on bg and surface need 4.5:1 contrast, accentInk on accent 4.5:1. Unreadable pairs are corrected automatically.`;
 
 export const CUSTOM_THEME_SYSTEM_PROMPT = `You design visual themes for Locus, a desktop app with a left icon rail, a sidebar list, a top bar, a chat thread with user bubbles, a composer box, buttons, and modals.
@@ -1681,7 +2873,7 @@ export interface ThemeManageResult {
   theme?: ThemeRef;
 }
 
-function mergeDeep(
+export function mergeDeep(
   base: Record<string, unknown>,
   patch: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -1708,7 +2900,8 @@ function describeTheme(theme: CustomTheme): string {
 }
 
 /** Pure reducer behind the manage_theme tool. */
-export function applyThemeManageAction(
+/** The manage_theme reducer without inheritance; see applyThemeManageAction(). */
+export function applyThemeManageActionRows(
   themes: readonly CustomTheme[],
   args: Record<string, unknown>,
   now = new Date().toISOString(),

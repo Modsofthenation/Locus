@@ -17,6 +17,8 @@ const apiMock = vi.hoisted(() => ({
   slackConversations: vi.fn(),
   slackUsers: vi.fn(),
   slackReviewerRuns: vi.fn(),
+  slackReviewerRun: vi.fn(),
+  slackReviewerLogs: vi.fn(async () => ({ entries: [], lastSeq: 0 })),
   slackReviewerReview: vi.fn(),
   slackReviewerTrace: vi.fn(),
   slackReviewerNotes: vi.fn(),
@@ -182,6 +184,50 @@ const reviewer = (over: Record<string, unknown> = {}) =>
   parseSlackReviewer({ id: "r1", name: "API reviews", channelId: "C1", ...over })!;
 
 describe("SlackReviewerSettings", () => {
+  it("opens on activity and shows reviewer setup and diagnostics on demand", () => {
+    mount([]);
+    const view = (id: string) => q<HTMLElement>(`#review-view-${id}`);
+    const open = (label: string) =>
+      act(() =>
+        [...host.querySelectorAll<HTMLButtonElement>("nav button")]
+          .find((button) => button.textContent === label)!
+          .click(),
+      );
+
+    expect(view("activity").hidden).toBe(false);
+    expect(view("reviewers").hidden).toBe(true);
+    expect(view("diagnostics").hidden).toBe(true);
+
+    open("Reviewers");
+    expect(view("activity").hidden).toBe(true);
+    expect(view("reviewers").hidden).toBe(false);
+    expect(view("reviewers").querySelector('[data-testid="slack-reviewer-add"]')).toBeTruthy();
+
+    open("Diagnostics");
+    expect(view("reviewers").hidden).toBe(true);
+    expect(view("diagnostics").hidden).toBe(false);
+  });
+
+  it("saves settings, runs the reviewer from its collapsed card and refreshes Activity", async () => {
+    const { persist } = mount([reviewer(), reviewer({ id: "r2", enabled: false })]);
+    apiMock.slackReviewerRun.mockResolvedValue({ ok: true });
+    await flush();
+
+    act(() => {
+      q<HTMLButtonElement>('[aria-controls="review-view-reviewers"]').click();
+      q<HTMLButtonElement>('[aria-label="Collapse API reviews"]').click();
+    });
+    const button = q<HTMLButtonElement>('[data-testid="slack-reviewer-run-now-r1"]');
+    expect(q<HTMLButtonElement>('[data-testid="slack-reviewer-run-now-r2"]').disabled).toBe(true);
+    await act(async () => button.click());
+    expect(persist).toHaveBeenCalledBefore(apiMock.slackReviewerRun);
+    expect(apiMock.slackReviewerRun).toHaveBeenCalledExactlyOnceWith("r1");
+    expect(apiMock.slackReviewerRuns).toHaveBeenCalledTimes(2);
+    expect(q('[data-testid="slack-reviewer-r1"] [role="status"]').textContent).toContain(
+      "Check complete",
+    );
+  });
+
   it("lists in-progress reviews, watched review chats and past ones, each opening its thread", async () => {
     apiMock.slackReviewerRuns.mockResolvedValue({
       runs: [
@@ -306,7 +352,8 @@ describe("SlackReviewerSettings", () => {
     expect(q('[data-testid="slack-reviewers-empty"]').textContent).toContain("No reviewers yet");
     act(() => q<HTMLButtonElement>('[data-testid="slack-reviewers-signin"] button').click());
     expect(onOpenIntegrations).toHaveBeenCalled();
-    expect(q('[data-testid="slack-reviewer-runs-empty"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="slack-reviewer-runs-empty"]')).toBeNull();
+    expect(q(".review-activity-empty").textContent).toContain("Set up a Slack reviewer");
 
     act(() => q<HTMLButtonElement>('[data-testid="slack-reviewer-add"]').click());
     expect(seen.rows).toHaveLength(1);

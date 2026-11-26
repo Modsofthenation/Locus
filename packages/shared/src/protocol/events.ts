@@ -14,10 +14,16 @@ import type {
 } from "../models/repo.js";
 import type { SlackConversation, SlackMessage } from "../models/slack.js";
 import type { CustomTheme, ThemeRef } from "../models/customTheme.js";
+import type { ThemePreferences } from "../models/themePreferences.js";
 
 export type ClientEvent =
   /** The agent changed the app theme or the generated themes (manage_theme). */
-  | { type: "theme.updated"; theme: ThemeRef; customThemes: CustomTheme[] }
+  | {
+      type: "theme.updated";
+      theme: ThemeRef;
+      customThemes: CustomTheme[];
+      themePreferences?: ThemePreferences | null;
+    }
   | { type: "session.updated"; session: AgentSession }
   | { type: "session.deleted"; id: string }
   | { type: "vm.updated"; vm: VmInstance }

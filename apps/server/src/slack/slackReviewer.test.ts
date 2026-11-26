@@ -16,6 +16,7 @@ import {
   type PullFile,
   type SlackMessage,
   SLACK_REVIEW_REACTION_PRESETS,
+  LOCUS_REVIEWER_EVENT_TYPE,
 } from "@locus/shared";
 import type {
   ChatEvent,
@@ -79,7 +80,13 @@ afterEach(async () => {
 
 interface Harness {
   service: SlackReviewerService;
-  posts: Array<{ channel: string; text: string; threadTs?: string; as?: string }>;
+  posts: Array<{
+    channel: string;
+    text: string;
+    threadTs?: string;
+    as?: string;
+    eventType?: string;
+  }>;
   reviews: PostReviewInput[];
   requests: CompleteRequest[];
   history: SlackMessage[];
@@ -223,9 +230,15 @@ async function harness(
         h.emit = undefined;
       };
     },
-    post: async (channel, text, threadTs, _gif, as) => {
-      h.posts.push({ channel, text, threadTs, as });
-      const message = { ts: `${500 + h.posts.length}.0`, channelId: channel, text, threadTs };
+    post: async (channel, text, threadTs, _gif, as, _broadcast, _blocks, metadata) => {
+      h.posts.push({ channel, text, threadTs, as, eventType: metadata?.event_type });
+      const message: SlackMessage = {
+        ts: `${500 + h.posts.length}.0`,
+        channelId: channel,
+        text,
+        threadTs,
+        ...(metadata ? { eventType: metadata.event_type } : {}),
+      };
       if (threadTs) h.replies.push(message);
       return message;
     },
@@ -1391,6 +1404,53 @@ describe("helpers", () => {
       expect(h.reviews.at(-1)!.comments).toBeUndefined();
     });
 
+    it("marks its posts and ignores another reviewer's replies in the same thread", async () => {
+      const h = await reviewedOnce();
+      expect(h.posts.every((row) => row.eventType === LOCUS_REVIEWER_EVENT_TYPE)).toBe(true);
+      const before = h.posts.length;
+      // Another person's Locus, once as its Slack app and once as its user with the marker.
+      h.replies.push(
+        post("600.0", ":ok_hand: Dismissed #1 (`x.py:1`) on acme/api#7.", {
+          threadTs: "101.0",
+          userId: "U0OTHERBOT",
+          bot: true,
+        }),
+        post("601.0", "won't fix #1", {
+          threadTs: "101.0",
+          userId: "U0DESHAN",
+          eventType: LOCUS_REVIEWER_EVENT_TYPE,
+        }),
+      );
+      await h.service.tick();
+      await h.service.idle();
+      expect(h.posts).toHaveLength(before);
+      expect(h.requests).toHaveLength(1);
+    });
+
+    it('stops watching on "stop watching this thread"', async () => {
+      const h = await reviewedOnce();
+      h.replies.push(
+        post("600.0", "<@U0SOMEONE> stop watching this thread", { threadTs: "101.0" }),
+      );
+      await h.service.tick();
+      await h.service.idle();
+      const before = h.posts.length;
+      expect(h.posts.at(-1)!.text).not.toContain("Stopped watching");
+
+      h.replies.push(post("601.0", "stop watching this thread", { threadTs: "101.0" }));
+      await h.service.tick();
+      await h.service.idle();
+      expect(h.posts).toHaveLength(before + 1);
+      expect(h.posts.at(-1)!.text).toContain("Stopped watching this thread");
+
+      h.replies.push(post("602.0", "won't fix #1", { threadTs: "101.0" }));
+      h.replies.push(post("603.0", "PTAL", { threadTs: "101.0" }));
+      await h.service.tick();
+      await h.service.idle();
+      expect(h.posts).toHaveLength(before + 1);
+      expect(h.requests).toHaveLength(1);
+    });
+
     it("says so when a dismissal names a finding that doesn't exist", async () => {
       const h = await reviewedOnce();
       h.replies.push(post("600.0", "#4 is a false positive", { threadTs: "101.0" }));
@@ -2088,6 +2148,40 @@ describe("triggers beyond a Slack post, and parallel reviews", () => {
       ...extra,
     };
   }
+
+  it("runs only the chosen reviewer before its next scheduled poll", async () => {
+    const h = await harness({ autoReview: true, repos: ["acme/api"] });
+    const config = await h.store.loadConfig();
+    config.slackReviewers!.push({ ...config.slackReviewers![0]!, id: "r2", channelId: "C2" });
+    h.deps.now = () => 1_000_000;
+    h.deps.channelPollMs = 45_000;
+    h.deps.autoReviewPollMs = 300_000;
+    h.service = new SlackReviewerService(h.store, h.deps);
+
+    h.history.push(post("99.0", "https://github.com/acme/api/pull/1"));
+    h.openPulls = [openPull(2)];
+    await h.service.runNow("r1");
+    await h.service.idle();
+    expect(h.historyCalls).toBe(1);
+    expect(h.requests).toHaveLength(0);
+
+    h.history.push(post("101.0", "https://github.com/acme/api/pull/7"));
+    h.openPulls.push(openPull(12));
+    await Promise.all([h.service.runNow("r1"), h.service.runNow("r1")]);
+    await h.service.idle();
+    expect(h.historyCalls).toBe(3);
+    expect(h.service.recentRuns()).toHaveLength(2);
+    expect(h.service.recentRuns()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ reviewerId: "r1", pr: "acme/api#7" }),
+        expect.objectContaining({ reviewerId: "r1", pr: "acme/api#12" }),
+      ]),
+    );
+
+    config.slackReviewers![0]!.enabled = false;
+    await expect(h.service.runNow("r1")).rejects.toThrow("enabled reviewer");
+    expect(h.historyCalls).toBe(3);
+  });
 
   it("auto review primes without a backlog, then reviews a new PR under a channel post", async () => {
     const h = await harness({ autoReview: true, repos: ["acme/api"] });
@@ -2843,10 +2937,7 @@ describe("review when tagged in an unwatched thread", () => {
     const emit = async (event: { ts: string; threadTs: string; text?: string }) => {
       h.emit!({ channelId: "C1", ...event });
       // The event starts a tick of its own; wait for it, then for the reviews it queued.
-      const ticking = () => (h.service as unknown as { ticking: boolean }).ticking;
-      for (let i = 0; i < 200 && ticking(); i++) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
+      await (h.service as unknown as { currentPoll?: Promise<void> }).currentPoll;
       await h.service.idle();
     };
     return { h, emit, advance: (ms: number) => (now += ms) };

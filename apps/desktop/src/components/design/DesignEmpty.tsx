@@ -500,10 +500,8 @@ export function DesignEmpty({ surface = "design" }: { surface?: CanvasLaunchSurf
   function setSelectedRepos(ids: string[], refs?: Record<string, string>) {
     repoPickTouched.current = true;
     const next = [...new Set(ids.filter(Boolean))];
-    const hadRepos = repoIds.length > 0;
     setRepoIds(next);
     if (next.length === 0) setBranchLock(false);
-    else if (!hadRepos) setBranchLock(true);
     const source = refs ?? repoRefs;
     const kept: Record<string, string> = {};
     for (const id of next) {

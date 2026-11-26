@@ -885,12 +885,44 @@ html[data-shell="mobile"] #root {
   align-content: start;
 }
 .mobile-link-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: flex;
   gap: var(--space-2-5);
-  align-items: start;
-  padding: var(--space-1) 0 var(--space-3);
-  border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  align-items: center;
+  padding: var(--space-2) 0;
+}
+.mobile-link-row .mobile-live {
+  margin: 0;
+}
+.mobile-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.mobile-quick-actions button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 76px;
+  padding: var(--space-2-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pane);
+  background: var(--bg-1);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
+  text-align: left;
+}
+.mobile-quick-actions button svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+.mobile-quick-actions button:active,
+button.mobile-setting-row:active {
+  background: var(--hover);
 }
 .mobile-link-copy {
   min-width: 0;
@@ -924,13 +956,19 @@ html[data-shell="mobile"] #root {
   gap: var(--space-0-5);
 }
 .mobile-settings-block h2,
-.mobile-cap-block h2 {
+.mobile-cap-block summary,
+.mobile-preferences summary {
   margin: var(--space-2) 0 var(--space-2);
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--faint);
+}
+.mobile-cap-block summary,
+.mobile-preferences summary {
+  cursor: pointer;
+  padding-block: var(--space-2);
 }
 .mobile-setting-row {
   display: flex;
@@ -940,6 +978,19 @@ html[data-shell="mobile"] #root {
   min-height: 44px;
   color: var(--text);
   font-size: var(--type-lg);
+}
+button.mobile-setting-row {
+  width: 100%;
+  padding: var(--space-2) var(--space-2-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg-1);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mobile-setting-row > .mobile-setting-value:last-child {
+  text-align: right;
 }
 .mobile-setting-value {
   display: inline-flex;

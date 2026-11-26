@@ -53,6 +53,7 @@ export function Modal(props: {
         aria-label={label}
         aria-describedby={props.describedBy}
         aria-busy={props.busy || undefined}
+        tabIndex={-1}
         data-testid={props.dialogTestId}
         ref={dialogRef}
         style={props.style}

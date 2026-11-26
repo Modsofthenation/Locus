@@ -5,6 +5,7 @@ import type { AgentSession, LocusConfig } from "@locus/shared";
 import { SessionSwitcher } from "./SessionSwitcher";
 import { api } from "@/lib/api";
 import { exportSessionChat } from "@/lib/chatExport";
+import { openPalette } from "@/lib/palette";
 import { Store, initialState, type Action } from "@/state/store";
 import { setSettingsDirty, setSettingsPersist } from "@/lib/settingsLeave";
 
@@ -91,6 +92,39 @@ describe("SessionSwitcher palette", () => {
     vi.restoreAllMocks();
     setSettingsDirty(false);
     localStorage.removeItem("locus.palette.recents");
+  });
+
+  it("opens on request and lets j and k begin a search", () => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root.render(
+        <Store.Provider value={{ state: initialState, dispatch: vi.fn() }}>
+          <SessionSwitcher />
+        </Store.Provider>,
+      );
+    });
+    act(() => openPalette());
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="Search workspace"]');
+    expect(document.activeElement).toBe(input);
+    expect(input?.getAttribute("role")).toBe("combobox");
+    const selected = input?.getAttribute("aria-activedescendant");
+    expect(document.getElementById(selected!)?.getAttribute("aria-selected")).toBe("true");
+    act(() => {
+      input!.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+      );
+    });
+    expect(input?.getAttribute("aria-activedescendant")).not.toBe(selected);
+    expect(document.activeElement).toBe(input);
+    for (const key of ["j", "k"]) {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      act(() => {
+        input!.dispatchEvent(event);
+      });
+      expect(event.defaultPrevented).toBe(false);
+    }
   });
 
   it("opens with Ctrl+K and runs Start guest / Replay / Theme", async () => {

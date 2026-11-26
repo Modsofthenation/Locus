@@ -462,6 +462,107 @@ describe("IntegrationsClient", () => {
     expect(grafana.output).toContain(title);
   });
 
+  it("shows reactions on messages from slack_history and slack_replies", async () => {
+    const message = (ts: string, text: string, reactions?: unknown) => ({
+      ts,
+      user: "U1",
+      text,
+      ...(reactions ? { reactions } : {}),
+    });
+    const client = new IntegrationsClient(async (url) => {
+      const href = String(url);
+      if (href.includes("conversations.history")) {
+        return Response.json({
+          ok: true,
+          messages: [
+            message("2.0", "plain"),
+            message("1.0", "shipping today", [
+              { name: "eyes", count: 2, users: ["U2", "U3"] },
+              { name: "shipit", count: 1, users: ["U2"] },
+            ]),
+          ],
+        });
+      }
+      if (href.includes("conversations.replies")) {
+        return Response.json({
+          ok: true,
+          messages: [
+            message("1.0", "parent"),
+            message("1.1", "done", [{ name: "tada", count: 3 }]),
+          ],
+        });
+      }
+      if (href.includes("users.info")) {
+        return Response.json({ ok: true, user: { id: "U1", name: "alice" } });
+      }
+      return Response.json({ ok: true });
+    });
+    const account = {
+      id: "s1",
+      kind: "slack" as const,
+      name: "Slack",
+      enabled: true,
+      baseUrl: "https://slack.com/api",
+      token: "xoxb-bot",
+      userToken: "xoxp-user",
+    };
+    const history = await client.call("slack_history", { channel: "C1" }, [account]);
+    expect(history.ok).toBe(true);
+    expect(history.output).toMatch(/1\.0 .+: shipping today {2}\[:eyes: 2, :shipit: 1\]/);
+    expect(history.output).toMatch(/2\.0 .+: plain$/m);
+    const replies = await client.call("slack_replies", { channel: "C1", thread_ts: "1.0" }, [
+      account,
+    ]);
+    expect(replies.ok).toBe(true);
+    expect(replies.output).toMatch(/1\.1 .+: done {2}\[:tada: 3\]/);
+  });
+
+  it("lists and looks up Slack emoji with slack_emojis", async () => {
+    const auths: string[] = [];
+    const client = new IntegrationsClient(async (url, init) => {
+      if (String(url).includes("emoji.list")) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        auths.push(headers?.Authorization ?? headers?.authorization ?? "");
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            emoji: {
+              shipit: "https://emoji.slack-edge.com/T1/shipit/a.png",
+              ship_it: "alias:shipit",
+              partyparrot: "https://emoji.slack-edge.com/T1/partyparrot/b.gif",
+            },
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      }
+      throw new Error(`unexpected ${String(url)}`);
+    });
+    const account = {
+      id: "s1",
+      kind: "slack" as const,
+      name: "Slack",
+      enabled: true,
+      baseUrl: "https://slack.com/api",
+      token: "xoxb-bot",
+      userToken: "xoxp-user",
+    };
+    const all = await client.call("slack_emojis", {}, [account]);
+    expect(all.ok).toBe(true);
+    expect(all.output).toContain(":partyparrot: https://emoji.slack-edge.com/T1/partyparrot/b.gif");
+    expect(all.output).toContain(":ship_it: https://emoji.slack-edge.com/T1/shipit/a.png");
+    const filtered = await client.call("slack_emojis", { query: "ship", limit: 1 }, [account]);
+    expect(filtered.output).toContain(":ship_it:");
+    expect(filtered.output).not.toContain("partyparrot");
+    expect(filtered.output).toContain("1 more");
+    const custom = await client.call("slack_emojis", { name: ":shipit:" }, [account]);
+    expect(custom.output).toBe(":shipit: custom https://emoji.slack-edge.com/T1/shipit/a.png");
+    const standard = await client.call("slack_emojis", { name: "tada" }, [account]);
+    expect(standard.output).toBe(":tada: standard 🎉");
+    const missing = await client.call("slack_emojis", { name: "nope" }, [account]);
+    expect(missing.ok).toBe(false);
+    expect(auths.every((auth) => auth === "Bearer xoxp-user")).toBe(true);
+  });
+
   it("posts Slack as the bot when as=bot and both tokens are present", async () => {
     const auths: string[] = [];
     const client = new IntegrationsClient(async (url, init) => {

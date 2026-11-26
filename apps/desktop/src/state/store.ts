@@ -55,6 +55,7 @@ import {
   isIdeSession,
   mergeSlackMessageRows,
 } from "@locus/shared";
+import type { InterfaceMode } from "@/lib/interfaceMode";
 import type { SettingsTab } from "@/lib/settingsNav";
 import { lastVisibleMessageId, startChatVisit, type ChatNewVisit } from "@/lib/chatNewMarker";
 import { mergeSession } from "./sessionMerge";
@@ -73,6 +74,7 @@ export type UiSection =
   | "project"
   | "ide"
   | "codebase"
+  | "reviews"
   | "brain"
   | "slack"
   | "grafana"
@@ -95,6 +97,7 @@ export const UI_SECTIONS: UiSection[] = [
   "project",
   "ide",
   "codebase",
+  "reviews",
   "brain",
   "slack",
   "grafana",
@@ -109,6 +112,7 @@ export function isSessionlessSection(section: UiSection): boolean {
     section === "board" ||
     section === "project" ||
     section === "codebase" ||
+    section === "reviews" ||
     section === "brain" ||
     section === "docker" ||
     section === "slack" ||
@@ -127,6 +131,7 @@ export function sectionQuery(state: Pick<UiState, "section" | "queries">): strin
 }
 
 export interface UiState {
+  interfaceMode: InterfaceMode;
   config: LocusConfig | null;
   sessions: AgentSession[];
   vms: VmInstance[];
@@ -174,6 +179,7 @@ export interface UiState {
   inboxOpen: boolean;
   /** Home's focused Needs-you row, shared by the sidebar list and the decision card. */
   inboxFocusKey: string | null;
+  inboxQuery: string;
   /** One-shot: IDE start screen should open this choice when it mounts. */
   ideStart: "open" | "clone" | null;
   queries: Partial<Record<UiSection, string>>;
@@ -247,6 +253,7 @@ export type WorkspaceOpen = {
 };
 
 export const initialState: UiState = {
+  interfaceMode: "lite",
   config: null,
   sessions: [],
   vms: [],
@@ -291,6 +298,7 @@ export const initialState: UiState = {
   section: "agents",
   inboxOpen: false,
   inboxFocusKey: null,
+  inboxQuery: "",
   ideStart: null,
   queries: {},
   collapsed: false,
@@ -350,6 +358,7 @@ export const initialState: UiState = {
 };
 
 export type Action =
+  | { type: "interfaceMode"; mode: InterfaceMode }
   | {
       type: "hydrate";
       config: LocusConfig;
@@ -493,7 +502,12 @@ export type Action =
   | { type: "gameShot"; sessionId: string; image: string | null }
   | { type: "productModeTransition"; transition: ProductModeTransition | null }
   | { type: "config"; config: LocusConfig }
-  | { type: "themeUpdated"; theme: LocusConfig["theme"]; customThemes: CustomTheme[] };
+  | {
+      type: "themeUpdated";
+      theme: LocusConfig["theme"];
+      customThemes: CustomTheme[];
+      themePreferences?: LocusConfig["themePreferences"] | null;
+    };
 
 /** Open Settings, optionally landing on a named tab (Git, Integrations, …). */
 export function openSettings(dispatch: Dispatch<Action>, tab?: SettingsTab): void {
@@ -1094,6 +1108,9 @@ function reduceUiState(state: UiState, action: Action): UiState {
       };
     }
     case "query": {
+      if (state.inboxOpen) {
+        return state.inboxQuery === action.query ? state : { ...state, inboxQuery: action.query };
+      }
       const current = state.queries[state.section] ?? "";
       if (current === action.query) return state;
       return { ...state, queries: { ...state.queries, [state.section]: action.query } };
@@ -1265,11 +1282,21 @@ function reduceUiState(state: UiState, action: Action): UiState {
       return state.config
         ? {
             ...state,
-            config: { ...state.config, theme: action.theme, customThemes: action.customThemes },
+            config: {
+              ...state.config,
+              theme: action.theme,
+              customThemes: action.customThemes,
+              themePreferences:
+                action.themePreferences === undefined
+                  ? state.config.themePreferences
+                  : (action.themePreferences ?? undefined),
+            },
           }
         : state;
     case "config":
       return { ...state, config: action.config };
+    case "interfaceMode":
+      return { ...state, interfaceMode: action.mode };
     case "productModeTransition":
       return { ...state, productModeTransition: action.transition };
     case "delta": {

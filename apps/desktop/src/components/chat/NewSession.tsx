@@ -191,7 +191,7 @@ export function NewSessionModal() {
     setNetDirty(false);
     setNetwork(policyForcedJail(state.config?.managedPolicy) ?? defaultNetworkJail());
     setNamedEnvId("");
-    setBranchLock(Boolean(state.newRepoId));
+    setBranchLock(false);
     void api
       .images()
       .then((rows) => {
@@ -535,10 +535,8 @@ export function NewSessionModal() {
               extraRepoIds={extraRepoIds}
               url={repo}
               onRepoId={(id) => {
-                const hadRepo = Boolean(repoId);
                 setRepoId(id);
                 if (!id) setBranchLock(false);
-                else if (!hadRepo) setBranchLock(true);
               }}
               onExtraRepoIds={setExtraRepoIds}
               onUrl={(next) => {

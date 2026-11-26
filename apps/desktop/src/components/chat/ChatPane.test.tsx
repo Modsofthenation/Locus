@@ -1002,6 +1002,75 @@ describe("ChatPane", () => {
     expect(Number.parseFloat(thumb.style.height)).toBeGreaterThan(0);
   });
 
+  it("shows one tick per prompt with a preview tooltip on hover", () => {
+    render({
+      ...initialState,
+      selectedId: session.id,
+      sessions: [
+        {
+          ...session,
+          status: "idle",
+          messages: [
+            { id: "u1", role: "user", content: "first ask", createdAt: "2020-01-01T00:00:00.000Z" },
+            {
+              id: "a1",
+              role: "assistant",
+              content: "first answer",
+              createdAt: "2020-01-01T00:00:01.000Z",
+            },
+            {
+              id: "u2",
+              role: "user",
+              content: "second ask",
+              createdAt: "2020-01-01T00:00:02.000Z",
+            },
+            {
+              id: "a2",
+              role: "assistant",
+              content: "second answer",
+              createdAt: "2020-01-01T00:00:03.000Z",
+            },
+          ],
+        },
+      ],
+      vms: [{ ...vm, status: "ready" }],
+    });
+    const pane = host.querySelector(".thread") as HTMLDivElement;
+    const rail = host.querySelector("[data-testid='chat-scroll-indicator']") as HTMLDivElement;
+    const track = rail.querySelector(".thread-scroll-track") as HTMLDivElement;
+    expect(rail.classList.contains("has-ticks")).toBe(true);
+    expect(host.querySelector("[data-testid='chat-scroll-thumb']")).toBeNull();
+    Object.defineProperty(pane, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(pane, "clientHeight", { configurable: true, value: 80 });
+    Object.defineProperty(pane, "scrollTop", { configurable: true, writable: true, value: 0 });
+    Object.defineProperty(track, "clientHeight", { configurable: true, value: 100 });
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      bottom: 100,
+      right: 6,
+      width: 6,
+      height: 100,
+      toJSON: () => ({}),
+    });
+    act(() => {
+      pane.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    const ticks = rail.querySelectorAll("[data-testid='chat-scroll-tick']");
+    expect(ticks).toHaveLength(2);
+    expect(ticks[0]!.classList.contains("is-active")).toBe(true);
+    act(() => {
+      rail.dispatchEvent(
+        new PointerEvent("pointermove", { bubbles: true, clientY: 56, pointerType: "mouse" }),
+      );
+    });
+    const tip = rail.querySelector("[data-testid='chat-scroll-tip']");
+    expect(tip?.textContent).toContain("second ask");
+    expect(tip?.textContent).toContain("second answer");
+  });
+
   it("jumps the thread when you click the position indicator", () => {
     render({
       ...initialState,

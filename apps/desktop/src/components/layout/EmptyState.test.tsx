@@ -19,8 +19,16 @@ import { NEW_AGENT_COPY } from "@/lib/launchCopy";
 import { Sidebar } from "./Sidebar";
 import { FINISH_SETUP_DISMISSED_KEY } from "@/components/settings/FinishSetupChecklist";
 import { api } from "@/lib/api";
-import { Store, initialState, reducer, type Action, type UiState } from "@/state/store";
+import {
+  Store,
+  initialState as appInitialState,
+  reducer,
+  type Action,
+  type UiState,
+} from "@/state/store";
 import { selectValue, setSelectValue } from "@/lib/selectControl";
+
+const initialState = { ...appInitialState, interfaceMode: "full" as const };
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -208,6 +216,22 @@ describe("EmptyState recipes", () => {
       root.render(node);
     });
   }
+
+  it("shows a prompt first in Lite and reveals workspace controls on demand", () => {
+    render(undefined, { interfaceMode: "lite" });
+    expect(host.querySelector("textarea")).not.toBeNull();
+    expect(host.querySelector(".composer-send")).not.toBeNull();
+    expect(host.querySelector(".launch-location")?.textContent).toBe("Host");
+    expect(host.querySelector("[data-testid='launch-workspace']")).toBeNull();
+
+    const options = host.querySelector<HTMLButtonElement>(".launch-footer button")!;
+    expect(options.getAttribute("aria-expanded")).toBe("false");
+    act(() => options.click());
+    expect(options.getAttribute("aria-expanded")).toBe("true");
+    expect(host.querySelector("[data-testid='launch-workspace']")).not.toBeNull();
+    act(() => options.click());
+    expect(host.querySelector("[data-testid='launch-workspace']")).toBeNull();
+  });
 
   it("creates from Send inside the composer, with matching heading and placeholder", () => {
     render();
@@ -976,8 +1000,9 @@ describe("EmptyState recipes", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+    expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({ repoId: "r1" }));
     expect(api.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ repoId: "r1", branchLock: true }),
+      expect.not.objectContaining({ branchLock: true }),
     );
 
     const more = [...host.querySelectorAll("button")].find(
@@ -987,11 +1012,11 @@ describe("EmptyState recipes", () => {
       more!.click();
     });
     const branchLock = host.querySelector('[aria-label="Branch lock"]') as HTMLButtonElement;
-    expect(branchLock.getAttribute("aria-checked")).toBe("true");
+    expect(branchLock.getAttribute("aria-checked")).toBe("false");
     act(() => {
       branchLock.click();
     });
-    expect(branchLock.getAttribute("aria-checked")).toBe("false");
+    expect(branchLock.getAttribute("aria-checked")).toBe("true");
     await pickComposerRepoBranch(host, "acme/app", "feat");
     vi.mocked(api.createSession).mockClear();
     await act(async () => {
@@ -1003,10 +1028,8 @@ describe("EmptyState recipes", () => {
       expect.objectContaining({
         repoId: "r1",
         repo: expect.objectContaining({ ref: "feat" }),
+        branchLock: true,
       }),
-    );
-    expect(api.createSession).toHaveBeenCalledWith(
-      expect.not.objectContaining({ branchLock: true }),
     );
 
     const advanced = [...host.querySelectorAll("button")].find(

@@ -1010,6 +1010,15 @@ describe("reducer", () => {
     ]);
   });
 
+  it("keeps Home search independent of the section it was opened from", () => {
+    let state = reducer(initialState, { type: "query", query: "existing agent" });
+    state = reducer(state, { type: "inbox", open: true });
+    expect(state.inboxQuery).toBe("");
+    state = reducer(state, { type: "query", query: "waiting approval" });
+    expect(state.inboxQuery).toBe("waiting approval");
+    expect(state.queries.agents).toBe("existing agent");
+  });
+
   it("keeps sidebar search queries per section", () => {
     let state = reducer(initialState, { type: "query", query: "agent-term" });
     expect(sectionQuery(state)).toBe("agent-term");

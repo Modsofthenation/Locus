@@ -1916,8 +1916,8 @@ export function SlackPane() {
             <EmptyHero
               pose="rest"
               size={76}
-              title="Sign in as yourself"
-              lead="Read Slack and reply as you, or as the Locus bot. Your token stays in Settings → Integrations."
+              title="Connect Slack"
+              lead="Read channels and reply to threads from Locus."
             />
             <div className="row-actions">
               <button
@@ -1986,8 +1986,8 @@ export function SlackPane() {
               <EmptyHero
                 pose="rest"
                 size={76}
-                title="Pick a channel"
-                lead="Unreads, starred, channels, and DMs land in the sidebar. Locus reads as you. Sends default to you; switch the composer to post as the Locus bot."
+                title="No conversations yet"
+                lead="Join a channel or start a direct message in Slack to see it here."
               />
             </div>
           </div>

@@ -389,8 +389,35 @@ export interface SlackMessage {
   /** Thread reply that Slack also posted to the channel ("Also sent to the channel"). */
   replyBroadcast?: boolean;
   agent?: boolean;
+  /** Posted by a Slack app or integration (`bot_id` / `bot_profile` / `bot_message`), not a person. */
+  bot?: boolean;
+  /** `metadata.event_type` the poster attached (see `LOCUS_REVIEWER_EVENT_TYPE`). */
+  eventType?: string;
   files?: SlackFile[];
   reactions?: SlackReaction[];
+}
+
+/** Slack message metadata (`chat.postMessage` `metadata`). */
+export interface SlackPostMetadata {
+  event_type: string;
+  event_payload: Record<string, string | number | boolean>;
+}
+
+/**
+ * Message metadata event type on every Slack reviewer post. Any Locus reading a thread skips posts
+ * carrying it, so two reviewers in one channel never take each other's status lines as commands,
+ * even when one posts as its user rather than as the app.
+ */
+export const LOCUS_REVIEWER_EVENT_TYPE = "locus_reviewer_post";
+
+export const LOCUS_REVIEWER_METADATA: SlackPostMetadata = {
+  event_type: LOCUS_REVIEWER_EVENT_TYPE,
+  event_payload: { v: 1 },
+};
+
+/** Whether a Slack message is a Slack reviewer's own post, from this Locus or another one. */
+export function isLocusReviewerPost(message: Pick<SlackMessage, "eventType">): boolean {
+  return message.eventType === LOCUS_REVIEWER_EVENT_TYPE;
 }
 
 export interface SlackFile {
@@ -553,6 +580,15 @@ export function slackMpimDisplayName(name: string): string {
   return people.length ? people.join(", ") : trimmed;
 }
 
+function slackMessageFromBot(value: Record<string, unknown>): boolean {
+  return (
+    value.bot === true ||
+    Boolean(str(value.bot_id)) ||
+    Boolean(value.bot_profile && typeof value.bot_profile === "object") ||
+    str(value.subtype) === "bot_message"
+  );
+}
+
 export function parseSlackMessage(raw: unknown, channelId?: string): SlackMessage | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const value = raw as Record<string, unknown>;
@@ -565,6 +601,11 @@ export function parseSlackMessage(raw: unknown, channelId?: string): SlackMessag
     value.replyBroadcast === true ||
     value.reply_broadcast === true ||
     str(value.subtype) === "thread_broadcast";
+  const metadata =
+    value.metadata && typeof value.metadata === "object"
+      ? (value.metadata as Record<string, unknown>)
+      : undefined;
+  const eventType = str(value.eventType) || str(metadata?.event_type);
   return {
     ts,
     channelId: channel,
@@ -582,6 +623,8 @@ export function parseSlackMessage(raw: unknown, channelId?: string): SlackMessag
     subtype: str(value.subtype),
     ...(replyBroadcast ? { replyBroadcast: true } : {}),
     agent: value.agent === true,
+    ...(slackMessageFromBot(value) ? { bot: true } : {}),
+    ...(eventType ? { eventType } : {}),
     files,
     reactions: parseSlackReactions(value.reactions),
   };

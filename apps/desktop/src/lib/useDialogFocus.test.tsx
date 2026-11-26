@@ -79,4 +79,85 @@ describe("useDialogFocus", () => {
     });
     expect(document.activeElement).toBe(opener);
   });
+
+  it("keeps focus on rerender and lets Escape close one dialog at a time", async () => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+
+    function Inner({ close }: { close: () => void }) {
+      const ref = useRef<HTMLDivElement>(null);
+      useDialogFocus(true, close, ref);
+      return (
+        <div ref={ref} role="dialog">
+          <button type="button" hidden>
+            Hidden
+          </button>
+          <button type="button">Inner action</button>
+        </div>
+      );
+    }
+
+    function Shell() {
+      const ref = useRef<HTMLDivElement>(null);
+      const [outer, setOuter] = useState(false);
+      const [inner, setInner] = useState(false);
+      const [text, setText] = useState("");
+      useDialogFocus(outer, () => setOuter(false), ref);
+      return (
+        <>
+          <button type="button" onClick={() => setOuter(true)}>
+            Open
+          </button>
+          {outer && (
+            <div ref={ref} role="dialog">
+              <details>
+                <summary>Options</summary>
+                <button type="button">Collapsed action</button>
+              </details>
+              <button type="button" onClick={() => setText("Updated")}>
+                Update
+              </button>
+              <button type="button" onClick={() => setInner(true)}>
+                Open inner
+              </button>
+              <span>{text}</span>
+              {inner && <Inner close={() => setInner(false)} />}
+            </div>
+          )}
+        </>
+      );
+    }
+
+    function press(key: string) {
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+      );
+    }
+    async function activate(label: string) {
+      const button = [...host.querySelectorAll("button")].find(
+        (node) => node.textContent === label,
+      )!;
+      await act(async () => {
+        button.focus();
+        button.click();
+      });
+    }
+
+    await act(async () => root.render(<Shell />));
+    await activate("Open");
+    expect(document.activeElement?.textContent).toBe("Options");
+    act(() => press("Tab"));
+    expect(document.activeElement?.textContent).toBe("Update");
+    await activate("Update");
+    expect(document.activeElement?.textContent).toBe("Update");
+    await activate("Open inner");
+    expect(document.activeElement?.textContent).toBe("Inner action");
+    act(() => press("Escape"));
+    expect(host.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(document.activeElement?.textContent).toBe("Open inner");
+    act(() => press("Escape"));
+    expect(host.querySelectorAll('[role="dialog"]')).toHaveLength(0);
+    expect(document.activeElement?.textContent).toBe("Open");
+  });
 });

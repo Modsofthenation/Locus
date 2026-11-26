@@ -12,25 +12,26 @@ import {
 describe("settingsNav", () => {
   it("keeps the grouped labels used in the sidebar", () => {
     expect(SETTINGS_NAV_GROUPS.map((group) => group.label)).toEqual([
-      "Models",
-      "Workspace",
+      "Preferences",
+      "Agent setup",
+      "Runtimes",
+      "Connections",
       "System",
     ]);
     expect(SETTINGS_NAV_GROUPS.flatMap((group) => group.items.map(settingsNavLabel))).toEqual([
+      "Appearance",
+      "Notifications",
       "Providers",
       "MCP",
       "Skills",
-      "Benchmark",
       "Machines",
       "Workers",
       "Environments",
       "Git",
       "Integrations",
-      "Reviewers",
-      "Appearance",
-      "Notifications",
-      "Phone",
       "Chrome",
+      "Phone",
+      "Benchmark",
       "Advanced",
       "About",
     ]);
@@ -80,20 +81,19 @@ describe("settingsNav", () => {
 
   it("lists tabs in sidebar order", () => {
     expect(settingsNavTabs()).toEqual([
+      "appearance",
+      "notifications",
       "providers",
       "mcp",
       "skills",
-      "benchmark",
       "machines",
       "workers",
       "environments",
       "git",
       "integrations",
-      "reviewers",
-      "appearance",
-      "notifications",
-      "phone",
       "chrome",
+      "phone",
+      "benchmark",
       "advanced",
       "about",
     ]);
@@ -187,20 +187,20 @@ describe("settingsNav", () => {
     expect(settingsSearchHits(config, "")).toEqual([]);
   });
 
-  it("counts and finds Slack PR reviewers", () => {
-    const config = {
-      providers: [],
-      templates: [],
-      forges: [],
-      slackReviewers: [{ id: "r1", name: "API reviews" }],
-    } as unknown as Parameters<typeof settingsSearchHits>[0];
-    expect(settingsNavCount("reviewers", config)).toBe(1);
-    expect(settingsNavCount("reviewers", { ...config!, slackReviewers: [] })).toBeUndefined();
-    expect(settingsSearchHits(config, "api rev")).toContainEqual({
-      tab: "reviewers",
-      id: "r1",
-      label: "API reviews",
-    });
-    expect(settingsSearchHits(config, "reviewers")[0]).toMatchObject({ tab: "reviewers" });
+  it("finds settings using common task language", () => {
+    expect(settingsSearchHits(null, "virtual machine")).toEqual([
+      { tab: "machines", label: "Machines" },
+    ]);
+    expect(settingsSearchHits(null, "browser extension")).toEqual([
+      { tab: "chrome", label: "Chrome" },
+    ]);
+    expect(settingsSearchHits(null, "quiet hours")).toEqual([
+      { tab: "notifications", label: "Notifications" },
+    ]);
+    expect(settingsSearchHits(null, "virtual machine", "swarm")).toEqual([]);
+  });
+
+  it("keeps reviewer configuration out of Settings search", () => {
+    expect(settingsSearchHits(null, "reviewers")).toEqual([]);
   });
 });

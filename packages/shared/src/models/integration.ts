@@ -272,6 +272,7 @@ export const INTEGRATION_TOOL_NAMES = [
   "slack_channels",
   "slack_history",
   "slack_replies",
+  "slack_emojis",
   "grafana_search",
   "grafana_get",
   "grafana_query",

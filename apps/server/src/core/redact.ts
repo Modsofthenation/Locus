@@ -142,6 +142,7 @@ export function mergeSecrets(current: LocusConfig, incoming: LocusConfig): Locus
   return {
     ...incoming,
     customThemes,
+    themePreferences: incoming.themePreferences ?? current.themePreferences,
     theme: resolveThemeRef(incoming.theme ?? current.theme, customThemes),
     hardwareProfiles: incoming.hardwareProfiles ?? current.hardwareProfiles ?? [],
     providers: incoming.providers.map((p) => {

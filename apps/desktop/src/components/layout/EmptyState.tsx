@@ -181,7 +181,17 @@ export function EmptyState() {
     !engineBlocked &&
     (hostChat ||
       (effectiveRuntime === "docker" ? Boolean(launchDockerImage) : available.length > 0));
-  const showRuntimeChrome = !hubMode || showAdvanced;
+  const lite = !hubMode && state.interfaceMode === "lite";
+  const showRuntimeChrome = hubMode ? showAdvanced : !lite || showOptions;
+  const launchLocation = [
+    pickedWorker?.name,
+    effectiveRuntime === "vm" ? "Virtual machine" : hostChat ? "Host" : "Docker",
+    workspace.kind === "environment" && workspace.env.runtime === effectiveRuntime
+      ? workspace.env.name
+      : launchHostDir,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const workerHint = backendId ? workerPlacementHint(pickedWorker, effectiveRuntime) : "";
   const hasProvider =
     setup?.hasProvider ?? Boolean(state.config?.providers.some((row) => row.enabled));
@@ -346,10 +356,8 @@ export function EmptyState() {
   function setSelectedRepos(ids: string[], refs?: Record<string, string>) {
     repoPickTouched.current = true;
     const next = [...new Set(ids.filter(Boolean))];
-    const hadRepos = repoIds.length > 0;
     setRepoIds(next);
     if (next.length === 0) setBranchLock(false);
-    else if (!hadRepos) setBranchLock(true);
     const source = refs ?? repoRefs;
     const kept: Record<string, string> = {};
     for (const id of next) {
@@ -486,6 +494,7 @@ export function EmptyState() {
     state.config &&
     !hasForge &&
     state.repos.length === 0 &&
+    (!lite || showOptions) &&
     !checklistOpen &&
     !showEngineCallout &&
     !setupHintDismissed,
@@ -951,10 +960,14 @@ export function EmptyState() {
           ) : null}
 
           <div className="empty-actions launch-footer">
+            {lite && !showOptions ? (
+              <span className="hint launch-location">{launchLocation}</span>
+            ) : null}
             <button
               className="btn ghost"
               type="button"
-              disabled={engineBlocked}
+              disabled={!lite && engineBlocked}
+              aria-expanded={showOptions}
               onClick={() => setShowOptions((open) => !open)}
             >
               {showOptions ? "Hide options" : NEW_AGENT_COPY.moreOptions}

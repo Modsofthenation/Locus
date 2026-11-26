@@ -13,28 +13,45 @@ import {
   IconHash,
   IconPalette,
   IconRepo,
+  IconReview,
   IconStack,
 } from "../Icons";
 import type { UiSection } from "@/state/store";
 
-export type SectionMeta = { label: string; railLabel?: string; icon: ReactNode };
+export type SectionMeta = { label: string; description: string; icon: ReactNode };
 
 export const SECTION_META: Record<Exclude<UiSection, "settings">, SectionMeta> = {
-  agents: { label: "Agents", icon: <IconAgents /> },
-  design: { label: "Design", icon: <IconPalette /> },
-  games: { label: "Games", icon: <IconGamepad /> },
-  assets: { label: "Assets", icon: <IconCube /> },
-  android: { label: "Android", icon: <IconFrame /> },
-  ide: { label: "IDE", icon: <IconFolder /> },
-  board: { label: "Board", icon: <IconFrame /> },
-  project: { label: "Projects", icon: <IconStack /> },
-  codebase: { label: "Codebase", icon: <IconRepo /> },
-  brain: { label: "Brain", icon: <IconBrain /> },
-  slack: { label: "Slack", icon: <IconHash /> },
-  grafana: { label: "Grafana", icon: <IconGrafana /> },
-  docker: { label: "Docker", icon: <IconContainer /> },
-  // "Jobs" fits the 72px icon column; the pane, search, and More menu stay Automations.
-  automations: { label: "Jobs", railLabel: "Jobs", icon: <IconClock /> },
+  agents: { label: "Agents", description: "Start and resume agent chats", icon: <IconAgents /> },
+  design: { label: "Design", description: "Prototype interfaces", icon: <IconPalette /> },
+  games: { label: "Games", description: "Build and playtest games", icon: <IconGamepad /> },
+  assets: { label: "Assets", description: "Create art and 3D models", icon: <IconCube /> },
+  android: { label: "Android", description: "Build and test apps", icon: <IconFrame /> },
+  ide: { label: "IDE", description: "Edit files in a workspace", icon: <IconFolder /> },
+  board: { label: "Board", description: "Map ideas and tasks", icon: <IconFrame /> },
+  project: { label: "Projects", description: "Coordinate a group of agents", icon: <IconStack /> },
+  codebase: {
+    label: "Codebase",
+    description: "Browse repos, pull requests, and issues",
+    icon: <IconRepo />,
+  },
+  reviews: {
+    label: "Reviews",
+    description: "Track reviews and manage Slack reviewers",
+    icon: <IconReview />,
+  },
+  brain: { label: "Brain", description: "Explore shared agent knowledge", icon: <IconBrain /> },
+  slack: { label: "Slack", description: "Read messages and threads", icon: <IconHash /> },
+  grafana: { label: "Grafana", description: "Explore logs and dashboards", icon: <IconGrafana /> },
+  docker: {
+    label: "Docker",
+    description: "Manage local containers and services",
+    icon: <IconContainer />,
+  },
+  automations: {
+    label: "Jobs",
+    description: "Run agents on a schedule or trigger",
+    icon: <IconClock />,
+  },
 };
 
 export function sectionMetaFor(
@@ -43,9 +60,17 @@ export function sectionMetaFor(
   if (mode !== "swarm") return SECTION_META;
   return {
     ...SECTION_META,
-    agents: { label: "Teammates", icon: <IconAgents /> },
-    project: { label: "Teams", icon: <IconStack /> },
-    automations: { label: "Routines", icon: <IconClock /> },
+    agents: {
+      label: "Teammates",
+      description: "Start and resume teammate chats",
+      icon: <IconAgents />,
+    },
+    project: { label: "Teams", description: "Work with groups of teammates", icon: <IconStack /> },
+    automations: {
+      label: "Routines",
+      description: "Run teammates on a schedule or trigger",
+      icon: <IconClock />,
+    },
   };
 }
 
@@ -65,6 +90,7 @@ export function sectionSearchPlaceholder(
   if (section === "automations") {
     return mode === "swarm" ? "Search routines" : "Search jobs";
   }
+  if (section === "android") return "Search Android projects";
   if (section === "board") return "Search boards";
   if (section === "project") {
     return mode === "swarm" ? "Search teams" : "Search projects";
@@ -74,7 +100,6 @@ export function sectionSearchPlaceholder(
   if (section === "assets") return "Search assets";
   if (section === "ide") return "Search workspaces";
   if (section === "codebase") return "Search repos";
-  if (section === "brain") return "Search claims";
   if (section === "slack") return "Search channels";
   if (section === "grafana") return "Search queries and dashboards";
   return mode === "swarm" ? "Search teammates" : "Search agents";

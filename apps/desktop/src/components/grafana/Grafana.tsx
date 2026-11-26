@@ -368,8 +368,8 @@ export function GrafanaPane() {
           <div className="empty-card">
             <EmptyHero
               pose="rest"
-              title="Grafana explorer"
-              lead="Open Grafana dashboards, query Elasticsearch logs, trace stack frames into linked repos, and start an Ops loop agent."
+              title="Connect Grafana"
+              lead="Open dashboards and investigate errors in your logs."
             />
             {/* Wide windows already show Add Grafana as the sidebar's primary button. */}
             <div className="empty-actions narrow-only">

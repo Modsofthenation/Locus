@@ -31,7 +31,7 @@ By default (`cloneRepo: true`) a reviewer doesn't judge the change from the diff
 - **If the clone fails** (no Contents permission, an unusual forge URL, a timeout after 3 minutes), the review falls back to the diff and the usage line says `diff only, clone failed: …`. A failed clone never fails the review.
 - **Cost.** Every lookup round sends the conversation so far again, so a checkout review costs several times a diff-only one. The usage line counts lookups (`· 14 lookups in the repo`), the started line ends `, with the repo checked out to check callers and tests` (the `{checkout}` placeholder), and the forge review footer says so too. A review with the checkout gets 10 minutes.
 
-Turn it off with `cloneRepo: false` (Settings → Reviewers → **Clone the repo and check around the diff**). The reviewer then makes the single tool-less completion described under [Token budget](#token-budget).
+Turn it off with `cloneRepo: false` (Reviews → Reviewers → **Clone the repo and check around the diff**). The reviewer then makes the single tool-less completion described under [Token budget](#token-budget).
 
 ### Clean-up
 
@@ -81,7 +81,7 @@ It is read once the model call finishes, cached for a minute, and dropped if it 
 
 ## Reviews without a Slack post
 
-With `autoReview` on (off by default, Settings → Reviewers → **Review new PRs nobody posted**), a reviewer doesn't wait for someone to post a link. Every 5 minutes it lists the open PRs of the repos in `repos` (`ForgeClient.listPulls`, one call per repo) and reviews each PR that was opened, or marked ready for review, since it started watching:
+With `autoReview` on (off by default, Reviews → Reviewers → **Review new PRs nobody posted**), a reviewer doesn't wait for someone to post a link. Every 5 minutes it lists the open PRs of the repos in `repos` (`ForgeClient.listPulls`, one call per repo) and reviews each PR that was opened, or marked ready for review, since it started watching:
 
 ```
 Locus   🔎 New PR acme/api#12 by alice: Add token refresh
@@ -98,7 +98,7 @@ Locus   🔎 New PR acme/api#12 by alice: Add token refresh
 
 ## Review on request from the PR
 
-With `reviewOnPrComment` on (off by default, Settings → Reviewers → **Review when asked on the PR**), a PR comment that starts with `@locus review`, `locus review`, `@locus re-review` or `@locus rereview` (any case) asks for a review. Only these forms count, so other bots' `/review` commands don't trigger it.
+With `reviewOnPrComment` on (off by default, Reviews → Reviewers → **Review when asked on the PR**), a PR comment that starts with `@locus review`, `locus review`, `@locus re-review` or `@locus rereview` (any case) asks for a review. Only these forms count, so other bots' `/review` commands don't trigger it.
 
 - **A PR with a watched thread** gets "💬 bob asked for a review on the PR." in that thread and a follow-up review, as if someone had replied **re-review** there: earlier findings, only the new commits, and "no new commits since `abc1234`" with no model call if nothing was pushed. Its comments are read when the thread's PR state is checked (every 10 minutes), and on every auto-review poll.
 - **A PR without one** is only noticed while `autoReview` polls its repo: a PR whose `updatedAt` moved since the last poll has its comments read (at most 10 PRs per poll). The reviewer posts "🔎 bob asked for a review of acme/api#12 on the PR" to its channel and reviews in that thread. Without `autoReview`, only PRs with a watched thread are checked.
@@ -107,7 +107,7 @@ With `reviewOnPrComment` on (off by default, Settings → Reviewers → **Review
 
 ## Review when tagged in a thread
 
-With `reviewOnMention` on (the default, Settings → Reviewers → **Review when tagged in a thread**), tagging the identity the reviewer posts as in a thread of its channel that it isn't watching reviews a PR there. It is for links that were never posted top-level: a PR shared as a thread reply, a thread from before the reviewer existed, or one whose watch ran out.
+With `reviewOnMention` on (the default, Reviews → Reviewers → **Review when tagged in a thread**), tagging the identity the reviewer posts as in a thread of its channel that it isn't watching reviews a PR there. It is for links that were never posted top-level: a PR shared as a thread reply, a thread from before the reviewer existed, or one whose watch ran out.
 
 ```
 alice   release checklist for 2.4
@@ -124,7 +124,7 @@ alice   release checklist for 2.4
 
 ## Review context
 
-Besides the diff (and the clone), each review gets context that is cheap to fetch and saves the model guessing. Each piece can be turned off under Settings → Reviewers → **Review context**.
+Besides the diff (and the clone), each review gets context that is cheap to fetch and saves the model guessing. Each piece can be turned off under Reviews → Reviewers → **Review context**.
 
 - **Repo guidelines** (`repoGuidelines`). Up to three of `AGENTS.md`, `CLAUDE.md`, `REVIEW.md`, `.github/copilot-instructions.md`, `CONTRIBUTING.md` and `.github/CONTRIBUTING.md`, read from the **base** branch through the forge API (6,000 characters each, 12,000 in total). A PR that edits these files can't change the rules it is held to. When the forge can't read files (Azure DevOps), they come from the clone instead, skipping any file the PR changes. They are fenced as data: they can shape the findings, not the output format or the verdict.
 - **CI status** (`ciContext`). One line: how many checks ran at the head commit, which are failing and which are still running. The model is told not to repeat a failure CI already shows, but to point at the change that likely causes it. In verdict mode, `holdApprovalOnFailingCi` (on by default) stops a clean review from approving while a check is failing: it posts a COMMENT review instead and the reply starts "Not approving while CI is failing (unit)."
@@ -135,7 +135,7 @@ Besides the diff (and the clone), each review gets context that is cheap to fetc
 
 ## Double-checking serious findings
 
-One review pass makes false positives, and in verdict mode a false `major` becomes REQUEST_CHANGES. So before posting, a reviewer double-checks its blocker and major findings (`verifyFindings`, on by default; Settings → Reviewers → Behaviour → **Double-check blocker and major findings before posting**):
+One review pass makes false positives, and in verdict mode a false `major` becomes REQUEST_CHANGES. So before posting, a reviewer double-checks its blocker and major findings (`verifyFindings`, on by default; Reviews → Reviewers → Execution and verification → **Double-check blocker and major findings before posting**):
 
 1. After the findings are parsed and filtered (`minSeverity`, `maxComments`, dismissals), the blocker and major ones (at most 10) go to one more completion: no tools, a small output cap (300 tokens plus 150 per finding, at most 2,000).
 2. Each finding comes with its claim, its `path:line`, and the code around it: ±40 lines of the file at the PR head, read from the clone before it is deleted, or the diff hunk when there is no clone (or the file is over 512 KB). Claims and code are fenced as untrusted data, and the model is told to only judge them.
@@ -149,7 +149,7 @@ The usage line says what happened: `· verified 3, dropped 1` (or `downgraded 1`
 **Why on by default.** It costs one small call, and only on reviews that have a blocker or major finding, while a false one costs a REQUEST_CHANGES in verdict mode and a misleading "major" in comment mode. Turn it off with `verifyFindings: false`. Reviews with no blocker or major finding never make the extra call.
 ## Opting out and scoping
 
-Settings → Reviewers → Behaviour. All of these are checked before the model, so a skipped PR costs nothing.
+Reviews → Reviewers → Triggers and filters. All of these are checked before the model, so a skipped PR costs nothing.
 
 - **Opt-out labels** (`skipLabels`, default `no-review` and `skip-review`). A PR carrying one of these labels (any case) gets the `skipped` reply ("Skipped acme/api#7: it has the `no-review` label") and no review. `[skip review]`, `[no review]`, `[skip-review]` or `[no-review]` anywhere in the PR title does the same, even with the list empty. Nothing is recorded for the commit, so once the label or marker is gone, posting the link again (or "re-review" in the thread) reviews it. Labels come from the forge's PR API: GitHub, Gitea, Forgejo, GitLab and Azure DevOps (active labels). Bitbucket Cloud PRs have no labels, so only the title marker works there. Settings → Try it (dry run) ignores opt-outs, like drafts.
 - **Base branches** (`baseBranches`, globs, empty = any). A PR into any other branch is ignored silently, like a repo outside `repos`: no reply in Slack, only a skipped row in Recent reviews. `*` stays within one `/` segment (`release/*` matches `release/1.2`, not `release/1.2/hotfix`); `**` crosses segments. Matching ignores case.
@@ -158,7 +158,7 @@ Settings → Reviewers → Behaviour. All of these are checked before the model,
 
 ## Instructions per path
 
-`pathPrompts` (Settings → Reviewers → Behaviour → **Instructions per path**) holds up to 20 `{ glob, prompt }` rows, each prompt up to 2,000 characters. When a PR changes a file that matches a glob, that row's text goes with the review as:
+`pathPrompts` (Reviews → Reviewers → Triggers and filters → **Instructions per path**) holds up to 20 `{ glob, prompt }` rows, each prompt up to 2,000 characters. When a PR changes a file that matches a glob, that row's text goes with the review as:
 
 ```
 Extra instructions for files matching `migrations/**`: Check every migration can run on a live table without a long lock.
@@ -181,7 +181,7 @@ Once the author has pushed fixes, they reply in the reviewer's thread with **re-
 
 **Only the new commits** (`incrementalRereview`, on by default). On a follow-up, the reviewer asks the forge what changed between the last commit it reviewed and the new head, and sends only that diff with the earlier findings, instead of the whole PR again. Inline comments can still go on any line the PR's diff shows. After a force-push or rebase (the old commit is no longer an ancestor), and on forges that can't compare commits (Gitea, Forgejo, Azure DevOps), it sends the whole PR as before. GitHub, GitLab and Bitbucket can. If only generated or lockfile files changed since the last review, it skips with a reply saying so.
 
-**Full re-review.** Reply **full re-review** or **force re-review** in a watched Slack review thread. This runs with or without new commits and uses the full PR diff within the reviewer's usual file filters and budgets. Slack requester rules and **Re-review when asked in the thread** still apply. In Settings → Reviewers → **Try it**, turn off **Dry run** and enable **Force full re-review** to run the same mode and use the reviewer's configured PR posting behavior. A dry run already uses the full PR diff and shows the findings in Settings.
+**Full re-review.** Reply **full re-review** or **force re-review** in a watched Slack review thread. This runs with or without new commits and uses the full PR diff within the reviewer's usual file filters and budgets. Slack requester rules and **Re-review when asked in the thread** still apply. In Reviews → Reviewers → **Try it**, turn off **Dry run** and enable **Force full re-review** to run the same mode and use the reviewer's configured PR posting behavior. A dry run already uses the full PR diff and shows the findings on the reviewer card.
 
 **Fixed findings are resolved on the PR** (`resolveFixedThreads`, on by default). When a follow-up marks an earlier finding `resolved`, the reviewer resolves that finding's inline comment thread on the PR, so what's still open is easy to see. Only its own threads are touched. GitHub and GitLab; Bitbucket has no resolvable threads.
 
@@ -195,11 +195,11 @@ Threads are checked about once a minute, one `conversations.replies` call per wa
 
 **Socket Mode events (optional).** If the Slack app subscribes to the `message.channels` (and `message.groups` for private channels) bot events and the bot is in the channel, Locus hears about new posts and replies as they happen. The reviewer then reads that channel or thread straight away, and polling drops to a fallback sweep: channels every 5 minutes, threads every 10. Without those events nothing changes. See [slack.md](slack.md).
 
-Turn this off with `rereviewOnThreadReply: false` (Settings → Reviewers → **Re-review when asked in the thread**).
+Turn this off with `rereviewOnThreadReply: false` (Reviews → Reviewers → **Re-review when asked in the thread**).
 
 ## Polling intervals
 
-Settings → Reviewers → **Polling** (below the reviewer cards, config `slackReviewerPolling`) sets how often every reviewer reads Slack and the forge. It applies while Socket Mode isn't delivering message events; with events arriving, reads follow the events and the 5- and 10-minute fallback sweeps above stay as they are. `autoReview` always polls, so it follows these settings either way.
+Reviews → Diagnostics → **Polling** (config `slackReviewerPolling`) sets how often every reviewer reads Slack and the forge. It applies while Socket Mode isn't delivering message events; with events arriving, reads follow the events and the 5- and 10-minute fallback sweeps above stay as they are. `autoReview` always polls, so it follows these settings either way.
 
 | Field | Default | Range | What |
 | --- | --- | --- | --- |
@@ -224,16 +224,18 @@ The earlier findings go in the user message, not the system prompt, so the cache
 
 The final reply lists the findings by number, and the review on the PR uses the same numbers. People can answer in the thread:
 
-- **Dismiss a finding** (`dismissInThread`, on by default). "won't fix #2", "#1 and #3 are false positives", "#2 is by design", "dismiss all". Matched with a regex, no model call. The reviewer replies with the `dismissed` template, and later reviews of that PR never raise those findings again: they are left out of the follow-up's earlier findings, the model is told about them, and a new finding on the same line with the same severity, or with the same opening words, is dropped. At most 50 per PR. A number the last review didn't have gets a short reply saying how many findings there were.
+- **Dismiss a finding** (`dismissInThread`, on by default). "won't fix #2", "#1 and #3 are false positives", "#2 is by design", "dismiss #2", "dismiss all". Past-tense "dismissed", links (`acme/api#12`), inline code and ranges like "#1–#3" don't count. Matched with a regex, no model call. The reviewer replies with the `dismissed` template, and later reviews of that PR never raise those findings again: they are left out of the follow-up's earlier findings, the model is told about them, and a new finding on the same line with the same severity, or with the same opening words, is dropped. At most 50 per PR. A number the last review didn't have gets a short reply saying how many findings there were.
 - **Dismiss on the PR** (`dismissOnPr`, on by default). "won't fix #2" in a PR comment, or a reply with a dismiss word ("won't fix", "false positive", "by design") to one of the reviewer's inline comments, dismisses that finding the same way, and the Slack thread gets the `dismissed` reply with "(from the PR)". PR comments are read when a review starts and every 10 minutes while the thread is watched. Only comments posted after the last check count, and the reviewer's own never do.
 - **Dismissals follow the code.** A dismissed finding remembers the code on its line. A later finding in the same file is dropped when it sits on the same code (even after edits above moved the line), on the same line with the same severity, starts with the same words, or says much the same thing within a few lines.
-- **Learn from dismissals** (`learnFromDismissals`, on by default). Each dismissal is also kept for the whole repo with its reason (false positive, by design or won't fix; at most 40 per repo). The 15 most recent, those on files the PR touches first, go with every later review of a PR in that repo, fenced, as the team's conventions. Settings → Reviewers → **Remembered dismissals** lists them per repo with **Forget** and **Forget all**, and **Propose as REVIEW.md** (see [Promote dismissals into REVIEW.md](#promote-dismissals-into-reviewmd)).
+- **Learn from dismissals** (`learnFromDismissals`, on by default). Each dismissal is also kept for the whole repo with its reason (false positive, by design or won't fix; at most 40 per repo). The 15 most recent, those on files the PR touches first, go with every later review of a PR in that repo, fenced, as the team's conventions. Reviews → Reviewers → **Remembered dismissals** lists them per repo with **Forget** and **Forget all**, and **Propose as REVIEW.md** (see [Promote dismissals into REVIEW.md](#promote-dismissals-into-reviewmd)).
 - **Ask a question** (`answerQuestions`, off by default). @-mention the identity the reviewer posts as (the Locus bot, or you with `postAs: "user"`) in the thread: "@Locus why is #1 a major?". It answers in the thread with one small completion (600 output tokens, no tools) over its last findings and the PR diff (at most 24,000 characters). The question is fenced as untrusted Slack text, and the model is told it can only explain: changing the verdict is done with "re-review" or "won't fix #n". At most 10 answers per thread. Answers count toward the daily budget and show in Recent reviews as **Answered a question**.
+- **Stop watching.** "stop watching this thread", "unwatch" or "stop reviewing this PR" (from someone allowed to ask) drops the thread at once: no more re-reviews, dismissals or answers there, and the reviewer says so. "@Locus stop watching" stops only the reviewer that identity belongs to; a reply that mentions someone else is ignored. Posting the PR again, or a mention asking for a review, starts watching again.
+- **Several reviewers in one channel.** Every reviewer post carries Slack message metadata (`event_type: locus_reviewer_post`), and threads are read with that metadata. Replies with it, and replies from any Slack app or bot (`bot_id`), never count as dismissals, re-review requests or questions, so two people's reviewers in one channel don't act on each other's "Dismissed #1" lines. If Slack refuses the metadata on a post, the post goes out without it. Each reviewer only knows its own findings, so "won't fix #1" dismisses #1 of every reviewer watching that thread.
 - **Votes.** 👍 and 👎 on the final reply are counted each time the thread is checked. Recent reviews shows them per run, and each reviewer's card shows its totals, so you can tell whether a prompt or severity floor change helped. Votes are kept for the last 500 final replies per reviewer.
 
 ### Promote dismissals into REVIEW.md
 
-Remembered dismissals live only in Locus. **Propose as REVIEW.md** on a repo in Settings → Reviewers → Remembered dismissals (`POST /api/slack/reviewers/:id/notes/propose`) writes them into the repo, where people and other tools see them too. With the forge account it:
+Remembered dismissals live only in Locus. **Propose as REVIEW.md** on a repo in Reviews → Reviewers → Remembered dismissals (`POST /api/slack/reviewers/:id/notes/propose`) writes them into the repo, where people and other tools see them too. With the forge account it:
 
 1. reads `REVIEW.md` on the default branch, if there is one
 2. appends a `## Conventions learned from review dismissals` section with one bullet per note, built from the note's path, reason and the first sentence of the finding, with no model call: ``- `src/http/retry.ts`: don't raise "Name the retry limit" again. The team accepted it (acme/api#482).`` If the file already has that section, new bullets are added to it, sorted and once each, so proposing again with the same notes changes nothing (and is refused as "already has these conventions").
@@ -241,13 +243,13 @@ Remembered dismissals live only in Locus. **Propose as REVIEW.md** on a repo in 
 
 Settings links the PR. The notes are not forgotten automatically. The reviewer reads `REVIEW.md` from the base branch as [repo guidelines](#review-context), so once the PR merges use **Forget all** for that repo, or the same notes go with each review twice. `REVIEW.md` comes third, after `AGENTS.md` and `CLAUDE.md`, so it is sent unless those two already use the 12,000-character guidelines budget. GitHub and GitLab only: on Bitbucket, Azure DevOps, Gitea and Forgejo the button is disabled and the endpoint answers "not supported on this forge". The forge token needs write access to the repo's contents and pull requests.
 
-The final reply starts with an @-mention of the PR author (`mentionAuthor`, on by default) when `authorSlackIds` maps their Git login to a Slack member ID. Settings → Reviewers → **PR authors in Slack** takes one `login = U0123ABCD` per line.
+The final reply starts with an @-mention of the PR author (`mentionAuthor`, on by default) when `authorSlackIds` maps their Git login to a Slack member ID. Reviews → Reviewers → **PR authors in Slack** takes one `login = U0123ABCD` per line.
 
 ## Accuracy
 
 Each reviewer keeps a compact ledger in the state file: one bucket per UTC day for the last 90 days, holding counts only. Reviews, failures and answers; findings posted by severity; dismissals by reason (false positive, by design, won't fix) and severity; earlier findings a follow-up found resolved; findings the double-check rejected or downgraded; 👍 / 👎 changes on final replies; tokens and estimated cost. Dry runs aren't counted. Dismissals, resolutions and votes count on the day they happen.
 
-Settings → Reviewers shows an **Accuracy** section on each reviewer card for the last 30 days:
+Reviews → Reviewers shows an **Accuracy** section on each reviewer card for the last 30 days:
 
 - findings posted, and how many were double-checked and dropped or downgraded
 - **precision per severity**: 1 − false-positive dismissals ÷ findings posted. It's an upper bound: a wrong finding nobody dismissed still counts as right. "By design" and "won't fix" don't count against it.
@@ -259,13 +261,15 @@ The derivation is `summarizeSlackReviewStats` in `packages/shared/src/models/sla
 
 ## Live logs
 
-Settings → Reviewers → **Live logs** (under Recent reviews) lists every Slack and forge API call the reviewers make, newest first, while it is open: the channel poll (`conversations.history`), the thread poll (`conversations.replies`), the `autoReview` poll (open PRs per repo), and the calls a running review or answer makes (PR and diff, CI, files, posts, reactions, the PR review). Each row shows the time, OK or error, which loop made it, the client method and the API it stands for, a one-line result ("12 items", the PR's state and title, or the error), the reviewer and how long it took. Open a row for the request arguments and the response as JSON. Filter by loop or errors only, pause, or clear the view.
+Reviews → Diagnostics → **Live logs** lists every Slack and forge API call the reviewers make, newest first, while it is open: the channel poll (`conversations.history`), the thread poll (`conversations.replies`), the `autoReview` poll (open PRs per repo), and the calls a running review or answer makes (PR and diff, CI, files, posts, reactions, the PR review). Each row shows the time, OK or error, which loop made it, the client method and the API it stands for, a one-line result ("12 items", the PR's state and title, or the error), the reviewer and how long it took. Open a row for the request arguments and the response as JSON. Filter by loop or errors only, pause, or clear the view.
 
 The server keeps the last 300 calls in memory only; nothing is saved and a restart starts empty. Keys that look like credentials (`token`, `secret`, `password`, `authorization`, …) are shown as `[redacted]`, strings over 500 characters are trimmed, and each request or response is cut at 4,000 characters. The recorder is `ReviewerApiLog` in `apps/server/src/slack/reviewerApiLog.ts`.
 
 ## Configure
 
-**Settings → Reviewers** (Workspace group) is the usual way. Sections: Model, Review prompt, Behaviour, **Review context**, **In the thread**, Token budget (including the cost cap), Slack preview, Status messages, **Accuracy** and Try it. **Add reviewer** creates a draft. Pick a channel and it starts watching. Each card has the channel picker, model (Slack default, or pin one), review prompt, how to post and what to do on the PR, repo filter, toggles, a **Token budget** section, a **Slack preview**: a mock thread showing the request, the "started" reply and the final reply exactly as this reviewer will post them (identity, templates, reactions, Slack formatting), with a chip per outcome it can produce; **Status messages** with a rendered preview under each and per-message Reset, and **Try it**: paste a PR URL and **Review now** runs the reviewer once on its saved settings. With **Dry run** on (the default) nothing is posted or recorded, even an already-reviewed commit is reviewed, and the findings (with any suggested fixes) are listed under the button. With it off, the review is posted to the PR, not to Slack. At the bottom, **In progress** lists reviews and answers queued or running now (refreshing every few seconds while any are), **Open review chats** lists the threads the reviewer still watches for re-review, dismissals and questions (a week after the last review, or until the PR merges or closes), and **Recent reviews** lists the last 50 runs with outcome, tokens and cost. Every row with a Slack thread has **Open chat**, which opens that thread in the Slack pane. Every run that reached the model has **Trace**: the prompt, the model's reasoning (when the provider streams it; Anthropic API models don't), each tool call with its arguments and output, refused calls, retries, and the reply. A running review's trace refreshes every 2 seconds. Traces are stored one JSON file per run in `<dataDir>/slack-reviewers/traces` (newest 200 kept; 400 steps, 40,000 characters per text step and 6,000 per tool output at most) and served by `GET /api/slack/reviewers/traces/:id`. Changes autosave like the rest of Settings.
+Choose **Run now** on an enabled reviewer card to check its Slack channel, watched threads, and any repositories configured for automatic review immediately. The first poll establishes where to start watching. Subsequent checks use the usual filters and queue eligible reviews under **Reviews → Activity**.
+
+**Reviews → Reviewers** is where you configure and test Slack reviewers. Name, channel, model, prompt, and Try it are available when you expand a reviewer. Open a disclosure for posting and severity, triggers and filters, execution and verification, review context, thread behaviour, token budget, the Slack preview, status messages, or accuracy. **Add reviewer** creates a draft. Pick a channel and it starts watching. Each card has the channel picker, model (Slack default, or pin one), review prompt, how to post and what to do on the PR, repo filter, toggles, a **Token budget** section, a **Slack preview**: a mock thread showing the request, the "started" reply and the final reply exactly as this reviewer will post them (identity, templates, reactions, Slack formatting), with a chip per outcome it can produce; **Status messages** with a rendered preview under each and per-message Reset, and **Try it**: paste a PR URL and **Review now** runs the reviewer once on its saved settings. With **Dry run** on (the default) nothing is posted or recorded, even an already-reviewed commit is reviewed, and the findings (with any suggested fixes) are listed under the button. With it off, the reviewer can post to the PR according to its configured mode. In **Reviews → Activity**, **In progress** lists reviews and answers queued or running now (refreshing every few seconds while any are), **Watched Slack threads** lists the threads the reviewer still watches for re-review, dismissals and questions (a week after the last review, or until the PR merges or closes), and **Recent Slack reviews** lists the last 50 runs with outcome, tokens and cost. Every row with a Slack thread has **Open chat**, which opens that thread in the Slack pane. Every run that reached the model has **Trace**: the prompt, the model's reasoning (when the provider streams it; Anthropic API models don't), each tool call with its arguments and output, refused calls, retries, and the reply. A running review's trace refreshes every 2 seconds. Traces are stored one JSON file per run in `<dataDir>/slack-reviewers/traces` (newest 200 kept; 400 steps, 40,000 characters per text step and 6,000 per tool output at most) and served by `GET /api/slack/reviewers/traces/:id`. Reviewer changes autosave.
 
 You can also add `slackReviewers` to `~/.locus/config.json` or send it with `PUT /api/config`. Slack must be signed in (Settings → Integrations). The channel must be in the Slack allowlist when one is set. A forge account must be able to read the repo.
 
@@ -354,7 +358,7 @@ A reviewer with an empty `channelId` is kept as a draft and never polled. Everyt
 | `allowedRequesters` | Slack member IDs who may post a link, ask for a re-review or retry, or ask a question. Others are ignored silently; dismissals stay open. Empty = anyone. |
 | `excludedUsers` | Slack member IDs whose posts, @-mentions and thread requests are never reviewed, even if they are in `allowedRequesters`. With `autoReview`, PRs by authors mapped to them in `authorSlackIds` are skipped too. Empty = none. |
 | `pathPrompts` | `[{ "glob", "prompt" }]`, at most 20, 2,000 characters each. Sent in the user message when the PR changes a matching file. See [Instructions per path](#instructions-per-path). |
-| `unlimitedTokens` | No token limits. The whole diff is sent with no per-file or total cap, the reply cap goes to the 32,000 maximum, and the call streams with a 10-minute timeout. Context trimming and the ignore list still apply. A PR larger than the model's context window fails instead of being reviewed in part, and daily budget caps still apply. Settings → Reviewers → Token budget → **No token limits**. |
+| `unlimitedTokens` | No token limits. The whole diff is sent with no per-file or total cap, the reply cap goes to the 32,000 maximum, and the call streams with a 10-minute timeout. Context trimming and the ignore list still apply. A PR larger than the model's context window fails instead of being reviewed in part, and daily budget caps still apply. Reviews → Reviewers → Token budget → **No token limits**. |
 | `rereviewOnThreadReply` | Watch review threads for a "re-review" / "review again" / "PTAL" reply and review again in that thread with the earlier findings. See [Re-review after feedback](#re-review-after-feedback). |
 | `cloneRepo` | Shallow-clone the PR head and check the change against the code around it before answering. See [Checking beyond the diff](#checking-beyond-the-diff). |
 | `maxToolRounds` | Lookup rounds (1–40) an API model may take in the clone before it must answer. CLI agents explore on their own and ignore it. |
@@ -380,7 +384,7 @@ The verdict is derived from the findings that survive `minSeverity` and `maxComm
 
 ## Reaction legend
 
-Many channels read a PR post's reaction stack as its review status. With `reactions` on, the reviewer keeps that stack in step, and **Reaction legend** in Settings → Reviewers says which emoji mean what. Pick a preset, then edit any name (without colons; custom workspace emoji work if the workspace has them, and a name Slack doesn't know is skipped silently).
+Many channels read a PR post's reaction stack as its review status. With `reactions` on, the reviewer keeps that stack in step, and **Reaction legend** in Reviews → Reviewers says which emoji mean what. Pick a preset, then edit any name (without colons; custom workspace emoji work if the workspace has them, and a name Slack doesn't know is skipped silently).
 
 | Step | `classic` (default) | `legend` |
 | --- | --- | --- |
@@ -412,7 +416,7 @@ A `stop` reaction on a post means it is left alone: a new post that already carr
 
 ## Skills
 
-Skills from Settings → Skills work in the review prompt. Write `/name` (for example `Follow /house-rules.`), or click a skill's chip under the prompt in Settings → Reviewers, which adds or removes the reference.
+Skills from Settings → Skills work in the review prompt. Write `/name` (for example `Follow /house-rules.`), or click a skill's chip under the prompt in Reviews → Reviewers, which adds or removes the reference.
 
 Chat agents load skills on demand with a `read_skill` tool. Reviews have no tools, so the full text of each skill the prompt names is added to the system prompt, after your instructions. Skills the prompt doesn't name are never sent. The reviewer tells the model to turn any "call this tool" or "post a comment" steps in a skill into findings in its JSON.
 

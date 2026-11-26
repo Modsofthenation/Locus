@@ -198,7 +198,11 @@ export function OverflowMenu(props: {
   }
 
   const focusItem = useCallback((index: number) => {
-    focusMenuEl(menuItemButtons(pop.current)[index]);
+    const item = menuItemButtons(pop.current)[index];
+    focusMenuEl(item);
+    if (item && document.activeElement === item) {
+      item.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    }
   }, []);
 
   function openMenu(focus: "first" | "last" | "active" = "active") {
@@ -228,9 +232,14 @@ export function OverflowMenu(props: {
       setOpen(false);
     }
     function onKey(event: KeyboardEvent) {
-      if (isTypingTarget(event.target)) return;
-      const list = items();
       const focused = document.activeElement;
+      if (
+        event.defaultPrevented ||
+        isTypingTarget(event.target) ||
+        !root.current?.contains(focused)
+      )
+        return;
+      const list = items();
       // A row's trailing toggle (`.menu-row [data-menu-pin]`) counts as its row for
       // Up/Down; Left/Right move between the row's item and its toggle.
       const row = focused instanceof HTMLElement ? focused.closest(".menu-row") : null;
@@ -354,8 +363,8 @@ export function OverflowMenu(props: {
       want === "last" ? list.length - 1 : want === "first" ? 0 : active >= 0 ? active : 0;
     pendingFocus.current = "active";
     focusedOpen.current = true;
-    focusMenuEl(list[index]);
-  }, [open, place]);
+    focusItem(index);
+  }, [open, place, focusItem]);
 
   const popStyle: CSSProperties | undefined = place
     ? { top: place.top, left: place.left }
@@ -372,6 +381,7 @@ export function OverflowMenu(props: {
       >
         <summary
           id={props.id}
+          role="button"
           className={props.toggleClassName ?? "btn small ghost menu-toggle"}
           title={props.title ?? "More"}
           aria-label={props.ariaLabel ?? props.title ?? "More"}
@@ -389,7 +399,7 @@ export function OverflowMenu(props: {
             if (next) props.onOpen?.();
           }}
           onKeyDown={(event) => {
-            if (props.disabled) return;
+            if (props.disabled || open) return;
             if (event.key === "ArrowDown") {
               event.preventDefault();
               openMenu("first");

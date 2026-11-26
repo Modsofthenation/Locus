@@ -58,6 +58,7 @@ import { CloneProgressCard, ImageBuildCard } from "./CloneProgressCard";
 import { BootStepsCard } from "./BootStepsCard";
 import { ThinkingTrace } from "./ThinkingTrace";
 import { ChatScrollIndicator } from "./ChatScrollIndicator";
+import { chatTurnMarks } from "@/lib/chatScrollIndicator";
 import { NewMessagesDivider } from "./NewMessagesDivider";
 import { TaskListCard } from "./TaskListCard";
 import { SubscriptionCard } from "./SubscriptionCard";
@@ -469,6 +470,14 @@ export const ChatThread = memo(function ChatThread({
   }, [session.id, threadRef]);
 
   const painted = clusters.slice(chatWin.start, chatWin.end);
+  const turnMarks = useMemo(
+    () =>
+      chatTurnMarks(clusters, listSizePrefix(sizes), {
+        skip: (id) => hideLifecycleIds.has(id),
+        replyText: operatorVisibleText,
+      }),
+    [clusters, sizes, hideLifecycleIds],
+  );
 
   return (
     <div className="thread-body">
@@ -787,6 +796,7 @@ export const ChatThread = memo(function ChatThread({
       <ChatScrollIndicator
         threadRef={threadRef}
         revision={`${session.id}:${clusters.length}:${chatWin.height}:${sizeTick}`}
+        marks={viewing ? undefined : turnMarks}
       />
     </div>
   );

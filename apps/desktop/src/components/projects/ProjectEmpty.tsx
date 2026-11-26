@@ -92,11 +92,15 @@ export function ProjectEmpty() {
     <div className="empty design-start board-start">
       <div className="empty-card">
         <EmptyHero
-          title={hubMode ? "Teams" : "Projects"}
+          title={
+            hubMode ? (groupChat ? "Start a group chat" : "Create a team") : "Create a project"
+          }
           lead={
             hubMode
-              ? "A team with a coordinator, shared context, and teammates who can hand work to each other."
-              : "A body of work with a coordinator, shared context, and members. The coordinator plans and delegates — it does not write application code."
+              ? groupChat
+                ? "Pick teammates to bring into one conversation."
+                : "Give teammates shared context and a coordinator who can assign work."
+              : "Describe a goal. The coordinator will plan the work and delegate it to agents."
           }
         />
         {hubMode ? (

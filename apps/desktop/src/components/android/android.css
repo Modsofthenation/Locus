@@ -23,13 +23,6 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
-.android-badge {
-  font-size: var(--type-xs);
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--accent-2);
-}
 .android-section label {
   display: flex;
   align-items: center;
@@ -81,7 +74,7 @@
 .android-start-intro {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 .android-start h1 {
   font-size: clamp(26px, 3vw, 38px);
@@ -124,38 +117,6 @@
 }
 .android-start select {
   max-width: none;
-}
-.android-capabilities {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-3);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  counter-reset: android-step;
-}
-.android-capabilities li {
-  counter-increment: android-step;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-3) var(--space-3-5);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--pill);
-  font-size: var(--type-xs);
-  color: var(--muted);
-  line-height: 1.45;
-}
-.android-capabilities strong {
-  color: var(--text);
-  font-size: var(--type-sm);
-}
-.android-capabilities strong::before {
-  content: "0" counter(android-step) "  ";
-  color: var(--accent-2);
-  font-variant-numeric: tabular-nums;
-  white-space: pre;
 }
 .android-segmented {
   margin: 0;
@@ -221,9 +182,11 @@
   color: var(--muted);
   line-height: 1.55;
 }
-.android-requirements strong {
+.android-requirements summary {
+  cursor: pointer;
   color: var(--text);
   font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
 }
 .android-requirements ul {
   margin: var(--space-1-5) 0 0;
@@ -597,7 +560,6 @@
   .android-start {
     padding: var(--space-6) var(--space-4);
   }
-  .android-capabilities,
   .android-segmented-options {
     grid-template-columns: 1fr;
   }

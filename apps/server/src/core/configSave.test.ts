@@ -19,6 +19,41 @@ describe("normalizeSavedConfig", () => {
     ).toEqual({ ok: false, error: "Unknown theme" });
   });
 
+  it("persists valid system pairs and workspace accents and drops references to removed themes", () => {
+    const current = defaultConfig("/data");
+    const light = customThemeFromInput({ name: "Dawn", scheme: "light" });
+    const preferences = {
+      followSystem: true,
+      light: light.id,
+      dark: "nightbus" as const,
+      workspaceAccents: { "project:alpha": "#17355c", "invalid:alpha": "#ffffff" },
+    };
+    const saved = prepareSavedConfig(
+      current,
+      { ...current, customThemes: [light], themePreferences: preferences },
+      "/data",
+    );
+    expect(saved).toMatchObject({
+      ok: true,
+      config: {
+        themePreferences: {
+          followSystem: true,
+          light: light.id,
+          dark: "nightbus",
+          workspaceAccents: { "project:alpha": "#17355c" },
+        },
+      },
+    });
+    if (!saved.ok) return;
+    const removed = prepareSavedConfig(
+      saved.config,
+      { ...saved.config, customThemes: [] },
+      "/data",
+    );
+    expect(removed).toMatchObject({ ok: true, config: { themePreferences: { dark: "nightbus" } } });
+    if (removed.ok) expect(removed.config.themePreferences?.light).toBeUndefined();
+  });
+
   it("rejects an unknown theme and a non-loopback bind host", () => {
     const config = defaultConfig("/data");
     expect(normalizeSavedConfig(config, "not-a-theme" as never, "/data")).toEqual({

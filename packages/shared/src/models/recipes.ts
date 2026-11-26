@@ -234,6 +234,7 @@ const OPS_TOOLS: ComputerUseToolName[] = [
   "slack_channels",
   "slack_history",
   "slack_replies",
+  "slack_emojis",
   "grafana_search",
   "grafana_get",
   "grafana_query",

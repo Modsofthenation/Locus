@@ -151,6 +151,7 @@ export function ProviderCard({
         <button
           type="button"
           className="provider-card-summary"
+          data-setting-id={p.id}
           aria-expanded={expanded}
           onClick={onToggleExpand}
         >
@@ -679,6 +680,7 @@ export function ForgeAccountCard({
       <button
         type="button"
         className="git-account-summary"
+        data-setting-id={f.id}
         aria-expanded={expanded}
         onClick={onToggleExpand}
       >
@@ -882,6 +884,7 @@ export function SkillCard({
         <button
           type="button"
           className="provider-card-summary"
+          data-setting-id={skill.id}
           aria-expanded={expanded}
           onClick={onToggleExpand}
         >
@@ -1169,6 +1172,7 @@ export function MachineCard({
         <button
           type="button"
           className="machine-row-head"
+          data-setting-id={template.id}
           aria-expanded={expanded}
           onClick={onToggleExpand}
         >
@@ -1537,6 +1541,7 @@ export function McpServerCard({
         <button
           type="button"
           className="provider-card-summary"
+          data-setting-id={server.id}
           aria-expanded={expanded}
           onClick={onToggleExpand}
         >
@@ -1853,6 +1858,7 @@ export function WorkerCard({
         <button
           type="button"
           className="provider-card-summary"
+          data-setting-id={worker.id}
           aria-expanded={expanded}
           onClick={onToggleExpand}
         >
@@ -2560,6 +2566,7 @@ export function NamedEnvironmentCard({
         <button
           type="button"
           className="provider-card-summary"
+          data-setting-id={env.id}
           aria-expanded={expanded}
           onClick={onToggleExpand}
         >
@@ -2638,6 +2645,7 @@ export function IntegrationCard({
         <button
           type="button"
           className="provider-card-summary"
+          data-setting-id={account.id}
           aria-expanded={expanded}
           onClick={onToggleExpand}
         >

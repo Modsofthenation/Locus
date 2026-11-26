@@ -5,11 +5,14 @@ import type { AgentSession, LinkedRepo, LocusConfig, SlackStatus, ToolCall } fro
 import { MobileShell } from "./MobileShell";
 import { api } from "@/lib/api";
 import { setUiShell } from "@/lib/mobileShell";
-import { Store, initialState, reducer, type UiState } from "@/state/store";
+import { Store, initialState, reducer, useStore, type UiState } from "@/state/store";
 import { selectOptionValues, selectValue, setSelectValue } from "@/lib/selectControl";
 
 vi.mock("@/components/settings/Settings", () => ({
-  Settings: () => <div data-testid="settings-stub">Settings body</div>,
+  Settings: () =>
+    useStore().state.section === "settings" ? (
+      <div data-testid="settings-stub">Settings body</div>
+    ) : null,
 }));
 vi.mock("@/components/automations/NewAutomation", () => ({
   NewAutomationModal: () => <div data-testid="new-automation-stub">New automation modal</div>,
@@ -2160,9 +2163,11 @@ describe("MobileShell", () => {
       await Promise.resolve();
     });
     expect(host.querySelector("[data-testid='mobile-settings']")).toBeTruthy();
-    act(() => {
+    expect(host.querySelector("[data-testid='settings-stub']")).toBeTruthy();
+    await act(async () => {
       host.querySelector<HTMLButtonElement>(".mobile-overlay .mobile-back")!.click();
     });
+    expect(host.querySelector("[data-testid='mobile-settings']")).toBeNull();
     const automation = [...host.querySelectorAll("button")].find((btn) =>
       btn.textContent?.includes("New job"),
     );
